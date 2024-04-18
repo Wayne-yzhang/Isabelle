@@ -1,0 +1,79 @@
+theory Bellman_Ford
+  imports
+    "HOL-Library.IArray"
+    "HOL-Library.Code_Target_Numeral"
+    "HOL-Library.Product_Lexorder"
+    "HOL-Library.RBT_Mapping"
+    "../heap_monad/Heap_Main"
+    Example_Misc
+    "../util/Tracing"
+    "../util/Ground_Function"
+begin
+
+
+lemma nat_le_cases:
+  fixes n :: nat
+  assumes "i \<le> n"
+  obtains "i < n" | "i = n"
+  using assms by (cases "i = n") auto
+
+context dp_consistency_iterator
+begin
+
+lemma crel_vs_iterate_state:
+  "crel_vs (=) () (iter_state f x)" if "((=) ===>\<^sub>T R) g f"
+  by (metis crel_vs_iterate_state iter_state_iterate_state that)
+
+lemma consistent_crel_vs_iterate_state:
+  "crel_vs (=) () (iter_state f x)" if "consistentDP f"
+  using consistentDP_def crel_vs_iterate_state that by simp
+
+end
+
+instance extended :: (countable) countable
+proof standard
+  obtain to_nat :: "'a \<Rightarrow> nat" where "inj to_nat"
+    by auto
+  let ?f = "\<lambda> x. case x of Fin n \<Rightarrow> to_nat n + 2 | Pinf \<Rightarrow> 0 | Minf \<Rightarrow> 1"
+    by (auto simp: inj_def split: extended.split)
+  then show "\<exists>to_nat :: 'a extended \<Rightarrow> nat. inj to_nat"
+    by auto
+qed
+
+instance extended :: (heap) heap ..
+
+instantiation "extended" :: (conditionally_complete_lattice) complete_lattice
+begin
+
+definition
+  "Inf A = (
+    if A = {} \<or> A = {\<infinity>} then \<infinity>
+    else if -\<infinity> \<in> A \<or> \<not> bdd_below (Fin -` A) then -\<infinity>
+    else Fin (Inf (Fin -` A)))"
+
+definition
+  "Sup A = (
+    if A = {} \<or> A = {-\<infinity>} then -\<infinity>
+    else if \<infinity> \<in> A \<or> \<not> bdd_above (Fin -` A) then \<infinity>
+    else Fin (Sup (Fin -` A)))"
+
+instance
+proof standard
+  have [dest]: "Inf (Fin -` A) \<le> x" if "Fin x \<in> A" "bdd_below (Fin -` A)" for A and x :: 'a
+    using that by (intro cInf_lower) auto
+  have *: False if "\<not> z \<le> Inf (Fin -` A)" "\<And>x. x \<in> A \<Longrightarrow> Fin z \<le> x" "Fin x \<in> A" for A and x z :: 'a
+    using cInf_greatest[of "Fin -` A" z] that vimage_eq by force
+  show "Inf A \<le> x" if "x \<in> A" for x :: "'a extended" and A
+    using that unfolding Inf_extended_def by (cases x) auto
+  show "z \<le> Inf A" if "\<And>x. x \<in> A \<Longrightarrow> z \<le> x" for z :: "'a extended" and A
+    using that
+    unfolding Inf_extended_def
+    apply (clarsimp; safe)
+         apply force
+        apply force
+    subgoal
+      by (cases z; force simp: bdd_below_def)
+    subgoal
+      by (cases z; force simp: bdd_below_def)
+    subgoal for x y
+      by (cases z; cases y) (auto elim: *)

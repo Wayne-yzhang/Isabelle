@@ -1,0 +1,466 @@
+theory Gromov_Boundary
+  imports Gromov_Hyperbolicity Eexp_Eln
+begin
+
+
+
+definition turn_into_distance::"('a \<Rightarrow> 'a \<Rightarrow> real) \<Rightarrow> ('a \<Rightarrow> 'a \<Rightarrow> real)"
+  where "turn_into_distance f x y = Inf {(\<Sum> i \<in> {0..<n}. f (u i) (u (Suc i)))| u (n::nat). u 0 = x \<and> u n = y}"
+
+locale Turn_into_distance =
+  fixes f::"'a \<Rightarrow> 'a \<Rightarrow> real"
+  assumes nonneg: "f x y \<ge> 0"
+      and sym: "f x y = f y x"
+      and self_zero: "f x x = 0"
+      and weak_triangle: "f x z \<le> sqrt 2 * max (f x y) (f y z)"
+begin
+
+
+lemma bdd_below [simp]:
+  "bdd_below {(\<Sum> i = 0..<n. f (u i) (u (Suc i)))| u (n::nat). u 0 = x \<and> u n = y}"
+  apply (rule bdd_belowI[of _ 0]) using nonneg by (auto simp add: sum_nonneg)
+
+lemma nonempty:
+  "{\<Sum>i = 0..<n. f (u i) (u (Suc i)) |u n. u 0 = x \<and> u n = y} \<noteq> {}"
+proof -
+  define u::"nat \<Rightarrow> 'a" where "u = (\<lambda>n. if n = 0 then x else y)"
+  define n::nat where "n = 1"
+  have "u 0 = x \<and> u n = y" unfolding u_def n_def by auto
+  then have "(\<Sum>i = 0..<n. f (u i) (u (Suc i))) \<in> {\<Sum>i = 0..<n. f (u i) (u (Suc i)) |u n. u 0 = x \<and> u n = y}"
+    by auto
+  then show ?thesis by auto
+qed
+
+
+lemma TID_nonneg:
+  "turn_into_distance f x y \<ge> 0"
+unfolding turn_into_distance_def apply (rule cInf_greatest[OF nonempty])
+using nonneg by (auto simp add: sum_nonneg)
+
+
+lemma TID_sym:
+  "turn_into_distance f x y = turn_into_distance f y x"
+proof -
+  have "turn_into_distance f x y \<le> Inf {(\<Sum> i \<in> {0..<n}. f (u i) (u (Suc i)))| u (n::nat). u 0 = y \<and> u n = x}" for x y
+  proof (rule cInf_greatest[OF nonempty], auto)
+    fix u::"nat \<Rightarrow> 'a" and n assume U: "y = u 0" "x = u n"
+    define v::"nat \<Rightarrow>'a" where "v = (\<lambda>i. u (n-i))"
+    have V: "v 0 = x" "v n = y" unfolding v_def using U by auto
+
+    have "(\<Sum>i = 0..<n. f (u i) (u (Suc i))) = (\<Sum>i = 0..<n. (\<lambda>i. f (u i) (u (Suc i))) (n-1-i))"
+      apply (rule sum.reindex_bij_betw[symmetric])
+      by (rule bij_betw_byWitness[of _ "\<lambda>i. n-1-i"], auto)
+    also have "... = (\<Sum> i = 0..<n. f (v (Suc i)) (v i))"
+      apply (rule sum.cong) unfolding v_def by (auto simp add: Suc_diff_Suc)
+    also have "... = (\<Sum> i = 0..<n. f (v i) (v (Suc i)))"
+      using sym by auto
+    finally have "(\<Sum>i = 0..<n. f (u i) (u (Suc i))) = (\<Sum> i = 0..<n. f (v i) (v (Suc i)))"
+      by simp
+
+    moreover have "turn_into_distance f x y \<le> (\<Sum> i = 0..<n. f (v i) (v (Suc i)))"
+      unfolding turn_into_distance_def apply (rule cInf_lower)
+      using V by auto
+    finally show "turn_into_distance f (u n) (u 0) \<le> (\<Sum>i = 0..<n. f (u i) (u (Suc i)))"
+      using U by auto
+  qed
+  then have *: "turn_into_distance f x y \<le> turn_into_distance f y x" for x y
+    unfolding turn_into_distance_def by auto
+  show ?thesis using *[of x y] *[of y x] by simp
+qed
+
+
+lemma upper:
+  "turn_into_distance f x y \<le> f x y"
+unfolding turn_into_distance_def proof (rule cInf_lower, auto)
+  define u::"nat \<Rightarrow> 'a" where "u = (\<lambda>n. if n = 0 then x else y)"
+  define n::nat where "n = 1"
+  have "u 0 = x \<and> u n = y \<and> f x y = (\<Sum>i = 0..<n. f (u i) (u (Suc i)))" unfolding u_def n_def by auto
+  then show "\<exists>u n. f x y = (\<Sum>i = 0..<n. f (u i) (u (Suc i))) \<and> u 0 = x \<and> u n = y"
+    by auto
+qed
+
+
+lemma TID_self_zero:
+  "turn_into_distance f x x = 0"
+using upper[of x x] TID_nonneg[of x x] self_zero[of x] by auto
+
+
+lemma triangle:
+  "turn_into_distance f x z \<le> turn_into_distance f x y + turn_into_distance f y z"
+proof -
+  have "turn_into_distance f x z \<le> turn_into_distance f x y + turn_into_distance f y z + e" if "e > 0" for e
+  proof -
+    have "Inf {(\<Sum> i \<in> {0..<n}. f (u i) (u (Suc i)))| u (n::nat). u 0 = x \<and> u n = y} < turn_into_distance f x y + e/2"
+    then have "\<exists>a \<in> {(\<Sum> i \<in> {0..<n}. f (u i) (u (Suc i)))| u (n::nat). u 0 = x \<and> u n = y}. a < turn_into_distance f x y + e/2"
+      by (rule cInf_lessD[OF nonempty])
+    then obtain u n where U: "u 0 = x" "u n = y" "(\<Sum> i \<in> {0..<n}. f (u i) (u (Suc i))) < turn_into_distance f x y + e/2"
+      by auto
+
+    have "Inf {(\<Sum> i \<in> {0..<m}. f (v i) (v (Suc i)))| v (m::nat). v 0 = y \<and> v m = z} < turn_into_distance f y z + e/2"
+    then have "\<exists>a \<in> {(\<Sum> i \<in> {0..<m}. f (v i) (v (Suc i)))| v (m::nat). v 0 = y \<and> v m = z}. a < turn_into_distance f y z + e/2"
+      by (rule cInf_lessD[OF nonempty])
+    then obtain v m where V: "v 0 = y" "v m = z" "(\<Sum> i \<in> {0..<m}. f (v i) (v (Suc i))) < turn_into_distance f y z + e/2"
+      by auto
+
+    define w where "w = (\<lambda>i. if i < n then u i else v (i-n))"
+    have *: "w 0 = x" "w (n+m) = z"
+      unfolding w_def using U V by auto
+    have "turn_into_distance f x z \<le> (\<Sum>i = 0..<n+m. f (w i) (w (Suc i)))"
+      unfolding turn_into_distance_def apply (rule cInf_lower) using * by auto
+    also have "... = (\<Sum>i = 0..<n. f (w i) (w (Suc i))) + (\<Sum>i = n..<n+m. f (w i) (w (Suc i)))"
+      by (simp add: sum.atLeastLessThan_concat)
+    also have "... = (\<Sum>i = 0..<n. f (w i) (w (Suc i))) + (\<Sum>i = 0..<m. f (w (i+n)) (w (Suc (i+n))))"
+      by (auto intro!: sum.reindex_bij_betw[symmetric] bij_betw_byWitness[of _ "\<lambda>i. i-n"])
+    also have "... = (\<Sum>i = 0..<n. f (u i) (u (Suc i))) + (\<Sum>i = 0..<m. f (v i) (v (Suc i)))"
+      unfolding w_def apply (auto intro!: sum.cong)
+      using U(2) V(1) Suc_lessI by fastforce
+    also have "... < turn_into_distance f x y + e/2 + turn_into_distance f y z + e/2"
+      using U(3) V(3) by auto
+    finally show ?thesis by auto
+  qed
+  then show ?thesis
+    using field_le_epsilon by blast
+qed
+
+
+lemma lower:
+  "f x y \<le> 2 * turn_into_distance f x y"
+proof -
+  have I: "f (u 0) (u n) \<le> (\<Sum> i \<in> {0..<n}. f (u i) (u (Suc i))) * 2" for n u
+  proof (induction n arbitrary: u rule: less_induct)
+    case (less n)
+    show "f (u 0) (u n) \<le> (\<Sum>i = 0..<n. f (u i) (u (Suc i))) * 2"
+    proof (cases "n = 0")
+      case True
+      then have "f (u 0) (u n) = 0" using self_zero by auto
+      then show ?thesis using True by auto
+    next
+      case False
+      then have "n > 0" by auto
+      define S where "S = (\<Sum>i = 0..<n. f (u i) (u (Suc i)))"
+      have "S \<ge> 0" unfolding S_def using nonneg by (auto simp add: sum_nonneg)
+      have "\<exists>p. p < n \<and> (\<Sum>i = 0..<p. f (u i) (u (Suc i))) \<le> S/2 \<and> (\<Sum>i = Suc p..<n. f (u i) (u (Suc i))) \<le> S/2"
+      proof (cases "S = 0")
+        case True
+        have "(\<Sum>i = Suc 0..<n. f (u i) (u (Suc i))) = (\<Sum>i = 0..<n. f (u i) (u (Suc i))) - f(u 0) (u (Suc 0))"
+        also have "... \<le> S/2" using True S_def nonneg by auto
+        finally have "0 < n \<and> (\<Sum>i = 0..<0. f (u i) (u (Suc i))) \<le> S/2 \<and> (\<Sum>i = Suc 0..<n. f (u i) (u (Suc i))) \<le> S/2"
+        then show ?thesis by auto
+      next
+        case False
+        define A where "A = {q. q \<le> n \<and> (\<Sum>i = 0..<q. f (u i) (u (Suc i))) \<le> S/2}"
+        define p where "p = Max A"
+        then have L: "p \<le> n" "(\<Sum>i = 0..<p. f (u i) (u (Suc i))) \<le> S/2" unfolding A_def by auto
+        have "Suc p \<notin> A" unfolding p_def
+          by (metis (no_types, lifting) A_def Max_ge Suc_n_not_le_n infinite_nat_iff_unbounded mem_Collect_eq not_le p_def)
+        then have *: "(\<Sum>i = 0..<Suc p. f (u i) (u (Suc i))) > S/2"
+        have "(\<Sum> i = Suc p..<n. f (u i) (u (Suc i))) = S - (\<Sum>i = 0..<Suc p. f (u i) (u (Suc i)))"
+        also have "... \<le> S/2" using * by auto
+        finally have "p < n \<and> (\<Sum>i = 0..<p. f (u i) (u (Suc i))) \<le> S/2 \<and> (\<Sum>i = Suc p..<n. f (u i) (u (Suc i))) \<le> S/2"
+        then show ?thesis by auto
+      qed
+      then obtain p where P: "p < n" "(\<Sum>i = 0..<p. f (u i) (u (Suc i))) \<le> S/2" "(\<Sum>i = Suc p..<n. f (u i) (u (Suc i))) \<le> S/2"
+        by auto
+      have "f (u 0) (u p) \<le> (\<Sum>i = 0..<p. f (u i) (u (Suc i))) * 2"
+      then have A: "f (u 0) (u p) \<le> S" using P(2) by auto
+      have B: "f (u p) (u (Suc p)) \<le> S"
+        apply (rule sum_nonneg_leq_bound[of "{0..<n}" "\<lambda>i. f (u i) (u (Suc i))"])
+      have "f (u (0 + Suc p)) (u ((n-Suc p) + Suc p)) \<le> (\<Sum>i = 0..<n-Suc p. f (u (i + Suc p)) (u (Suc i + Suc p))) * 2"
+      also have "... = 2 * (\<Sum>i = Suc p..<n. f (u i) (u (Suc i)))"
+        by (auto intro!: sum.reindex_bij_betw bij_betw_byWitness[of _ "\<lambda>i. i - Suc p"])
+      also have "... \<le> S" using P(3) by simp
+      finally have C: "f (u (Suc p)) (u n) \<le> S"
+
+      have "f (u 0) (u n) \<le> sqrt 2 * max (f (u 0) (u p)) (f (u p) (u n))"
+        using weak_triangle by simp
+      also have "... \<le> sqrt 2* max (f (u 0) (u p)) (sqrt 2 * max (f (u p) (u (Suc p))) (f (u (Suc p)) (u n)))"
+        using weak_triangle by simp (meson max.cobounded2 order_trans)
+      also have "... \<le> sqrt 2 * max S (sqrt 2 * max S S)"
+        using A B C by auto (simp add: le_max_iff_disj)
+      also have "... \<le> sqrt 2 * max (sqrt 2 * S) (sqrt 2 * max S S)"
+      also have "... = 2 * S"
+        by auto
+      finally show ?thesis
+        unfolding S_def by simp
+    qed
+  qed
+  have "f x y/2 \<le> turn_into_distance f x y"
+    unfolding turn_into_distance_def by (rule cInf_greatest[OF nonempty], auto simp add: I)
+  then show ?thesis by simp
+qed
+
+
+
+
+
+
+definition Gromov_converging_at_boundary::"(nat \<Rightarrow> ('a::Gromov_hyperbolic_space)) \<Rightarrow> bool"
+  where "Gromov_converging_at_boundary u = (\<forall>a. \<forall>(M::real). \<exists>N. \<forall>n \<ge> N. \<forall> m \<ge> N. Gromov_product_at a (u m) (u n) \<ge> M)"
+
+lemma Gromov_converging_at_boundaryI:
+  assumes "\<And>M. \<exists>N. \<forall>n \<ge> N. \<forall>m \<ge> N. Gromov_product_at a (u m) (u n) \<ge> M"
+  shows "Gromov_converging_at_boundary u"
+unfolding Gromov_converging_at_boundary_def proof (auto)
+  fix b::'a and M::real
+  obtain N where *: "\<And>m n. n \<ge> N \<Longrightarrow> m \<ge> N \<Longrightarrow> Gromov_product_at a (u m) (u n) \<ge> M + dist a b"
+    using assms[of "M + dist a b"] by auto
+  have "Gromov_product_at b (u m) (u n) \<ge> M" if "m \<ge> N" "n \<ge> N" for m n
+    using *[OF that] Gromov_product_at_diff1[of a "u m" "u n" b] by (smt Gromov_product_commute)
+  then show "\<exists>N. \<forall>n \<ge> N. \<forall>m \<ge> N. M \<le> Gromov_product_at b (u m) (u n)" by auto
+qed
+
+lemma Gromov_converging_at_boundary_imp_unbounded:
+  assumes "Gromov_converging_at_boundary u"
+  shows "(\<lambda>n. dist a (u n)) \<longlonglongrightarrow> \<infinity>"
+proof -
+  have "\<exists>N. \<forall>n \<ge> N. dist a (u n) \<ge> M" for M::real
+    using assms unfolding Gromov_converging_at_boundary_def Gromov_product_e_x_x[symmetric] by meson
+  then show ?thesis
+    unfolding tendsto_PInfty eventually_sequentially by (meson dual_order.strict_trans1 gt_ex less_ereal.simps(1))
+qed
+
+lemma Gromov_converging_at_boundary_imp_not_constant:
+  "\<not>(Gromov_converging_at_boundary (\<lambda>n. x))"
+  using Gromov_converging_at_boundary_imp_unbounded[of "(\<lambda>n. x)" "x"] Lim_bounded_PInfty by auto
+
+lemma Gromov_converging_at_boundary_imp_not_constant':
+  assumes "Gromov_converging_at_boundary u"
+  shows "\<not>(\<forall>m n. u m = u n)"
+  using Gromov_converging_at_boundary_imp_not_constant
+  by (metis (no_types) Gromov_converging_at_boundary_def assms order_refl)
+
+
+definition Gromov_completion_rel::"(nat \<Rightarrow> 'a::Gromov_hyperbolic_space) \<Rightarrow> (nat \<Rightarrow> 'a) \<Rightarrow> bool"
+  where "Gromov_completion_rel u v =
+            (((Gromov_converging_at_boundary u \<and> Gromov_converging_at_boundary v \<and> (\<forall>a. (\<lambda>n. Gromov_product_at a (u n) (v n)) \<longlonglongrightarrow> \<infinity>)))
+            \<or> (\<forall>n m. u n = v m \<and> u n = u m \<and> v n = v m))"
+
+
+lemma Gromov_completion_rel_const [simp]:
+  "Gromov_completion_rel (\<lambda>n. x) (\<lambda>n. x)"
+unfolding Gromov_completion_rel_def by auto
+
+lemma Gromov_completion_rel_to_const:
+  assumes "Gromov_completion_rel u (\<lambda>n. x)"
+  shows "u n = x"
+using assms unfolding Gromov_completion_rel_def using Gromov_converging_at_boundary_imp_not_constant[of x] by auto
+
+lemma Gromov_completion_rel_to_const':
+  assumes "Gromov_completion_rel (\<lambda>n. x) u"
+  shows "u n = x"
+using assms unfolding Gromov_completion_rel_def using Gromov_converging_at_boundary_imp_not_constant[of x] by auto
+
+lemma Gromov_product_tendsto_PInf_a_b:
+  assumes "(\<lambda>n. Gromov_product_at a (u n) (v n)) \<longlonglongrightarrow> \<infinity>"
+  shows "(\<lambda>n. Gromov_product_at b (u n) (v n)) \<longlonglongrightarrow> \<infinity>"
+proof (rule tendsto_sandwich[of "\<lambda>n. ereal(Gromov_product_at a (u n) (v n)) + (- dist a b)" _ _ "\<lambda>n. \<infinity>"])
+  have "ereal(Gromov_product_at b (u n) (v n)) \<ge> ereal(Gromov_product_at a (u n) (v n)) + (- dist a b)" for n
+    using Gromov_product_at_diff1[of a "u n" "v n" b] by auto
+  then show "\<forall>\<^sub>F n in sequentially. ereal (Gromov_product_at a (u n) (v n)) + ereal (- dist a b) \<le> ereal (Gromov_product_at b (u n) (v n))"
+    by auto
+  have "(\<lambda>n. ereal(Gromov_product_at a (u n) (v n)) + (- dist a b)) \<longlonglongrightarrow> \<infinity> + (- dist a b)"
+    apply (intro tendsto_intros) using assms by auto
+  then show "(\<lambda>n. ereal (Gromov_product_at a (u n) (v n)) + ereal (- dist a b)) \<longlonglongrightarrow> \<infinity>" by simp
+qed (auto)
+
+lemma Gromov_converging_at_boundary_rel:
+  assumes "Gromov_converging_at_boundary u"
+  shows "Gromov_completion_rel u u"
+unfolding Gromov_completion_rel_def using Gromov_converging_at_boundary_imp_unbounded[OF assms] assms by auto
+
+
+lemma part_equivp_Gromov_completion_rel:
+  "part_equivp Gromov_completion_rel"
+proof (rule part_equivpI)
+  show "\<exists>x::(nat \<Rightarrow> 'a). Gromov_completion_rel x x"
+    apply (rule exI[of _ "\<lambda>n. (SOME a::'a. True)"]) unfolding Gromov_completion_rel_def by (auto simp add: convergent_const)
+
+  show "symp Gromov_completion_rel"
+    unfolding symp_def Gromov_completion_rel_def by (auto simp add: Gromov_product_commute) metis+
+
+  show "transp (Gromov_completion_rel::(nat \<Rightarrow> 'a) \<Rightarrow> (nat \<Rightarrow> 'a) \<Rightarrow> bool)"
+  unfolding transp_def proof (intro allI impI)
+    fix u v w::"nat\<Rightarrow>'a"
+    assume UV: "Gromov_completion_rel u v"
+       and VW: "Gromov_completion_rel v w"
+    show "Gromov_completion_rel u w"
+    proof (cases "\<forall>n m. v n = v m")
+      case True
+      define a where "a = v 0"
+      have *: "v = (\<lambda>n. a)" unfolding a_def using True by auto
+      then have "u n = v 0" "w n = v 0" for n
+        using Gromov_completion_rel_to_const' Gromov_completion_rel_to_const UV VW unfolding * by auto force
+      then show ?thesis
+        using UV VW unfolding Gromov_completion_rel_def by auto
+    next
+      case False
+      have "(\<lambda>n. Gromov_product_at a (u n) (w n)) \<longlonglongrightarrow> \<infinity>" for a
+      proof (rule tendsto_sandwich[of "\<lambda>n. min (ereal (Gromov_product_at a (u n) (v n))) (ereal (Gromov_product_at a (v n) (w n))) + (- deltaG(TYPE('a)))" _ _ "\<lambda>n. \<infinity>"])
+        have "min (Gromov_product_at a (u n) (v n)) (Gromov_product_at a (v n) (w n)) - deltaG(TYPE('a)) \<le> Gromov_product_at a (u n) (w n)" for n
+          by (rule hyperb_ineq)
+        then have "min (ereal (Gromov_product_at a (u n) (v n))) (ereal (Gromov_product_at a (v n) (w n))) + ereal (- deltaG TYPE('a)) \<le> ereal (Gromov_product_at a (u n) (w n))" for n
+          by (auto simp del: ereal_min simp add: ereal_min[symmetric])
+        then show "\<forall>\<^sub>F n in sequentially. min (ereal (Gromov_product_at a (u n) (v n))) (ereal (Gromov_product_at a (v n) (w n)))
+                    + ereal (- deltaG TYPE('a)) \<le> ereal (Gromov_product_at a (u n) (w n))"
+          unfolding eventually_sequentially by auto
+
+        have "(\<lambda>n. min (ereal (Gromov_product_at a (u n) (v n))) (ereal (Gromov_product_at a (v n) (w n))) + (- deltaG(TYPE('a)))) \<longlonglongrightarrow> min \<infinity> \<infinity> + (- deltaG(TYPE('a)))"
+          apply (intro tendsto_intros) using UV VW False unfolding Gromov_completion_rel_def by auto
+        then show "(\<lambda>n. min (ereal (Gromov_product_at a (u n) (v n))) (ereal (Gromov_product_at a (v n) (w n))) + (- deltaG(TYPE('a)))) \<longlonglongrightarrow> \<infinity>" by auto
+      qed (auto)
+      then show ?thesis
+        using False UV VW unfolding Gromov_completion_rel_def by auto
+    qed
+  qed
+qed
+
+
+quotient_type (overloaded) 'a Gromov_completion =
+  "nat \<Rightarrow> ('a::Gromov_hyperbolic_space)"
+  / partial: "Gromov_completion_rel"
+by (rule part_equivp_Gromov_completion_rel)
+
+
+definition to_Gromov_completion::"('a::Gromov_hyperbolic_space) \<Rightarrow> 'a Gromov_completion"
+  where "to_Gromov_completion x = abs_Gromov_completion (\<lambda>n. x)"
+
+definition from_Gromov_completion::"('a::Gromov_hyperbolic_space) Gromov_completion \<Rightarrow> 'a"
+  where "from_Gromov_completion = inv to_Gromov_completion"
+
+definition Gromov_boundary::"('a::Gromov_hyperbolic_space) Gromov_completion set"
+  where "Gromov_boundary = UNIV - range to_Gromov_completion"
+
+lemma to_Gromov_completion_inj:
+  "inj to_Gromov_completion"
+proof (rule injI)
+  fix x y::'a assume H: "to_Gromov_completion x = to_Gromov_completion y"
+  have "Gromov_completion_rel (\<lambda>n. x) (\<lambda>n. y)"
+    apply (subst Quotient3_rel[OF Quotient3_Gromov_completion, symmetric])
+    using H unfolding to_Gromov_completion_def by auto
+  then show "x = y"
+    using Gromov_completion_rel_to_const by auto
+qed
+
+lemma from_to_Gromov_completion [simp]:
+  "from_Gromov_completion (to_Gromov_completion x) = x"
+unfolding from_Gromov_completion_def by (simp add: to_Gromov_completion_inj)
+
+lemma to_from_Gromov_completion:
+  assumes "x \<notin> Gromov_boundary"
+  shows "to_Gromov_completion (from_Gromov_completion x) = x"
+using assms to_Gromov_completion_inj unfolding Gromov_boundary_def from_Gromov_completion_def
+by (simp add: f_inv_into_f)
+
+lemma not_in_Gromov_boundary:
+  assumes "x \<notin> Gromov_boundary"
+  shows "\<exists>a. x = to_Gromov_completion a"
+using assms unfolding Gromov_boundary_def by auto
+
+lemma not_in_Gromov_boundary' [simp]:
+  "to_Gromov_completion x \<notin> Gromov_boundary"
+unfolding Gromov_boundary_def by auto
+
+lemma abs_Gromov_completion_in_Gromov_boundary [simp]:
+  assumes "Gromov_converging_at_boundary u"
+  shows "abs_Gromov_completion u \<in> Gromov_boundary"
+using Gromov_completion_rel_to_const Gromov_converging_at_boundary_imp_not_constant'
+  Gromov_converging_at_boundary_rel[OF assms]
+  Quotient3_rel[OF Quotient3_Gromov_completion] assms not_in_Gromov_boundary to_Gromov_completion_def
+  by fastforce
+
+lemma rep_Gromov_completion_to_Gromov_completion [simp]:
+  "rep_Gromov_completion (to_Gromov_completion y) = (\<lambda>n. y)"
+proof -
+  have "Gromov_completion_rel (\<lambda>n. y) (rep_Gromov_completion (abs_Gromov_completion (\<lambda>n. y)))"
+    by (metis Gromov_completion_rel_const Quotient3_Gromov_completion rep_abs_rsp)
+  then show ?thesis
+    unfolding to_Gromov_completion_def using Gromov_completion_rel_to_const' by blast
+qed
+
+
+lemma Gromov_completion_cases [case_names to_Gromov_completion boundary, cases type: Gromov_completion]:
+  "(\<And>x. z = to_Gromov_completion x \<Longrightarrow> P) \<Longrightarrow> (z \<in> Gromov_boundary \<Longrightarrow> P) \<Longrightarrow> P"
+apply (cases "z \<in> Gromov_boundary") using not_in_Gromov_boundary by auto
+
+
+
+
+definition extended_Gromov_product_at::"('a::Gromov_hyperbolic_space) \<Rightarrow> 'a Gromov_completion \<Rightarrow> 'a Gromov_completion \<Rightarrow> ereal"
+  where "extended_Gromov_product_at e x y = Inf {liminf (\<lambda>n. ereal(Gromov_product_at e (u n) (v n))) |u v. abs_Gromov_completion u = x \<and> abs_Gromov_completion v = y \<and> Gromov_completion_rel u u \<and> Gromov_completion_rel v v}"
+
+definition extended_Gromov_distance::"('a::Gromov_hyperbolic_space) Gromov_completion \<Rightarrow> 'a Gromov_completion \<Rightarrow> ereal"
+  where "extended_Gromov_distance x y =
+              (if x \<in> Gromov_boundary \<or> y \<in> Gromov_boundary then \<infinity>
+              else ereal (dist (inv to_Gromov_completion x) (inv to_Gromov_completion y)))"
+
+
+lemma extended_Gromov_distance_commute:
+  "extended_Gromov_distance x y = extended_Gromov_distance y x"
+unfolding extended_Gromov_distance_def by (simp add: dist_commute)
+
+lemma extended_Gromov_product_nonneg [mono_intros, simp]:
+  "0 \<le> extended_Gromov_product_at e x y"
+unfolding extended_Gromov_product_at_def by (rule Inf_greatest, auto intro: Liminf_bounded always_eventually)
+
+lemma extended_Gromov_distance_nonneg [mono_intros, simp]:
+  "0 \<le> extended_Gromov_distance x y"
+unfolding extended_Gromov_distance_def by auto
+
+lemma extended_Gromov_product_at_commute:
+  "extended_Gromov_product_at e x y = extended_Gromov_product_at e y x"
+unfolding extended_Gromov_product_at_def
+proof (rule arg_cong[of _ _ Inf])
+  have "{liminf (\<lambda>n. ereal (Gromov_product_at e (u n) (v n))) |u v.
+          abs_Gromov_completion u = x \<and> abs_Gromov_completion v = y \<and> Gromov_completion_rel u u \<and> Gromov_completion_rel v v} =
+        {liminf (\<lambda>n. ereal (Gromov_product_at e (v n) (u n))) |u v.
+          abs_Gromov_completion v = y \<and> abs_Gromov_completion u = x \<and> Gromov_completion_rel v v \<and> Gromov_completion_rel u u}"
+    by (auto simp add: Gromov_product_commute)
+  then show "{liminf (\<lambda>n. ereal (Gromov_product_at e (u n) (v n))) |u v.
+      abs_Gromov_completion u = x \<and> abs_Gromov_completion v = y \<and> Gromov_completion_rel u u \<and> Gromov_completion_rel v v} =
+      {liminf (\<lambda>n. ereal (Gromov_product_at e (u n) (v n))) |u v.
+      abs_Gromov_completion u = y \<and> abs_Gromov_completion v = x \<and> Gromov_completion_rel u u \<and> Gromov_completion_rel v v}"
+    by auto
+qed
+
+
+lemma extended_Gromov_distance_inside [simp]:
+  "extended_Gromov_distance (to_Gromov_completion x) (to_Gromov_completion y) = dist x y"
+unfolding extended_Gromov_distance_def Gromov_boundary_def by (auto simp add: to_Gromov_completion_inj)
+
+lemma extended_Gromov_product_inside [simp] :
+  "extended_Gromov_product_at e (to_Gromov_completion x) (to_Gromov_completion y) = Gromov_product_at e x y"
+proof -
+  have A: "u = (\<lambda>n. z)" if H: "abs_Gromov_completion u = abs_Gromov_completion (\<lambda>n. z)" "Gromov_completion_rel u u" for u and z::'a
+  proof -
+    have "Gromov_completion_rel u (\<lambda>n. z)"
+      apply (subst Quotient3_rel[OF Quotient3_Gromov_completion, symmetric])
+      using H uniformity_dist_class_def by auto
+    then show ?thesis using Gromov_completion_rel_to_const by auto
+  qed
+  then have *: "{u. abs_Gromov_completion u = to_Gromov_completion z \<and> Gromov_completion_rel u u} = {(\<lambda>n. z)}" for z::'a
+    unfolding to_Gromov_completion_def by auto
+  have **: "{F u v |u v. abs_Gromov_completion u = to_Gromov_completion x \<and> abs_Gromov_completion v = to_Gromov_completion y \<and> Gromov_completion_rel u u \<and> Gromov_completion_rel v v}
+      = {F (\<lambda>n. x) (\<lambda>n. y)}" for F::"(nat \<Rightarrow> 'a) \<Rightarrow> (nat \<Rightarrow> 'a) \<Rightarrow> ereal"
+    using *[of x] *[of y] unfolding extended_Gromov_product_at_def by (auto, smt mem_Collect_eq singletonD)
+
+  have "extended_Gromov_product_at e (to_Gromov_completion x) (to_Gromov_completion y) = Inf {liminf (\<lambda>n. ereal(Gromov_product_at e ((\<lambda>n. x) n) ((\<lambda>n. y) n)))}"
+    unfolding extended_Gromov_product_at_def ** by simp
+  also have "... = ereal(Gromov_product_at e x y)"
+    by (auto simp add: Liminf_const)
+  finally show "extended_Gromov_product_at e (to_Gromov_completion x) (to_Gromov_completion y) = Gromov_product_at e x y"
+    by simp
+qed
+
+
+lemma extended_Gromov_distance_PInf_boundary [simp]:
+  assumes "x \<in> Gromov_boundary"
+  shows "extended_Gromov_distance x y = \<infinity>" "extended_Gromov_distance y x = \<infinity>"
+unfolding extended_Gromov_distance_def using assms by auto
+
+
+lemma extended_Gromov_distance_triangle [mono_intros]:
+  "extended_Gromov_distance x z \<le> extended_Gromov_distance x y + extended_Gromov_distance y z"
+proof (cases "x \<in> Gromov_boundary \<or> y \<in> Gromov_boundary \<or> z \<in> Gromov_boundary")
+  case True
+  then have *: "extended_Gromov_distance x y + extended_Gromov_distance y z = \<infinity>" by auto
+  show ?thesis by (simp add: *)

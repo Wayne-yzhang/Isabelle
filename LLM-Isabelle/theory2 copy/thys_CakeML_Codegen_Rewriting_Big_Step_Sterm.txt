@@ -1,0 +1,294 @@
+theory Big_Step_Sterm
+imports
+  Rewriting_Sterm
+  "../Terms/Term_as_Value"
+begin
+
+
+inductive (in constructors) seval :: "srule list \<Rightarrow> (name, sterm) fmap \<Rightarrow> sterm \<Rightarrow> sterm \<Rightarrow> bool"  ("_, _/ \<turnstile>\<^sub>s/ _ \<down>/ _" [50,0,50] 50) for rs where
+const: "(name, rhs) \<in> set rs \<Longrightarrow> rs, \<Gamma> \<turnstile>\<^sub>s Sconst name \<down> rhs" |
+var: "fmlookup \<Gamma> name = Some val \<Longrightarrow> rs, \<Gamma> \<turnstile>\<^sub>s Svar name \<down> val" |
+abs: "rs, \<Gamma> \<turnstile>\<^sub>s Sabs cs \<down> Sabs (map (\<lambda>(pat, t). (pat, subst t (fmdrop_fset (frees pat) \<Gamma>))) cs)" |
+comb: "
+  rs, \<Gamma> \<turnstile>\<^sub>s t \<down> Sabs cs \<Longrightarrow> rs, \<Gamma> \<turnstile>\<^sub>s u \<down> u' \<Longrightarrow>
+  find_match cs u' = Some (env, _, rhs) \<Longrightarrow>
+  rs, \<Gamma> ++\<^sub>f env \<turnstile>\<^sub>s rhs \<down> val \<Longrightarrow>
+  rs, \<Gamma> \<turnstile>\<^sub>s t $\<^sub>s u \<down> val" |
+constr: "
+  name |\<in>| C \<Longrightarrow>
+  list_all2 (seval rs \<Gamma>) ts us \<Longrightarrow>
+  rs, \<Gamma> \<turnstile>\<^sub>s name $$ ts \<down> name $$ us"
+
+lemma (in constructors) seval_closed:
+  assumes "rs, \<Gamma> \<turnstile>\<^sub>s t \<down> u" "closed_srules rs" "closed_env \<Gamma>" "closed_except t (fmdom \<Gamma>)"
+  shows "closed u"
+using assms proof induction
+  case (const name rhs \<Gamma>)
+  thus ?case
+    by (auto simp: list_all_iff)
+next
+  case (comb \<Gamma> t cs u u' env pat rhs val)
+  hence "closed (Sabs cs)" "closed u'"
+    by (auto simp: closed_except_def)
+  moreover have "(pat, rhs) \<in> set cs" "match pat u' = Some env"
+    using comb by (auto simp: find_match_elem)
+  ultimately have "closed_except rhs (frees pat)"
+    by (auto dest: closed_except_sabs)
+
+  show ?case
+    proof (rule comb)
+      have "closed_env env"
+        by (rule closed.match) fact+
+      thus "closed_env (\<Gamma> ++\<^sub>f env)"
+    next
+      have "closed_except rhs (fmdom \<Gamma> |\<union>| frees pat)"
+        unfolding closed_except_def by auto
+      hence "closed_except rhs (fmdom \<Gamma> |\<union>| fmdom env)"
+      thus "closed_except rhs (fmdom (\<Gamma> ++\<^sub>f env))"
+        using comb by simp
+    qed fact
+next
+  case (abs \<Gamma> cs)
+  show ?case
+    apply (subst subst_sterm.simps[symmetric])
+    apply (subst closed_except_def)
+    apply (subst subst_frees)
+    apply fact+
+    apply (subst fminus_fsubset_conv)
+    apply (subst closed_except_def[symmetric])
+    apply (subst funion_fempty_right)
+    apply fact
+    done
+next
+  case (constr name \<Gamma> ts us)
+  have "list_all closed us"
+    proof (induction ts us rule: list.rel_induct)
+      case (Cons v vs u us)
+      thus ?case
+        using constr unfolding closed.list_comb
+        by auto
+    qed simp
+  thus ?case
+    unfolding closed.list_comb
+    by (simp add: closed_except_def)
+qed auto
+
+lemma (in srules) seval_wellformed:
+  assumes "rs, \<Gamma> \<turnstile>\<^sub>s t \<down> u" "wellformed t" "wellformed_env \<Gamma>"
+  shows "wellformed u"
+using assms proof induction
+  case (const name rhs \<Gamma>)
+  thus ?case
+    using all_rules
+    by (auto simp: list_all_iff)
+next
+  case (comb \<Gamma> t cs u u' env pat rhs val)
+  hence "(pat, rhs) \<in> set cs" "match pat u' = Some env"
+    by (auto simp: find_match_elem)
+
+  show ?case
+    proof (rule comb)
+      show "wellformed rhs"
+        by (auto simp: list_all_iff)
+    next
+      have "wellformed_env env"
+        apply (rule wellformed.match)
+         apply fact
+        apply (rule comb)
+        using comb apply simp
+        apply fact+
+        done
+      thus "wellformed_env (\<Gamma> ++\<^sub>f env)"
+        using comb by auto
+    qed
+next
+  case (abs \<Gamma> cs)
+  thus ?case
+    by (metis subst_sterm.simps subst_wellformed)
+next
+  case (constr name \<Gamma> ts us)
+  have "list_all wellformed us"
+    proof (induction ts us rule: list.rel_induct)
+      case (Cons v vs u us)
+      thus ?case
+        using constr by (auto simp: wellformed.list_comb app_sterm_def)
+    qed simp
+  thus ?case
+    by (simp add: wellformed.list_comb const_sterm_def)
+qed auto
+
+lemma (in constants) seval_shadows:
+  assumes "rs, \<Gamma> \<turnstile>\<^sub>s t \<down> u" "\<not> shadows_consts t"
+  assumes "list_all (\<lambda>(_, rhs). \<not> shadows_consts rhs) rs"
+  assumes "not_shadows_consts_env \<Gamma>"
+  shows "\<not> shadows_consts u"
+using assms proof induction
+  case (const name rhs \<Gamma>)
+  thus ?case
+    unfolding srules_def
+    by (auto simp: list_all_iff)
+next
+  case (comb \<Gamma> t cs u u' env pat rhs val)
+  hence "\<not> shadows_consts (Sabs cs)" "\<not> shadows_consts u'"
+    by auto
+  moreover from comb have "(pat, rhs) \<in> set cs" "match pat u' = Some env"
+    by (auto simp: find_match_elem)
+  ultimately have "\<not> shadows_consts rhs"
+    by (auto simp: list_ex_iff)
+
+  moreover have "not_shadows_consts_env env"
+
+  ultimately show ?case
+    using comb by blast
+next
+  case (abs \<Gamma> cs)
+  show ?case
+    apply (subst subst_sterm.simps[symmetric])
+    apply (rule subst_shadows)
+     apply fact+
+    done
+next
+  case (constr name \<Gamma> ts us)
+  have "list_all (Not \<circ> shadows_consts) us"
+    proof (induction ts us rule: list.rel_induct)
+      case (Cons v vs u us)
+      thus ?case
+        using constr by (auto simp: shadows.list_comb const_sterm_def app_sterm_def)
+    qed simp
+  thus ?case
+    by (auto simp: shadows.list_comb list_ex_iff list_all_iff const_sterm_def)
+qed auto
+
+lemma (in constructors) seval_list_comb_abs:
+  assumes "rs, \<Gamma> \<turnstile>\<^sub>s name $$ args \<down> Sabs cs"
+  shows "name \<in> dom (map_of rs)"
+using assms
+proof (induction \<Gamma> "name $$ args" "Sabs cs" arbitrary: args cs)
+  case (constr name' _ _ us)
+  hence "Sabs cs = name' $$ us" by simp
+  hence False
+    by (cases rule: list_comb_cases) (auto simp: const_sterm_def app_sterm_def)
+  thus ?case ..
+next
+  case (comb \<Gamma> t cs' u u' env pat rhs)
+
+  hence "strip_comb (t $\<^sub>s u) = strip_comb (name $$ args)"
+    by simp
+  hence "strip_comb t = (Sconst name, butlast args)" "u = last args"
+     apply -
+    subgoal
+      apply (simp add: strip_list_comb_const)
+      apply (fold app_sterm_def const_sterm_def)
+      by (auto split: prod.splits)
+    subgoal
+      apply (simp add: strip_list_comb_const)
+      apply (fold app_sterm_def const_sterm_def)
+      by (auto split: prod.splits)
+    done
+  hence "t = name $$ butlast args"
+    apply (fold const_sterm_def)
+    by (metis list_strip_comb fst_conv snd_conv)
+
+  thus ?case
+    using comb by auto
+qed (auto elim: list_comb_cases simp: const_sterm_def app_sterm_def intro: weak_map_of_SomeI)
+
+lemma (in constructors) is_value_eval_id:
+  assumes "is_value t" "closed t"
+  shows "rs, \<Gamma> \<turnstile>\<^sub>s t \<down> t"
+using assms proof induction
+  case (abs cs)
+
+  have "rs, \<Gamma> \<turnstile>\<^sub>s Sabs cs \<down> Sabs (map (\<lambda>(pat, t). (pat, subst t (fmdrop_fset (frees pat) \<Gamma>))) cs)"
+    by (rule seval.abs)
+  moreover have "subst (Sabs cs) \<Gamma> = Sabs cs"
+    using abs by (metis subst_closed_id)
+  ultimately show ?case
+    by simp
+next
+  case (constr vs name)
+  have "list_all2 (seval rs \<Gamma>) vs vs"
+    proof (rule list.rel_refl_strong)
+      fix v
+      assume "v \<in> set vs"
+      moreover hence "closed v"
+        using constr
+        unfolding closed.list_comb
+        by (auto simp: list_all_iff)
+      ultimately show "rs, \<Gamma> \<turnstile>\<^sub>s v \<down> v"
+        by (force simp: list_all_iff)
+    qed
+      by (rule seval.constr)
+qed
+
+lemma (in constructors) ssubst_eval:
+  assumes "rs, \<Gamma> \<turnstile>\<^sub>s t \<down> t'" "\<Gamma>' \<subseteq>\<^sub>f \<Gamma>" "closed_env \<Gamma>" "value_env \<Gamma>"
+  shows "rs, \<Gamma> \<turnstile>\<^sub>s subst t \<Gamma>' \<down> t'"
+using assms proof induction
+  case (var \<Gamma> name val)
+  show ?case
+    proof (cases "fmlookup \<Gamma>' name")
+      case None
+      thus ?thesis
+        using var by (auto intro: seval.intros)
+    next
+      case (Some val')
+      with var have "val' = val"
+        unfolding fmsubset_alt_def by force
+      show ?thesis
+        apply simp
+        apply (subst Some)
+        apply simp
+        apply (rule is_value_eval_id)
+        using var by auto
+    qed
+next
+  case (abs \<Gamma> cs)
+  hence "subst (subst (Sabs cs) \<Gamma>') \<Gamma> = subst (Sabs cs) \<Gamma>"
+    by (metis subst_twice fmsubset_pred)
+  moreover have "rs, \<Gamma> \<turnstile>\<^sub>s subst (Sabs cs) \<Gamma>' \<down> subst (subst (Sabs cs) \<Gamma>') \<Gamma>"
+    apply simp
+    apply (subst map_map[symmetric])
+    apply (rule seval.abs)
+    done
+  ultimately have "rs, \<Gamma> \<turnstile>\<^sub>s subst (Sabs cs) \<Gamma>' \<down> subst (Sabs cs) \<Gamma>"
+    by metis
+  thus ?case by simp
+next
+  case (constr name \<Gamma> ts us)
+  hence "list_all2 (\<lambda>t. seval rs \<Gamma> (subst t \<Gamma>')) ts us"
+    by (blast intro: list.rel_mono_strong)
+  with constr show ?case
+    by (auto simp: subst_list_comb list_all2_map1 intro: seval.constr)
+qed (auto intro: seval.intros)
+
+lemma (in constructors) seval_agree_eq:
+  assumes "rs, \<Gamma> \<turnstile>\<^sub>s t \<down> u" "fmrestrict_fset S \<Gamma> = fmrestrict_fset S \<Gamma>'" "closed_except t S"
+  assumes "S |\<subseteq>| fmdom \<Gamma>" "closed_srules rs" "closed_env \<Gamma>"
+  shows "rs, \<Gamma>' \<turnstile>\<^sub>s t \<down> u"
+using assms proof (induction arbitrary: \<Gamma>' S)
+  case (var \<Gamma> name val)
+  hence "name |\<in>| S"
+    by (simp add: closed_except_def)
+  hence "fmlookup \<Gamma> name = fmlookup \<Gamma>' name"
+    unfolding fmfilter_alt_defs
+    including fmap.lifting
+    by transfer' (auto simp: map_filter_def fun_eq_iff split: if_splits)
+  with var show ?case
+    by (auto intro: seval.var)
+next
+  case (abs \<Gamma> cs)
+
+  have *: "fmdrop_fset S (fmrestrict_fset T m) = fmrestrict_fset (T |\<union>| S) (fmdrop_fset S m)" for S T m
+    unfolding fmfilter_alt_defs fmfilter_comp
+    by (rule fmfilter_cong) auto
+
+  {
+    fix pat t
+    assume "(pat, t) \<in> set cs"
+    with abs have "closed_except t (S |\<union>| frees pat)"
+      by (auto simp: Sterm.closed_except_simps list_all_iff)
+
+    have
+      "subst t (fmdrop_fset (frees pat) (fmrestrict_fset S \<Gamma>)) = subst t (fmdrop_fset (frees pat) \<Gamma>)"
+      apply (subst *)

@@ -1,0 +1,376 @@
+theory Set_Theory imports "HOL-Library.FuncSet" begin
+
+hide_const map
+hide_const partition
+
+no_notation divide (infixl "'/" 70)
+no_notation inverse_divide (infixl "'/" 70)
+
+
+
+
+
+locale map =
+  fixes \<alpha> and S and T
+  assumes graph [intro, simp]: "\<alpha> \<in> S \<rightarrow>\<^sub>E T"
+begin
+
+lemma map_closed [intro, simp]:
+  "a \<in> S \<Longrightarrow> \<alpha> a \<in> T"
+using graph by fast
+  
+lemma map_undefined [intro]:
+  "a \<notin> S \<Longrightarrow> \<alpha> a = undefined"
+using graph by fast
+
+
+locale surjective_map = map + assumes surjective [intro]: "\<alpha> ` S = T"
+
+locale injective_map = map + assumes injective [intro, simp]: "inj_on \<alpha> S"
+
+locale bijective =
+  fixes \<alpha> and S and T
+  assumes bijective [intro, simp]: "bij_betw \<alpha> S T"
+
+locale bijective_map = map + bijective begin
+
+sublocale surjective_map by unfold_locales (simp add: bij_betw_imp_surj_on)
+
+sublocale injective_map using bij_betw_def by unfold_locales fast
+
+sublocale inverse: map "restrict (inv_into S \<alpha>) T" T S
+  by unfold_locales (simp add: inv_into_into surjective)
+
+sublocale inverse: bijective "restrict (inv_into S \<alpha>) T" T S
+  by unfold_locales (simp add: bij_betw_inv_into surjective)
+
+
+abbreviation "identity S \<equiv> (\<lambda>x \<in> S. x)"
+
+context map begin
+
+theorem bij_betw_iff_has_inverse:
+  "bij_betw \<alpha> S T \<longleftrightarrow> (\<exists>\<beta> \<in> T \<rightarrow>\<^sub>E S. compose S \<beta> \<alpha> = identity S \<and> compose T \<alpha> \<beta> = identity T)"
+    (is "_ \<longleftrightarrow> (\<exists>\<beta> \<in> T \<rightarrow>\<^sub>E S. ?INV \<beta>)")
+proof
+  let ?inv = "restrict (inv_into S \<alpha>) T"
+  assume "bij_betw \<alpha> S T"
+  then have "?INV ?inv" and "?inv \<in> T \<rightarrow>\<^sub>E S"
+    by (simp_all add: compose_inv_into_id bij_betw_imp_surj_on compose_id_inv_into bij_betw_imp_funcset bij_betw_inv_into)
+  then show "\<exists>\<beta> \<in> T \<rightarrow>\<^sub>E S. ?INV \<beta>" ..
+next
+  assume "\<exists>\<beta> \<in> T \<rightarrow>\<^sub>E S. ?INV \<beta>"
+  then obtain \<beta> where "\<alpha> \<in> S \<rightarrow> T" "\<beta> \<in> T \<rightarrow> S" "\<And>x. x \<in> S \<Longrightarrow> \<beta> (\<alpha> x) = x" "\<And>y. y \<in> T \<Longrightarrow> \<alpha> (\<beta> y) = y"
+    by (metis PiE_restrict compose_eq graph restrict_PiE restrict_apply)
+  then show "bij_betw \<alpha> S T" by (rule bij_betwI) 
+qed
+
+
+
+
+locale equivalence =
+  fixes S and E
+  assumes closed [intro, simp]: "E \<subseteq> S \<times> S"
+    and reflexive [intro, simp]: "a \<in> S \<Longrightarrow> (a, a) \<in> E"
+    and symmetric [sym]: "(a, b) \<in> E \<Longrightarrow> (b, a) \<in> E"
+    and transitive [trans]: "\<lbrakk> (a, b) \<in> E; (b, c) \<in> E \<rbrakk> \<Longrightarrow> (a, c) \<in> E"
+begin
+
+  "(a, b) \<in> E \<Longrightarrow> a \<in> S"
+  using closed by blast
+  
+  "(a, b) \<in> E \<Longrightarrow> b \<in> S"
+  using closed by blast
+
+
+locale partition =
+  fixes S and P
+  assumes subset: "P \<subseteq> Pow S"
+    and non_vacuous: "{} \<notin> P"
+    and complete: "\<Union>P = S"
+    and disjoint: "\<lbrakk> A \<in> P; B \<in> P; A \<noteq> B \<rbrakk> \<Longrightarrow> A \<inter> B = {}"
+
+context equivalence begin
+
+definition "Class = (\<lambda>a \<in> S. {b \<in> S. (b, a) \<in> E})"
+
+lemma Class_closed [dest]:
+  "\<lbrakk> a \<in> Class b; b \<in> S \<rbrakk> \<Longrightarrow> a \<in> S"
+  unfolding Class_def by auto
+
+lemma Class_closed2 [intro, simp]:
+  "a \<in> S \<Longrightarrow> Class a \<subseteq> S"
+  unfolding Class_def by auto
+
+lemma Class_undefined [intro, simp]:
+  "a \<notin> S \<Longrightarrow> Class a = undefined"
+  unfolding Class_def by simp
+
+lemma ClassI [intro, simp]:
+  "(a, b) \<in> E \<Longrightarrow> a \<in> Class b"
+  unfolding Class_def by (simp add: left_closed right_closed)
+  
+lemma Class_revI [intro, simp]:
+  "(a, b) \<in> E \<Longrightarrow> b \<in> Class a"
+  by (blast intro: symmetric)
+
+lemma ClassD [dest]:
+  "\<lbrakk> b \<in> Class a; a \<in> S \<rbrakk> \<Longrightarrow> (b, a) \<in> E"
+  unfolding Class_def by simp
+
+theorem Class_self [intro, simp]:
+  "a \<in> S \<Longrightarrow> a \<in> Class a"
+  unfolding Class_def by simp
+
+theorem Class_Union [simp]:
+  "(\<Union>a\<in>S. Class a) = S"
+  by blast
+
+theorem Class_subset:
+  "(a, b) \<in> E \<Longrightarrow> Class a \<subseteq> Class b"
+proof
+  fix a and b and c
+  assume "(a, b) \<in> E" and "c \<in> Class a"
+  then have "(c, a) \<in> E" by auto
+  finally have "(c, b) \<in> E" by simp
+  then show "c \<in> Class b" by auto
+qed
+
+theorem Class_eq:
+  "(a, b) \<in> E \<Longrightarrow> Class a = Class b"
+  by (auto intro!: Class_subset intro: symmetric)
+
+theorem Class_equivalence:
+  "\<lbrakk> a \<in> S; b \<in> S \<rbrakk> \<Longrightarrow> Class a = Class b \<longleftrightarrow> (a, b) \<in> E"
+proof
+  fix a and b
+  assume "a \<in> S" "b \<in> S" "Class a = Class b"
+  then have "a \<in> Class a" by auto
+qed (rule Class_eq)
+
+theorem not_disjoint_implies_equal:
+  assumes not_disjoint: "Class a \<inter> Class b \<noteq> {}"
+  assumes closed: "a \<in> S" "b \<in> S"
+  shows "Class a = Class b"
+proof -
+  from not_disjoint and closed obtain c where witness: "c \<in> Class a \<inter> Class b" by fast
+  with closed have "(a, c) \<in> E" by (blast intro: symmetric)
+  also from witness and closed have "(c, b) \<in> E" by fast
+  finally show ?thesis by (rule Class_eq)
+qed
+
+definition "Partition = Class ` S"
+
+lemma Class_in_Partition [intro, simp]:
+  "a \<in> S \<Longrightarrow> Class a \<in> Partition"
+  unfolding Partition_def by fast
+
+theorem partition:
+  "partition S Partition"
+proof
+  fix A and B
+  assume closed: "A \<in> Partition" "B \<in> Partition"
+  then obtain a and b where eq: "A = Class a" "B = Class b" and ab: "a \<in> S" "b \<in> S"
+  unfolding Partition_def by auto
+  assume distinct: "A \<noteq> B"
+  then show "A \<inter> B = {}"
+  proof (rule contrapos_np)
+    assume not_disjoint: "A \<inter> B \<noteq> {}"
+    then show "A = B" by (simp add: eq) (metis not_disjoint_implies_equal ab)
+  qed
+qed (auto simp: Partition_def)
+
+
+context partition begin
+
+theorem block_exists:
+  "a \<in> S \<Longrightarrow> \<exists>A. a \<in> A \<and> A \<in> P"
+  using complete by blast
+
+theorem block_unique:
+  "\<lbrakk> a \<in> A; A \<in> P; a \<in> B; B \<in> P \<rbrakk> \<Longrightarrow> A = B"
+  using disjoint by blast
+
+  "\<lbrakk> a \<in> A; A \<in> P \<rbrakk> \<Longrightarrow> a \<in> S"
+  using complete by blast
+
+lemma element_exists:
+  "A \<in> P \<Longrightarrow> \<exists>a \<in> S. a \<in> A"
+  by (metis non_vacuous block_closed all_not_in_conv)
+
+definition "Block = (\<lambda>a \<in> S. THE A. a \<in> A \<and> A \<in> P)"
+
+lemma Block_closed [intro, simp]:
+  assumes [intro]: "a \<in> S" shows "Block a \<in> P"
+proof -
+  obtain A where "a \<in> A" "A \<in> P" using block_exists by blast
+  then show ?thesis
+    apply (auto simp: Block_def)
+    apply (rule theI2)
+      apply (auto dest: block_unique)
+    done
+qed
+  
+lemma Block_undefined [intro, simp]:
+  "a \<notin> S \<Longrightarrow> Block a = undefined"
+  unfolding Block_def by simp
+
+lemma Block_self:
+  "\<lbrakk> a \<in> A; A \<in> P \<rbrakk> \<Longrightarrow> Block a = A"
+  apply (simp add: Block_def block_closed)
+  apply (rule the_equality)
+   apply (auto dest: block_unique)
+  done
+
+definition "Equivalence = {(a, b) . \<exists>A \<in> P. a \<in> A \<and> b \<in> A}"
+
+theorem equivalence: "equivalence S Equivalence"
+proof
+  show "Equivalence \<subseteq> S \<times> S" unfolding Equivalence_def using subset by auto
+next
+  fix a
+  assume "a \<in> S"
+  then show "(a, a) \<in> Equivalence" unfolding Equivalence_def using complete by auto
+next
+  fix a and b
+  assume "(a, b) \<in> Equivalence"
+  then show "(b, a) \<in> Equivalence" unfolding Equivalence_def by auto
+next
+  fix a and b and c
+  assume "(a, b) \<in> Equivalence" "(b, c) \<in> Equivalence"
+  then show "(a, c) \<in> Equivalence" unfolding Equivalence_def using disjoint by auto
+qed
+
+interpretation equivalence S Equivalence by (rule equivalence)
+
+theorem Class_is_Block:
+  assumes "a \<in> S" shows "Class a = Block a"
+proof -
+  show ?thesis
+    apply (simp add: Block_def Class_def)
+    apply (rule theI2)
+      apply (rule block)
+     apply (metis block block_unique)
+    apply (auto dest: block_unique simp: Equivalence_def)
+    done
+qed
+
+lemma Class_equals_Block:
+  "Class = Block"
+proof
+  fix x show "Class x = Block x"
+  by (cases "x \<in> S") (auto simp: Class_is_Block)
+qed
+
+theorem partition_of_equivalence:
+  "Partition = P"
+  by (auto simp add: Partition_def Class_equals_Block image_iff) (metis Block_self element_exists)
+
+
+context equivalence begin
+
+interpretation partition S Partition by (rule partition)
+
+theorem equivalence_of_partition:
+  "Equivalence = E"
+  unfolding Equivalence_def unfolding Partition_def by auto (metis ClassD Class_closed Class_eq)
+
+
+sublocale partition \<subseteq> equivalence S Equivalence
+  rewrites "equivalence.Partition S Equivalence = P" and "equivalence.Class S Equivalence = Block"
+    apply (rule equivalence)
+   apply (rule partition_of_equivalence)
+  apply (rule Class_equals_Block)
+  done
+
+sublocale equivalence \<subseteq> partition S Partition
+  rewrites "partition.Equivalence Partition = E" and "partition.Block S Partition = Class"
+    apply (rule partition)
+   apply (rule equivalence_of_partition)
+  apply (metis equivalence_of_partition partition partition.Class_equals_Block)
+  done
+
+notation equivalence.Partition (infixl "'/" 75)
+
+context equivalence begin
+
+lemma representant_exists [dest]: "A \<in> S / E \<Longrightarrow> \<exists>a\<in>S. a \<in> A \<and> A = Class a"
+  by (metis Block_self element_exists)
+
+lemma quotient_ClassE: "A \<in> S / E \<Longrightarrow> (\<And>a. a \<in> S \<Longrightarrow> P (Class a)) \<Longrightarrow> P A"
+  using representant_exists by blast
+
+
+sublocale equivalence \<subseteq> natural: surjective_map Class S "S / E"
+  by unfold_locales force+
+
+locale fiber_relation_notation = fixes S :: "'a set" begin
+
+definition Fiber_Relation ("E'(_')") where "Fiber_Relation \<alpha> = {(x, y). x \<in> S \<and> y \<in> S \<and> \<alpha> x = \<alpha> y}"
+
+
+locale fiber_relation = map begin
+
+sublocale fiber_relation_notation .
+
+sublocale equivalence where E = "E(\<alpha>)"
+  unfolding Fiber_Relation_def by unfold_locales auto
+
+definition "induced = (\<lambda>A \<in> S / E(\<alpha>). THE b. \<exists>a \<in> A. b = \<alpha> a)"
+
+theorem Fiber_equality:
+  "\<lbrakk> a \<in> S; b \<in> S \<rbrakk> \<Longrightarrow> Class a = Class b \<longleftrightarrow> \<alpha> a = \<alpha> b"
+  unfolding Class_equivalence unfolding Fiber_Relation_def by simp
+
+theorem induced_Fiber_simp [simp]:
+  assumes [intro, simp]: "a \<in> S" shows "induced (Class a) = \<alpha> a"
+proof -
+  have "(THE b. \<exists>a\<in>Class a. b = \<alpha> a) = \<alpha> a"
+    by (rule the_equality) (auto simp: Fiber_equality [symmetric] Block_self block_closed)
+  then show ?thesis unfolding induced_def by simp
+qed
+
+interpretation induced: map induced "S / E(\<alpha>)" T
+proof (unfold_locales, rule)
+  fix A
+  assume [intro, simp]: "A \<in> S / E(\<alpha>)"
+  obtain a where a: "a \<in> S" "a \<in> A" using element_exists by auto
+  have "(THE b. \<exists>a\<in>A. b = \<alpha> a) \<in> T"
+    apply (rule theI2)
+    using a apply (auto simp: Fiber_equality [symmetric] Block_self block_closed)
+    done
+  then show "induced A \<in> T" unfolding induced_def by simp
+qed (simp add: induced_def)
+
+sublocale induced: injective_map induced "S / E(\<alpha>)" T
+proof
+  show "inj_on induced Partition"
+    unfolding inj_on_def
+    by (metis Fiber_equality Block_self element_exists induced_Fiber_simp)
+qed
+
+theorem factorization_lemma:
+  "a \<in> S \<Longrightarrow> compose S induced Class a = \<alpha> a"
+  by (simp add: compose_eq)
+
+theorem factorization [simp]: "compose S induced Class = \<alpha>"
+  by (rule ext) (simp add: compose_def map_undefined)
+
+theorem uniqueness:
+  assumes map: "\<beta> \<in> S / E(\<alpha>) \<rightarrow>\<^sub>E T"
+    and factorization: "compose S \<beta> Class = \<alpha>"
+  shows "\<beta> = induced"
+proof
+  fix A
+  show "\<beta> A = induced A"
+  proof (cases "A \<in> S / E(\<alpha>)")
+    case True
+    then obtain a where [simp]: "A = Class a" "a \<in> S" by fast
+    then have "\<beta> (Class a) = \<alpha> a" by (metis compose_eq factorization)
+    also have "\<dots> = induced (Class a)" by simp
+    finally show ?thesis by simp
+  qed (simp add: induced_def PiE_arb [OF map])
+qed
+
+
+end

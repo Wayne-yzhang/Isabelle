@@ -1,0 +1,53 @@
+theory DynSlice imports DependentLiveVariables BitVector "../Basic/SemanticsCFG" begin
+
+
+context DynPDG begin
+
+fun slice_path :: "'edge list \<Rightarrow> bit_vector"
+  where "slice_path [] = []"
+  | "slice_path (a#as) = (let n' = last(targetnodes (a#as)) in
+                           (sourcenode a -a#as\<rightarrow>\<^sub>d* n')#slice_path as)"
+
+
+lemma slice_path_length:
+  "length(slice_path as) = length as"
+by(induct as) auto
+
+
+lemma slice_path_right_Cons:
+  assumes slice:"slice_path as = x#xs"
+  obtains a' as' where "as = a'#as'" and "slice_path as' = xs"
+proof(atomize_elim)
+  from slice show "\<exists>a' as'. as = a'#as' \<and> slice_path as' = xs"
+    by(induct as) auto
+qed
+
+
+
+fun select_edge_kinds :: "'edge list \<Rightarrow> bit_vector \<Rightarrow> 'state edge_kind list"
+where "select_edge_kinds [] [] = []"
+  | "select_edge_kinds (a#as) (b#bs) = (if b then kind a
+      else (case kind a of \<Up>f \<Rightarrow> \<Up>id | (Q)\<^sub>\<surd> \<Rightarrow> (\<lambda>s. True)\<^sub>\<surd>))#select_edge_kinds as bs"
+
+
+definition slice_kinds :: "'edge list \<Rightarrow> 'state edge_kind list"
+  where "slice_kinds as = select_edge_kinds as (slice_path as)"
+
+
+lemma select_edge_kinds_max_bv:
+  "select_edge_kinds as (replicate (length as) True) = kinds as"
+by(induct as,auto simp:kinds_def)
+
+
+lemma slice_path_leqs_information_same_Uses:
+  "\<lbrakk>n -as\<rightarrow>* n'; bs \<preceq>\<^sub>b bs'; slice_path as = bs;
+    select_edge_kinds as bs = es; select_edge_kinds as bs' = es'; 
+    \<forall>V xs. (V,xs,as) \<in> dependent_live_vars n' \<longrightarrow> state_val s V = state_val s' V;
+    preds es' s'\<rbrakk> 
+  \<Longrightarrow> (\<forall>V \<in> Use n'. state_val (transfers es s) V =
+      state_val (transfers es' s') V) \<and> preds es s"
+proof(induct bs bs' arbitrary:as es es' n s s' rule:bv_leqs.induct)
+  case 1
+  have "es = []" and "es' = []" by simp_all
+  { fix V assume "V \<in> Use n'"
+    hence "(V,[],[]) \<in> dependent_live_vars n'" by(rule dep_vars_Use)

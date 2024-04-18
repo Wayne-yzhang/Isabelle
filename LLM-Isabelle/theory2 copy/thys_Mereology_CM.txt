@@ -1,0 +1,304 @@
+theory CM
+  imports M
+begin
+
+
+locale CM = M +
+  assumes sum_eq: "x \<oplus> y = (THE z. \<forall>v. O v z \<longleftrightarrow> O v x \<or> O v y)"
+  assumes sum_closure: "\<exists>z. \<forall>v. O v z \<longleftrightarrow> O v x \<or> O v y"
+  assumes product_eq: 
+    "x \<otimes> y = (THE z. \<forall>v. P v z \<longleftrightarrow> P v x \<and> P v y)"
+  assumes product_closure: 
+    "O x y \<Longrightarrow> \<exists>z. \<forall>v. P v z \<longleftrightarrow> P v x \<and> P v y"
+begin
+
+
+lemma product_intro: 
+  "(\<forall>w. P w z \<longleftrightarrow> (P w x \<and> P w y)) \<Longrightarrow> x \<otimes> y = z"
+proof -
+  assume z: "\<forall>w. P w z \<longleftrightarrow> (P w x \<and> P w y)"
+  hence "(THE v. \<forall>w. P w v \<longleftrightarrow> P w x \<and> P w y) = z"
+  proof (rule the_equality)
+    fix v
+    assume v: "\<forall>w. P w v \<longleftrightarrow> (P w x \<and> P w y)"
+    have "\<forall>w. P w v \<longleftrightarrow> P w z"
+    proof
+      fix w
+      from z have "P w z \<longleftrightarrow> (P w x \<and> P w y)"..
+      moreover from v have "P w v \<longleftrightarrow> (P w x \<and> P w y)"..
+      ultimately show "P w v \<longleftrightarrow> P w z" by (rule ssubst)
+    qed
+    with part_extensionality show "v = z"..
+  qed
+  thus "x \<otimes> y = z"
+    using product_eq by (rule subst)
+qed
+
+lemma product_idempotence: "x \<otimes> x = x"
+proof -
+  have "\<forall>w. P w x \<longleftrightarrow> P w x \<and> P w x"
+  proof
+    fix w
+    show "P w x \<longleftrightarrow> P w x \<and> P w x"
+    proof
+      assume "P w x"
+    next
+      assume "P w x \<and> P w x"
+      thus "P w x"..
+    qed
+  qed
+  thus "x \<otimes> x = x" by (rule product_intro)
+qed
+
+lemma product_character: 
+  "O x y \<Longrightarrow> (\<forall>w. P w (x \<otimes> y) \<longleftrightarrow> (P w x \<and> P w y))"
+proof -
+  assume "O x y"
+  hence "\<exists>z. \<forall>w. P w z \<longleftrightarrow> (P w x \<and> P w y)" by (rule product_closure)
+  then obtain z where z: "\<forall>w. P w z \<longleftrightarrow> (P w x \<and> P w y)"..
+  hence "x \<otimes> y = z" by (rule product_intro)
+  thus "\<forall>w. P w (x \<otimes> y) \<longleftrightarrow> P w x \<and> P w y"
+    using z by (rule ssubst)
+qed
+
+lemma product_commutativity: "O x y \<Longrightarrow> x \<otimes> y = y \<otimes> x"
+proof -
+  assume "O x y"
+  hence "O y x" by (rule overlap_symmetry)
+  hence "\<forall>w. P w (y \<otimes> x) \<longleftrightarrow> (P w y \<and> P w x)" by (rule product_character)
+  hence "\<forall>w. P w (y \<otimes> x) \<longleftrightarrow> (P w x \<and> P w y)" by auto
+  thus "x \<otimes> y = y \<otimes> x" by (rule product_intro)
+qed
+
+lemma product_in_factors: "O x y \<Longrightarrow> P (x \<otimes> y) x \<and> P (x \<otimes> y) y"
+proof -
+  assume "O x y"
+  hence "\<forall>w. P w (x \<otimes> y) \<longleftrightarrow> P w x \<and> P w y" by (rule product_character)
+  hence "P (x \<otimes> y) (x \<otimes> y) \<longleftrightarrow> P (x \<otimes> y) x \<and> P (x \<otimes> y) y"..
+  moreover have "P (x \<otimes> y) (x \<otimes> y)" by (rule part_reflexivity)
+  ultimately show "P (x \<otimes> y) x \<and> P (x \<otimes> y) y"..
+qed
+
+lemma product_in_first_factor: "O x y \<Longrightarrow> P (x \<otimes> y) x"
+proof -
+  assume "O x y"
+  hence "P (x \<otimes> y) x \<and> P (x \<otimes> y) y" by (rule product_in_factors)
+  thus "P (x \<otimes> y) x"..
+qed
+
+lemma product_in_second_factor: "O x y \<Longrightarrow> P (x \<otimes> y) y"
+proof -
+  assume "O x y"
+  hence "P (x \<otimes> y) x \<and> P (x \<otimes> y) y" by (rule product_in_factors)
+  thus "P (x \<otimes> y) y"..
+qed
+
+lemma nonpart_implies_proper_product: 
+  "\<not> P x y \<and> O x y \<Longrightarrow> PP (x \<otimes> y) x"
+proof -
+  assume antecedent: "\<not> P x y \<and> O x y"
+  hence "\<not> P x y"..
+  from antecedent have "O x y"..
+  hence "P (x \<otimes> y) x" by (rule product_in_first_factor)
+  moreover have "(x \<otimes> y) \<noteq> x"
+  proof
+    assume "(x \<otimes> y) = x"
+    hence "\<not> P (x \<otimes> y) y"
+    moreover have "P (x \<otimes> y) y"
+    ultimately show "False"..
+  qed
+  ultimately have "P (x \<otimes> y) x \<and> x \<otimes> y \<noteq> x"..
+  with nip_eq show "PP (x \<otimes> y) x"..
+qed
+
+lemma common_part_in_product: "P z x \<and> P z y \<Longrightarrow> P z (x \<otimes> y)"
+proof -
+  assume antecedent: "P z x \<and> P z y"
+  hence "\<exists>z. P z x \<and> P z y"..
+  with overlap_eq have "O x y"..
+  hence "\<forall>w. P w (x \<otimes> y) \<longleftrightarrow> (P w x \<and> P w y)"
+    by (rule product_character)
+  hence "P z (x \<otimes> y) \<longleftrightarrow> (P z x \<and> P z y)"..
+  thus "P z (x \<otimes> y)" 
+qed
+
+lemma product_part_in_factors: 
+  "O x y \<Longrightarrow> P z (x \<otimes> y) \<Longrightarrow> P z x \<and> P z y"
+proof -
+  assume "O x y"
+  hence "\<forall>w. P w (x \<otimes> y) \<longleftrightarrow> (P w x \<and> P w y)"
+    by (rule product_character)
+  hence "P z (x \<otimes> y) \<longleftrightarrow> (P z x \<and> P z y)"..
+  moreover assume "P z (x \<otimes> y)"
+  ultimately show "P z x \<and> P z y"..
+qed
+
+corollary product_part_in_first_factor: 
+  "O x y \<Longrightarrow> P z (x \<otimes> y) \<Longrightarrow> P z x"
+proof -
+  assume "O x y"
+  moreover assume "P z (x \<otimes> y)"
+  ultimately have "P z x \<and> P z y"
+    by (rule product_part_in_factors)
+  thus "P z x"..
+qed
+
+corollary product_part_in_second_factor: 
+  "O x y \<Longrightarrow> P z (x \<otimes> y) \<Longrightarrow> P z y"
+proof -
+  assume "O x y"
+  moreover assume "P z (x \<otimes> y)"
+  ultimately have "P z x \<and> P z y"
+    by (rule product_part_in_factors)
+  thus "P z y"..
+qed
+
+lemma part_product_identity: "P x y \<Longrightarrow> x \<otimes> y = x"
+proof -
+  assume "P x y"
+  with part_reflexivity have "P x x \<and> P x y"..
+  hence "P x (x \<otimes> y)" by (rule common_part_in_product)
+  hence  "P (x \<otimes> y) x" by (rule product_in_first_factor)
+qed
+
+lemma product_overlap: "P z x \<Longrightarrow> O z y \<Longrightarrow> O z (x \<otimes> y)"
+proof -
+  assume "P z x"
+  assume "O z y"
+  with overlap_eq have "\<exists>v. P v z \<and> P v y"..
+  then obtain v where v: "P v z \<and> P v y"..
+  hence "P v y"..
+  from v have "P v z"..
+  hence "P v (x \<otimes> y)" by (rule common_part_in_product)
+  hence "\<exists>v. P v z \<and> P v (x \<otimes> y)"..
+  with overlap_eq show "O z (x \<otimes> y)"..
+qed
+
+lemma disjoint_from_second_factor: 
+  "P x y \<and> \<not> O x (y \<otimes> z) \<Longrightarrow> \<not> O x z" 
+proof -
+  assume antecedent: "P x y \<and> \<not> O x (y \<otimes> z)"
+  hence "\<not> O x (y \<otimes> z)"..
+  show "\<not> O x z"
+  proof
+    from antecedent have "P x y"..
+    moreover assume "O x z"
+    ultimately have "O x (y \<otimes> z)"
+      by (rule product_overlap)
+  qed
+qed
+
+lemma converse_product_overlap: 
+  "O x y \<Longrightarrow> O z (x \<otimes> y) \<Longrightarrow> O z y"
+proof -
+  assume "O x y"
+  hence "P (x \<otimes> y) y" by (rule product_in_second_factor)
+  moreover assume "O z (x \<otimes> y)"
+  ultimately show "O z y"
+    by (rule overlap_monotonicity)
+qed
+
+lemma part_product_in_whole_product:
+  "O x y \<Longrightarrow> P x v \<and> P y z \<Longrightarrow> P (x \<otimes> y) (v \<otimes> z)"
+proof -
+  assume "O x y"
+  assume "P x v \<and> P y z"
+  have "\<forall>w. P w (x \<otimes> y) \<longrightarrow> P w (v \<otimes> z)"
+  proof
+    fix w
+    show "P w (x \<otimes> y) \<longrightarrow> P w (v \<otimes> z)"
+    proof
+      assume "P w (x \<otimes> y)"
+        by (rule product_part_in_factors)
+      have "P w v \<and> P w z"
+      proof
+        ultimately show "P w v" by (rule part_transitivity)
+      next
+        ultimately show "P w z" by (rule part_transitivity)
+      qed     
+      thus "P w (v \<otimes> z)" by (rule common_part_in_product)
+    qed
+  qed
+  hence "P (x \<otimes> y) (x \<otimes> y) \<longrightarrow> P (x \<otimes> y) (v \<otimes> z)"..
+  moreover have "P (x \<otimes> y) (x \<otimes> y)" by (rule part_reflexivity)
+  ultimately show "P (x \<otimes> y) (v \<otimes> z)"..
+qed
+
+lemma right_associated_product: "(\<exists>w. P w x \<and> P w y \<and> P w z) \<Longrightarrow>
+  (\<forall>w. P w (x \<otimes> (y \<otimes> z)) \<longleftrightarrow> P w x \<and> (P w y \<and> P w z))"
+proof -
+  assume antecedent: "(\<exists>w. P w x \<and> P w y \<and> P w z)"
+  then obtain w where w: "P w x \<and> P w y \<and> P w z"..
+  hence "P w x"..
+  from w have "P w y \<and> P w z"..
+  hence "\<exists>w. P w y \<and> P w z"..
+  with overlap_eq have "O y z"..
+  hence yz: "\<forall>w. P w (y \<otimes> z) \<longleftrightarrow> (P w y \<and> P w z)"
+    by (rule product_character)
+  hence "P w (y \<otimes> z) \<longleftrightarrow> (P w y \<and> P w z)"..
+  hence "P w (y \<otimes> z)"
+  hence "\<exists>w. P w x \<and> P w (y \<otimes> z)"..
+  with overlap_eq have "O x (y \<otimes> z)"..
+  hence xyz: "\<forall>w. P w (x \<otimes> (y \<otimes> z)) \<longleftrightarrow> P w x \<and> P w (y \<otimes> z)"
+    by (rule product_character)
+  show "\<forall>w. P w (x \<otimes> (y \<otimes> z)) \<longleftrightarrow> P w x \<and> (P w y \<and> P w z)"
+  proof
+    fix w
+    from yz have wyz: "P w (y \<otimes> z) \<longleftrightarrow> (P w y \<and> P w z)"..
+    moreover from xyz have 
+      "P w (x \<otimes> (y \<otimes> z)) \<longleftrightarrow> P w x \<and> P w (y \<otimes> z)"..
+    ultimately show 
+      "P w (x \<otimes> (y \<otimes> z)) \<longleftrightarrow> P w x \<and> (P w y \<and> P w z)"
+      by (rule subst)
+  qed
+qed
+
+lemma left_associated_product: "(\<exists>w. P w x \<and> P w y \<and> P w z) \<Longrightarrow>
+  (\<forall>w. P w ((x \<otimes> y) \<otimes> z) \<longleftrightarrow> (P w x \<and> P w y) \<and> P w z)"
+proof -
+  assume antecedent: "(\<exists>w. P w x \<and> P w y \<and> P w z)"
+  then obtain w where w: "P w x \<and> P w y \<and> P w z"..
+  hence "P w y \<and> P w z"..
+  hence "P w y"..
+  have "P w z"
+  from w have "P w x"..
+  hence "P w x \<and> P w y"
+  hence "\<exists>z. P z x \<and> P z y"..
+  with overlap_eq have "O x y"..
+  hence xy: "\<forall>w. P w (x \<otimes> y) \<longleftrightarrow> (P w x \<and> P w y)"
+    by (rule product_character)
+  hence "P w (x \<otimes> y) \<longleftrightarrow> (P w x \<and> P w y)"..
+  hence "P w (x \<otimes> y)"
+  hence "P w (x \<otimes> y) \<and> P w z"
+  hence "\<exists>w. P w (x \<otimes> y) \<and> P w z"..
+  with overlap_eq have "O (x \<otimes> y) z"..
+  hence xyz: "\<forall>w. P w ((x \<otimes> y) \<otimes> z) \<longleftrightarrow> P w (x \<otimes> y) \<and> P w z"
+    by (rule product_character)
+  show "\<forall>w. P w ((x \<otimes> y) \<otimes> z) \<longleftrightarrow> (P w x \<and> P w y) \<and> P w z"
+  proof
+    fix v
+    from xy have vxy: "P v (x \<otimes> y) \<longleftrightarrow> (P v x \<and> P v y)"..
+    moreover from xyz have 
+      "P v ((x \<otimes> y) \<otimes> z) \<longleftrightarrow> P v (x \<otimes> y) \<and> P v z"..
+    ultimately show "P v ((x \<otimes> y) \<otimes> z) \<longleftrightarrow> (P v x \<and> P v y) \<and> P v z"
+      by (rule subst)
+  qed
+qed
+
+theorem product_associativity:
+  "(\<exists>w. P w x \<and> P w y \<and> P w z) \<Longrightarrow> x \<otimes> (y \<otimes> z) = (x \<otimes> y) \<otimes> z"
+proof -
+  assume ante:"(\<exists>w. P w x \<and> P w y \<and> P w z)"
+  hence "(\<forall>w. P w (x \<otimes> (y \<otimes> z)) \<longleftrightarrow> P w x \<and> (P w y \<and> P w z))"
+    by (rule right_associated_product)
+  moreover from ante have 
+    "(\<forall>w. P w ((x \<otimes> y) \<otimes> z) \<longleftrightarrow> (P w x \<and> P w y) \<and> P w z)"
+    by (rule left_associated_product)
+  ultimately have "\<forall>w. P w (x \<otimes> (y \<otimes> z)) \<longleftrightarrow> P w ((x \<otimes> y) \<otimes> z)" 
+    by simp
+  with part_extensionality show "x \<otimes> (y \<otimes> z) = (x \<otimes> y) \<otimes> z"..
+qed
+
+end
+
+

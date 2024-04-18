@@ -1,0 +1,246 @@
+theory Definitions
+  imports Main
+begin
+
+
+subsection "Introduction"
+
+
+
+subsection "Case study: the Restricted Identification protocol"
+
+
+
+subsection "Agents, messages, protocol rules"
+
+
+type_synonym agent_id = nat
+
+datatype agent =
+  Token agent_id |
+  Sector agent_id |
+  Spy
+
+
+type_synonym key_id = nat
+
+datatype agr_key =
+  PriK key_id |
+  PubK "key_id set"
+
+datatype enc_key =
+  SigK agent_id |
+  VerK agent_id
+
+datatype msg =
+  AgrKey agr_key |
+  EncKey enc_key |
+  Hash msg |
+  Crypt enc_key msg |
+  MPair msg msg |
+  IDInfo agent_id msg
+
+syntax
+  "_MPair"  :: "['a, args] \<Rightarrow> 'a * 'b"  ("(2\<lbrace>_,/ _\<rbrace>)")
+  "_IDInfo" :: "[agent_id, msg] \<Rightarrow> msg"      ("(2\<langle>_,/ _\<rangle>)")
+translations
+  "\<lbrace>X, Y, Z\<rbrace>" \<rightleftharpoons> "\<lbrace>X, \<lbrace>Y, Z\<rbrace>\<rbrace>"
+  "\<lbrace>X, Y\<rbrace>" \<rightleftharpoons> "CONST MPair X Y"
+  "\<langle>n, X\<rangle>" \<rightleftharpoons> "CONST IDInfo n X"
+
+
+abbreviation SigKey :: "agent_id \<Rightarrow> msg" where
+"SigKey \<equiv> EncKey \<circ> SigK"
+
+abbreviation VerKey :: "agent_id \<Rightarrow> msg" where
+"VerKey \<equiv> EncKey \<circ> VerK"
+
+abbreviation PriKey :: "key_id \<Rightarrow> msg" where
+"PriKey \<equiv> AgrKey \<circ> PriK"
+
+abbreviation PubKey :: "key_id set \<Rightarrow> msg" where
+"PubKey \<equiv> AgrKey \<circ> PubK"
+
+primrec InvK :: "enc_key \<Rightarrow> enc_key" where
+"InvK (SigK n) = VerK n" |
+"InvK (VerK n) = SigK n"
+
+abbreviation InvKey :: "enc_key \<Rightarrow> msg" where
+"InvKey \<equiv> EncKey \<circ> InvK"
+
+
+inductive_set parts :: "msg set \<Rightarrow> msg set"
+  for H :: "msg set" where
+
+parts_used [intro]:
+  "X \<in> H \<Longrightarrow> X \<in> parts H" |
+
+parts_crypt [intro]:
+  "Crypt K X \<in> parts H \<Longrightarrow> X \<in> parts H" |
+
+parts_fst [intro]:
+  "\<lbrace>X, Y\<rbrace> \<in> parts H \<Longrightarrow> X \<in> parts H" |
+
+parts_snd [intro]:
+  "\<lbrace>X, Y\<rbrace> \<in> parts H \<Longrightarrow> Y \<in> parts H"
+
+definition parts_msg :: "msg \<Rightarrow> msg set" where
+"parts_msg X \<equiv> parts {X}"
+
+
+consts Rev_PriK :: key_id
+
+consts Sec_PriK :: "agent_id \<Rightarrow> key_id"
+
+consts Tok_PriK :: "agent_id \<Rightarrow> key_id"
+
+specification (Rev_PriK Sec_PriK Tok_PriK)
+  sec_prik_inj: "inj Sec_PriK"
+  tok_prik_inj: "inj Tok_PriK"
+  sec_prik_rev: "Rev_PriK \<notin> range Sec_PriK"
+  tok_prik_rev: "Rev_PriK \<notin> range Tok_PriK"
+  sec_prik_tok_prik: "range Sec_PriK \<inter> range Tok_PriK = {}"
+by (rule exI [of _ 0], rule exI [of _ "\<lambda>n. n + n + 1"],
+ rule exI [of _ "\<lambda>n. n + n + 2"], auto simp: inj_on_def, arith)
+
+
+abbreviation Gen_PubKey :: msg where
+"Gen_PubKey \<equiv> PubKey {}"
+
+abbreviation Rev_PriKey :: msg where
+"Rev_PriKey \<equiv> PriKey Rev_PriK"
+
+abbreviation Rev_PubKey :: msg where
+"Rev_PubKey \<equiv> PubKey {Rev_PriK}"
+
+abbreviation Tok_PriKey :: "agent_id \<Rightarrow> msg" where
+"Tok_PriKey n \<equiv> PriKey (Tok_PriK n)"
+
+abbreviation Tok_PubKey :: "agent_id \<Rightarrow> msg" where
+"Tok_PubKey n \<equiv> PubKey {Tok_PriK n}"
+
+abbreviation Sec_PriKey :: "agent_id \<Rightarrow> msg" where
+"Sec_PriKey n \<equiv> PriKey (Sec_PriK n)"
+
+abbreviation Sec_PubKey :: "agent_id \<Rightarrow> msg" where
+"Sec_PubKey n \<equiv> PubKey {Sec_PriK n, Rev_PriK}"
+
+abbreviation Sign :: "agent_id \<Rightarrow> msg \<Rightarrow> msg" where
+"Sign n X \<equiv> Crypt (SigK n) (Hash X)"
+
+abbreviation ID :: "agent_id \<Rightarrow> msg \<Rightarrow> msg" where
+"ID n X \<equiv> case X of AgrKey (PubK S) \<Rightarrow> PubKey (insert (Tok_PriK n) S)"
+
+
+consts bad_sigk :: "agent_id set"
+
+consts bad_sec_prik :: "agent_id set"
+
+consts bad_tok_prik :: "agent_id set"
+
+consts bad_id :: "(agent_id \<times> agent_id) set"
+
+type_synonym event = "agent \<times> msg"
+
+type_synonym state = "event set"
+
+abbreviation used :: "state \<Rightarrow> msg set" where
+"used s \<equiv> Range s"
+
+abbreviation spied :: "state \<Rightarrow> msg set" where
+"spied s \<equiv> s `` {Spy}"
+
+abbreviation s\<^sub>0 :: state where
+"s\<^sub>0 \<equiv> {Spy} \<times> ({Gen_PubKey, Rev_PubKey} \<union>
+  SigKey ` bad_sigk \<union> Sec_PriKey ` bad_sec_prik \<union> Tok_PriKey ` bad_tok_prik \<union>
+  range VerKey \<union> range Sec_PubKey \<union> range Tok_PubKey \<union>
+  range (\<lambda>(n, m). ID n (Sec_PubKey m)) \<union>
+  range (\<lambda>(n, m). Hash (ID n (Sec_PubKey m))) \<union>
+  range (\<lambda>n. \<langle>n, Tok_PubKey n\<rangle>) \<union>
+  {\<langle>n, Tok_PriKey n\<rangle> | n. n \<in> bad_tok_prik} \<union>
+  {\<langle>n, ID n (Sec_PubKey m)\<rangle> | n m. (n, m) \<in> bad_id} \<union>
+  {\<langle>n, Hash (ID n (Sec_PubKey m))\<rangle> | n m. (n, m) \<in> bad_id})"
+
+
+abbreviation rel_sector :: "(state \<times> state) set" where
+"rel_sector \<equiv> {(s, s') | s s' m.
+  s' = s \<union> {Sector m, Spy} \<times> {\<lbrace>Sec_PubKey m, Sign m (Sec_PubKey m)\<rbrace>}}"
+
+abbreviation rel_token :: "(state \<times> state) set" where
+"rel_token \<equiv> {(s, s') | s s' m n S.
+  s' = s \<union> {Token n, Spy} \<times> {Hash (ID n (PubKey S))} \<and>
+  \<lbrace>PubKey S, Sign m (PubKey S)\<rbrace> \<in> used s}"
+
+
+abbreviation rel_pubk_less :: "(state \<times> state) set" where
+"rel_pubk_less \<equiv> {(s, s') | s s' A S.
+  s' = insert (Spy, PubKey (S - {A})) s \<and>
+  {PriKey A, PubKey S} \<subseteq> spied s}"
+
+abbreviation rel_pubk_more :: "(state \<times> state) set" where
+"rel_pubk_more \<equiv> {(s, s') | s s' A S.
+  s' = insert (Spy, PubKey (insert A S)) s \<and>
+  {PriKey A, PubKey S} \<subseteq> spied s}"
+
+abbreviation rel_hash :: "(state \<times> state) set" where
+"rel_hash \<equiv> {(s, s') | s s' X.
+  s' = insert (Spy, Hash X) s \<and>
+  X \<in> spied s}"
+
+abbreviation rel_dec :: "(state \<times> state) set" where
+"rel_dec \<equiv> {(s, s') | s s' K X.
+  s' = insert (Spy, X) s \<and>
+  {Crypt K X, InvKey K} \<subseteq> spied s}"
+
+abbreviation rel_enc :: "(state \<times> state) set" where
+"rel_enc \<equiv> {(s, s') | s s' K X.
+  s' = insert (Spy, Crypt K X) s \<and>
+  {X, EncKey K} \<subseteq> spied s}"
+
+abbreviation rel_sep :: "(state \<times> state) set" where
+"rel_sep \<equiv> {(s, s') | s s' X Y.
+  s' = s \<union> {Spy} \<times> {X, Y} \<and>
+  \<lbrace>X, Y\<rbrace> \<in> spied s}"
+
+abbreviation rel_con :: "(state \<times> state) set" where
+"rel_con \<equiv> {(s, s') | s s' X Y.
+  s' = insert (Spy, \<lbrace>X, Y\<rbrace>) s \<and>
+  {X, Y} \<subseteq> spied s}"
+
+
+abbreviation rel_id_pubk_less :: "(state \<times> state) set" where
+"rel_id_pubk_less \<equiv> {(s, s') | s s' n A S.
+  s' = insert (Spy, \<langle>n, PubKey (S - {A})\<rangle>) s \<and>
+  {PriKey A, PubKey (S - {A}), \<langle>n, PubKey S\<rangle>} \<subseteq> spied s \<and>
+  Tok_PriK n \<in> S - {A}}"
+
+abbreviation rel_id_pubk_more :: "(state \<times> state) set" where
+"rel_id_pubk_more \<equiv> {(s, s') | s s' n A S.
+  s' = insert (Spy, \<langle>n, PubKey (insert A S)\<rangle>) s \<and>
+  {PriKey A, PubKey (insert A S), \<langle>n, PubKey S\<rangle>} \<subseteq> spied s}"
+
+abbreviation rel_id_pubk_prik :: "(state \<times> state) set" where
+"rel_id_pubk_prik \<equiv> {(s, s') | s s' n S.
+  s' = insert (Spy, \<langle>n, PubKey S\<rangle>) s \<and>
+  {Tok_PriKey n, PubKey S} \<subseteq> spied s \<and>
+  Tok_PriK n \<in> S}"
+
+abbreviation rel_id_hash :: "(state \<times> state) set" where
+"rel_id_hash \<equiv> {(s, s') | s s' n X.
+  s' = s \<union> {Spy} \<times> {\<langle>n, X\<rangle>, \<langle>n, Hash X\<rangle>} \<and>
+  {X, Hash X} \<subseteq> spied s \<and>
+  (\<langle>n, X\<rangle> \<in> spied s \<or> \<langle>n, Hash X\<rangle> \<in> spied s)}"
+
+
+definition rel :: "(state \<times> state) set" where
+"rel \<equiv> rel_sector \<union> rel_token \<union> rel_pubk_less \<union> rel_pubk_more \<union>
+  rel_hash \<union> rel_dec \<union> rel_enc \<union> rel_sep \<union> rel_con \<union>
+  rel_id_pubk_less \<union> rel_id_pubk_more \<union> rel_id_pubk_prik \<union> rel_id_hash"
+
+abbreviation in_rel :: "state \<Rightarrow> state \<Rightarrow> bool" (infix "\<turnstile>" 60) where
+"s \<turnstile> s' \<equiv> (s, s') \<in> rel"
+
+abbreviation in_rel_rtrancl :: "state \<Rightarrow> state \<Rightarrow> bool" (infix "\<Turnstile>" 60) where
+"s \<Turnstile> s' \<equiv> (s, s') \<in> rel\<^sup>*"
+
+end

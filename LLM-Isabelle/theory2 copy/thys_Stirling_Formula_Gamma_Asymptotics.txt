@@ -1,0 +1,125 @@
+theory Gamma_Asymptotics
+imports 
+  "HOL-Complex_Analysis.Complex_Analysis"
+  "HOL-Real_Asymp.Real_Asymp"
+  Bernoulli.Bernoulli_FPS 
+  Bernoulli.Periodic_Bernpoly 
+  Stirling_Formula
+begin
+
+
+lemma stirling_limit_aux1: 
+  "((\<lambda>y. Ln (1 + z * of_real y) / of_real y) \<longlongrightarrow> z) (at_right 0)" for z :: complex
+proof (cases "z = 0")
+  case True
+  then show ?thesis by simp
+next
+  case False
+  have "((\<lambda>y. ln (1 + z * of_real y)) has_vector_derivative 1 * z) (at 0)"
+    by (rule has_vector_derivative_real_field) (auto intro!: derivative_eq_intros)
+  then have "(\<lambda>y. (Ln (1 + z * of_real y) - of_real y * z) / of_real \<bar>y\<bar>) \<midarrow>0\<rightarrow> 0"
+    by (auto simp add: has_vector_derivative_def has_derivative_def netlimit_at 
+          scaleR_conv_of_real field_simps)
+  then have "((\<lambda>y. (Ln (1 + z * of_real y) - of_real y * z) / of_real \<bar>y\<bar>) \<longlongrightarrow> 0) (at_right 0)"
+    by (rule filterlim_mono[OF _ _ at_le]) simp_all
+  also have "?this \<longleftrightarrow> ((\<lambda>y. Ln (1 + z * of_real y) / (of_real y) - z) \<longlongrightarrow> 0) (at_right 0)"
+    using eventually_at_right_less[of "0::real"]
+    by (intro filterlim_cong refl) (auto elim!: eventually_mono simp: field_simps)
+  finally show ?thesis by (simp only: LIM_zero_iff)
+qed
+  
+lemma stirling_limit_aux2: 
+  "((\<lambda>y. y * Ln (1 + z / of_real y)) \<longlongrightarrow> z) at_top" for z :: complex
+  using stirling_limit_aux1[of z] by (subst filterlim_at_top_to_right) (simp add: field_simps)
+
+lemma Union_atLeastAtMost: 
+  assumes "N > 0" 
+  shows   "(\<Union>n\<in>{0..<N}. {real n..real (n + 1)}) = {0..real N}"
+proof (intro equalityI subsetI)
+  fix x assume x: "x \<in> {0..real N}"
+  thus "x \<in> (\<Union>n\<in>{0..<N}. {real n..real (n + 1)})"
+  proof (cases "x = real N")
+    case True
+    with assms show ?thesis by (auto intro!: bexI[of _ "N - 1"])
+  next
+    case False
+    with x have x: "x \<ge> 0" "x < real N" by simp_all
+    hence "x \<ge> real (nat \<lfloor>x\<rfloor>)" "x \<le> real (nat \<lfloor>x\<rfloor> + 1)" by linarith+
+    moreover from x have "nat \<lfloor>x\<rfloor> < N" by linarith
+    ultimately have "\<exists>n\<in>{0..<N}. x \<in> {real n..real (n + 1)}"
+      by (intro bexI[of _ "nat \<lfloor>x\<rfloor>"]) simp_all
+    thus ?thesis by blast
+  qed
+qed auto
+
+
+
+definition complex_cone :: "real \<Rightarrow> real \<Rightarrow> complex set" where
+  "complex_cone a b = {z. \<exists>y\<in>{a..b}. z = rcis (norm z) y}"
+
+abbreviation complex_cone' :: "real \<Rightarrow> complex set" where
+  "complex_cone' a \<equiv> complex_cone (-a) a"
+
+lemma zero_in_complex_cone [simp, intro]: "a \<le> b \<Longrightarrow> 0 \<in> complex_cone a b"
+  by (auto simp: complex_cone_def)
+
+lemma complex_coneE:
+  assumes "z \<in> complex_cone a b"
+  obtains r \<alpha> where "r \<ge> 0" "\<alpha> \<in> {a..b}" "z = rcis r \<alpha>"
+proof -
+  from assms obtain y where "y \<in> {a..b}" "z = rcis (norm z) y"
+    unfolding complex_cone_def by auto
+  thus ?thesis using that[of "norm z" y] by auto
+qed
+
+lemma arg_cis [simp]:
+  assumes "x \<in> {-pi<..pi}"
+  shows   "Arg (cis x) = x"
+  using assms by (intro cis_Arg_unique) auto
+
+lemma arg_mult_of_real_left [simp]:
+  assumes "r > 0"
+  shows   "Arg (of_real r * z) = Arg z"
+proof (cases "z = 0")
+  case False
+  thus ?thesis
+    using Arg_bounded[of z] assms
+    by (intro cis_Arg_unique) (auto simp: sgn_mult sgn_of_real cis_Arg)
+qed auto
+
+lemma arg_mult_of_real_right [simp]:
+  assumes "r > 0"
+  shows   "Arg (z * of_real r) = Arg z"
+  by (subst mult.commute, subst arg_mult_of_real_left) (simp_all add: assms)
+
+lemma arg_rcis [simp]:
+  assumes "x \<in> {-pi<..pi}" "r > 0"
+  shows   "Arg (rcis r x) = x"
+  using assms by (simp add: rcis_def)
+
+lemma rcis_in_complex_cone [intro]: 
+  assumes "\<alpha> \<in> {a..b}" "r \<ge> 0"
+  shows   "rcis r \<alpha> \<in> complex_cone a b"
+  using assms by (auto simp: complex_cone_def)  
+
+lemma arg_imp_in_complex_cone:
+  assumes "Arg z \<in> {a..b}"
+  shows   "z \<in> complex_cone a b"
+proof -
+  have "z = rcis (norm z) (Arg z)"
+    by (simp add: rcis_cmod_Arg)
+  also have "\<dots> \<in> complex_cone a b"
+    using assms by auto
+  finally show ?thesis .
+qed
+
+lemma complex_cone_altdef:
+  assumes "-pi < a" "a \<le> b" "b \<le> pi"
+  shows   "complex_cone a b = insert 0 {z. Arg z \<in> {a..b}}"
+proof (intro equalityI subsetI)
+  fix z assume "z \<in> complex_cone a b"
+  then obtain r \<alpha> where *: "r \<ge> 0" "\<alpha> \<in> {a..b}" "z = rcis r \<alpha>"
+    by (auto elim: complex_coneE)
+  have "Arg z \<in> {a..b}" if [simp]: "z \<noteq> 0"
+  proof -
+    have "r > 0" using that * by (subst (asm) *) auto

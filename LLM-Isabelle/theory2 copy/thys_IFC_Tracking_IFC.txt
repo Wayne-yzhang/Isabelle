@@ -1,0 +1,1434 @@
+theory IFC
+  imports Main
+begin
+
+
+
+record ('n, 'var, 'val, 'obs) ifc_problem =  
+
+locale IFC_def =
+begin  
+
+
+
+
+
+
+definition path where
+
+
+
+definition is_path where
+end
+
+
+
+
+
+refer to as indistinguishable security.  In order to do so we require notions of observations made
+by the attacker, termination and equivalence of input states.\<close>
+subsubsection \<open>Observations\<close>
+text_raw \<open>\label{sec:obs}\<close>
+text \<open>The observation made at a given index within an execution.\<close>
+\<open>obsp \<sigma> k = (case att(path \<sigma> k) of Some f \<Rightarrow> Some (f (\<sigma>\<^bsup>k\<^esup>)) | None \<Rightarrow> None)\<close>
+text \<open>The indices within a path where an observation is made.\<close>
+definition obs_ids :: \<open>(nat \<Rightarrow> 'n) \<Rightarrow> nat set\<close> where
+\<open>obs_ids \<pi> = {k. att (\<pi> k) \<noteq> None}\<close>
+text \<open>A predicate relating an observable index to the number of observations made before.\<close>
+definition is_kth_obs :: \<open>(nat \<Rightarrow> 'n) \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool\<close>where
+\<open>is_kth_obs \<pi> k i = (card (obs_ids \<pi> \<inter> {..<i}) = k \<and> att (\<pi> i) \<noteq>  None)\<close>
+text \<open>The final sequence of observations made for an execution.\<close>
+\<open>obs \<sigma> k = (if (\<exists>i. is_kth_obs (path \<sigma>) k i) then obsp \<sigma> (THE i. is_kth_obs (path \<sigma>) k i) else None)\<close>
+text \<open>Comparability of observations.\<close>
+definition obs_prefix :: \<open>(nat \<Rightarrow> 'obs option) \<Rightarrow> (nat \<Rightarrow> 'obs option) \<Rightarrow> bool\<close> (infix \<open>\<lesssim>\<close> 50) where
+\<open>a \<lesssim> b \<equiv> \<forall> i. a i \<noteq> None \<longrightarrow> a i = b i\<close>
+definition obs_comp (infix \<open>\<approx>\<close> 50) where
+\<open>a \<approx> b \<equiv> a \<lesssim> b \<or> b \<lesssim> a\<close>
+subsubsection \<open>Low equivalence of input states\<close>
+definition restrict (infix \<open>\<restriction>\<close> 100 ) where
+\<open>f\<restriction>U = (\<lambda> n. if n \<in> U then f n else undefined)\<close>
+text \<open>Two input states are low equivalent if they coincide on the non high variables.\<close>
+definition loweq (infix \<open>=\<^sub>L\<close> 50) 
+where \<open>\<sigma> =\<^sub>L \<sigma>' = (\<sigma>\<restriction>(-hvars) = \<sigma>'\<restriction>(-hvars))\<close>
+subsubsection \<open>Termination\<close>
+text \<open>An execution terminates iff it reaches the terminal node at any point.\<close>
+\<open>terminates \<sigma> \<equiv> \<exists> i. path \<sigma> i = return\<close>
+subsubsection \<open>Security Property\<close>
+text \<open>The fixed program is secure if and only if for all pairs of low equivalent inputs the observation
+sequences are comparable and if the execution for an input state terminates then the observation sequence 
+is not missing any observations.\<close>
+\<open>secure \<equiv> \<forall> \<sigma> \<sigma>'. \<sigma> =\<^sub>L \<sigma>' \<longrightarrow> (obs \<sigma> \<approx> obs \<sigma>' \<and> (terminates \<sigma> \<longrightarrow> obs \<sigma>' \<lesssim> obs \<sigma>))\<close>
+subsection \<open>Characterisation of Information Flows\<close>
+text \<open>We now define our characterisation of information flows which tracks data and control dependencies 
+within executions. To do so we first require some additional concepts.\<close>
+subsubsection \<open>Post Dominance\<close>
+text \<open>We utilise the post dominance relation in order to define control dependence.\<close>
+text \<open>The basic post dominance relation.\<close>
+definition is_pd (infix \<open>pd\<rightarrow>\<close> 50) where 
+\<open>y pd\<rightarrow> x \<longleftrightarrow> x \<in> nodes \<and> (\<forall> \<pi> n. is_path \<pi> \<and> \<pi> (0::nat) = x \<and> \<pi> n = return \<longrightarrow> (\<exists>k\<le>n. \<pi> k = y))\<close>
+text \<open>The immediate post dominance relation.\<close>
+definition is_ipd (infix \<open>ipd\<rightarrow>\<close> 50)where
+\<open>y ipd\<rightarrow> x \<longleftrightarrow> x \<noteq> y \<and> y pd\<rightarrow> x \<and> (\<forall> z. z\<noteq>x \<and> z pd\<rightarrow> x \<longrightarrow> z pd\<rightarrow> y)\<close>
+\<open>ipd x = (THE y. y ipd\<rightarrow> x)\<close>
+text \<open>The post dominance tree.\<close>
+\<open>pdt = {(x,y). x\<noteq>y \<and> y pd\<rightarrow> x}\<close>
+subsubsection \<open>Control Dependence\<close>
+text \<open>An index on an execution path is control dependent upon another if the path does not visit
+the immediate post domiator of the node reached by the smaller index.\<close>
+definition is_cdi (\<open>_ cd\<^bsup>_\<^esup>\<rightarrow> _\<close> [51,51,51]50) where
+\<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k \<longleftrightarrow> is_path \<pi> \<and> k < i \<and> \<pi> i \<noteq> return \<and> (\<forall> j \<in> {k..i}. \<pi> j \<noteq> ipd (\<pi> k))\<close> 
+text \<open>The largest control dependency of an index is the immediate control dependency.\<close>
+definition is_icdi (\<open>_ icd\<^bsup>_\<^esup>\<rightarrow> _\<close> [51,51,51]50) where
+\<open>n icd\<^bsup>\<pi>\<^esup>\<rightarrow> n' \<longleftrightarrow> is_path \<pi> \<and> n cd\<^bsup>\<pi>\<^esup>\<rightarrow> n' \<and> (\<forall> m \<in> {n'<..<n}.\<not> n cd\<^bsup>\<pi>\<^esup>\<rightarrow> m)\<close>
+text \<open>For the definition of the control slice, which we will define next, we require the uniqueness 
+of the immediate control dependency.\<close>
+lemma icd_uniq: assumes  \<open>m icd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> \<open> m icd\<^bsup>\<pi>\<^esup>\<rightarrow> n'\<close> shows \<open>n = n'\<close>
+    fix n n' assume *: \<open>m icd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> \<open> m icd\<^bsup>\<pi>\<^esup>\<rightarrow> n'\<close> \<open>n < n'\<close>
+    have \<open>n'<m\<close> using * unfolding is_icdi_def is_cdi_def by auto    
+    hence \<open>\<not> m cd\<^bsup>\<pi>\<^esup>\<rightarrow> n'\<close> using * unfolding is_icdi_def by auto
+    with *(2) have \<open>False\<close> unfolding is_icdi_def by auto
+subsubsection \<open>Control Slice\<close>
+text \<open>We utilise the control slice, that is the sequence of nodes visited by the control dependencies 
+of an index, to match indices between executions.\<close>
+function cs:: \<open>(nat \<Rightarrow> 'n) \<Rightarrow> nat \<Rightarrow> 'n list\<close> (\<open>cs\<^bsup>_\<^esup> _\<close> [51,70] 71) where
+\<open>cs\<^bsup>\<pi>\<^esup> n = (if (\<exists> m. n icd\<^bsup>\<pi>\<^esup>\<rightarrow> m) then (cs \<pi> (THE m. n icd\<^bsup>\<pi>\<^esup>\<rightarrow> m))@[\<pi> n] else [\<pi> n])\<close> 
+termination \<open>cs\<close> proof
+  show \<open>wf (measure snd)\<close> by simp
+  define m where \<open>m == (The (is_icdi n \<pi>))\<close>
+  assume \<open>Ex (is_icdi n \<pi>)\<close> 
+  hence \<open>n icd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> unfolding m_def by (metis (full_types) icd_uniq theI')
+  hence \<open>m < n\<close> unfolding is_icdi_def is_cdi_def by simp
+  thus \<open>((\<pi>, The (is_icdi n \<pi>)), \<pi>, n) \<in> measure snd\<close> by (metis in_measure m_def snd_conv)
+inductive cs_less (infix \<open>\<prec>\<close> 50) where
+\<open>length xs < length ys \<Longrightarrow> take (length xs) ys = xs  \<Longrightarrow> xs \<prec> ys\<close>     
+definition cs_select (infix \<open>\<exclamdown>\<close> 50) where
+\<open>\<pi>\<exclamdown>xs = (THE k. cs\<^bsup>\<pi>\<^esup> k = xs)\<close>
+subsubsection \<open>Data Dependence\<close>
+text \<open>Data dependence is defined straight forward. An index is data dependent upon another, 
+if the index reads a variable written by the earlier index and the variable in question has not 
+been written by any index in between.\<close>
+definition is_ddi (\<open>_ dd\<^bsup>_,_\<^esup>\<rightarrow> _\<close> [51,51,51,51] 50) where
+\<open>n dd\<^bsup>\<pi>,v\<^esup>\<rightarrow> m \<longleftrightarrow> is_path \<pi> \<and> m < n \<and> v \<in> reads (\<pi> n) \<inter> (writes (\<pi> m)) \<and> (\<forall> l \<in> {m<..<n}. v \<notin> writes (\<pi> l))\<close>
+subsubsection \<open>Characterisation via Critical Paths\<close>
+text_raw \<open>\label{sec:char-cp}\<close>
+text \<open>With the above we define the set of critical paths which as we will prove characterise the matching
+points in executions where diverging data is read.\<close>
+\<comment> \<open>Any pair of low equivalent input states and indices where a diverging high variable is first
+read is critical.\<close>
+\<open>\<lbrakk>\<sigma> =\<^sub>L \<sigma>'; 
+  cs\<^bsup>path \<sigma>\<^esup> n = cs\<^bsup>path \<sigma>'\<^esup> n'; 
+  h \<in> reads(path \<sigma> n); 
+  (\<sigma>\<^bsup>n\<^esup>) h \<noteq> (\<sigma>'\<^bsup>n'\<^esup>) h; 
+  \<forall> k<n. h\<notin>writes(path \<sigma> k); 
+  \<forall> k'<n'. h\<notin>writes(path \<sigma>' k')
+ \<rbrakk> \<Longrightarrow> ((\<sigma>,n),(\<sigma>',n')) \<in> cp\<close> |
+\<comment> \<open>If from a pair of critical indices in two executions there exist data dependencies from both
+indices to a pair of matching indices where the variable diverges, the later pair of indices is critical.\<close>
+\<open>\<lbrakk>((\<sigma>,k),(\<sigma>',k')) \<in> cp; 
+  n dd\<^bsup>path \<sigma>,v\<^esup>\<rightarrow> k;
+  n' dd\<^bsup>path \<sigma>',v\<^esup>\<rightarrow> k'; 
+  cs\<^bsup>path \<sigma>\<^esup> n = cs\<^bsup>path \<sigma>'\<^esup> n'; 
+  (\<sigma>\<^bsup>n\<^esup>) v \<noteq> (\<sigma>'\<^bsup>n'\<^esup>) v
+ \<rbrakk> \<Longrightarrow> ((\<sigma>,n),(\<sigma>',n')) \<in> cp\<close> |
+\<comment> \<open>If from a pair of critical indices the executions take different branches and one of the critical 
+indices is a control dependency of an index that is data dependency of a matched index where diverging 
+data is read and the variable in question is not written by the other execution after the executions
+first reached matching indices again, then the later matching pair of indices is critical.\<close>
+\<open>\<lbrakk>((\<sigma>,k),(\<sigma>',k')) \<in> cp; 
+  n dd\<^bsup>path \<sigma>,v\<^esup>\<rightarrow> l; 
+  l cd\<^bsup>path \<sigma>\<^esup>\<rightarrow> k; 
+  cs\<^bsup>path \<sigma>\<^esup> n = cs\<^bsup>path \<sigma>'\<^esup> n'; 
+  path \<sigma> (Suc k) \<noteq> path \<sigma>' (Suc k'); 
+  (\<sigma>\<^bsup>n\<^esup>) v \<noteq> (\<sigma>'\<^bsup>n'\<^esup>) v; 
+  \<forall>j'\<in>{(LEAST i'. k' < i' \<and> (\<exists>i. cs\<^bsup>path \<sigma>\<^esup> i = cs\<^bsup>path \<sigma>'\<^esup> i'))..<n'}. v\<notin>writes (path \<sigma>' j')
+ \<rbrakk> \<Longrightarrow> ((\<sigma>,n),(\<sigma>',n')) \<in> cp\<close> | 
+\<comment> \<open>The relation is symmetric.\<close>
+\<open>\<lbrakk>((\<sigma>,k),(\<sigma>',k')) \<in> cp\<rbrakk> \<Longrightarrow> ((\<sigma>',k'),(\<sigma>,k)) \<in> cp\<close>
+text \<open>Based on the set of critical paths, the critical observable paths are those that either directly 
+reach observable nodes or are diverging control dependencies of an observable index.\<close>
+\<open>\<lbrakk>((\<sigma>,n),(\<sigma>',n')) \<in> cp;
+  path \<sigma> n \<in> dom att
+ \<rbrakk> \<Longrightarrow> ((\<sigma>,n),(\<sigma>',n')) \<in> cop\<close> |
+\<open>\<lbrakk>((\<sigma>,k),(\<sigma>',k')) \<in> cp; 
+  n cd\<^bsup>path \<sigma>\<^esup>\<rightarrow> k; 
+  path \<sigma> (Suc k) \<noteq> path \<sigma>' (Suc k'); 
+  path \<sigma> n \<in> dom att
+ \<rbrakk> \<Longrightarrow> ((\<sigma>,n),(\<sigma>',k')) \<in> cop\<close>
+subsubsection \<open>Approximation via Single Critical Paths\<close>
+text_raw \<open>\label{sec:char-scp}\<close>
+text \<open>For applications we also define a single execution approximation.\<close>
+definition is_dcdi_via (\<open>_ dcd\<^bsup>_,_\<^esup>\<rightarrow> _ via _ _\<close> [51,51,51,51,51,51] 50) where
+\<open>n dcd\<^bsup>\<pi>,v\<^esup>\<rightarrow> m via \<pi>' m' = (is_path \<pi> \<and> m < n \<and> (\<exists> l' n'. cs\<^bsup>\<pi>\<^esup> m = cs\<^bsup>\<pi>'\<^esup> m' \<and> cs\<^bsup>\<pi>\<^esup> n = cs\<^bsup>\<pi>'\<^esup> n' \<and> n' dd\<^bsup>\<pi>',v\<^esup>\<rightarrow> l' \<and> l' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> m') \<and> (\<forall> l \<in> {m..<n}. v\<notin> writes(\<pi> l)))\<close>
+\<open>\<lbrakk>h \<in> hvars; h \<in> reads (path \<sigma> n); (\<forall> k<n. h\<notin> writes(path \<sigma> k))\<rbrakk> \<Longrightarrow> (path \<sigma>,n) \<in> scp\<close> |
+\<open>\<lbrakk>(\<pi>,m) \<in> scp; n cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<rbrakk> \<Longrightarrow> (\<pi>,n) \<in> scp\<close>|
+\<open>\<lbrakk>(\<pi>,m) \<in> scp; n dd\<^bsup>\<pi>,v\<^esup>\<rightarrow> m\<rbrakk> \<Longrightarrow> (\<pi>,n) \<in> scp\<close>|
+\<open>\<lbrakk>(\<pi>,m) \<in> scp; (\<pi>',m') \<in> scp; n dcd\<^bsup>\<pi>,v\<^esup>\<rightarrow> m via \<pi>' m'\<rbrakk> \<Longrightarrow> (\<pi>,n) \<in> scp\<close>
+\<open>\<lbrakk>(\<pi>,n) \<in> scp; \<pi> n \<in> dom att\<rbrakk> \<Longrightarrow> (\<pi>,n) \<in> scop\<close>
+subsubsection \<open>Further Definitions\<close>
+text \<open>The following concepts are utilised by the proofs.\<close>
+inductive contradicts (infix \<open>\<cc>\<close> 50) where
+\<open>\<lbrakk>cs\<^bsup>\<pi>'\<^esup> k' \<prec> cs\<^bsup>\<pi>\<^esup> k ; \<pi> = path \<sigma>;  \<pi>' = path \<sigma>' ; \<pi> (Suc (\<pi>\<exclamdown>cs\<^bsup>\<pi>'\<^esup> k')) \<noteq> \<pi>' (Suc k')\<rbrakk> \<Longrightarrow> (\<sigma>', k') \<cc> (\<sigma>, k)\<close>|
+\<open>\<lbrakk>cs\<^bsup>\<pi>'\<^esup> k' = cs\<^bsup>\<pi>\<^esup> k ; \<pi> = path \<sigma>;  \<pi>' = path \<sigma>' ; \<sigma>\<^bsup>k\<^esup> \<restriction> (reads (\<pi> k)) \<noteq> \<sigma>'\<^bsup>k'\<^esup> \<restriction> (reads (\<pi> k))\<rbrakk> \<Longrightarrow> (\<sigma>',k') \<cc> (\<sigma>,k)\<close>
+definition path_shift (infixl \<open>\<guillemotleft>\<close> 51) where 
+[simp]: \<open>\<pi>\<guillemotleft>m = (\<lambda> n. \<pi> (m+n))\<close> 
+definition path_append :: \<open>(nat \<Rightarrow> 'n) \<Rightarrow> nat \<Rightarrow> (nat \<Rightarrow> 'n) \<Rightarrow> (nat \<Rightarrow> 'n)\<close> (\<open>_ @\<^bsup>_\<^esup> _\<close> [0,0,999] 51) where
+[simp]: \<open>\<pi> @\<^bsup>m\<^esup> \<pi>' = (\<lambda>n.(if n \<le> m then \<pi> n else \<pi>' (n-m)))\<close> 
+definition eq_up_to :: \<open>(nat \<Rightarrow> 'n) \<Rightarrow> nat \<Rightarrow> (nat \<Rightarrow> 'n) \<Rightarrow> bool\<close> (\<open>_ =\<^bsub>_\<^esub> _\<close> [55,55,55] 50) where
+\<open>\<pi> =\<^bsub>k\<^esub> \<pi>' = (\<forall> i \<le> k. \<pi> i = \<pi>' i)\<close>
+section \<open>Proofs\<close>
+text_raw \<open>\label{sec:proofs}\<close>
+subsection \<open>Miscellaneous Facts\<close>
+lemma option_neq_cases: assumes \<open>x \<noteq> y\<close> obtains (none1) a where \<open>x = None\<close> \<open>y = Some a\<close> | (none2) a where \<open>x = Some a\<close> \<open>y = None\<close> | (some) a b where \<open>x = Some a\<close> \<open>y = Some b\<close> \<open>a \<noteq> b\<close> using assms by fastforce
+lemma mod_bound_instance: assumes \<open>j < (i::nat)\<close> obtains j' where \<open>k < j'\<close> and \<open>j' mod i = j\<close>  proof -
+  have \<open>k < Suc k * i + j\<close> using assms less_imp_Suc_add by fastforce
+  have \<open>(Suc k * i + j) mod i = j\<close> by (metis assms mod_less mod_mult_self3) 
+  ultimately show \<open>thesis\<close> using that by auto
+lemma list_neq_prefix_cases: assumes \<open>ls \<noteq> ls'\<close> and \<open>ls \<noteq> Nil\<close> and \<open>ls' \<noteq> Nil\<close>
+  obtains (diverge) xs x x' ys ys' where \<open>ls = xs@[x]@ys\<close> \<open>ls' = xs@[x']@ys'\<close> \<open>x \<noteq> x'\<close> |
+   (prefix1) xs where \<open>ls = ls'@xs\<close> and \<open>xs \<noteq> Nil\<close> |
+   (prefix2) xs where \<open>ls@xs = ls'\<close> and \<open>xs \<noteq> Nil\<close> 
+using assms proof (induct \<open>length ls\<close> arbitrary: \<open>ls\<close> \<open>ls'\<close> rule: less_induct)
+  lz: \<open>ls = z#zs\<close> \<open>ls' = z'#zs'\<close> by (metis list.exhaust less(6,7))
+  show \<open>?case\<close> proof cases
+    assume zz: \<open>z = z'\<close>
+    hence zsz: \<open>zs \<noteq> zs'\<close> using less(5) lz by auto
+    have lenz: \<open>length zs < length ls\<close> using lz by auto    
+    show \<open>?case\<close> proof(cases \<open>zs = Nil\<close>)
+      assume zs: \<open>zs = Nil\<close>
+      hence \<open>zs' \<noteq> Nil\<close> using zsz by auto
+      have \<open>ls@zs' = ls'\<close> using zs lz zz by auto
+      show \<open>thesis\<close> using less(4) by blast
+      assume zs: \<open>zs \<noteq> Nil\<close>
+      show \<open>thesis\<close> proof (cases \<open>zs' = Nil\<close>)
+        assume \<open>zs' = Nil\<close>
+        hence \<open>ls = ls'@zs\<close> using lz zz by auto
+        thus \<open>thesis\<close> using zs less(3) by blast
+        assume zs': \<open>zs' \<noteq> Nil\<close>
+          assume \<open>zs = xs @ [x] @ ys\<close> \<open>zs' = xs @ [x'] @ ys'\<close> and xx: \<open>x \<noteq> x'\<close>
+          hence \<open>ls = (z#xs) @ [x] @ ys\<close> \<open>ls' = (z#xs) @ [x'] @ ys'\<close> using lz zz by auto
+          hence \<open>thesis\<close> using less(2) xx by blast
+          assume \<open>zs = zs' @ xs\<close> and xs: \<open>xs \<noteq> []\<close>
+          hence \<open>ls = ls' @ xs\<close> using lz zz by auto
+          hence \<open>thesis\<close> using xs less(3) by blast
+          assume \<open>zs@xs = zs'\<close> and xs: \<open>xs \<noteq> []\<close>
+          hence \<open>ls@xs = ls'\<close> using lz zz by auto
+          hence \<open>thesis\<close> using xs less(4) by blast
+        have \<open>(\<And>xs x ys x' ys'. zs = xs @ [x] @ ys \<Longrightarrow> zs' = xs @ [x'] @ ys' \<Longrightarrow> x \<noteq> x' \<Longrightarrow> thesis) \<Longrightarrow> 
+              (\<And>xs. zs = zs' @ xs \<Longrightarrow> xs \<noteq> [] \<Longrightarrow> thesis) \<Longrightarrow> 
+              (\<And>xs. zs @ xs = zs' \<Longrightarrow> xs \<noteq> [] \<Longrightarrow> thesis) \<Longrightarrow> thesis\<close> 
+        thus \<open>thesis\<close> using * ** *** by blast
+    assume \<open>z \<noteq> z'\<close>
+    have \<open>ls = []@[z]@zs\<close> \<open>ls' = []@[z']@zs'\<close> using lz by auto
+    ultimately show \<open>thesis\<close> using less(2) by blast
+lemma three_cases: assumes \<open>A \<or> B \<or> C\<close> obtains \<open>A\<close> | \<open>B\<close> | \<open>C\<close> using assms by auto
+lemma insort_greater: \<open>\<forall> x \<in> set ls. x < y \<Longrightarrow> insort y ls = ls@[y]\<close> by (induction \<open>ls\<close>,auto) 
+lemma insort_append_first: assumes \<open>\<forall> y \<in> set ys. x \<le> y\<close> shows \<open>insort x (xs@ys) = insort x xs @ ys\<close> using assms by (induction \<open>xs\<close>,auto,metis insort_is_Cons)
+lemma sorted_list_of_set_append: assumes \<open>finite xs\<close> \<open>finite ys\<close> \<open>\<forall> x \<in> xs. \<forall> y \<in> ys. x < y\<close> shows \<open>sorted_list_of_set (xs \<union> ys) = sorted_list_of_set xs @ (sorted_list_of_set ys)\<close>
+using assms(1,3) proof (induction \<open>xs\<close>)
+  case empty thus \<open>?case\<close> by simp
+  hence iv: \<open>sorted_list_of_set (xs \<union> ys) = sorted_list_of_set xs @ sorted_list_of_set ys\<close> by blast
+  have le: \<open>\<forall> y \<in> set (sorted_list_of_set ys). x < y\<close> using insert(4) assms(2) sorted_list_of_set by auto
+  have \<open>sorted_list_of_set (insert x xs \<union> ys) = sorted_list_of_set (insert x (xs \<union> ys))\<close> by auto
+  have \<open>\<dots> = insort x (sorted_list_of_set (xs \<union> ys))\<close> by (metis Un_iff assms(2) finite_Un insert.hyps(1) insert.hyps(2) insert.prems insertI1 less_irrefl sorted_list_of_set_insert)
+  have \<open>\<dots> = insort x (sorted_list_of_set xs @ sorted_list_of_set ys)\<close> using iv by simp
+  have \<open>\<dots> = insort x (sorted_list_of_set xs) @ sorted_list_of_set ys\<close>  by (metis le insort_append_first less_le_not_le)
+  have \<open>\<dots> = sorted_list_of_set (insert x xs) @ sorted_list_of_set ys\<close> using sorted_list_of_set_insert[OF insert(1),of \<open>x\<close>] insert(2) by auto
+  show \<open>?case\<close> .
+lemma filter_insort: \<open>sorted xs \<Longrightarrow> filter P (insort x xs) = (if P x then insort x (filter P xs) else filter P xs)\<close> by (induction \<open>xs\<close>, simp) (metis filter_insort filter_insort_triv map_ident) 
+lemma filter_sorted_list_of_set: assumes \<open>finite xs\<close> shows \<open>filter P (sorted_list_of_set xs) = sorted_list_of_set {x \<in> xs. P x}\<close> using assms proof(induction \<open>xs\<close>)
+  case empty thus \<open>?case\<close> by simp
+  have *: \<open>set (sorted_list_of_set xs) = xs\<close> \<open>sorted (sorted_list_of_set xs)\<close> \<open>distinct (sorted_list_of_set xs)\<close> by (auto simp add: insert.hyps(1))
+  have **: \<open>P x \<Longrightarrow> {y \<in> insert x xs. P y} = insert x {y \<in> xs. P y}\<close> by auto
+  have ***: \<open>\<not> P x \<Longrightarrow> {y \<in> insert x xs. P y} = {y \<in> xs. P y}\<close> by auto
+  note filter_insort[OF *(2),of \<open>P\<close> \<open>x\<close>] sorted_list_of_set_insert[OF insert(1), of \<open>x\<close>] insert(2,3) ** ***  
+  thus \<open>?case\<close> by (metis (mono_tags) "*"(1) List.finite_set distinct_filter distinct_insort distinct_sorted_list_of_set set_filter sorted_list_of_set_insert)
+lemma unbounded_nat_set_infinite: assumes \<open>\<forall> (i::nat). \<exists> j\<ge>i. j \<in> A\<close> shows \<open>\<not> finite A\<close> using assms
+lemma infinite_ascending: assumes nf: \<open>\<not> finite (A::nat set)\<close> obtains f where \<open>range f = A\<close> \<open>\<forall> i. f i < f (Suc i)\<close> proof 
+  let \<open>?f\<close> = \<open>\<lambda> i. (LEAST a. a \<in> A \<and> card (A \<inter> {..<a}) = i)\<close>
+    obtain a where \<open>a \<in> A\<close> \<open>card (A \<inter> {..<a}) = i\<close> 
+    proof (induction \<open>i\<close> arbitrary: \<open>thesis\<close>)
+      let \<open>?a0\<close> = \<open>(LEAST a. a \<in> A)\<close>
+      have \<open>?a0 \<in> A\<close> by (metis LeastI empty_iff finite.emptyI nf set_eq_iff)      
+      have \<open>\<And>b. b \<in> A \<Longrightarrow> ?a0 \<le> b\<close> by (metis Least_le)
+      hence \<open>card (A \<inter> {..<?a}) = 0\<close> by force
+      show \<open>?case\<close> using 0 by blast
+      obtain a where aa: \<open>a \<in> A\<close> and card: \<open>card (A \<inter> {..<a}) = i\<close> using Suc.IH by metis
+      have nf': \<open>~ finite (A - {..a})\<close> using nf by auto
+      let \<open>?b\<close> = \<open>LEAST b. b \<in> A - {..a}\<close>
+      have bin: \<open>?b \<in> A-{..a}\<close> by (metis LeastI empty_iff finite.emptyI nf' set_eq_iff)
+      have le: \<open>\<And>c. c \<in> A-{..a} \<Longrightarrow> ?b \<le> c\<close> by (metis Least_le)
+      have ab: \<open>a < ?b\<close> using bin by auto
+      have \<open>\<And> c. c \<in> A \<Longrightarrow> c < ?b \<Longrightarrow> c \<le> a\<close> using le by force
+      hence \<open>A \<inter> {..<?b} = insert a (A \<inter> {..<a})\<close> using bin ab aa by force 
+      hence \<open>card (A \<inter>{..<?b}) = Suc i\<close> using card by auto
+      thus \<open>?case\<close> using Suc.prems bin by auto
+    note \<open>\<And> thesis. ((\<And>a. a \<in> A \<Longrightarrow> card (A \<inter> {..<a}) = i \<Longrightarrow> thesis) \<Longrightarrow> thesis)\<close>
+    obtain a where a: \<open>a \<in> A \<and> card (A \<inter>{..<a}) = i\<close>  using ex by blast
+    have ina: \<open>?f i \<in> A\<close> and card: \<open>card (A \<inter>{..<?f i}) = i\<close> using LeastI[of \<open>\<lambda> a. a \<in> A \<and> card (A \<inter>{..<a}) = i\<close> \<open>a\<close>, OF a] by auto    
+    obtain b where b: \<open>b \<in> A \<and> card (A \<inter>{..<b}) = Suc i\<close>  using ex by blast
+    have inab: \<open>?f (Suc i) \<in> A\<close> and cardb: \<open>card (A \<inter>{..<?f (Suc i)}) = Suc i\<close> using LeastI[of \<open>\<lambda> a. a \<in> A \<and> card (A \<inter>{..<a}) = Suc i\<close> \<open>b\<close>, OF b] by auto
+    have \<open>?f i < ?f (Suc i)\<close> proof (rule ccontr)
+      assume \<open>\<not> ?f i < ?f (Suc i)\<close>
+      hence \<open>A \<inter>{..<?f (Suc i)} \<subseteq> A \<inter>{..<?f i}\<close> by auto
+      moreover have \<open>finite (A \<inter>{..<?f i})\<close> by auto
+      ultimately have \<open>card(A \<inter>{..<?f (Suc i)}) \<le> card (A \<inter>{..<?f i})\<close> by (metis (erased, lifting) card_mono)
+      thus \<open>False\<close> using card cardb by auto 
+  thus \<open>\<forall> i. ?f i < ?f (Suc i)\<close> by auto
+  have *: \<open>range ?f \<subseteq> A\<close> using b by auto
+    fix a assume ina: \<open>a \<in> A\<close>
+    let \<open>?i\<close> = \<open>card (A \<inter> {..<a})\<close>
+    obtain b where b: \<open>b \<in> A \<and> card (A \<inter>{..<b}) = ?i\<close>  using ex by blast
+    have inab: \<open>?f ?i \<in> A\<close> and cardb: \<open>card (A \<inter>{..<?f ?i}) = ?i\<close> using LeastI[of \<open>\<lambda> a. a \<in> A \<and> card (A \<inter>{..<a}) = ?i\<close> \<open>b\<close>, OF b] by auto
+    have le: \<open>?f ?i \<le> a\<close> using Least_le[of \<open>\<lambda> a. a \<in> A \<and> card (A \<inter>{..<a}) = ?i\<close> \<open>a\<close>] ina by auto    
+    have \<open>a = ?f ?i\<close> proof (rule ccontr)
+      have fin: \<open>finite (A \<inter> {..<a})\<close> by auto
+      assume \<open>a \<noteq> ?f ?i\<close>
+      hence \<open>?f ?i < a\<close> using le by simp
+      hence \<open>?f ?i \<in> A \<inter> {..<a}\<close> using inab by auto
+      have \<open>A \<inter> {..<?f ?i} \<subseteq> A \<inter> {..<a}\<close> using le by auto
+      hence \<open>A \<inter> {..<?f ?i} = A \<inter> {..<a}\<close> using cardb card_subset_eq[OF fin] by auto
+      show \<open>False\<close> by auto
+    hence \<open>a \<in> range ?f\<close> by auto
+  hence \<open>A \<subseteq> range ?f\<close> by auto 
+  ultimately show \<open>range ?f = A\<close> by auto
+lemma mono_ge_id: \<open>\<forall> i. f i < f (Suc i) \<Longrightarrow> i \<le> f i\<close> 
+  apply (induction \<open>i\<close>,auto) 
+lemma insort_map_mono: assumes mono: \<open>\<forall> n m. n < m \<longrightarrow> f n < f m\<close> shows \<open>map f (insort n ns) = insort (f n) (map f ns)\<close>
+  apply (induction \<open>ns\<close>)
+lemma sorted_list_of_set_map_mono: assumes mono: \<open>\<forall> n m. n < m \<longrightarrow> f n < f m\<close> and fin: \<open>finite A\<close>
+shows \<open>map f (sorted_list_of_set A) = sorted_list_of_set (f`A)\<close>
+  case empty thus \<open>?case\<close> by simp
+  have [simp]:\<open>sorted_list_of_set (insert x A) = insort x (sorted_list_of_set A)\<close> using insert sorted_list_of_set_insert by simp
+  have \<open>f ` insert x A = insert (f x) (f ` A)\<close> by auto
+  have \<open>f x \<notin> f`A\<close> apply (rule ccontr) using insert(2) mono apply auto by (metis insert.hyps(2) mono neq_iff)
+  have \<open>sorted_list_of_set (f ` insert x A) = insort (f x) (sorted_list_of_set (f`A))\<close> using insert(1) sorted_list_of_set_insert by simp
+  have \<open>\<dots> = insort (f x) (map f (sorted_list_of_set A))\<close> using insert.IH by auto
+  also have \<open>\<dots> = map f (insort x (sorted_list_of_set A))\<close> using insort_map_mono[OF mono] by auto
+  show \<open>map f (sorted_list_of_set (insert x A)) = sorted_list_of_set (f ` insert x A)\<close> by simp
+fixes n :: \<open>nat\<close> and P
+assumes a:\<open>\<exists>k\<le>n. P k\<close>
+shows GreatestBI: \<open>P (GREATEST k. k\<le>n \<and> P k)\<close> and GreatestB: \<open>(GREATEST k. k\<le>n \<and> P k) \<le> n\<close> 
+  show \<open>P (GREATEST k. k\<le>n \<and> P k)\<close> using GreatestI_ex_nat[OF assms] by auto  
+  show \<open>(GREATEST k. k\<le>n \<and> P k) \<le> n\<close> using GreatestI_ex_nat[OF assms] by auto
+fixes n :: \<open>nat\<close>
+assumes \<open>x\<le>n\<close> and \<open>P x\<close>
+shows \<open>x \<le> (GREATEST k. k\<le>n \<and> P k)\<close> 
+  have *: \<open>\<forall> y. y\<le>n \<and> P y \<longrightarrow> y<Suc n\<close> by auto
+  then show \<open>x \<le> (GREATEST k. k\<le>n \<and> P k)\<close> using assms by (blast intro: Greatest_le_nat)
+lemma LeastBI_ex: assumes \<open>\<exists>k \<le> n. P k\<close> shows \<open>P (LEAST k::'c::wellorder. P k)\<close> and \<open>(LEAST k. P k) \<le> n\<close> 
+  thus \<open>P (LEAST k. P k)\<close> using LeastI[of \<open>P\<close> \<open>k\<close>] by simp
+  show \<open>(LEAST k. P k) \<le> n\<close> using Least_le[of \<open>P\<close> \<open>k\<close>] k by auto
+lemma allB_atLeastLessThan_lower:  assumes \<open>(i::nat) \<le> j\<close> \<open>\<forall> x\<in>{i..<n}. P x\<close> shows \<open>\<forall> x\<in>{j..<n}. P x\<close> proof 
+  fix x assume \<open>x\<in>{j..<n}\<close> hence \<open>x\<in>{i..<n}\<close> using assms(1) by simp
+  thus \<open>P x\<close> using assms(2) by auto
+subsection \<open>Facts about Paths\<close>
+lemma path0: \<open>path \<sigma> 0 = entry\<close> unfolding path_def by auto
+lemma path_in_nodes[intro]: \<open>path \<sigma> k \<in> nodes\<close> proof (induction \<open>k\<close>)
+  hence \<open>\<And> \<sigma>'. (path \<sigma> k, suc (path \<sigma> k) \<sigma>') \<in> edges\<close> by auto
+  hence \<open>(path \<sigma> k, path \<sigma> (Suc k)) \<in> edges\<close> unfolding path_def 
+  thus \<open>?case\<close> using edges_nodes by force
+lemma path_is_path[simp]: \<open>is_path (path \<sigma>)\<close> unfolding is_path_def path_def using step_suc_sem apply auto
+lemma term_path_stable: assumes \<open>is_path \<pi>\<close> \<open>\<pi> i = return\<close> and le: \<open>i \<le> j\<close> shows \<open>\<pi> j = return\<close> 
+using le proof (induction \<open>j\<close>)
+  show \<open>?case\<close> proof cases
+    assume \<open>i\<le>j\<close>
+    hence \<open>\<pi> j = return\<close> using Suc by simp
+    hence \<open>(return, \<pi> (Suc j)) \<in> edges\<close> using assms(1) unfolding is_path_def by metis
+    thus \<open>\<pi> (Suc j) = return\<close> using edges_return by auto
+    assume \<open>\<not> i \<le> j\<close>
+    hence \<open>Suc j = i\<close> using Suc by auto
+    thus \<open>?thesis\<close> using assms(2) by auto
+  case 0 thus \<open>?case\<close> using assms by simp
+lemma path_path_shift: assumes \<open>is_path \<pi>\<close> shows \<open>is_path (\<pi>\<guillemotleft>m)\<close> 
+lemma path_cons: assumes \<open>is_path \<pi>\<close> \<open>is_path \<pi>'\<close> \<open>\<pi> m = \<pi>' 0\<close> shows \<open>is_path (\<pi> @\<^bsup>m\<^esup> \<pi>')\<close> 
+  fix n assume \<open>m < n\<close> thus \<open>((\<pi> @\<^bsup>m\<^esup> \<pi>') n, (\<pi> @\<^bsup>m\<^esup>  \<pi>') (Suc n)) \<in> edges\<close> 
+  fix n assume *: \<open>\<not> m < n\<close>  thus \<open>((\<pi> @\<^bsup>m\<^esup>  \<pi>') n, (\<pi> @\<^bsup>m\<^esup>  \<pi>') (Suc n)) \<in> edges\<close> proof cases
+    assume [simp]: \<open>n = m\<close>
+    thus \<open>?thesis\<close> using assms unfolding is_path_def path_append_def by force
+    assume \<open>n \<noteq> m\<close>
+    hence \<open>Suc n \<le> m\<close> \<open>n\<le> m\<close> using * by auto
+    with assms(1) show \<open>?thesis\<close> unfolding is_path_def by auto
+lemma is_path_loop: assumes \<open>is_path \<pi>\<close> \<open>0 < i\<close> \<open>\<pi> i = \<pi> 0\<close> shows \<open>is_path (\<lambda> n. \<pi> (n mod i))\<close> unfolding is_path_def proof (rule,cases)
+  assume \<open>0 < Suc n mod i\<close>
+  hence \<open>Suc n mod i = Suc (n mod i)\<close> by (metis mod_Suc neq0_conv)
+  have \<open>(\<pi> (n mod i), \<pi> (Suc (n mod i))) \<in> edges\<close> using assms(1) unfolding is_path_def by auto
+  show \<open>(\<pi> (n mod i), \<pi> (Suc n mod i)) \<in> edges\<close> by simp
+  assume \<open>\<not> 0 < Suc n mod i\<close>
+  hence \<open>Suc n mod i = 0\<close> by auto
+  hence \<open>n mod i = i - 1\<close> using assms(2) by (metis Zero_neq_Suc diff_Suc_1 mod_Suc)
+  show \<open>(\<pi>(n mod i), \<pi> (Suc n mod i)) \<in> edges\<close> using assms(1) unfolding is_path_def by (metis assms(3) mod_Suc)
+lemma path_nodes: \<open>is_path \<pi> \<Longrightarrow> \<pi> k \<in> nodes\<close> unfolding is_path_def using edges_nodes by force 
+lemma direct_path_return': assumes \<open>is_path \<pi> \<close> \<open>\<pi> 0 = x\<close> \<open>x \<noteq> return\<close> \<open>\<pi> n = return\<close>
+obtains \<pi>' n' where \<open>is_path \<pi>'\<close> \<open>\<pi>' 0 = x\<close> \<open>\<pi>' n' = return\<close> \<open>\<forall> i> 0. \<pi>' i \<noteq> x\<close>
+using assms proof (induction \<open>n\<close> arbitrary: \<open>\<pi>\<close>  rule: less_induct)
+  hence ih: \<open>\<And> n' \<pi>'. n' < n \<Longrightarrow> is_path \<pi>' \<Longrightarrow> \<pi>' 0 = x \<Longrightarrow> \<pi>' n' = return \<Longrightarrow> thesis\<close> using assms by auto
+  show \<open>thesis\<close> proof cases
+    assume \<open>\<forall> i>0. \<pi> i \<noteq> x\<close> thus \<open>thesis\<close> using less by auto
+    assume \<open>\<not> (\<forall> i>0. \<pi> i \<noteq> x)\<close>
+    then obtain i where \<open>0<i\<close> \<open>\<pi> i = x\<close> by auto
+    hence \<open>(\<pi>\<guillemotleft>i) 0 = x\<close> by auto
+    have \<open>i < n\<close> using less(3,5,6) \<open>\<pi> i = x\<close> by (metis linorder_neqE_nat term_path_stable less_imp_le)    
+    hence \<open>(\<pi>\<guillemotleft>i) (n-i) = return\<close> using less(6) by auto
+    have \<open>is_path (\<pi>\<guillemotleft>i)\<close> using less(3) by (metis path_path_shift)
+    have \<open>n - i < n\<close> using \<open>0<i\<close> \<open>i < n\<close> by auto    
+    ultimately show \<open>thesis\<close> using ih by auto
+lemma direct_path_return: assumes  \<open>x \<in> nodes\<close> \<open>x \<noteq> return\<close>
+obtains \<pi> n where \<open>is_path \<pi>\<close> \<open>\<pi> 0 = x\<close> \<open>\<pi> n = return\<close> \<open>\<forall> i> 0. \<pi> i \<noteq> x\<close>
+using direct_path_return'[of _ \<open>x\<close>] reaching_ret[OF assms(1)] assms(2) by blast
+lemma path_append_eq_up_to: \<open>(\<pi> @\<^bsup>k\<^esup> \<pi>') =\<^bsub>k\<^esub> \<pi>\<close>  unfolding eq_up_to_def by auto
+lemma eq_up_to_le: assumes \<open>k \<le> n\<close> \<open>\<pi> =\<^bsub>n\<^esub>  \<pi>'\<close> shows \<open>\<pi> =\<^bsub>k\<^esub> \<pi>'\<close> using assms unfolding eq_up_to_def by auto 
+lemma eq_up_to_refl: shows \<open>\<pi> =\<^bsub>k\<^esub> \<pi>\<close> unfolding eq_up_to_def by auto 
+lemma eq_up_to_sym: assumes \<open>\<pi> =\<^bsub>k\<^esub> \<pi>'\<close> shows \<open>\<pi>' =\<^bsub>k\<^esub> \<pi>\<close> using assms unfolding eq_up_to_def by auto
+lemma eq_up_to_apply: assumes \<open>\<pi> =\<^bsub>k\<^esub> \<pi>'\<close> \<open>j \<le> k\<close> shows \<open>\<pi> j = \<pi>' j\<close> using assms unfolding eq_up_to_def by auto
+lemma path_swap_ret: assumes \<open>is_path \<pi>\<close> obtains \<pi>' n where \<open>is_path \<pi>'\<close> \<open>\<pi> =\<^bsub>k\<^esub> \<pi>'\<close> \<open>\<pi>' n = return\<close>
+  have nd: \<open>\<pi> k \<in> nodes\<close> using assms path_nodes by simp
+  obtain \<pi>' n where *: \<open>is_path \<pi>'\<close> \<open>\<pi>' 0 = \<pi> k\<close> \<open>\<pi>' n = return\<close> using reaching_ret[OF nd] by blast
+  have \<open>\<pi> =\<^bsub>k\<^esub> (\<pi>@\<^bsup>k\<^esup> \<pi>')\<close> by (metis eq_up_to_sym path_append_eq_up_to)
+  have \<open>is_path (\<pi>@\<^bsup>k\<^esup> \<pi>')\<close> using assms * path_cons by metis
+  have \<open>(\<pi>@\<^bsup>k\<^esup> \<pi>') (k + n) = return\<close> using * by auto
+  show \<open>thesis\<close> using that by blast
+lemma path_suc: \<open>path \<sigma> (Suc k) = fst (step (path \<sigma> k, \<sigma>\<^bsup>k\<^esup>))\<close> by (induction \<open>k\<close>, auto simp: path_def kth_state_def)
+lemma kth_state_suc: \<open>\<sigma>\<^bsup>Suc k\<^esup>  = snd (step (path \<sigma> k, \<sigma>\<^bsup>k\<^esup>))\<close> by (induction \<open>k\<close>, auto simp: path_def kth_state_def)
+subsection \<open>Facts about Post Dominators\<close>
+lemma pd_trans: assumes 1: \<open>y pd\<rightarrow> x\<close> and 2: \<open>z pd\<rightarrow>y\<close> shows \<open>z pd\<rightarrow>x\<close> 
+    assume 3[simp]: \<open>is_path \<pi>\<close> \<open>\<pi> 0 = x\<close> \<open>\<pi> n = return\<close>
+    then obtain k where \<open>\<pi> k = y\<close> and 7: \<open>k \<le> n\<close> using 1 unfolding is_pd_def by blast
+    then have \<open>(\<pi>\<guillemotleft>k) 0 = y\<close> and \<open>(\<pi>\<guillemotleft>k) (n-k) = return\<close> by auto
+    moreover have \<open>is_path (\<pi>\<guillemotleft>k)\<close> by(metis 3(1) path_path_shift)
+    ultimately obtain k' where 8: \<open>(\<pi>\<guillemotleft>k) k' = z\<close> and \<open>k' \<le> n-k\<close> using 2 unfolding is_pd_def by blast
+    hence \<open>k+k'\<le>n\<close> and \<open>\<pi> (k+ k') = z\<close> using 7 by auto
+    hence \<open>\<exists>k\<le>n. \<pi> k = z\<close> using path_nodes by auto    
+  thus \<open>?thesis\<close> using 1 unfolding is_pd_def by blast
+lemma pd_path: assumes \<open>y pd\<rightarrow> x\<close>
+obtains \<pi> n k where \<open>is_path \<pi>\<close> and \<open>\<pi> 0 = x\<close> and \<open>\<pi> n = return\<close> and \<open>\<pi> k = y\<close> and \<open>k \<le> n\<close>   
+using assms unfolding is_pd_def using reaching_ret[of \<open>x\<close>] by blast
+lemma pd_antisym: assumes xpdy: \<open>x pd\<rightarrow> y\<close> and ypdx: \<open>y pd\<rightarrow> x\<close> shows \<open>x = y\<close>
+  obtain \<pi> n where path: \<open>is_path \<pi>\<close> and \<pi>0: \<open>\<pi> 0 = x\<close> and \<pi>n: \<open>\<pi> n = return\<close> using pd_path[OF ypdx] by metis
+  hence kex: \<open>\<exists>k\<le>n. \<pi> k = y\<close> using ypdx unfolding is_pd_def by auto
+  obtain k where k: \<open>k = (GREATEST k. k\<le>n \<and> \<pi> k = y)\<close> by simp
+  have \<pi>k: \<open>\<pi> k = y\<close> and kn: \<open>k \<le> n\<close> using k kex by (auto intro: GreatestIB)
+  have kpath: \<open>is_path (\<pi>\<guillemotleft>k)\<close> by (metis path_path_shift path)
+  moreover have k0: \<open>(\<pi>\<guillemotleft>k) 0 = y\<close> using \<pi>k by simp
+  moreover have kreturn: \<open>(\<pi>\<guillemotleft>k) (n-k) = return\<close> using kn \<pi>n by simp
+  ultimately have ky': \<open>\<exists>k'\<le>(n-k).(\<pi>\<guillemotleft>k) k' = x\<close> using xpdy unfolding is_pd_def by simp      
+  obtain k' where k': \<open>k' = (GREATEST k'. k'\<le>(n-k) \<and> (\<pi>\<guillemotleft>k) k' = x)\<close> by simp
+  with ky' have \<pi>k': \<open>(\<pi>\<guillemotleft>k) k' = x\<close> and kn': \<open>k' \<le> (n-k)\<close>  by (auto intro: GreatestIB)
+  have k'path: \<open>is_path (\<pi>\<guillemotleft>k\<guillemotleft>k')\<close> using kpath by(metis path_path_shift)
+  moreover have k'0: \<open>(\<pi>\<guillemotleft>k\<guillemotleft>k') 0 = x\<close> using \<pi>k' by simp
+  moreover have k'return: \<open>(\<pi>\<guillemotleft>k\<guillemotleft>k') (n-k-k') = return\<close> using kn' kreturn by (metis path_shift_def le_add_diff_inverse)
+  ultimately have ky'': \<open>\<exists>k''\<le>(n-k-k').(\<pi>\<guillemotleft>k\<guillemotleft>k') k'' = y\<close> using ypdx unfolding is_pd_def by blast
+  obtain k'' where k'': \<open>k''= (GREATEST k''. k''\<le>(n-k-k') \<and> (\<pi>\<guillemotleft>k\<guillemotleft>k') k'' = y)\<close> by simp
+  with ky'' have \<pi>k'': \<open>(\<pi>\<guillemotleft>k\<guillemotleft>k') k'' = y\<close> and kn'': \<open>k'' \<le> (n-k-k')\<close>  by (auto intro: GreatestIB)
+  from this(1) have  \<open>\<pi> (k + k' + k'') = y\<close> by (metis path_shift_def add.commute add.left_commute)
+  have \<open>k + k' +k'' \<le> n\<close> using kn'' kn' kn by simp
+  ultimately have \<open>k + k' + k''\<le> k\<close> using k by(auto simp: GreatestB_le)
+  hence \<open>k' = 0\<close> by simp
+  with k0 \<pi>k' show \<open>x = y\<close> by simp
+lemma pd_refl[simp]: \<open>x \<in> nodes \<Longrightarrow> x pd\<rightarrow> x\<close> unfolding is_pd_def by blast
+lemma pdt_trans_in_pdt: \<open>(x,y) \<in> pdt\<^sup>+ \<Longrightarrow> (x,y) \<in> pdt\<close> 
+  case base thus \<open>?case\<close> by simp
+  case (step y z) show \<open>?case\<close> unfolding pdt_def proof (simp)
+    have *: \<open>y pd\<rightarrow> x\<close> \<open>z pd\<rightarrow> y\<close> using step unfolding pdt_def by auto
+    hence [simp]: \<open>z pd\<rightarrow> x\<close> using pd_trans[where x=\<open>x\<close> and y=\<open>y\<close> and z=\<open>z\<close>] by simp
+    have \<open>x\<noteq>z\<close> proof 
+      assume \<open>x = z\<close>
+      hence \<open>z pd\<rightarrow> y\<close> \<open>y pd\<rightarrow> z\<close> using * by auto
+      hence \<open>z = y\<close> using pd_antisym by auto
+      thus \<open>False\<close> using step(2) unfolding pdt_def by simp
+    thus \<open>x \<noteq> z \<and> z pd\<rightarrow> x\<close> by auto
+lemma pdt_trancl_pdt: \<open>pdt\<^sup>+ = pdt\<close> using pdt_trans_in_pdt by fast
+lemma trans_pdt: \<open>trans pdt\<close> by (metis pdt_trancl_pdt trans_trancl)
+definition [simp]: \<open>pdt_inv = pdt\<inverse>\<close>
+lemma wf_pdt_inv: \<open>wf (pdt_inv)\<close> proof (rule ccontr)
+  assume \<open>\<not> wf (pdt_inv)\<close>
+  then obtain f where  \<open>\<forall>i. (f (Suc i), f i) \<in> pdt\<inverse>\<close> using wf_iff_no_infinite_down_chain by force
+  hence *: \<open>\<forall> i. (f i, f (Suc i)) \<in> pdt\<close> by simp
+  have **:\<open>\<forall> i. \<forall> j>i. (f i, f j) \<in> pdt\<close> proof(rule,rule,rule)
+    fix i j assume  \<open>i < (j::nat)\<close> thus \<open>(f i, f j) \<in> pdt\<close> proof (induction \<open>j\<close> rule: less_induct)
+      show \<open>?case\<close> proof (cases \<open>Suc i < k\<close>)
+        hence k:\<open>k-1 < k\<close> \<open>i < k-1\<close> and sk: \<open>Suc (k-1) = k\<close> by auto
+        show \<open>?thesis\<close> using less(1)[OF k] *[rule_format,of \<open>k-1\<close>,unfolded sk] trans_pdt[unfolded trans_def] by blast
+        hence \<open>Suc i = k\<close> using less(2) by auto
+        then show \<open>?thesis\<close> using * by auto
+  hence ***:\<open>\<forall> i. \<forall> j > i. f j pd\<rightarrow> f i\<close> \<open>\<forall> i. \<forall> j > i. f i \<noteq>  f j\<close> unfolding pdt_def by auto
+  hence ****:\<open>\<forall> i>0. f i pd\<rightarrow> f 0\<close> by simp
+  hence \<open>f 0 \<in> nodes\<close>  using * is_pd_def by fastforce
+  then obtain \<pi> n where \<pi>:\<open>is_path \<pi>\<close> \<open>\<pi> 0 = f 0\<close> \<open>\<pi> n = return\<close> using reaching_ret by blast  
+  hence \<open>\<forall> i>0. \<exists> k\<le>n. \<pi> k = f i\<close> using ***(1) \<open>f 0 \<in> nodes\<close> unfolding is_pd_def by blast
+  hence \<pi>f:\<open>\<forall> i. \<exists> k\<le>n. \<pi> k = f i\<close> using \<pi>(2) by (metis le0 not_gr_zero)
+  have \<open>range f \<subseteq> \<pi> ` {..n}\<close> proof(rule subsetI)
+    fix x assume \<open>x \<in> range f\<close>
+    then obtain i where \<open>x = f i\<close> by auto
+    then obtain k where \<open>x = \<pi> k\<close> \<open>k \<le> n\<close> using \<pi>f by metis
+    thus \<open>x \<in> \<pi> ` {..n}\<close> by simp
+  hence f:\<open>finite (range f)\<close> using finite_surj by auto
+  hence fi:\<open>\<exists> i. infinite {j. f j = f i}\<close>  using pigeonhole_infinite[OF _ f] by auto
+  obtain i where \<open>infinite {j. f j = f i}\<close> using fi ..    
+  thus \<open>False\<close> 
+lemma return_pd: assumes \<open>x \<in> nodes\<close> shows \<open>return pd\<rightarrow> x\<close> unfolding is_pd_def using assms by blast
+lemma pd_total: assumes xz: \<open>x pd\<rightarrow> z\<close> and yz: \<open>y pd\<rightarrow> z\<close> shows \<open>x pd\<rightarrow> y \<or> y pd\<rightarrow>x\<close> 
+  obtain \<pi> n where path: \<open>is_path \<pi>\<close> and \<pi>0: \<open>\<pi> 0 = z\<close> and \<pi>n: \<open>\<pi> n = return\<close> using xz reaching_ret unfolding is_pd_def by force
+  have *: \<open>\<exists> k\<le>n. (\<pi> k = x \<or> \<pi> k = y)\<close> (is \<open>\<exists> k\<le>n. ?P k\<close>) using path \<pi>0 \<pi>n xz yz unfolding is_pd_def by auto
+  obtain k where k: \<open>k = (LEAST k. \<pi> k = x \<or> \<pi> k = y)\<close> by simp
+  hence kn: \<open>k\<le>n\<close> and \<pi>k: \<open>\<pi> k = x \<or> \<pi> k = y\<close> using LeastBI_ex[OF *] by auto 
+  note k_le = Least_le[where P = \<open>?P\<close>] 
+  show \<open>?thesis\<close> proof (cases)
+    assume kx: \<open>\<pi> k = x\<close>
+    have k_min: \<open>\<And> k'. \<pi> k' = y \<Longrightarrow> k \<le> k'\<close> using k_le unfolding k by auto
+      and n' :: \<open>nat\<close>
+      assume path': \<open>is_path \<pi>'\<close> and \<pi>'0: \<open>\<pi>' 0 = x\<close> and \<pi>'n': \<open>\<pi>' n' = return\<close>
+      have path'': \<open>is_path (\<pi> @\<^bsup>k\<^esup> \<pi>')\<close> using path_cons[OF path path'] kx \<pi>'0 by auto
+      have \<pi>''0: \<open>(\<pi> @\<^bsup>k\<^esup> \<pi>') 0 = z\<close> using \<pi>0 by simp
+      have \<pi>''n: \<open>(\<pi> @\<^bsup>k\<^esup> \<pi>') (k+n') = return\<close> using \<pi>'n' kx \<pi>'0 by auto
+      obtain k' where k': \<open>k' \<le> k + n'\<close> \<open>(\<pi> @\<^bsup>k\<^esup> \<pi>') k' = y\<close> using yz path'' \<pi>''0 \<pi>''n unfolding is_pd_def by blast
+      have **: \<open>k \<le> k'\<close> proof (rule ccontr)
+        assume \<open>\<not> k \<le> k'\<close>
+        hence \<open>k' < k\<close> by simp
+        hence \<open>\<pi> k' = y\<close> using k' by auto
+        show \<open>False\<close> using k_min by force
+     hence \<open>\<pi>' (k' - k) = y\<close> using k' \<pi>'0 kx  by auto
+     have \<open>(k' - k) \<le> n'\<close> using k' by auto
+     have \<open>\<exists> k\<le> n'. \<pi>' k = y\<close> by auto
+   hence \<open>y pd\<rightarrow> x\<close> using kx path_nodes path unfolding is_pd_def by auto
+   thus \<open>?thesis\<close> ..
+ next \<comment> \<open>This is analogous argument\<close>
+   assume kx: \<open>\<pi> k \<noteq> x\<close>
+   hence ky: \<open>\<pi> k = y\<close> using \<pi>k by auto
+   have k_min: \<open>\<And> k'. \<pi> k' = x \<Longrightarrow> k \<le> k'\<close> using k_le unfolding k by auto
+      and n' :: \<open>nat\<close>
+      assume path': \<open>is_path \<pi>'\<close> and \<pi>'0: \<open>\<pi>' 0 = y\<close> and \<pi>'n': \<open>\<pi>' n' = return\<close>
+      have path'': \<open>is_path (\<pi> @\<^bsup>k\<^esup> \<pi>')\<close> using path_cons[OF path path'] ky \<pi>'0 by auto
+      have \<pi>''0: \<open>(\<pi> @\<^bsup>k\<^esup> \<pi>') 0 = z\<close> using \<pi>0 by simp
+      have \<pi>''n: \<open>(\<pi> @\<^bsup>k\<^esup> \<pi>') (k+n') = return\<close> using \<pi>'n' ky \<pi>'0 by auto
+      obtain k' where k': \<open>k' \<le> k + n'\<close> \<open>(\<pi> @\<^bsup>k\<^esup> \<pi>') k' = x\<close> using xz path'' \<pi>''0 \<pi>''n unfolding is_pd_def by blast
+      have **: \<open>k \<le> k'\<close> proof (rule ccontr)
+        assume \<open>\<not> k \<le> k'\<close>
+        hence \<open>k' < k\<close> by simp
+        hence \<open>\<pi> k' = x\<close> using k' by auto
+        show \<open>False\<close> using k_min by force
+     hence \<open>\<pi>' (k' - k) = x\<close> using k' \<pi>'0 ky  by auto
+     have \<open>(k' - k) \<le> n'\<close> using k' by auto
+     have \<open>\<exists> k\<le> n'. \<pi>' k = x\<close> by auto
+   hence \<open>x pd\<rightarrow> y\<close> using ky path_nodes path unfolding is_pd_def by auto
+   thus \<open>?thesis\<close> ..
+lemma pds_finite: \<open>finite {y . (x,y) \<in> pdt}\<close> proof cases 
+  assume \<open>x \<in> nodes\<close>
+  then obtain \<pi> n where \<pi>:\<open>is_path \<pi>\<close> \<open>\<pi> 0 = x\<close> \<open>\<pi> n = return\<close> using reaching_ret by blast
+  have *: \<open>\<forall> y \<in> {y. (x,y)\<in> pdt}. y pd\<rightarrow> x\<close> using pdt_def by auto
+  have \<open>\<forall> y \<in> {y. (x,y)\<in> pdt}. \<exists> k \<le> n. \<pi> k = y\<close>  using * \<pi> is_pd_def by blast
+  hence \<open>{y. (x,y)\<in> pdt} \<subseteq> \<pi> ` {..n}\<close>  by auto
+  then show \<open>?thesis\<close> using finite_surj by blast
+  assume \<open>\<not> x\<in> nodes\<close>
+  hence \<open>{y. (x,y)\<in>pdt} = {}\<close> unfolding pdt_def is_pd_def using path_nodes reaching_ret by fastforce
+  then show \<open>?thesis\<close> by simp
+lemma ipd_exists: assumes node: \<open>x \<in> nodes\<close> and not_ret: \<open>x\<noteq>return\<close> shows \<open>\<exists>y. y ipd\<rightarrow> x\<close> 
+  let \<open>?Q\<close> = \<open>{y. x\<noteq>y \<and> y pd\<rightarrow> x}\<close>
+  have *: \<open>return \<in> ?Q\<close> using assms return_pd by simp    
+  hence **: \<open>\<exists> x. x\<in> ?Q\<close> by auto
+  have fin: \<open>finite ?Q\<close> using pds_finite unfolding pdt_def by auto
+  have tot: \<open>\<forall> y z. y\<in>?Q \<and> z \<in> ?Q \<longrightarrow> z pd\<rightarrow> y \<or> y pd\<rightarrow> z\<close> using pd_total by auto
+  obtain y where ymax: \<open>y\<in> ?Q\<close> \<open>\<forall> z\<in>?Q. z = y \<or> z pd\<rightarrow> y\<close> using fin ** tot proof (induct)
+    then show \<open>?case\<close> by auto
+    case (insert x F) show \<open>thesis\<close> proof (cases \<open>F = {}\<close>)
+      assume \<open>F = {}\<close>
+      thus \<open>thesis\<close> using insert(4)[of \<open>x\<close>] by auto
+      assume \<open>F \<noteq> {}\<close>
+      hence \<open>\<exists> x. x\<in> F\<close> by auto
+      have \<open>\<And>y. y \<in> F \<Longrightarrow> \<forall>z\<in>F. z = y \<or> z pd\<rightarrow> y \<Longrightarrow> thesis\<close> proof -
+        fix y assume a: \<open>y \<in> F\<close> \<open>\<forall>z\<in>F. z = y \<or> z pd\<rightarrow> y\<close>
+        have \<open>x \<noteq> y\<close> using insert a by auto
+        have \<open>x pd\<rightarrow> y \<or> y pd\<rightarrow> x\<close> using insert(6) a(1) by auto
+        thus \<open>thesis\<close> proof 
+          assume \<open>x pd\<rightarrow> y\<close>
+          hence \<open>\<forall>z\<in>insert x F. z = y \<or> z pd\<rightarrow> y\<close> using a(2) by blast
+          thus \<open>thesis\<close> using a(1) insert(4) by blast
+          assume \<open>y pd\<rightarrow> x\<close>
+          have \<open>\<forall>z\<in>insert x F. z = x \<or> z pd\<rightarrow> x\<close> proof
+            fix z assume \<open>z\<in> insert x F\<close> thus \<open>z = x \<or> z pd\<rightarrow> x\<close> proof(rule,simp)
+              assume \<open>z\<in>F\<close>
+              hence \<open>z = y \<or> z pd\<rightarrow> y\<close> using a(2) by auto
+              thus \<open>z = x \<or> z pd\<rightarrow> x\<close> proof(rule,simp add: \<open>y pd\<rightarrow> x\<close>)
+                assume \<open>z pd\<rightarrow> y\<close>
+                show \<open>z = x \<or> z pd\<rightarrow> x\<close> using \<open>y pd\<rightarrow> x\<close> \<open>z pd\<rightarrow> y\<close> pd_trans by blast
+          then show \<open>thesis\<close> using insert by blast
+      then show \<open>thesis\<close> using insert by blast
+  hence ***: \<open>y pd\<rightarrow> x\<close> \<open>x\<noteq>y\<close> by auto
+  have \<open>\<forall> z. z \<noteq> x \<and> z pd\<rightarrow> x \<longrightarrow> z pd\<rightarrow> y\<close> proof (rule,rule)
+    assume a: \<open> z \<noteq> x \<and> z pd\<rightarrow> x\<close>
+    hence b: \<open>z \<in> ?Q\<close> by auto
+    have \<open>y pd\<rightarrow> z \<or> z pd\<rightarrow> y\<close> using pd_total ***(1) a by auto
+    thus \<open>z pd\<rightarrow> y\<close> proof
+      assume c: \<open>y pd\<rightarrow> z\<close>
+      hence \<open>y = z\<close> using b ymax pdt_def pd_antisym by auto
+      thus \<open>z pd\<rightarrow> y\<close> using c by simp
+  with *** have  \<open>y ipd\<rightarrow> x\<close> unfolding is_ipd_def by simp
+  thus \<open>?thesis\<close> by blast
+lemma ipd_unique: assumes yipd: \<open>y ipd\<rightarrow> x\<close> and y'ipd: \<open>y' ipd\<rightarrow> x\<close> shows \<open>y = y'\<close> 
+  have 1: \<open>y pd\<rightarrow> y'\<close> and  2: \<open>y' pd\<rightarrow> y\<close> using yipd y'ipd unfolding is_ipd_def by auto
+  show \<open>?thesis\<close> using pd_antisym[OF 1 2] .
+lemma ipd_is_ipd: assumes \<open>x \<in> nodes\<close> and \<open>x\<noteq>return\<close> shows \<open>ipd x ipd\<rightarrow> x\<close> proof -
+  from assms obtain y where \<open>y ipd\<rightarrow> x\<close> using ipd_exists by auto
+  hence \<open>\<And> z. z ipd\<rightarrow>x \<Longrightarrow> z = y\<close> using ipd_unique by simp
+  ultimately show \<open>?thesis\<close> unfolding ipd_def by (auto intro: theI2)
+lemma is_ipd_in_pdt: \<open>y ipd\<rightarrow> x \<Longrightarrow> (x,y) \<in> pdt\<close> unfolding is_ipd_def pdt_def by auto
+lemma ipd_in_pdt: \<open>x \<in> nodes \<Longrightarrow> x\<noteq>return \<Longrightarrow> (x,ipd x) \<in> pdt\<close> by (metis ipd_is_ipd is_ipd_in_pdt)
+lemma no_pd_path: assumes \<open>x \<in> nodes\<close> and \<open>\<not> y pd\<rightarrow> x\<close>
+obtains \<pi> n where \<open>is_path \<pi>\<close> and \<open>\<pi> 0 = x\<close> and \<open>\<pi> n = return\<close> and \<open>\<forall> k \<le> n. \<pi> k \<noteq> y\<close>
+  assume \<open>\<not> thesis\<close>
+  hence \<open>\<forall> \<pi> n.  is_path \<pi> \<and> \<pi> 0 = x \<and> \<pi> n = return \<longrightarrow> (\<exists> k\<le>n . \<pi> k = y)\<close> using that by force
+  thus \<open>False\<close> using assms unfolding is_pd_def by auto
+lemma pd_pd_ipd: assumes \<open>x \<in> nodes\<close> \<open>x\<noteq>return\<close> \<open>y\<noteq>x\<close> \<open>y pd\<rightarrow> x\<close> shows \<open>y pd\<rightarrow> ipd x\<close> 
+  have \<open>ipd x pd\<rightarrow> x\<close> by (metis assms(1,2) ipd_is_ipd is_ipd_def)
+  hence \<open>y pd\<rightarrow> ipd x \<or> ipd x pd\<rightarrow> y\<close> by (metis assms(4) pd_total)
+  thus \<open>?thesis\<close> proof
+    have 1: \<open>ipd x ipd\<rightarrow> x\<close> by (metis assms(1,2) ipd_is_ipd)
+    assume \<open>ipd x pd\<rightarrow> y\<close>
+    show \<open>y pd\<rightarrow> ipd x\<close> unfolding is_ipd_def using assms(3,4) by auto
+lemma pd_nodes: assumes \<open>y pd\<rightarrow> x\<close> shows pd_node1: \<open>y \<in> nodes\<close> and pd_node2: \<open>x \<in> nodes\<close>
+  obtain \<pi> k where \<open>is_path \<pi>\<close> \<open>\<pi> k = y\<close> using assms unfolding is_pd_def using reaching_ret by force
+  thus \<open>y \<in> nodes\<close> using path_nodes by auto
+  show \<open>x \<in> nodes\<close> using assms unfolding is_pd_def by simp
+lemma pd_ret_is_ret: \<open>x pd\<rightarrow> return \<Longrightarrow> x = return\<close> by (metis pd_antisym pd_node1 return_pd)
+lemma ret_path_none_pd: assumes \<open>x \<in> nodes\<close> \<open>x\<noteq>return\<close> 
+obtains \<pi> n where \<open>is_path \<pi>\<close>  \<open>\<pi> 0 = x\<close> \<open>\<pi> n = return\<close>  \<open>\<forall> i>0. \<not> x pd\<rightarrow> \<pi> i\<close>
+  assume \<open>\<not>thesis\<close>
+  hence *: \<open>\<And> \<pi> n. \<lbrakk>is_path \<pi>; \<pi> 0 = x; \<pi> n = return\<rbrakk> \<Longrightarrow> \<exists>i>0. x pd\<rightarrow> \<pi> i\<close> using that by blast
+  obtain \<pi> n where **: \<open>is_path \<pi>\<close>  \<open>\<pi> 0 = x\<close> \<open>\<pi> n = return\<close> \<open>\<forall> i>0. \<pi> i \<noteq> x\<close> using direct_path_return[OF assms] by metis
+  then obtain i where ***: \<open>i>0\<close> \<open>x pd\<rightarrow> \<pi> i\<close> using * by blast
+  hence \<open>\<pi> i \<noteq> return\<close> using pd_ret_is_ret assms(2) by auto
+  hence \<open>i < n\<close> using assms(2) term_path_stable ** by (metis linorder_neqE_nat less_imp_le)
+  hence \<open>(\<pi>\<guillemotleft>i)(n-i) = return\<close> using **(3) by auto
+  have \<open>(\<pi>\<guillemotleft>i) (0) = \<pi> i\<close> by simp
+  have \<open>is_path (\<pi>\<guillemotleft>i)\<close> using **(1) path_path_shift by metis
+  obtain k where \<open>(\<pi>\<guillemotleft>i) k = x\<close> using ***(2) unfolding is_pd_def by metis
+  hence \<open>\<pi> (i + k) = x\<close> by auto
+  thus \<open>False\<close> using **(4) \<open>i>0\<close> by auto
+lemma path_pd_ipd0': assumes \<open>is_path \<pi>\<close> and \<open>\<pi> n \<noteq> return\<close> \<open>\<pi> n \<noteq> \<pi> 0\<close> and \<open>\<pi> n pd\<rightarrow> \<pi> 0\<close> 
+obtains k where \<open>k \<le> n\<close> and \<open>\<pi> k = ipd(\<pi> 0)\<close> 
+  have *: \<open>\<pi> n pd\<rightarrow> ipd (\<pi> 0)\<close> by (metis is_pd_def assms(3,4) pd_pd_ipd pd_ret_is_ret)  
+  obtain \<pi>' n' where **: \<open>is_path \<pi>'\<close> \<open>\<pi>' 0 = \<pi> n\<close> \<open>\<pi>' n' = return\<close> \<open>\<forall> i>0. \<not> \<pi> n pd\<rightarrow> \<pi>' i\<close>  by (metis assms(2) assms(4) pd_node1 ret_path_none_pd)
+  hence \<open>\<forall> i>0. \<pi>' i \<noteq> ipd (\<pi> 0)\<close> using * by metis
+  assume \<open>\<not> thesis\<close>
+  hence \<open>\<forall> k\<le>n. \<pi> k \<noteq> ipd (\<pi> 0)\<close> using that by blast
+  have \<open>\<forall> i. (\<pi>@\<^bsup>n\<^esup>  \<pi>') i \<noteq> ipd (\<pi> 0)\<close> by (metis diff_is_0_eq neq0_conv path_append_def)
+  have \<open>(\<pi>@\<^bsup>n\<^esup>  \<pi>') (n + n') = return\<close> 
+    by (metis \<open>\<pi>' 0 = \<pi> n\<close> \<open>\<pi>' n' = return\<close> add_diff_cancel_left' assms(2) diff_is_0_eq path_append_def)
+  have \<open>(\<pi>@\<^bsup>n\<^esup>  \<pi>') 0 = \<pi> 0\<close> by (metis le0 path_append_def)
+  have \<open>is_path (\<pi>@\<^bsup>n\<^esup>  \<pi>')\<close> by (metis \<open>\<pi>' 0 = \<pi> n\<close> \<open>is_path \<pi>'\<close> assms(1) path_cons)
+  have \<open>ipd (\<pi> 0) pd\<rightarrow> \<pi> 0\<close> by (metis **(2,3,4) assms(2) assms(4) ipd_is_ipd is_ipd_def neq0_conv pd_node2)
+  have \<open>\<pi> 0 \<in> nodes\<close> by (metis assms(1) path_nodes)
+  show \<open>False\<close> unfolding is_pd_def by blast
+lemma path_pd_ipd0: assumes \<open>is_path \<pi>\<close> and \<open>\<pi> 0 \<noteq> return\<close> \<open>\<pi> n \<noteq> \<pi> 0\<close> and \<open>\<pi> n pd\<rightarrow> \<pi> 0\<close> 
+obtains k where \<open>k \<le> n\<close> and \<open>\<pi> k = ipd(\<pi> 0)\<close> 
+  assume *: \<open>\<pi> n = return\<close>
+  have \<open>ipd (\<pi> 0) pd\<rightarrow> (\<pi> 0)\<close> by (metis is_ipd_def is_pd_def assms(2,4) ipd_is_ipd)
+  with assms(1,2,3) * show \<open>thesis\<close> unfolding is_pd_def by (metis that)
+  assume \<open>\<pi> n \<noteq> return\<close> 
+  from path_pd_ipd0' [OF assms(1) this assms(3,4)] that show \<open>thesis\<close> by auto
+lemma path_pd_ipd: assumes \<open>is_path \<pi>\<close> and \<open>\<pi> k \<noteq> return\<close> \<open>\<pi> n \<noteq> \<pi> k\<close> and \<open>\<pi> n pd\<rightarrow> \<pi> k\<close> and kn: \<open>k < n\<close> 
+obtains l where \<open>k < l\<close> and \<open>l \<le> n\<close> and \<open>\<pi> l = ipd(\<pi> k)\<close> 
+  have \<open>is_path (\<pi> \<guillemotleft> k)\<close> \<open>(\<pi> \<guillemotleft> k) 0 \<noteq> return\<close> \<open>(\<pi> \<guillemotleft> k) (n - k) \<noteq> (\<pi> \<guillemotleft> k) 0\<close> \<open>(\<pi> \<guillemotleft> k) (n - k) pd\<rightarrow> (\<pi> \<guillemotleft> k) 0\<close> 
+  with path_pd_ipd0[of \<open>\<pi>\<guillemotleft>k\<close> \<open>n-k\<close>]
+  obtain ka where \<open>ka \<le> n - k\<close> \<open>(\<pi> \<guillemotleft> k) ka = ipd ((\<pi> \<guillemotleft> k) 0)\<close> .
+  hence \<open>k + ka \<le> n\<close> \<open>\<pi> (k + ka) = ipd (\<pi> k)\<close> using kn by auto
+  hence \<open>\<pi> (k + ka) ipd\<rightarrow> \<pi> k\<close> by (metis assms(1) assms(2) ipd_is_ipd path_nodes)
+  hence \<open>k < k + ka\<close> unfolding is_ipd_def by (metis nat_neq_iff not_add_less1)
+  show \<open>thesis\<close> using that[of \<open>k+ka\<close>] by auto
+lemma path_ret_ipd: assumes \<open>is_path \<pi>\<close> and \<open>\<pi> k \<noteq> return\<close> \<open>\<pi> n = return\<close> 
+obtains l where \<open>k < l\<close> and \<open>l \<le> n\<close> and \<open>\<pi> l = ipd(\<pi> k)\<close> 
+  have \<open>\<pi> n \<noteq> \<pi> k\<close> using assms by auto
+  have \<open>k \<le> n\<close> apply (rule ccontr) using term_path_stable assms by auto
+  hence \<open>k < n\<close> by (metis assms(2,3) dual_order.order_iff_strict)
+  have \<open>\<pi> n pd\<rightarrow> \<pi> k\<close> by (metis assms(1,3) path_nodes return_pd)
+  obtain l where \<open>k < l\<close> \<open>l \<le> n\<close> \<open>\<pi> l = ipd (\<pi> k)\<close> using assms path_pd_ipd by blast
+  thus \<open>thesis\<close> using that by auto
+lemma pd_intro: assumes \<open>l pd\<rightarrow> k\<close> \<open>is_path \<pi>\<close> \<open>\<pi> 0 = k\<close> \<open>\<pi> n = return\<close> 
+obtains i where \<open>i \<le> n\<close> \<open>\<pi> i = l\<close> using assms unfolding is_pd_def by metis
+lemma path_pd_pd0: assumes path:  \<open>is_path \<pi>\<close> and lpdn: \<open>\<pi> l pd\<rightarrow> n\<close> and npd0: \<open>n pd\<rightarrow> \<pi> 0\<close> 
+obtains k where \<open>k \<le> l\<close> \<open>\<pi> k = n\<close>
+  assume \<open>\<not> thesis\<close>
+  hence notn: \<open>\<And> k. k \<le> l \<Longrightarrow> \<pi> k \<noteq> n\<close> using that by blast
+  have nret: \<open>\<pi> l \<noteq> return\<close> by (metis is_pd_def assms(1,3) notn)
+  obtain \<pi>' n' where path': \<open>is_path \<pi>'\<close> and \<pi>0': \<open>\<pi>' 0 = \<pi> l\<close> and \<pi>n': \<open>\<pi>' n' = return\<close> and nonepd: \<open>\<forall> i>0. \<not> \<pi> l pd\<rightarrow> \<pi>' i\<close>
+  have \<open>\<pi> l \<noteq> n\<close> using notn by simp
+  hence \<open>\<forall> i. \<pi>' i \<noteq> n\<close> using nonepd \<pi>0' lpdn by (metis neq0_conv)
+  hence notn': \<open>\<forall> i. (\<pi>@\<^bsup>l\<^esup> \<pi>') i \<noteq> n\<close> using notn \<pi>0' by auto
+  have \<open>is_path (\<pi>@\<^bsup>l\<^esup> \<pi>')\<close> using path path' by (metis \<pi>0' path_cons)
+  have \<open>(\<pi>@\<^bsup>l\<^esup> \<pi>') 0 = \<pi> 0\<close> by simp
+  have \<open>(\<pi>@\<^bsup>l\<^esup> \<pi>') (n' + l) = return\<close> using \<pi>0' \<pi>n' by auto
+  show \<open>False\<close> using notn' npd0 unfolding is_pd_def by blast
+subsection \<open>Facts about Control Dependencies\<close>
+lemma icd_imp_cd: \<open>n icd\<^bsup>\<pi>\<^esup>\<rightarrow> k \<Longrightarrow> n cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> by (metis is_icdi_def)
+lemma ipd_impl_not_cd:  assumes \<open>j \<in> {k..i}\<close> and \<open>\<pi> j = ipd (\<pi> k)\<close> shows \<open>\<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> 
+lemma cd_not_ret: assumes \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k \<close> shows \<open>\<pi> k \<noteq> return\<close> by (metis is_cdi_def assms nat_less_le term_path_stable)
+lemma cd_path_shift: assumes \<open>j \<le> k\<close> \<open>is_path \<pi> \<close> shows \<open>(i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k) = (i - j cd\<^bsup>\<pi>\<guillemotleft>j\<^esup>\<rightarrow> k-j)\<close> proof 
+  assume a: \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>
+  hence b: \<open>k < i\<close> by (metis is_cdi_def)
+  hence \<open>is_path (\<pi> \<guillemotleft> j)\<close> \<open>k - j < i - j\<close> using assms apply (metis path_path_shift) 
+  have c: \<open>\<forall> j \<in> {k..i}. \<pi> j \<noteq> ipd (\<pi> k)\<close> by (metis a ipd_impl_not_cd)
+  hence \<open>\<forall> ja \<in> {k - j..i - j}. (\<pi> \<guillemotleft> j) ja \<noteq> ipd ((\<pi> \<guillemotleft> j) (k - j))\<close> using b assms by auto fastforce
+  have \<open>j < i\<close> using assms(1) b by auto
+  hence \<open>(\<pi>\<guillemotleft>j) (i - j) \<noteq> return\<close> using a unfolding is_cdi_def by auto 
+  show \<open>i - j cd\<^bsup>\<pi>\<guillemotleft>j\<^esup>\<rightarrow> k-j\<close> unfolding is_cdi_def by simp
+  assume a: \<open>i - j cd\<^bsup>\<pi>\<guillemotleft>j\<^esup>\<rightarrow> k-j\<close>
+  hence b: \<open>k - j < i-j\<close> by (metis is_cdi_def)
+  have c: \<open>\<forall> ja \<in> {k - j..i - j}. (\<pi> \<guillemotleft> j) ja \<noteq> ipd ((\<pi> \<guillemotleft> j) (k - j))\<close> by (metis a ipd_impl_not_cd)
+  have \<open>\<forall> j \<in> {k..i}. \<pi> j \<noteq> ipd (\<pi> k)\<close> proof (rule,goal_cases) case (1 n)
+    hence \<open>n-j \<in> {k-j..i-j}\<close> using assms by auto
+    hence \<open>\<pi> (j + (n-j)) \<noteq> ipd(\<pi> (j + (k-j)))\<close> by (metis c path_shift_def)
+    thus \<open>?case\<close> using 1 assms(1) by auto
+  have \<open>j < i\<close> using assms(1) b by auto
+  hence \<open>\<pi> i \<noteq> return\<close> using a unfolding is_cdi_def by auto
+  show \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> unfolding is_cdi_def by (metis assms(1) assms(2) diff_is_0_eq' le_diff_iff nat_le_linear nat_less_le)
+lemma cd_path_shift0: assumes \<open>is_path \<pi>\<close> shows \<open>(i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k) = (i-k cd\<^bsup>\<pi>\<guillemotleft>k\<^esup>\<rightarrow>0)\<close>
+lemma icd_path_shift: assumes \<open>l \<le> k\<close> \<open>is_path \<pi>\<close> shows \<open>(i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k) = (i - l icd\<^bsup>\<pi>\<guillemotleft>l\<^esup>\<rightarrow> k - l)\<close> 
+  have \<open>is_path (\<pi>\<guillemotleft>l)\<close> using path_path_shift assms(2) by auto
+  have \<open>(i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k) = (i - l cd\<^bsup>\<pi>\<guillemotleft>l\<^esup>\<rightarrow> k - l)\<close> using assms cd_path_shift by auto
+  have \<open>(\<forall> m \<in> {k<..<i}. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m) = (\<forall> m \<in> {k - l<..<i - l}. \<not> i - l cd\<^bsup>\<pi> \<guillemotleft> l\<^esup>\<rightarrow> m)\<close> 
+    {fix m assume *: \<open>\<forall> m \<in> {k - l<..<i - l}. \<not> i - l cd\<^bsup>\<pi> \<guillemotleft> l\<^esup>\<rightarrow> m\<close> \<open>m \<in> {k<..<i}\<close> 
+      hence \<open>m-l \<in> {k-l<..<i-l}\<close> using assms(1) by auto
+      hence \<open>\<not> i - l cd\<^bsup>\<pi>\<guillemotleft>l\<^esup>\<rightarrow>(m-l)\<close> using * by blast
+      have \<open>l \<le> m\<close> using * assms by auto
+      ultimately have \<open>\<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow>m\<close> using assms(2) cd_path_shift by blast
+    {fix m assume *: \<open>\<forall> m \<in> {k<..<i}. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> \<open>m-l \<in> {k-l<..<i-l}\<close> 
+      hence \<open>m \<in> {k<..<i}\<close> using assms(1) by auto
+      hence \<open>\<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow>m\<close> using * by blast
+      have \<open>l \<le> m\<close> using * assms by auto
+      ultimately have \<open>\<not> i - l cd\<^bsup>\<pi>\<guillemotleft>l\<^esup>\<rightarrow>(m-l)\<close> using assms(2) cd_path_shift by blast
+    ultimately show \<open>?thesis\<close> by auto (metis diff_add_inverse)
+  show \<open>?thesis\<close> unfolding is_icdi_def using assms by blast
+lemma icd_path_shift0: assumes \<open>is_path \<pi>\<close> shows \<open>(i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k) = (i-k icd\<^bsup>\<pi>\<guillemotleft>k\<^esup>\<rightarrow>0)\<close>
+lemma cdi_path_swap: assumes \<open>is_path \<pi>'\<close> \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> \<open>\<pi> =\<^bsub>j\<^esub>  \<pi>'\<close> shows \<open>j cd\<^bsup>\<pi>'\<^esup>\<rightarrow>k\<close> using assms unfolding eq_up_to_def is_cdi_def by auto
+lemma cdi_path_swap_le: assumes \<open>is_path \<pi>'\<close> \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> \<open>\<pi> =\<^bsub>n\<^esub>  \<pi>'\<close> \<open>j \<le> n\<close> shows \<open>j cd\<^bsup>\<pi>'\<^esup>\<rightarrow>k\<close> by (metis assms cdi_path_swap eq_up_to_le)
+lemma not_cd_impl_ipd:  assumes \<open>is_path \<pi>\<close> and \<open>k < i\<close> and \<open>\<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> and \<open>\<pi> i \<noteq> return\<close> obtains j where \<open>j \<in> {k..i}\<close> and \<open>\<pi> j = ipd (\<pi> k)\<close>
+lemma icd_is_the_icd: assumes \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> shows \<open>k = (THE k. i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k)\<close> using assms icd_uniq 
+lemma all_ipd_imp_ret: assumes \<open>is_path \<pi>\<close> and \<open>\<forall> i. \<pi> i \<noteq> return \<longrightarrow> (\<exists> j>i. \<pi> j = ipd (\<pi> i))\<close> shows \<open>\<exists>j. \<pi> j = return\<close>
+  { fix x assume *: \<open>\<pi> 0 = x\<close>
+    have \<open>?thesis\<close> using wf_pdt_inv * assms  
+    proof(induction \<open>x\<close> arbitrary: \<open>\<pi>\<close> rule: wf_induct_rule )
+    case (less x \<pi>) show \<open>?case\<close> proof (cases \<open>x = return\<close>)
+      case True thus \<open>?thesis\<close> using less(2) by auto
+      assume not_ret: \<open>x \<noteq> return\<close>
+      then obtain k where k_ipd: \<open>\<pi> k = ipd x\<close> using less(2,4) by auto
+      have \<open>x \<in> nodes\<close> using less(2,3) by (metis path_nodes)
+      have \<open>(x, \<pi> k) \<in> pdt\<close> by (metis ipd_in_pdt)
+      hence a: \<open>(\<pi> k, x) \<in> pdt_inv\<close> unfolding pdt_inv_def by simp     
+      have b: \<open>is_path (\<pi> \<guillemotleft> k)\<close> by (metis less.prems(2) path_path_shift)    
+      have c: \<open>\<forall> i. (\<pi>\<guillemotleft>k) i \<noteq> return \<longrightarrow> (\<exists>j>i. (\<pi>\<guillemotleft>k) j = ipd ((\<pi>\<guillemotleft>k) i))\<close> using less(4) apply auto
+      have \<open>\<exists>j. (\<pi>\<guillemotleft>k) j = return\<close> by auto    
+      thus \<open>\<exists>j. \<pi> j = return\<close> by auto
+  thus \<open>?thesis\<close> by simp
+lemma loop_has_cd: assumes \<open>is_path \<pi>\<close> \<open>0 < i\<close> \<open>\<pi> i = \<pi> 0\<close> \<open>\<pi> 0 \<noteq> return\<close> shows \<open>\<exists> k < i. i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> proof (rule ccontr)
+  let \<open>?\<pi>\<close> = \<open>(\<lambda> n. \<pi> (n mod i))\<close>  
+  assume \<open>\<not> (\<exists>k<i. i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k)\<close>
+  hence \<open>\<forall> k <i. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> by blast
+  hence *: \<open>\<forall> k<i. (\<exists>j \<in> {k..i}. \<pi> j = ipd (\<pi> k))\<close> using assms(1,3,4) not_cd_impl_ipd by metis
+  have \<open>\<forall> k. (\<exists> j > k. ?\<pi> j = ipd (?\<pi> k))\<close> proof 
+    have \<open>k mod i < i\<close> using assms(2) by auto
+    with * obtain j where \<open>j \<in> {(k mod i)..i}\<close> \<open>\<pi> j = ipd (\<pi> (k mod i))\<close> by auto
+    then obtain j' where 1: \<open>j' < i\<close> \<open>\<pi> j' = ipd (\<pi> (k mod i))\<close> 
+      by (cases \<open>j = i\<close>, auto ,metis assms(2) assms(3),metis le_neq_implies_less)
+    then obtain j'' where 2: \<open>j'' > k\<close> \<open>j'' mod i = j'\<close> by (metis mod_bound_instance)
+    hence \<open>?\<pi> j'' = ipd (?\<pi> k)\<close> using 1 by auto
+    show \<open>\<exists> j > k. ?\<pi> j = ipd (?\<pi> k)\<close> by auto
+  have \<open>is_path ?\<pi>\<close> by (metis assms(1) assms(2) assms(3) is_path_loop)
+  obtain k where \<open>?\<pi> k = return\<close> by (metis (lifting) all_ipd_imp_ret)
+  have \<open>k mod i < i\<close> by (simp add: assms(2)) 
+  have \<open>\<pi> i = return\<close> by (metis assms(1) term_path_stable less_imp_le)
+  thus \<open>False\<close> by (metis assms(3) assms(4))
+lemma loop_has_cd': assumes \<open>is_path \<pi>\<close> \<open>j < i\<close> \<open>\<pi> i = \<pi> j\<close> \<open>\<pi> j \<noteq> return\<close> shows \<open>\<exists> k \<in> {j..<i}. i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> 
+  have \<open>\<exists> k'< i-j. i-j cd\<^bsup>\<pi>\<guillemotleft>j\<^esup>\<rightarrow>k'\<close> 
+  then obtain k where k: \<open>k<i-j\<close> \<open>i-j cd\<^bsup>\<pi>\<guillemotleft>j\<^esup>\<rightarrow>k\<close> by auto
+  hence k': \<open>(k+j) < i\<close>  \<open>i-j cd\<^bsup>\<pi>\<guillemotleft>j\<^esup>\<rightarrow> (k+j)-j\<close>  by auto
+  hence \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k+j\<close> using k'(2) by (metis le_add1 add.commute)
+  with k'(1) show \<open>?thesis\<close> by force
+lemma claim'': assumes path\<pi>: \<open>is_path \<pi>\<close> and path\<pi>': \<open>is_path \<pi>'\<close> 
+and \<pi>i: \<open>\<pi> i = \<pi>' i'\<close> and \<pi>j: \<open>\<pi> j = \<pi>' j'\<close> 
+and not_cd:  \<open>\<forall> k. \<not> j cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>  \<open>\<forall> k. \<not> i' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> k\<close> 
+and nret: \<open>\<pi> i \<noteq> return\<close>
+and ilj: \<open>i < j\<close>
+shows \<open>i' < j'\<close> proof (rule ccontr)
+  assume \<open>\<not> i' < j'\<close>  
+  hence jlei: \<open>j' \<le> i'\<close> by auto
+  show \<open>False\<close> proof (cases)
+  assume j'li': \<open>j' < i'\<close> 
+  define \<pi>'' where \<open>\<pi>'' \<equiv> (\<pi>@\<^bsup>j\<^esup>(\<pi>'\<guillemotleft>j'))\<guillemotleft>i\<close>
+  have \<open>\<pi> j = (\<pi>' \<guillemotleft> j') 0\<close> by (metis path_shift_def Nat.add_0_right \<pi>j)
+  hence \<open>is_path \<pi>''\<close> using path\<pi> path\<pi>' \<pi>''_def path_path_shift path_cons by presburger
+  have \<open>\<pi>'' (j-i+(i'-j')) = \<pi>'' 0\<close>  using ilj jlei \<pi>i \<pi>j 
+  have \<open>\<pi>'' 0 \<noteq> return\<close> by (simp add: ilj less_or_eq_imp_le nret)
+  have \<open>0 < j-i+(i'-j')\<close> by (metis add_is_0 ilj neq0_conv zero_less_diff)
+  ultimately obtain k where k: \<open>k < j-i+(i'-j')\<close> \<open>j-i+(i'-j') cd\<^bsup>\<pi>''\<^esup>\<rightarrow> k\<close>   by (metis loop_has_cd)
+  hence *: \<open>\<forall> l \<in> {k..j-i+(i'-j')}. \<pi>'' l \<noteq> ipd (\<pi>'' k)\<close> by (metis is_cdi_def)
+  show \<open>False\<close> proof (cases \<open>k < j-i\<close>)
+    assume a: \<open>k < j - i\<close>
+    hence b: \<open>\<pi>'' k = \<pi> (i + k)\<close> by auto
+    have \<open>\<forall> l \<in> {i+k..j}. \<pi> l \<noteq> ipd (\<pi> (i+k))\<close> proof
+      fix l assume l: \<open>l \<in> {i + k..j}\<close>
+      hence \<open>\<pi> l = \<pi>'' (l - i)\<close> by auto
+      from a l have \<open>l-i \<in> {k .. j-i + (i'-j')}\<close> by force
+      ultimately show \<open>\<pi> l \<noteq> ipd (\<pi> (i + k))\<close> using * b by auto
+    have \<open>i + k < j\<close> using a by simp
+    have \<open>\<pi> j \<noteq> return\<close> by (metis \<pi>i \<pi>j j'li' nret path\<pi>' term_path_stable less_imp_le) 
+    have \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i+k\<close>  by (metis not_cd_impl_ipd path\<pi>)
+    thus \<open>False\<close> by (metis not_cd(1))
+    assume \<open>\<not> k < j - i\<close>
+    hence a: \<open>j - i \<le> k\<close> by simp
+    hence b: \<open>\<pi>'' k = \<pi>' (j' + (i + k) - j)\<close> unfolding \<pi>''_def path_shift_def path_append_def using ilj 
+    have \<open>\<forall> l \<in> {j' + (i+k) - j..i'}. \<pi>' l \<noteq> ipd (\<pi>' (j' + (i+k) - j))\<close> proof
+      fix l assume l: \<open>l \<in> {j' + (i+k) - j..i'}\<close>
+      hence \<open>\<pi>' l = \<pi>'' (j + l - i - j')\<close> unfolding \<pi>''_def path_shift_def path_append_def using ilj
+      from a l have \<open>j + l - i - j' \<in> {k .. j-i + (i'-j')}\<close> by force
+      ultimately show \<open>\<pi>' l \<noteq> ipd (\<pi>' (j' + (i + k) - j))\<close> using * b by auto
+    have \<open>j' + (i+k) - j < i'\<close> using a  j'li' ilj k(1) by linarith      
+    have \<open>\<pi>' i' \<noteq> return\<close> by (metis \<pi>i nret)
+    have \<open>i' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> j' + (i+k) - j\<close> by (metis not_cd_impl_ipd path\<pi>')
+    thus \<open>False\<close> by (metis not_cd(2))
+  assume \<open>\<not> j' < i'\<close>
+  hence \<open>j' = i'\<close> by (metis \<open>\<not> i' < j'\<close> linorder_cases)
+  hence \<open>\<pi> i = \<pi> j\<close> by (metis \<pi>i \<pi>j)
+  thus \<open>False\<close> by (metis ilj loop_has_cd' not_cd(1) nret path\<pi>)
+lemma other_claim': assumes path: \<open>is_path \<pi>\<close> and eq: \<open>\<pi> i = \<pi> j\<close> and \<open>\<pi> i \<noteq> return\<close> 
+and icd: \<open>\<forall> k. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> and \<open>\<forall> k. \<not> j cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> shows \<open>i = j\<close>  
+  assume \<open>i < j\<close> thus \<open>False\<close> using assms claim'' by blast
+  assume \<open>\<not> i < j\<close> \<open>i \<noteq> j\<close> 
+  hence \<open>j < i\<close> by auto
+  thus \<open>False\<close> using assms claim'' by (metis loop_has_cd')
+lemma icd_no_cd_path_shift: assumes \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close> shows \<open>(\<forall> k. \<not> i - 1 cd\<^bsup>\<pi>\<guillemotleft>1\<^esup>\<rightarrow> k)\<close> 
+  hence *: \<open>i - 1 cd\<^bsup>\<pi> \<guillemotleft> 1\<^esup>\<rightarrow> k\<close> by simp
+  have **: \<open>1 \<le> k + 1\<close> by simp
+  have ***: \<open>is_path \<pi>\<close> by (metis assms is_icdi_def)
+  hence \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k+1\<close> using cd_path_shift[OF ** ***] * by auto
+  hence \<open>k+1 < i\<close> unfolding is_cdi_def by simp
+  have \<open>0 < k + 1\<close> by simp
+  ultimately show \<open>False\<close> using assms[unfolded is_icdi_def] by auto
+lemma claim': assumes path\<pi>: \<open>is_path \<pi>\<close> and path\<pi>': \<open>is_path \<pi>'\<close> and
+  \<pi>i: \<open>\<pi> i = \<pi>' i'\<close> and \<pi>j: \<open>\<pi> j = \<pi>' j'\<close> and not_cd:
+  \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close> \<open>j icd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close>
+  \<open>i' icd\<^bsup>\<pi>'\<^esup>\<rightarrow> 0\<close> \<open>j' icd\<^bsup>\<pi>'\<^esup>\<rightarrow> 0\<close>
+   and ilj: \<open>i < j\<close>
+   and nret: \<open>\<pi> i \<noteq> return\<close>
+  shows \<open>i' < j'\<close> 
+  have g0: \<open>0 < i\<close> \<open>0 < j\<close> \<open>0 < i'\<close> \<open>0 < j'\<close>using not_cd[unfolded is_icdi_def is_cdi_def] by auto
+  have  \<open>(\<pi> \<guillemotleft> 1) (i - 1) = (\<pi>' \<guillemotleft> 1) (i' - 1)\<close> \<open>(\<pi> \<guillemotleft> 1) (j - 1) = (\<pi>' \<guillemotleft> 1) (j' - 1)\<close> using \<pi>i \<pi>j g0 by auto
+  have \<open>\<forall> k. \<not> (j - 1) cd\<^bsup>\<pi>\<guillemotleft>1\<^esup>\<rightarrow> k\<close> \<open>\<forall> k. \<not> (i' - 1) cd\<^bsup>\<pi>'\<guillemotleft>1\<^esup>\<rightarrow> k\<close> 
+  have \<open>is_path (\<pi>\<guillemotleft>1)\<close> \<open>is_path (\<pi>'\<guillemotleft>1)\<close> using path\<pi> path\<pi>' path_path_shift by blast+
+  have \<open>(\<pi>\<guillemotleft>1) (i - 1) \<noteq> return\<close> using g0 nret by auto
+  have \<open>i - 1 < j - 1\<close> using g0 ilj by auto
+  ultimately have \<open>i' - 1 < j' - 1\<close> using claim'' by blast
+  thus \<open>i'<j'\<close> by auto
+lemma other_claim: assumes path: \<open>is_path \<pi>\<close> and eq: \<open>\<pi> i = \<pi> j\<close> and \<open>\<pi> i \<noteq> return\<close> 
+and icd: \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close> and \<open>j icd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close> shows \<open>i = j\<close>  proof (rule ccontr,cases)
+  assume \<open>i < j\<close> thus \<open>False\<close> using assms claim' by blast
+  assume \<open>\<not> i < j\<close> \<open>i \<noteq> j\<close> 
+  hence \<open>j < i\<close> by auto
+  thus \<open>False\<close> using assms claim' by (metis less_not_refl)
+lemma cd_trans0: assumes \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close> and \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow>j\<close> shows \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close> proof (rule ccontr)    
+  have path: \<open>is_path \<pi>\<close> and ij: \<open>0 < j\<close> and jk: \<open>j < k\<close> 
+  and nret: \<open>\<pi> j \<noteq> return\<close> \<open>\<pi> k \<noteq> return\<close>
+  and noipdi: \<open>\<forall> l \<in> {0..j}. \<pi> l \<noteq> ipd (\<pi> 0)\<close>
+  and noipdj: \<open>\<forall> l \<in> {j..k}. \<pi> l \<noteq> ipd (\<pi> j)\<close>
+  assume \<open>\<not> k cd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close>
+  hence \<open>\<exists>l \<in> {0..k}. \<pi> l = ipd (\<pi> 0)\<close> unfolding is_cdi_def using path ij jk nret by force
+  then obtain l where \<open>l \<in> {0..k}\<close> and l: \<open>\<pi> l = ipd (\<pi> 0)\<close> by auto
+  hence jl: \<open>j<l\<close> and lk: \<open>l\<le>k\<close> using noipdi ij by auto
+  have pdj: \<open>ipd (\<pi> 0) pd\<rightarrow> \<pi> j\<close> proof (rule ccontr)    
+    have \<open>\<pi> j \<in> nodes\<close> using path by (metis path_nodes)
+    assume \<open>\<not> ipd (\<pi> 0) pd\<rightarrow> \<pi> j\<close>
+    obtain \<pi>' n where *: \<open>is_path \<pi>'\<close> \<open>\<pi>' 0 = \<pi> j\<close> \<open>\<pi>' n = return\<close> \<open>\<forall> k\<le>n. \<pi>' k \<noteq> ipd(\<pi> 0)\<close> using no_pd_path by metis
+    hence path': \<open>is_path (\<pi> @\<^bsup>j\<^esup>  \<pi>')\<close> by (metis path path_cons) 
+    have \<open>\<forall> k \<le> j + n. (\<pi>@\<^bsup>j\<^esup>  \<pi>') k \<noteq> ipd (\<pi> 0)\<close> using noipdi *(4) by auto
+    have \<open>(\<pi>@\<^bsup>j\<^esup>  \<pi>') 0 = \<pi> 0\<close> by auto
+    have \<open>(\<pi>@\<^bsup>j\<^esup>  \<pi>') (j + n) = return\<close> using *(2,3) by auto
+    have \<open>\<not> ipd (\<pi> 0) pd\<rightarrow> \<pi> 0\<close> unfolding is_pd_def by metis
+    thus \<open>False\<close> by (metis is_ipd_def ij ipd_is_ipd nret(1) path path_nodes term_path_stable less_imp_le)
+  hence \<open>(\<pi>\<guillemotleft>j) (l-j) pd\<rightarrow> (\<pi>\<guillemotleft>j) 0\<close> using jl l by auto
+  have \<open>is_path (\<pi>\<guillemotleft>j)\<close> by (metis path path_path_shift)
+  have \<open>\<pi> l \<noteq> return\<close> by (metis lk nret(2) path term_path_stable)
+  hence \<open>(\<pi>\<guillemotleft>j) (l-j) \<noteq> return\<close> using jl by auto
+  have \<open>\<pi> j \<noteq> ipd (\<pi> 0)\<close> using noipdi by force
+  hence \<open>(\<pi>\<guillemotleft>j) (l-j) \<noteq> (\<pi>\<guillemotleft>j) 0\<close> using jl l by auto
+  obtain k' where \<open>k' \<le> l-j\<close> and \<open>(\<pi>\<guillemotleft>j) k' = ipd ((\<pi>\<guillemotleft>j) 0)\<close> using path_pd_ipd0' by blast
+  hence \<open>j + k' \<in> {j..k}\<close> \<open>\<pi> (j+k') = ipd (\<pi> j)\<close> using jl lk by auto
+  thus \<open>False\<close> using noipdj by auto
+lemma cd_trans: assumes \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i\<close> and \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow>j\<close> shows \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i\<close> proof -
+  have path: \<open>is_path \<pi>\<close> using assms is_cdi_def by auto
+  have ij: \<open>i<j\<close> using assms is_cdi_def by auto
+  let \<open>?\<pi>\<close> = \<open>\<pi>\<guillemotleft>i\<close>
+  have \<open>j-i cd\<^bsup>?\<pi>\<^esup>\<rightarrow> 0\<close> using assms(1) cd_path_shift0 path by auto
+  have \<open>k-i cd\<^bsup>?\<pi>\<^esup>\<rightarrow>j-i\<close> by (metis assms(2) cd_path_shift is_cdi_def ij less_imp_le_nat)
+  have \<open>k-i cd\<^bsup>?\<pi>\<^esup>\<rightarrow> 0\<close> using cd_trans0 by auto
+  thus \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i\<close> using path cd_path_shift0 by auto
+lemma excd_impl_exicd: assumes \<open>\<exists> k. i cd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> shows \<open>\<exists> k. i icd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> 
+using assms proof(induction \<open>i\<close> arbitrary: \<open>\<pi>\<close> rule: less_induct)
+  then obtain k where k: \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> by auto
+  hence ip: \<open>is_path \<pi>\<close> unfolding is_cdi_def by auto
+  show \<open>?case\<close> proof (cases)
+    assume *: \<open>\<forall> m \<in> {k<..<i}. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close>
+    hence \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> using k ip unfolding is_icdi_def by auto
+    thus \<open>?case\<close> by auto
+    assume \<open>\<not> (\<forall> m \<in> {k<..<i}. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m)\<close>
+    then obtain m where m: \<open>m \<in> {k<..<i}\<close> \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> by blast
+    hence \<open>i - m cd\<^bsup>\<pi>\<guillemotleft>m\<^esup>\<rightarrow> 0\<close> by (metis cd_path_shift0 is_cdi_def)
+    have \<open>i - m < i\<close> using m by auto
+    obtain k' where k': \<open>i - m icd\<^bsup>\<pi>\<guillemotleft>m\<^esup>\<rightarrow> k'\<close> using less(1) by blast
+    hence \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k' + m\<close> using ip 
+    thus \<open>?case\<close> by auto
+lemma cd_split: assumes \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> and \<open>\<not> i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> obtains m where \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> and \<open>m cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> 
+  have ki: \<open>k < i\<close> using assms is_cdi_def by auto
+  obtain m where m: \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using assms(1) by (metis excd_impl_exicd)
+  hence \<open>k \<le> m\<close> unfolding is_icdi_def using ki assms(1) by force
+  hence km: \<open>k < m\<close>using m assms(2) by (metis le_eq_less_or_eq)
+  moreover have \<open>\<pi> m \<noteq> return\<close> using m unfolding is_icdi_def is_cdi_def by (simp, metis term_path_stable less_imp_le)
+  moreover have \<open>m<i\<close> using m unfolding is_cdi_def is_icdi_def by auto
+  have \<open>m cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> using assms(1) unfolding is_cdi_def by auto
+  with m that show \<open>thesis\<close> by auto
+lemma cd_induct[consumes 1, case_names base IS]: assumes prem: \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> and base: \<open>\<And> i. i icd\<^bsup>\<pi>\<^esup>\<rightarrow>k \<Longrightarrow> P i\<close> 
+and IH: \<open>\<And> k' i'. k' cd\<^bsup>\<pi>\<^esup>\<rightarrow> k \<Longrightarrow> P k' \<Longrightarrow> i' icd\<^bsup>\<pi>\<^esup>\<rightarrow> k' \<Longrightarrow> P i'\<close> shows \<open>P i\<close> 
+using prem IH proof (induction \<open>i\<close> rule: less_induct,cases)
+  assume \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>
+  thus \<open>P i\<close> using base by simp
+  assume \<open>\<not> i' icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>
+  then obtain k' where k': \<open> i' icd\<^bsup>\<pi>\<^esup>\<rightarrow> k'\<close> \<open>k' cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> using less cd_split by blast
+  hence icdk: \<open>i' cd\<^bsup>\<pi>\<^esup>\<rightarrow> k'\<close> using is_icdi_def by auto
+  have ki: \<open>k' < i'\<close> using k' is_icdi_def is_cdi_def by auto
+  have \<open>P k'\<close> using less(1)[OF ki k'(2) ] less(3) by auto
+  thus \<open>P i'\<close> using ih by simp
+lemma cdi_prefix: \<open>n cd\<^bsup>\<pi>\<^esup>\<rightarrow> m \<Longrightarrow> m < n' \<Longrightarrow> n' \<le> n \<Longrightarrow> n' cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close>  unfolding is_cdi_def 
+lemma cr_wn': assumes 1: \<open>n cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> and nc: \<open>\<not> m' cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> and 3: \<open>m < m'\<close> shows \<open>n < m'\<close>
+  assume \<open>\<not> n < m'\<close>
+  hence \<open>m' \<le> n\<close> by simp  
+  hence \<open>m' cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> by (metis 1 3 cdi_prefix)
+  thus \<open>False\<close> using nc by simp
+lemma cr_wn'': assumes \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> and \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> and \<open>\<not> m cd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> and  \<open>i \<le> j\<close> shows \<open>m \<le> n\<close> proof (rule ccontr) 
+  assume \<open>\<not>m\<le>n\<close>
+  hence nm: \<open>n < m\<close> by auto
+  have \<open>m<j\<close> using assms(1) assms(4) unfolding is_cdi_def by auto
+  have \<open>m cd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> using assms(2) cdi_prefix by auto
+  thus \<open>False\<close> using assms(3) by auto
+lemma ret_no_cd: assumes \<open>\<pi> n = return\<close> shows \<open>\<not> n cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> by (metis assms is_cdi_def)
+lemma ipd_not_self: assumes \<open>x \<in> nodes\<close> \<open>x\<noteq> return\<close> shows \<open>x \<noteq> ipd x\<close> by (metis is_ipd_def assms ipd_is_ipd)
+lemma icd_cs: assumes \<open>l icd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> shows \<open>cs\<^bsup>\<pi>\<^esup> l = cs\<^bsup>\<pi>\<^esup> k @ [\<pi> l]\<close>
+  from assms have \<open>k = (THE k. l icd\<^bsup>\<pi>\<^esup>\<rightarrow> k)\<close> by (metis icd_is_the_icd)
+  with assms show \<open>?thesis\<close> by auto
+lemma cd_not_pd: assumes \<open>l cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> \<open>\<pi> l \<noteq> \<pi> k\<close> shows \<open>\<not> \<pi> l pd\<rightarrow> \<pi> k\<close> proof
+  assume pd: \<open>\<pi> l pd\<rightarrow> \<pi> k\<close>
+  have nret: \<open>\<pi> k \<noteq> return\<close> by (metis assms(1) pd pd_ret_is_ret ret_no_cd)
+  have kl: \<open>k < l\<close> by (metis is_cdi_def assms(1))
+  have path: \<open>is_path \<pi>\<close> by (metis is_cdi_def assms(1))
+  obtain n where \<open>k < n\<close> \<open>n \<le> l\<close> \<open>\<pi> n = ipd (\<pi> k)\<close> .
+  thus \<open>False\<close> using assms(1) unfolding is_cdi_def by auto
+lemma cd_ipd_is_cd: assumes \<open>k<m\<close> \<open>\<pi> m = ipd (\<pi> k)\<close> \<open>\<forall> n \<in> {k..<m}. \<pi> n \<noteq> ipd (\<pi> k)\<close> and mcdj: \<open>m cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> shows \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> proof cases
+  assume \<open>j < k\<close> thus \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> by (metis mcdj assms(1) cdi_prefix less_imp_le_nat)
+  assume \<open>\<not> j < k\<close>
+  hence kj: \<open>k \<le> j\<close> by simp 
+  have \<open>k < j\<close> apply (rule ccontr) using kj assms mcdj by (auto, metis is_cdi_def is_ipd_def cd_not_pd ipd_is_ipd path_nodes term_path_stable less_imp_le)
+  have \<open>j < m\<close> using mcdj is_cdi_def by auto
+  hence \<open>\<forall> n \<in> {k..j}. \<pi> n \<noteq> ipd(\<pi> k)\<close> using assms(3) by force
+  have \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> by (metis mcdj is_cdi_def term_path_stable less_imp_le)
+  hence \<open>m cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> by (metis mcdj cd_trans)
+  hence \<open>False\<close> by (metis is_cdi_def is_ipd_def assms(2) cd_not_pd ipd_is_ipd path_nodes term_path_stable less_imp_le)
+  thus \<open>?thesis\<close> by simp
+lemma ipd_pd_cd0: assumes lcd: \<open>n cd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close> shows \<open>ipd (\<pi> 0) pd\<rightarrow> (\<pi> n)\<close> 
+  obtain k l where \<pi>0: \<open>\<pi> 0 = k\<close> and \<pi>n: \<open>\<pi> n = l\<close> and cdi: \<open>n cd\<^bsup>\<pi>\<^esup>\<rightarrow> 0\<close> using lcd unfolding is_cdi_def by blast
+  have nret: \<open>k \<noteq> return\<close> by (metis is_cdi_def \<pi>0 cdi term_path_stable less_imp_le)
+  have  path: \<open>is_path \<pi>\<close> and ipd: \<open>\<forall> i\<le>n. \<pi> i \<noteq> ipd k\<close> using cdi unfolding is_cdi_def \<pi>0 by auto
+    assume path': \<open>is_path \<pi>'\<close>
+    and \<pi>'0: \<open>\<pi>' 0 = l\<close>
+    and ret: \<open>\<pi>' n' = return\<close>
+    have \<open>is_path (\<pi> @\<^bsup>n\<^esup>  \<pi>')\<close> using path path' \<pi>n \<pi>'0 by (metis path_cons)
+    have \<open>(\<pi> @\<^bsup>n\<^esup>  \<pi>') (n+n') = return\<close> using ret \<pi>n \<pi>'0 by auto
+    have \<open>(\<pi> @\<^bsup>n\<^esup>  \<pi>') 0 = k\<close> using \<pi>0 by auto
+    have \<open>ipd k pd\<rightarrow> k\<close> by (metis is_ipd_def path \<pi>0 ipd_is_ipd nret path_nodes)
+    obtain k' where k': \<open>k' \<le> n+n'\<close> \<open>(\<pi> @\<^bsup>n\<^esup>  \<pi>') k' = ipd k\<close> by (metis pd_intro)
+    have \<open>\<not> k'\<le> n\<close> proof 
+      assume \<open>k' \<le> n\<close> 
+      hence \<open>(\<pi> @\<^bsup>n\<^esup>  \<pi>') k' = \<pi> k'\<close> by auto
+      thus \<open>False\<close> using k'(2) ipd by (metis \<open>k' \<le> n\<close>)
+    hence \<open>(\<pi> @\<^bsup>n\<^esup>  \<pi>') k' = \<pi>' (k' - n)\<close> by auto
+    have \<open>(k' - n) \<le> n'\<close> using k' by simp
+    have \<open>\<exists> k'\<le>n'. \<pi>' k' = ipd k\<close> unfolding k' by auto
+  have \<open>l \<in> nodes\<close> by (metis \<pi>n path path_nodes)
+  ultimately show \<open>ipd (\<pi> 0) pd\<rightarrow> (\<pi> n)\<close> unfolding is_pd_def  by (simp add: \<pi>0 \<pi>n) 
+lemma ipd_pd_cd: assumes lcd: \<open>l cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> shows \<open>ipd (\<pi> k) pd\<rightarrow> (\<pi> l)\<close> 
+  have \<open>l-k cd\<^bsup>\<pi>\<guillemotleft>k\<^esup>\<rightarrow>0\<close> using lcd cd_path_shift0 is_cdi_def by blast 
+  have \<open>(\<pi> \<guillemotleft> k) 0 = \<pi> k\<close> by auto
+  have \<open>k < l\<close> using lcd unfolding is_cdi_def by simp
+  then have \<open>(\<pi> \<guillemotleft> k) (l - k) = \<pi> l\<close> by simp 
+  ultimately show \<open>?thesis\<close> by simp
+lemma cd_is_cd_ipd: assumes km: \<open>k<m\<close> and ipd: \<open>\<pi> m = ipd (\<pi> k)\<close> \<open>\<forall> n \<in> {k..<m}. \<pi> n \<noteq> ipd (\<pi> k)\<close> and cdj: \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> and nipdj: \<open>ipd (\<pi> j) \<noteq> \<pi> m\<close> shows \<open>m cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> proof -
+  have path: \<open>is_path \<pi>\<close> 
+  and jk: \<open>j < k\<close> 
+  and nretj: \<open>\<pi> k \<noteq> return\<close> 
+  and nipd: \<open>\<forall> l \<in> {j..k}. \<pi> l \<noteq> ipd (\<pi> j)\<close> using  cdj is_cdi_def by auto
+  have pd: \<open>ipd (\<pi> j) pd\<rightarrow> \<pi> m\<close> by (metis atLeastAtMost_iff cdj ipd(1) ipd_pd_cd jk le_refl less_imp_le nipd nretj path path_nodes pd_pd_ipd)  
+  have nretm: \<open>\<pi> m \<noteq> return\<close> by (metis nipdj pd pd_ret_is_ret)
+  have jm: \<open>j < m\<close> using jk km by simp
+  show \<open>m cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> proof (rule ccontr)
+    assume ncdj: \<open>\<not> m cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close>     
+    hence \<open>\<exists> l \<in> {j..m}. \<pi> l = ipd (\<pi> j)\<close> unfolding is_cdi_def by (metis jm nretm path)
+    where jl: \<open>j \<le> l\<close> and \<open>l \<le> m\<close> 
+    and lipd: \<open>\<pi> l = ipd (\<pi> j)\<close> by force
+    hence lm: \<open>l < m\<close> using nipdj by (metis le_eq_less_or_eq)
+    have npd: \<open>\<not> ipd (\<pi> k) pd\<rightarrow> \<pi> l\<close> by (metis ipd(1) lipd nipdj pd pd_antisym)
+    have nd: \<open>\<pi> l \<in> nodes\<close> using path path_nodes by simp
+    obtain \<pi>' n where path': \<open>is_path \<pi>'\<close> and \<pi>'0: \<open>\<pi>' 0 = \<pi> l\<close> and \<pi>'n: \<open>\<pi>' n = return\<close> and nipd: \<open>\<forall> ka\<le>n. \<pi>' ka \<noteq> ipd (\<pi> k)\<close> .
+    let \<open>?\<pi>\<close> = \<open>(\<pi>@\<^bsup>l\<^esup> \<pi>') \<guillemotleft> k\<close>
+    have path'': \<open>is_path ?\<pi>\<close> by (metis \<pi>'0 path path' path_cons path_path_shift)
+    have kl: \<open>k < l\<close> using lipd cdj jl unfolding is_cdi_def by fastforce    
+    have \<open>?\<pi> 0 = \<pi> k\<close> using kl by auto
+    have \<open>?\<pi> (l + n - k) = return\<close> using \<pi>'n \<pi>'0 kl by auto
+    have \<open>ipd (\<pi> k) pd\<rightarrow> \<pi> k\<close> by (metis is_ipd_def ipd_is_ipd nretj path path_nodes)
+    obtain l' where l': \<open>l' \<le> (l + n - k)\<close> \<open>?\<pi> l' = ipd (\<pi> k)\<close> unfolding is_pd_def by blast
+    show \<open>False\<close> proof (cases )
+      assume *: \<open>k + l' \<le> l\<close>
+      hence \<open>\<pi> (k + l') = ipd (\<pi> k)\<close> using l' by auto
+      have \<open>k + l' < m\<close> by (metis "*" dual_order.strict_trans2 lm)
+      show \<open>False\<close> using ipd(2) by simp
+      assume \<open>\<not> k + l' \<le> l\<close>
+      hence \<open>\<pi>' (k + l' - l) = ipd (\<pi> k)\<close> using l' by auto
+      have \<open>k + l' - l \<le> n\<close> using l' kl by linarith  
+      show \<open>False\<close> using nipd by auto
+lemma ipd_icd_greatest_cd_not_ipd: assumes ipd: \<open>\<pi> m = ipd (\<pi> k)\<close> \<open>\<forall> n \<in> {k..<m}. \<pi> n \<noteq> ipd (\<pi> k)\<close>
+and km: \<open>k < m\<close> and icdj: \<open>m icd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> shows \<open>j = (GREATEST j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<and> ipd (\<pi> j) \<noteq> \<pi> m)\<close>
+  let \<open>?j\<close> = \<open>GREATEST j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<and> ipd (\<pi> j) \<noteq> \<pi> m\<close>
+  have kcdj: \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> using assms cd_ipd_is_cd is_icdi_def by blast   
+  have nipd: \<open>ipd (\<pi> j) \<noteq> \<pi> m\<close> using icdj unfolding is_icdi_def is_cdi_def by auto
+  have bound: \<open>\<And> j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<and> ipd (\<pi> j) \<noteq> \<pi> m \<Longrightarrow> j \<le> k\<close> unfolding is_cdi_def by simp
+  have exists: \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<and> ipd (\<pi> j) \<noteq> \<pi> m\<close> (is \<open>?P j\<close>) using kcdj nipd by auto
+  note GreatestI_nat[of \<open>?P\<close> _ \<open>k\<close>, OF exists] Greatest_le_nat[of \<open>?P\<close> \<open>j\<close> \<open>k\<close>, OF exists]
+  hence kcdj': \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> ?j\<close> and ipd': \<open>ipd (\<pi> ?j) \<noteq> \<pi> m\<close> and jj: \<open>j \<le> ?j\<close> using bound by auto
+  hence mcdj': \<open>m cd\<^bsup>\<pi>\<^esup>\<rightarrow> ?j\<close> using ipd km cd_is_cd_ipd by auto
+  show \<open>j = ?j\<close> proof (rule ccontr)
+    assume \<open>j \<noteq> ?j\<close>
+    hence jlj: \<open>j < ?j\<close> using jj by simp
+    have \<open>?j < m\<close> using kcdj' km unfolding is_cdi_def by auto
+    show \<open>False\<close> using icdj mcdj' unfolding is_icdi_def by auto
+lemma cd_impl_icd_cd: assumes \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close> and \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> and \<open>\<not> i icd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close> shows \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close>
+lemma cdi_is_cd_icdi: assumes \<open>k icd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> shows \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i \<longleftrightarrow> j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i \<or> i = j\<close> 
+lemma same_ipd_stable: assumes \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i\<close> \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> \<open>i<j\<close> \<open>ipd (\<pi> i) = ipd (\<pi> k)\<close> shows \<open>ipd (\<pi> j) = ipd (\<pi> k)\<close>
+  have jcdi: \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i\<close> by (metis is_cdi_def assms(1,2,3) cr_wn' le_antisym less_imp_le_nat)
+  have 1: \<open>ipd (\<pi> j) pd\<rightarrow> \<pi> k \<close> by (metis assms(2) ipd_pd_cd)
+  have 2: \<open>ipd (\<pi> k) pd\<rightarrow> \<pi> j \<close> by (metis assms(4) ipd_pd_cd jcdi)
+  have 3: \<open>ipd (\<pi> k) pd\<rightarrow> (ipd (\<pi> j))\<close>  by (metis 2 IFC_def.is_cdi_def assms(1,2,4) atLeastAtMost_iff jcdi less_imp_le pd_node2 pd_pd_ipd) 
+  have 4: \<open>ipd (\<pi> j) pd\<rightarrow> (ipd (\<pi> k))\<close> by (metis 1 2 IFC_def.is_ipd_def assms(2) cd_not_pd ipd_is_ipd jcdi pd_node2 ret_no_cd) 
+  show \<open>?thesis\<close> using 3 4 pd_antisym by simp
+lemma icd_pd_intermediate': assumes icd: \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>  and j: \<open>k < j\<close> \<open>j < i\<close> shows \<open>\<pi> i pd\<rightarrow> (\<pi> j)\<close>
+using j proof (induction \<open>i - j\<close> arbitrary: \<open>j\<close> rule: less_induct)
+  have \<open>\<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> using less.prems icd unfolding is_icdi_def by force
+  have \<open>is_path \<pi>\<close> using icd by (metis is_icdi_def)
+  have \<open>\<pi> i \<noteq> return\<close> using icd by (metis is_icdi_def ret_no_cd)
+  have \<open>\<exists> l. j \<le> l \<and> l \<le> i \<and> \<pi> l = ipd (\<pi> j)\<close> unfolding is_cdi_def using less.prems by auto
+  then obtain l where l: \<open>j \<le> l\<close> \<open>l \<le> i\<close> \<open>\<pi> l = ipd (\<pi> j)\<close> by blast
+  hence lpd: \<open>\<pi> l pd\<rightarrow> (\<pi> j)\<close> by (metis is_ipd_def \<open>\<pi> i \<noteq> return\<close> \<open>is_path \<pi>\<close> ipd_is_ipd path_nodes term_path_stable)
+  show \<open>?case\<close> proof (cases)
+    assume \<open>l = i\<close>
+    thus \<open>?case\<close> using lpd by auto
+    assume \<open>l \<noteq> i\<close>
+    hence \<open>l < i\<close> using l by simp
+    have \<open>j \<noteq> l\<close> using l by (metis is_ipd_def \<open>\<pi> i \<noteq> return\<close> \<open>is_path \<pi>\<close> ipd_is_ipd path_nodes term_path_stable)
+    hence \<open>j < l\<close> using l by simp
+    hence \<open>i - l < i - j\<close> by (metis diff_less_mono2 less.prems(2))
+    have \<open>k < l\<close> by (metis l(1) less.prems(1) linorder_neqE_nat not_le order.strict_trans)
+    have \<open>\<pi> i pd\<rightarrow> (\<pi> l)\<close> using less.hyps by auto
+    thus \<open>?case\<close> using lpd by (metis pd_trans)
+lemma icd_pd_intermediate: assumes icd: \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>  and j: \<open>k < j\<close> \<open>j \<le> i\<close> shows \<open>\<pi> i pd\<rightarrow> (\<pi> j)\<close> 
+using assms icd_pd_intermediate'[OF assms(1,2)] apply (cases \<open>j < i\<close>,metis) by (metis is_icdi_def le_neq_trans path_nodes pd_refl)
+lemma no_icd_pd: assumes path: \<open>is_path \<pi>\<close> and noicd: \<open>\<forall> l\<ge>n. \<not> k icd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close> and nk: \<open>n \<le> k\<close> shows \<open>\<pi> k pd\<rightarrow> \<pi> n\<close>
+  assume \<open>\<pi> k = return\<close> thus \<open>?thesis\<close> by (metis path path_nodes return_pd)  
+  assume nret: \<open>\<pi> k \<noteq> return\<close>
+  have nocd: \<open>\<And> l. n\<le>l \<Longrightarrow> \<not> k cd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close> proof 
+    fix l assume kcd: \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close> and nl: \<open>n \<le> l\<close>
+    hence \<open>(k - n) cd\<^bsup>\<pi>\<guillemotleft>n\<^esup>\<rightarrow> (l - n)\<close> using cd_path_shift[OF nl path] by simp
+    hence \<open>\<exists> l. (k - n) icd\<^bsup>\<pi>\<guillemotleft>n\<^esup>\<rightarrow> l\<close> using excd_impl_exicd by blast
+    hence \<open>k icd\<^bsup>\<pi>\<^esup>\<rightarrow> (l' + n)\<close> using icd_path_shift[of \<open>n\<close> \<open>l' + n\<close> \<open>\<pi>\<close> \<open>k\<close>] path by auto
+    thus \<open>False\<close> using noicd by auto
+  hence \<open>\<And>l. n \<le> l \<Longrightarrow> l<k \<Longrightarrow> \<exists> j \<in> {l..k}. \<pi> j = ipd (\<pi> l)\<close> using path nret unfolding is_cdi_def by auto 
+  thus \<open>?thesis\<close> using nk proof (induction \<open>k - n\<close> arbitrary: \<open>n\<close> rule: less_induct,cases)
+    assume \<open>n = k\<close>
+    thus \<open>?case\<close> using pd_refl path path_nodes by auto
+    assume \<open>n \<noteq> k\<close>
+    hence nk: \<open>n < k\<close> using less(3) by auto
+    with less(2) obtain j where jnk: \<open>j \<in> {n..k}\<close> and ipdj: \<open>\<pi> j = ipd (\<pi> n)\<close> by blast
+    have nretn: \<open>\<pi> n \<noteq> return\<close> using nk nret term_path_stable path by auto
+    have jpdn: \<open>\<pi> j pd\<rightarrow> \<pi> n\<close> by auto
+    show \<open>?case\<close> proof cases
+      assume \<open>j = k\<close> thus \<open>?case\<close> using jpdn by simp
+      assume \<open>j \<noteq> k\<close>
+      hence jk: \<open>j < k\<close> using jnk by auto
+      have \<open>j \<noteq> n\<close> using ipdj by (metis ipd_not_self nretn path path_nodes)
+      hence nj: \<open>n < j\<close> using jnk by auto
+      have *: \<open>k - j < k - n\<close> using jk nj by auto
+      have \<open>\<pi> k pd\<rightarrow> \<pi> j\<close> by auto
+      thus \<open>?thesis\<close> using jpdn pd_trans by metis
+lemma first_pd_no_cd: assumes path: \<open>is_path \<pi>\<close> and pd: \<open>\<pi> n pd\<rightarrow> \<pi> 0\<close> and first: \<open>\<forall> l < n. \<pi> l \<noteq> \<pi> n\<close> shows \<open>\<forall> l. \<not> n cd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close> 
+  then obtain l where ncdl: \<open>n cd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close> by blast
+  hence ln: \<open>l < n\<close> using is_cdi_def by auto
+  have \<open>\<not> \<pi> n pd\<rightarrow> \<pi> l\<close> using ncdl cd_not_pd by (metis ln first)
+  then obtain \<pi>' n' where path': \<open>is_path \<pi>'\<close> and \<pi>0: \<open>\<pi>' 0 = \<pi> l\<close> and \<pi>n: \<open>\<pi>' n' = return\<close> and not\<pi>n: \<open>\<forall> j\<le> n'. \<pi>' j \<noteq> \<pi> n\<close> unfolding is_pd_def using path path_nodes by auto
+  let \<open>?\<pi>\<close> = \<open>\<pi>@\<^bsup>l\<^esup> \<pi>'\<close>
+  have \<open>is_path ?\<pi>\<close> by (metis \<pi>0 path path' path_cons)
+  have \<open>?\<pi> 0 = \<pi> 0\<close> by auto
+  have \<open>?\<pi> (n' + l) = return\<close> using \<pi>0 \<pi>n by auto
+  obtain j where j: \<open>j \<le> n' + l\<close> and jn: \<open>?\<pi> j = \<pi> n\<close> using pd unfolding is_pd_def by blast
+  show \<open>False\<close> proof cases
+    assume \<open>j \<le> l\<close> thus \<open>False\<close> using jn first ln by auto
+    assume \<open>\<not> j \<le> l\<close> thus \<open>False\<close> using j jn not\<pi>n by auto
+lemma first_pd_no_icd: assumes path: \<open>is_path \<pi>\<close> and pd: \<open>\<pi> n pd\<rightarrow> \<pi> 0\<close> and first: \<open>\<forall> l < n. \<pi> l \<noteq> \<pi> n\<close> shows \<open>\<forall> l. \<not> n icd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close>
+lemma path_nret_ex_nipd: assumes \<open>is_path \<pi>\<close> \<open>\<forall> i. \<pi> i \<noteq> return\<close> shows \<open>\<forall> i. (\<exists> j\<ge>i. (\<forall> k>j. \<pi> k \<noteq> ipd (\<pi> j)))\<close> proof(rule, rule ccontr)
+  assume \<open>\<not> (\<exists>j\<ge>i. \<forall> k>j. \<pi> k \<noteq> ipd (\<pi> j))\<close>
+  hence *: \<open>\<forall> j\<ge>i. (\<exists>k>j. \<pi> k = ipd (\<pi> j))\<close> by blast
+  have \<open>\<forall> j. (\<exists>k>j. (\<pi>\<guillemotleft>i) k = ipd ((\<pi>\<guillemotleft>i) j))\<close> proof
+    have \<open>i + j \<ge> i\<close> by auto
+    then obtain k where k: \<open>k>i+j\<close> \<open>\<pi> k = ipd (\<pi> (i+j))\<close> using * by blast
+    hence \<open>(\<pi>\<guillemotleft>i) (k - i) = ipd ((\<pi>\<guillemotleft>i) j)\<close> by auto
+    have \<open>k - i > j\<close> using k by auto
+    show \<open>\<exists>k>j. (\<pi>\<guillemotleft>i) k = ipd ((\<pi>\<guillemotleft>i) j)\<close> by auto
+  have \<open>is_path (\<pi>\<guillemotleft>i)\<close> using assms(1) path_path_shift by simp
+  obtain k where \<open>(\<pi>\<guillemotleft>i) k = return\<close> using all_ipd_imp_ret by blast
+  thus \<open>False\<close> using assms(2) by auto
+lemma path_nret_ex_all_cd: assumes \<open>is_path \<pi>\<close> \<open>\<forall> i. \<pi> i \<noteq> return\<close> shows \<open>\<forall> i. (\<exists> j\<ge>i. (\<forall> k>j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j))\<close>
+lemma path_nret_inf_all_cd: assumes \<open>is_path \<pi>\<close> \<open>\<forall> i. \<pi> i \<noteq> return\<close> shows \<open>\<not> finite {j. \<forall> k>j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j}\<close> 
+lemma path_nret_inf_icd_seq: assumes path: \<open>is_path \<pi>\<close> and nret: \<open>\<forall> i. \<pi> i \<noteq> return\<close> 
+obtains f where \<open>\<forall> i. f (Suc i) icd\<^bsup>\<pi>\<^esup>\<rightarrow> f i\<close> \<open>range f = {i. \<forall> j>i. j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}\<close> \<open>\<not> (\<exists>i. f 0 cd\<^bsup>\<pi>\<^esup>\<rightarrow> i)\<close>
+  then obtain f where ran: \<open>range f = {j. \<forall> k>j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j}\<close> and asc: \<open>\<forall> i. f i < f (Suc i)\<close> using infinite_ascending by blast
+  have mono: \<open>\<forall> i j. i < j \<longrightarrow> f i < f j\<close> using asc by (metis lift_Suc_mono_less)
+    have cd: \<open>f (Suc i) cd\<^bsup>\<pi>\<^esup>\<rightarrow> f i\<close> using ran asc by auto
+    have \<open>f (Suc i) icd\<^bsup>\<pi>\<^esup>\<rightarrow> f i\<close> proof (rule ccontr)
+      assume \<open>\<not> f (Suc i) icd\<^bsup>\<pi>\<^esup>\<rightarrow> f i\<close>
+      then obtain m where  im: \<open>f i < m\<close> and mi: \<open> m < f (Suc i)\<close> and cdm: \<open>f (Suc i) cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> unfolding is_icdi_def using assms(1) cd by auto
+      have \<open>\<forall> k>m. k cd\<^bsup>\<pi>\<^esup>\<rightarrow>m\<close> proof (rule,rule,cases)
+        fix k assume \<open>f (Suc i) < k\<close>
+        hence \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> f (Suc i)\<close> using ran by auto
+        thus \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using cdm cd_trans by metis
+        fix k assume mk: \<open>m < k\<close> and \<open>\<not> f (Suc i) < k\<close>
+        hence ik: \<open>k \<le> f (Suc i)\<close> by simp
+        thus \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using cdm by (metis cdi_prefix mk)
+      hence \<open>m \<in> range f\<close> using ran by blast
+      then obtain j where m: \<open>m = f j\<close> by blast
+      show \<open>False\<close> using im mi mono unfolding m by (metis Suc_lessI le_less not_le)
+    assume cdm: \<open>f 0 cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close>
+    have \<open>\<forall> k>m. k cd\<^bsup>\<pi>\<^esup>\<rightarrow>m\<close> proof (rule,rule,cases)
+      fix k assume \<open>f 0 < k\<close>
+      hence \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> f 0\<close> using ran by auto
+      thus \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using cdm cd_trans by metis
+      fix k assume mk: \<open>m < k\<close> and \<open>\<not> f 0 < k\<close>
+      hence ik: \<open>k \<le> f 0\<close> by simp
+      thus \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using cdm by (metis cdi_prefix mk)
+    hence \<open>m \<in> range f\<close> using ran by blast
+    then obtain j where m: \<open>m = f j\<close> by blast
+    hence fj0: \<open>f j < f 0\<close>  using cdm m is_cdi_def by auto
+    hence \<open>0 < j\<close> by (metis less_irrefl neq0_conv)
+    hence \<open>False\<close> using fj0 mono by fastforce
+  ultimately show \<open>thesis\<close> using that ran by blast
+lemma cdi_iff_no_strict_pd: \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k \<longleftrightarrow> is_path \<pi> \<and> k < i \<and> \<pi> i \<noteq> return \<and> (\<forall> j \<in> {k..i}. \<not> (\<pi> k, \<pi> j) \<in> pdt)\<close>
+  assume cd:\<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>
+  have 1: \<open>is_path \<pi> \<and> k < i \<and> \<pi> i \<noteq> return\<close> using cd unfolding is_cdi_def by auto
+  have 2: \<open>\<forall> j \<in> {k..i}. \<not> (\<pi> k, \<pi> j) \<in> pdt\<close> proof (rule ccontr)
+    assume \<open> \<not> (\<forall>j\<in>{k..i}. (\<pi> k, \<pi> j) \<notin> pdt)\<close>
+    then obtain j where \<open>j \<in> {k..i}\<close> and \<open>(\<pi> k, \<pi> j) \<in> pdt\<close> by auto
+    hence \<open>\<pi> j \<noteq> \<pi> k\<close> and \<open>\<pi> j pd\<rightarrow> \<pi> k\<close> unfolding pdt_def by auto
+    thus \<open>False\<close> using path_pd_ipd by (metis \<open>j \<in> {k..i}\<close> atLeastAtMost_iff cd cd_not_pd cdi_prefix le_eq_less_or_eq) 
+  show \<open>is_path \<pi> \<and> k < i \<and> \<pi> i \<noteq> return \<and> (\<forall> j \<in> {k..i}. \<not> (\<pi> k, \<pi> j) \<in> pdt)\<close> using 1 2 by simp
+  assume \<open>is_path \<pi> \<and> k < i \<and> \<pi> i \<noteq> return \<and> (\<forall> j \<in> {k..i}. \<not> (\<pi> k, \<pi> j) \<in> pdt)\<close>
+  thus \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> by (metis ipd_in_pdt term_path_stable less_or_eq_imp_le not_cd_impl_ipd path_nodes)
+subsection \<open>Facts about Control Slices\<close>
+lemma last_cs: \<open>last (cs\<^bsup>\<pi>\<^esup> i) = \<pi> i\<close> by auto
+lemma cs_not_nil: \<open>cs\<^bsup>\<pi>\<^esup> n \<noteq> []\<close> by (auto)
+lemma cs_return: assumes \<open>\<pi> n = return\<close> shows \<open>cs\<^bsup>\<pi>\<^esup> n = [\<pi> n]\<close> by (metis assms cs.elims icd_imp_cd ret_no_cd)
+lemma cs_0[simp]: \<open>cs\<^bsup>\<pi>\<^esup> 0 = [\<pi> 0]\<close> using is_icdi_def is_cdi_def by auto
+lemma cs_inj: assumes \<open>is_path \<pi>\<close> \<open>\<pi> n \<noteq> return\<close> \<open>cs\<^bsup>\<pi>\<^esup> n = cs\<^bsup>\<pi>\<^esup> n'\<close> shows \<open>n = n'\<close> 
+using assms proof (induction \<open>cs\<^bsup>\<pi>\<^esup> n\<close> arbitrary: \<open>\<pi>\<close> \<open>n\<close> \<open>n'\<close> rule:rev_induct)
+  case Nil hence \<open>False\<close> using cs_not_nil by metis thus \<open>?case\<close> by simp
+  case (snoc x xs \<pi> n n') show \<open>?case\<close> proof (cases \<open>xs\<close>)
+  hence *: \<open>\<not> (\<exists> k. n icd\<^bsup>\<pi>\<^esup>\<rightarrow>k)\<close> using snoc(2) cs_not_nil 
+  have \<open>[x] = cs\<^bsup>\<pi>\<^esup> n'\<close> using Nil snoc by auto
+  hence **: \<open>\<not> (\<exists> k. n' icd\<^bsup>\<pi>\<^esup>\<rightarrow>k)\<close> using cs_not_nil
+  have \<open>\<forall> k. \<not> n cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> \<open>\<forall> k. \<not> n' cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> using excd_impl_exicd by auto blast+
+  hence  \<open>\<pi> n = \<pi> n'\<close> using snoc(5,2) by auto (metis * ** list.inject)
+  show \<open>n = n'\<close> using other_claim' snoc by blast
+  hence *: \<open>\<exists> k. n icd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> using snoc(2) by auto (metis append_is_Nil_conv list.distinct(1) list.inject)
+  then obtain k where k: \<open>n icd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> by auto
+  have \<open>k = (THE k . n icd\<^bsup>\<pi>\<^esup>\<rightarrow> k)\<close> using k by (metis icd_is_the_icd)
+  hence xsk: \<open>xs = cs\<^bsup>\<pi>\<^esup> k\<close> using * k snoc(2) unfolding cs.simps[of \<open>\<pi>\<close> \<open>n\<close>] by auto
+  have **: \<open>\<exists> k. n' icd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> using snoc(2)[unfolded snoc(5)] by auto (metis Cons append1_eq_conv append_Nil list.distinct(1))
+  then obtain k' where k': \<open>n' icd\<^bsup>\<pi>\<^esup>\<rightarrow> k'\<close> by auto
+  hence \<open>k' = (THE k . n' icd\<^bsup>\<pi>\<^esup>\<rightarrow> k)\<close> using k' by (metis icd_is_the_icd)
+  hence xsk': \<open>xs = cs\<^bsup>\<pi>\<^esup> k'\<close> using ** k' snoc(5,2) unfolding cs.simps[of \<open>\<pi>\<close> \<open>n'\<close>] by auto
+  hence \<open>cs\<^bsup>\<pi>\<^esup> k = cs\<^bsup>\<pi>\<^esup> k'\<close> using xsk by simp
+  have kn: \<open>k < n\<close> using k by (metis is_icdi_def is_cdi_def)
+  hence \<open>\<pi> k \<noteq> return\<close> using snoc by (metis term_path_stable less_imp_le)
+  have kk'[simp]: \<open>k' = k\<close> using snoc(1) xsk snoc(3) by metis
+  have nk0: \<open>n - k icd\<^bsup>\<pi>\<guillemotleft>k\<^esup>\<rightarrow> 0\<close> \<open>n' - k icd\<^bsup>\<pi>\<guillemotleft>k\<^esup>\<rightarrow> 0\<close> using k k' icd_path_shift0 snoc(3) by auto
+  have nkr: \<open>(\<pi>\<guillemotleft>k)(n-k) \<noteq> return\<close> using snoc(4) kn by auto
+  have \<open>is_path (\<pi>\<guillemotleft>k)\<close> by (metis path_path_shift snoc.prems(1))
+  have kn': \<open>k < n'\<close> using k' kk' by (metis is_icdi_def is_cdi_def)
+  have \<open>\<pi> n = \<pi> n'\<close> using snoc(5) * ** by auto
+  hence \<open>(\<pi>\<guillemotleft>k)(n-k) = (\<pi>\<guillemotleft>k)(n'-k)\<close> using kn kn' by auto 
+  have \<open>n - k = n' - k\<close> using other_claim  by auto
+  thus \<open>n = n'\<close> using kn kn' by auto
+obtains (base) \<open>cs\<^bsup>\<pi>\<^esup> i = [\<pi> i]\<close> and \<open>\<forall> k. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> | 
+(depend) k where  \<open>cs\<^bsup>\<pi>\<^esup> i = (cs\<^bsup>\<pi>\<^esup> k)@[\<pi> i]\<close> and \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> 
+  assume *: \<open>\<exists> k. i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>
+  then obtain k where k: \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> ..
+  hence \<open>k = (THE k. i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k)\<close>  by (metis icd_is_the_icd)
+  hence \<open>cs\<^bsup>\<pi>\<^esup> i = (cs\<^bsup>\<pi>\<^esup> k)@[\<pi> i]\<close> using * by auto
+  with k that show \<open>thesis\<close> by simp
+  assume *: \<open>\<not> (\<exists> k. i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k)\<close>
+  hence \<open>\<forall> k. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> by (metis excd_impl_exicd)
+  have \<open>cs\<^bsup>\<pi>\<^esup> i = [\<pi> i]\<close> using * by auto
+  show \<open>thesis\<close> using that by simp
+lemma cs_length_one: assumes \<open>length (cs\<^bsup>\<pi>\<^esup> i) = 1\<close> shows  \<open>cs\<^bsup>\<pi>\<^esup> i = [\<pi> i]\<close> and \<open>\<forall> k. \<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close>
+  apply (cases \<open>i\<close> \<open>\<pi>\<close> rule: cs_cases)
+  apply (cases \<open>i\<close> \<open>\<pi>\<close> rule: cs_cases) 
+lemma cs_length_g_one: assumes \<open>length (cs\<^bsup>\<pi>\<^esup> i) \<noteq> 1\<close> obtains k where  \<open>cs\<^bsup>\<pi>\<^esup> i = (cs\<^bsup>\<pi>\<^esup> k)@[\<pi> i]\<close> and \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> 
+  apply (cases \<open>i\<close> \<open>\<pi>\<close> rule: cs_cases) 
+lemma claim: assumes  path: \<open>is_path \<pi>\<close> \<open>is_path \<pi>'\<close> and  ii: \<open>cs\<^bsup>\<pi>\<^esup> i = cs\<^bsup>\<pi>'\<^esup> i'\<close> and jj: \<open>cs\<^bsup>\<pi>\<^esup> j = cs\<^bsup>\<pi>'\<^esup> j'\<close> 
+and bl: \<open>butlast (cs\<^bsup>\<pi>\<^esup> i) = butlast (cs\<^bsup>\<pi>\<^esup> j)\<close> and nret: \<open>\<pi> i \<noteq> return\<close> and ilj: \<open>i < j\<close> 
+shows \<open>i' < j'\<close>
+  assume *: \<open>length (cs\<^bsup>\<pi>\<^esup> i) = 1\<close>
+  hence **: \<open>length (cs\<^bsup>\<pi>\<^esup> i) = 1\<close> \<open>length (cs\<^bsup>\<pi>\<^esup> j) = 1\<close> \<open>length (cs\<^bsup>\<pi>'\<^esup> i') = 1\<close> \<open>length (cs\<^bsup>\<pi>'\<^esup> j') = 1\<close>  
+  then obtain \<open>cs\<^bsup>\<pi>\<^esup> i = [\<pi> i]\<close> \<open>cs\<^bsup>\<pi>\<^esup> j = [\<pi> j]\<close> \<open>cs\<^bsup>\<pi>'\<^esup> j' = [\<pi>' j']\<close> \<open>cs\<^bsup>\<pi>'\<^esup> i'= [\<pi>' i']\<close> 
+    \<open>\<forall> k. \<not> j cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> \<open>\<forall> k. \<not> i' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> k\<close> \<open>\<forall> k. \<not> j' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> k\<close>
+  hence \<open>\<pi> i = \<pi>' i'\<close> \<open>\<pi> j = \<pi>' j'\<close> using  assms by auto
+  show \<open>i' < j'\<close> using nret ilj path claim'' by blast
+  assume *: \<open>length (cs\<^bsup>\<pi>\<^esup> i) \<noteq> 1\<close>
+  hence **: \<open>length (cs\<^bsup>\<pi>\<^esup> i) \<noteq> 1\<close> \<open>length (cs\<^bsup>\<pi>\<^esup> j) \<noteq> 1\<close> \<open>length (cs\<^bsup>\<pi>'\<^esup> i') \<noteq> 1\<close> \<open>length (cs\<^bsup>\<pi>'\<^esup> j') \<noteq> 1\<close>  
+    \<open>cs\<^bsup>\<pi>\<^esup> i = (cs\<^bsup>\<pi>\<^esup> k)@[\<pi> i]\<close> \<open>cs\<^bsup>\<pi>\<^esup> j = (cs\<^bsup>\<pi>\<^esup> l)@[\<pi> j]\<close>  \<open>cs\<^bsup>\<pi>'\<^esup> i' = (cs\<^bsup>\<pi>'\<^esup> k')@[\<pi>' i']\<close> \<open>cs\<^bsup>\<pi>'\<^esup> j' = (cs\<^bsup>\<pi>'\<^esup> l')@[\<pi>' j']\<close> and
+    icds: \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> \<open>j icd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close> \<open>i' icd\<^bsup>\<pi>'\<^esup>\<rightarrow> k'\<close> \<open>j' icd\<^bsup>\<pi>'\<^esup>\<rightarrow> l'\<close>
+  hence \<open>cs\<^bsup>\<pi>\<^esup> k = cs\<^bsup>\<pi>\<^esup> l\<close> \<open>cs\<^bsup>\<pi>'\<^esup> k' = cs\<^bsup>\<pi>'\<^esup> l'\<close> using assms by auto
+  have \<open>\<pi> k \<noteq> return\<close> \<open>\<pi>' k' \<noteq> return\<close> using nret 
+  have lk[simp]: \<open>l = k\<close> \<open>l' = k'\<close> using path cs_inj by auto
+  let \<open>?\<pi>\<close> = \<open>\<pi> \<guillemotleft> k\<close> 
+  let \<open>?\<pi>'\<close> = \<open>\<pi>'\<guillemotleft>k'\<close>
+  have \<open>i-k icd\<^bsup>?\<pi>\<^esup>\<rightarrow> 0\<close> \<open>j-k icd\<^bsup>?\<pi>\<^esup>\<rightarrow> 0\<close> \<open>i'-k' icd\<^bsup>?\<pi>'\<^esup>\<rightarrow> 0\<close> \<open>j'-k' icd\<^bsup>?\<pi>'\<^esup>\<rightarrow> 0\<close> using icd_path_shift0 path icds by auto
+  have ki: \<open>k < i\<close> using icds by (metis is_icdi_def is_cdi_def)
+  hence \<open>i-k < j-k\<close> by (metis diff_is_0_eq diff_less_mono ilj nat_le_linear order.strict_trans)
+  have \<pi>i: \<open>\<pi> i = \<pi>' i'\<close> \<open>\<pi> j = \<pi>' j'\<close> using assms *** by auto
+  have \<open>k' < i'\<close> \<open>k' < j'\<close> using icds unfolding lk by (metis is_cdi_def is_icdi_def)+ 
+  hence \<open>?\<pi> (i-k) = ?\<pi>' (i'-k')\<close> \<open>?\<pi> (j-k) = ?\<pi>' (j'-k')\<close> using \<pi>i ki ilj by auto
+  have \<open>?\<pi> (i-k) \<noteq> return\<close> using nret ki by auto
+  have \<open>is_path ?\<pi>\<close> \<open>is_path ?\<pi>'\<close> using path path_path_shift by auto
+  have \<open>i'-k' < j' - k'\<close> using claim' by blast
+  thus \<open>i' < j'\<close> by (metis diff_is_0_eq diff_less_mono less_nat_zero_code linorder_neqE_nat nat_le_linear)
+lemma cs_split': assumes \<open>cs\<^bsup>\<pi>\<^esup> i = xs@[x,x']@ys\<close>  shows \<open>\<exists> m. cs\<^bsup>\<pi>\<^esup> m = xs@[x] \<and> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> 
+using assms proof (induction \<open>ys\<close> arbitrary: \<open>i\<close> rule:rev_induct ) 
+  hence \<open>length (cs\<^bsup>\<pi>\<^esup> i) \<noteq> 1\<close> by auto
+  then obtain i' where \<open>cs\<^bsup>\<pi>\<^esup> i = (cs\<^bsup>\<pi>\<^esup> i') @ [\<pi> i]\<close> and *: \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> i'\<close> using cs_length_g_one[of \<open>\<pi>\<close> \<open>i\<close>] by metis
+  hence \<open>cs\<^bsup>\<pi>\<^esup> i' = xs@[x,x']@ys\<close> using snoc(2) by (metis append1_eq_conv append_assoc)
+  then obtain m where **: \<open>cs\<^bsup>\<pi>\<^esup> m = xs @ [x]\<close> and \<open>i' cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using snoc(1) by blast
+  hence \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using * cd_trans by (metis is_icdi_def)
+  with ** show \<open>?case\<close> by blast
+  hence \<open>length (cs\<^bsup>\<pi>\<^esup> i) \<noteq> 1\<close> by auto
+  then obtain i' where a: \<open>cs\<^bsup>\<pi>\<^esup> i = (cs\<^bsup>\<pi>\<^esup> i') @ [\<pi> i]\<close> and *: \<open>i icd\<^bsup>\<pi>\<^esup>\<rightarrow> i'\<close> using cs_length_g_one[of \<open>\<pi>\<close> \<open>i\<close>] by metis
+  have \<open>cs\<^bsup>\<pi>\<^esup> i = (xs@[x])@[x']\<close> using Nil by auto
+  hence \<open>cs\<^bsup>\<pi>\<^esup> i' = xs@[x]\<close> using append1_eq_conv a by metis  
+  thus \<open>?case\<close> using * unfolding is_icdi_def by blast
+lemma cs_split: assumes \<open>cs\<^bsup>\<pi>\<^esup> i = xs@[x]@ys@[\<pi> i]\<close>  shows \<open>\<exists> m. cs\<^bsup>\<pi>\<^esup> m = xs@[x] \<and> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> proof -
+  obtain x' ys' where \<open>ys@[\<pi> i] = [x']@ys'\<close> by (metis append_Cons append_Nil neq_Nil_conv)
+  thus \<open>?thesis\<close> using cs_split'[of \<open>\<pi>\<close> \<open>i\<close> \<open>xs\<close> \<open>x\<close> \<open>x'\<close> \<open>ys'\<close>] assms by auto
+lemma cs_less_split: assumes \<open>xs \<prec> ys\<close> obtains a as where \<open>ys = xs@a#as\<close>
+lemma cs_select_is_cs: assumes \<open>is_path \<pi>\<close> \<open>xs \<noteq> Nil\<close> \<open>xs \<prec> cs\<^bsup>\<pi>\<^esup> k\<close> shows \<open>cs\<^bsup>\<pi>\<^esup> (\<pi>\<exclamdown>xs) = xs\<close> \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> (\<pi>\<exclamdown>xs)\<close>proof -
+  obtain b bs where b: \<open>cs\<^bsup>\<pi>\<^esup> k = xs@b#bs\<close> using assms cs_less_split by blast
+  obtain a as where a: \<open>xs = as@[a]\<close> using assms by (metis rev_exhaust)
+  have \<open>cs\<^bsup>\<pi>\<^esup> k = as@[a,b]@bs\<close> using a b by auto
+  then obtain k' where csk: \<open>cs\<^bsup>\<pi>\<^esup> k' = xs\<close> and is_cd: \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> k'\<close> using cs_split' a by blast
+  hence nret: \<open>\<pi> k' \<noteq> return\<close> by (metis is_cdi_def term_path_stable less_imp_le)
+  show a: \<open>cs\<^bsup>\<pi>\<^esup> (\<pi>\<exclamdown>xs) = xs\<close> unfolding cs_select_def using cs_inj[OF assms(1) nret] csk the_equality[of _ \<open>k'\<close>]
+  show \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> (\<pi>\<exclamdown>xs)\<close> unfolding cs_select_def by (metis a assms(1) cs_inj cs_select_def csk is_cd nret)
+lemma cd_in_cs: assumes \<open>n cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> shows \<open>\<exists> ns. cs\<^bsup>\<pi>\<^esup> n = (cs\<^bsup>\<pi>\<^esup> m) @ ns @[\<pi> n]\<close> 
+  case (base  n) thus \<open>?case\<close> by (metis append_Nil cs.simps icd_is_the_icd)
+  hence \<open>cs\<^bsup>\<pi>\<^esup> n = cs\<^bsup>\<pi>\<^esup> k @ [\<pi> n]\<close> by (metis cs.simps icd_is_the_icd)  
+  thus \<open>?case\<close> using IS by force
+lemma butlast_cs_not_cd: assumes \<open>butlast (cs\<^bsup>\<pi>\<^esup> m) = butlast (cs\<^bsup>\<pi>\<^esup> n)\<close> shows \<open>\<not> m cd\<^bsup>\<pi>\<^esup>\<rightarrow>n\<close>
+lemma wn_cs_butlast: assumes \<open>butlast (cs\<^bsup>\<pi>\<^esup> m) = butlast (cs\<^bsup>\<pi>\<^esup> n)\<close> \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> \<open>m<n\<close> shows \<open>i<j\<close>
+  assume \<open>\<not> i < j\<close>
+  have \<open>\<not> n cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> by (metis assms(1) butlast_cs_not_cd)
+  have \<open>n \<le> m\<close> using assms(2,3) cr_wn'' by auto
+  thus \<open>False\<close> using assms(4) by auto
+text \<open>This is the central theorem making the control slice suitable for matching indices between executions.\<close>
+theorem cs_order: assumes path: \<open>is_path \<pi>\<close> \<open>is_path \<pi>'\<close> and csi: \<open>cs\<^bsup>\<pi>\<^esup> i = cs\<^bsup>\<pi>'\<^esup> i'\<close> 
+and csj: \<open>cs\<^bsup>\<pi>\<^esup> j = cs\<^bsup>\<pi>'\<^esup> j'\<close> and nret: \<open>\<pi> i \<noteq> return\<close> and ilj: \<open>i < j\<close>   
+shows \<open>i'<j'\<close>
+  have \<open>cs\<^bsup>\<pi>\<^esup> i \<noteq> cs\<^bsup>\<pi>\<^esup> j\<close> using cs_inj[OF path(1) nret] ilj by blast
+  have \<open>cs\<^bsup>\<pi>\<^esup> i \<noteq> Nil\<close> \<open>cs\<^bsup>\<pi>\<^esup> j \<noteq> Nil\<close> by (metis cs_not_nil)+
+  ultimately show \<open>?thesis\<close> proof (cases rule: list_neq_prefix_cases)
+    note csx = \<open>cs\<^bsup>\<pi>\<^esup> i = xs @ [x] @ ys\<close>
+    note csx' = \<open>cs\<^bsup>\<pi>\<^esup> j = xs @ [x'] @ ys'\<close>
+    note xx = \<open>x \<noteq> x'\<close>
+    show \<open>i' < j'\<close> proof (cases \<open>ys\<close>) 
+      assume ys: \<open>ys = Nil\<close>
+      show \<open>?thesis\<close> proof (cases \<open>ys'\<close>)
+        assume ys': \<open>ys' = Nil\<close>
+        have cs: \<open>cs\<^bsup>\<pi>\<^esup> i = xs @ [x]\<close> \<open>cs\<^bsup>\<pi>\<^esup> j = xs @ [x']\<close> by (metis append_Nil2 csx ys, metis append_Nil2 csx' ys')
+        hence bl: \<open>butlast (cs\<^bsup>\<pi>\<^esup> i) = butlast (cs\<^bsup>\<pi>\<^esup> j)\<close> by auto        
+        show \<open>i' < j'\<close> using claim[OF path csi csj bl nret ilj] .
+        assume ys': \<open>ys' = y'#zs'\<close>
+        have cs: \<open>cs\<^bsup>\<pi>\<^esup> i = xs @ [x]\<close> \<open>cs\<^bsup>\<pi>\<^esup> j = xs @ [x',y']@ zs'\<close> by (metis append_Nil2 csx ys, metis append_Cons append_Nil csx' ys')         
+        obtain n where n: \<open>cs\<^bsup>\<pi>\<^esup> n = xs@[x']\<close> and jn: \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> using cs cs_split' by blast
+        obtain n' where n': \<open>cs\<^bsup>\<pi>'\<^esup> n' = xs@[x']\<close> and jn': \<open>j' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> n'\<close> using cs cs_split' unfolding csj by blast
+        have csn : \<open>cs\<^bsup>\<pi>\<^esup> n = cs\<^bsup>\<pi>'\<^esup> n'\<close> and bl: \<open>butlast (cs\<^bsup>\<pi>\<^esup> i) = butlast (cs\<^bsup>\<pi>\<^esup> n)\<close> using n n' cs by auto
+        hence bl': \<open>butlast (cs\<^bsup>\<pi>'\<^esup> i') = butlast (cs\<^bsup>\<pi>'\<^esup> n')\<close> using csi by auto
+        have notcd: \<open>\<not> i cd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> by (metis butlast_cs_not_cd bl)
+        have nin: \<open>i \<noteq> n\<close> using cs n xx by auto
+        have iln: \<open>i < n\<close> apply (rule ccontr) using cr_wn'[OF jn notcd] nin ilj by auto
+        hence \<open>i' < n'\<close> .
+        thus \<open>i' < j'\<close> using jn' unfolding is_cdi_def by auto
+      assume ys: \<open>ys = y#zs\<close>
+      show \<open>?thesis\<close> proof (cases \<open>ys'\<close>)
+        assume ys' : \<open>ys' = Nil\<close>
+        have cs: \<open>cs\<^bsup>\<pi>\<^esup> i = xs @ [x,y]@zs\<close> \<open>cs\<^bsup>\<pi>\<^esup> j = xs @ [x']\<close> by (metis append_Cons append_Nil csx ys, metis append_Nil2 csx' ys')
+        obtain n where n: \<open>cs\<^bsup>\<pi>\<^esup> n = xs@[x]\<close> and jn: \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> using cs cs_split' by blast
+        obtain n' where n': \<open>cs\<^bsup>\<pi>'\<^esup> n' = xs@[x]\<close> and jn': \<open>i' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> n'\<close> using cs cs_split' unfolding csi by blast
+        have csn : \<open>cs\<^bsup>\<pi>\<^esup> n = cs\<^bsup>\<pi>'\<^esup> n'\<close> and bl: \<open>butlast (cs\<^bsup>\<pi>\<^esup> n) = butlast (cs\<^bsup>\<pi>\<^esup> j)\<close> using n n' cs by auto
+        hence bl': \<open>butlast (cs\<^bsup>\<pi>'\<^esup> j') = butlast (cs\<^bsup>\<pi>'\<^esup> n')\<close> using csj by auto
+        have notcd: \<open>\<not> j' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> n'\<close> by (metis butlast_cs_not_cd bl')
+        have nin: \<open>n < i\<close> using jn unfolding is_cdi_def by auto
+        have nlj: \<open>n < j\<close> using nin ilj by auto
+        hence nj': \<open>n' < j'\<close> using term_path_stable[OF path(1) _] less_imp_le nin nret by auto
+        show \<open>i' < j'\<close> apply(rule ccontr) using cdi_prefix[OF jn' nj'] notcd by auto
+        assume ys' : \<open>ys' = y'#zs'\<close>
+        have cs: \<open>cs\<^bsup>\<pi>\<^esup> i = xs@[x,y]@zs\<close> \<open>cs\<^bsup>\<pi>\<^esup> j = xs@[x',y']@zs'\<close> by (metis append_Cons append_Nil csx ys,metis append_Cons append_Nil csx' ys')
+        have neq: \<open>cs\<^bsup>\<pi>\<^esup> i \<noteq> cs\<^bsup>\<pi>\<^esup> j\<close> using cs_inj path nret ilj by blast
+        obtain m where m: \<open>cs\<^bsup>\<pi>\<^esup> m = xs@[x]\<close> and im: \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using cs cs_split' by blast
+        obtain n where n: \<open>cs\<^bsup>\<pi>\<^esup> n = xs@[x']\<close> and jn: \<open>j cd\<^bsup>\<pi>\<^esup>\<rightarrow> n\<close> using cs cs_split' by blast
+        obtain m' where m': \<open>cs\<^bsup>\<pi>'\<^esup> m' = xs@[x]\<close> and im': \<open>i' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> m'\<close> using cs cs_split' unfolding csi by blast
+        obtain n' where n': \<open>cs\<^bsup>\<pi>'\<^esup> n' = xs@[x']\<close> and jn': \<open>j' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> n'\<close> using cs cs_split' unfolding csj by blast
+        have \<open>m \<le> n\<close> using ilj m n wn_cs_butlast[OF _ jn im] by force
+        have \<open>m \<noteq> n\<close> using m n xx by (metis last_snoc)
+        have mn: \<open>m < n\<close> by auto
+        have \<open>\<pi> m \<noteq> return\<close> by (metis last_cs last_snoc m mn n path(1) term_path_stable xx less_imp_le)
+        have \<open>butlast (cs\<^bsup>\<pi>\<^esup> m) = butlast (cs\<^bsup>\<pi>\<^esup> n)\<close> \<open>cs\<^bsup>\<pi>\<^esup> m = cs\<^bsup>\<pi>'\<^esup> m'\<close> \<open>cs\<^bsup>\<pi>\<^esup> n = cs\<^bsup>\<pi>'\<^esup> n'\<close> using m n n' m' by auto
+        have \<open>m' < n'\<close> using claim path by blast
+        thus \<open>i' < j'\<close> using m' n' im' jn' wn_cs_butlast by (metis butlast_snoc)        
+    note pfx = \<open>cs\<^bsup>\<pi>\<^esup> i = cs\<^bsup>\<pi>\<^esup> j @ xs\<close>
+    note xs = \<open>xs \<noteq> []\<close>
+    obtain a as where \<open>xs = a#as\<close> using xs by (metis list.exhaust)
+    obtain bs b where bj: \<open>cs\<^bsup>\<pi>\<^esup> j = bs@[b]\<close> using cs_not_nil by (metis rev_exhaust)
+    have \<open>cs\<^bsup>\<pi>\<^esup> i = bs@[b,a]@as\<close> using pfx by auto
+    then obtain m where \<open>cs\<^bsup>\<pi>\<^esup> m = bs@[b]\<close> and cdep:  \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> m\<close> using cs_split' by blast
+    hence mi: \<open>m = j\<close> using bj cs_inj by (metis is_cdi_def term_path_stable less_imp_le)
+    hence \<open>i cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> using cdep by auto
+    hence \<open>False\<close> using ilj unfolding is_cdi_def by auto
+    thus \<open>i' < j'\<close> ..
+    have pfx : \<open>cs\<^bsup>\<pi>'\<^esup> i' @ xs = cs\<^bsup>\<pi>'\<^esup> j'\<close> using prefix2 csi csj by auto
+    note xs = \<open>xs \<noteq> []\<close>
+     obtain a as where \<open>xs = a#as\<close> using xs by (metis list.exhaust)
+    obtain bs b where bj: \<open>cs\<^bsup>\<pi>'\<^esup> i'  = bs@[b]\<close> using cs_not_nil by (metis rev_exhaust)
+    have \<open>cs\<^bsup>\<pi>'\<^esup> j' = bs@[b,a]@as\<close> using pfx by auto
+    then obtain m where \<open>cs\<^bsup>\<pi>'\<^esup> m = bs@[b]\<close> and cdep:  \<open>j' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> m\<close> using cs_split' by blast
+    hence mi: \<open>m = i'\<close> using bj cs_inj by (metis is_cdi_def term_path_stable less_imp_le)
+    hence \<open>j' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> i'\<close> using cdep by auto
+    thus \<open>i' < j'\<close> unfolding is_cdi_def by auto  
+lemma cs_order_le: assumes path: \<open>is_path \<pi>\<close> \<open>is_path \<pi>'\<close> and csi: \<open>cs\<^bsup>\<pi>\<^esup> i = cs\<^bsup>\<pi>'\<^esup> i'\<close> 
+and csj: \<open>cs\<^bsup>\<pi>\<^esup> j = cs\<^bsup>\<pi>'\<^esup> j'\<close> and nret: \<open>\<pi> i \<noteq> return\<close> and ilj: \<open>i \<le> j\<close>   
+shows \<open>i'\<le>j'\<close> proof cases
+  assume \<open>i < j\<close> with cs_order[OF assms(1,2,3,4,5)] show \<open>?thesis\<close> by simp
+  assume \<open>\<not> i < j\<close>
+  hence \<open>i = j\<close> using ilj by simp
+  hence csij: \<open>cs\<^bsup>\<pi>'\<^esup> i' = cs\<^bsup>\<pi>'\<^esup> j'\<close> using csi csj by simp  
+  have nret': \<open>\<pi>' i' \<noteq> return\<close> using nret last_cs csi by metis
+  show \<open>?thesis\<close> using cs_inj[OF path(2) nret' csij] by simp
+lemma icdi_path_swap: assumes \<open>is_path \<pi>'\<close> \<open>j icd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> \<open>\<pi> =\<^bsub>j\<^esub>  \<pi>'\<close> shows \<open>j icd\<^bsup>\<pi>'\<^esup>\<rightarrow>k\<close> using assms unfolding eq_up_to_def is_icdi_def is_cdi_def by auto
+lemma icdi_path_swap_le: assumes \<open>is_path \<pi>'\<close> \<open>j icd\<^bsup>\<pi>\<^esup>\<rightarrow>k\<close> \<open>\<pi> =\<^bsub>n\<^esub>  \<pi>'\<close> \<open>j \<le> n\<close> shows \<open>j icd\<^bsup>\<pi>'\<^esup>\<rightarrow>k\<close> by (metis assms icdi_path_swap eq_up_to_le)
+lemma cs_path_swap: assumes \<open>is_path \<pi>\<close> \<open>is_path \<pi>'\<close> \<open>\<pi> =\<^bsub>k\<^esub> \<pi>'\<close> shows \<open>cs\<^bsup>\<pi>\<^esup> k = cs\<^bsup>\<pi>'\<^esup> k\<close> using assms(1,3) proof (induction \<open>\<pi>\<close> \<open>k\<close> rule:cs_induct,cases)
+  let \<open>?l\<close> = \<open>(THE l. k icd\<^bsup>\<pi>\<^esup>\<rightarrow> l)\<close>
+  assume *: \<open>\<exists>l. k icd\<^bsup>\<pi>\<^esup>\<rightarrow> l\<close>
+  have kicd: \<open>k icd\<^bsup>\<pi>\<^esup>\<rightarrow> ?l\<close> by (metis "*" icd_is_the_icd)
+  hence \<open>?l < k\<close> unfolding is_cdi_def[of \<open>k\<close> \<open>\<pi>\<close> \<open>?l\<close>] is_icdi_def[of \<open>k\<close> \<open>\<pi>\<close> \<open>?l\<close>] by auto
+  hence \<open>\<forall> i\<le>?l. \<pi> i = \<pi>' i\<close> using cs(2,3) unfolding eq_up_to_def by auto
+  hence csl: \<open>cs\<^bsup>\<pi>\<^esup> ?l = cs\<^bsup>\<pi>'\<^esup> ?l\<close> using cs(1,2) * unfolding eq_up_to_def by auto 
+  have kicd: \<open>k icd\<^bsup>\<pi>\<^esup>\<rightarrow> ?l\<close> by (metis "*" icd_is_the_icd)
+  hence csk: \<open>cs\<^bsup>\<pi>\<^esup> k = cs\<^bsup>\<pi>\<^esup> ?l @ [\<pi> k]\<close> using kicd by auto
+  have kicd': \<open>k icd\<^bsup>\<pi>'\<^esup>\<rightarrow> ?l\<close> using kicd icdi_path_swap[OF assms(2) _ cs(3)] by simp
+  hence \<open>?l = (THE l. k icd\<^bsup>\<pi>'\<^esup>\<rightarrow> l)\<close> by (metis icd_is_the_icd)
+  hence csk': \<open>cs\<^bsup>\<pi>'\<^esup> k = cs\<^bsup>\<pi>'\<^esup> ?l @ [\<pi>' k]\<close> using kicd' by auto
+  have \<open>\<pi>' k = \<pi> k\<close> using cs(3) unfolding eq_up_to_def by auto
+  show \<open>?case\<close> by auto
+  assume *: \<open>\<not> (\<exists>l. k icd\<^bsup>\<pi>\<^esup>\<rightarrow> l)\<close>
+  hence csk: \<open>cs\<^bsup>\<pi>\<^esup> k = [\<pi> k]\<close> by auto
+  have \<open>\<not> (\<exists>l. k icd\<^bsup>\<pi>'\<^esup>\<rightarrow> l)\<close> apply (rule ccontr) using * icdi_path_swap_le[OF cs(2) _, of \<open>k\<close> \<open>\<pi>'\<close>] cs(3) by (metis eq_up_to_sym le_refl)
+  hence csk': \<open>cs\<^bsup>\<pi>'\<^esup> k = [\<pi>' k]\<close> by auto
+  with csk show \<open>?case\<close> using cs(3) eq_up_to_apply by auto
+lemma cs_path_swap_le: assumes \<open>is_path \<pi>\<close> \<open>is_path \<pi>'\<close> \<open>\<pi> =\<^bsub>n\<^esub>  \<pi>'\<close> \<open>k \<le> n\<close> shows \<open>cs\<^bsup>\<pi>\<^esup> k = cs\<^bsup>\<pi>'\<^esup> k\<close> by (metis assms cs_path_swap eq_up_to_le)
+lemma cs_path_swap_cd: assumes \<open>is_path \<pi>\<close> and \<open>is_path \<pi>'\<close> and \<open>cs\<^bsup>\<pi>\<^esup> n = cs\<^bsup>\<pi>'\<^esup> n'\<close> and \<open>n cd\<^bsup>\<pi>\<^esup>\<rightarrow> k\<close> 
+obtains k' where \<open>n' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> k'\<close> and \<open>cs\<^bsup>\<pi>\<^esup> k = cs\<^bsup>\<pi>'\<^esup> k'\<close>
+  obtain ns where *: \<open>cs\<^bsup>\<pi>\<^esup> n = cs\<^bsup>\<pi>\<^esup> k @ ns @ [\<pi> n]\<close> by blast
+  obtain xs x where csk: \<open>cs\<^bsup>\<pi>\<^esup> k = xs @ [x]\<close> by (metis cs_not_nil rev_exhaust)
+  have \<open>\<pi> n = \<pi>' n'\<close> using assms(3) last_cs by metis
+  hence **: \<open>cs\<^bsup>\<pi>'\<^esup> n' = xs@[x]@ns@[\<pi>' n']\<close> using * assms(3) csk by auto
+  obtain k' where \<open>cs\<^bsup>\<pi>'\<^esup> k' = xs @ [x]\<close> \<open>n' cd\<^bsup>\<pi>'\<^esup>\<rightarrow> k'\<close> by blast
+  thus \<open>thesis\<close> using that csk by auto
+lemma path_ipd_swap: assumes \<open>is_path \<pi>\<close> \<open>\<pi> k \<noteq> return\<close> \<open>k < n\<close> 
+obtains \<pi>' m where \<open>is_path \<pi>'\<close> \<open>\<pi> =\<^bsub>n\<^esub>  \<pi>'\<close> \<open>k < m\<close> \<open>\<pi>' m = ipd (\<pi>' k)\<close> \<open>\<forall> l \<in> {k..<m}. \<pi>' l \<noteq> ipd (\<pi>' k)\<close>
+  obtain \<pi>' r where *: \<open>\<pi>' 0 = \<pi> n\<close> \<open>is_path \<pi>'\<close> \<open>\<pi>' r = return\<close> by (metis assms(1) path_nodes reaching_ret)
+  let \<open>?\<pi>\<close> = \<open>\<pi>@\<^bsup>n\<^esup>  \<pi>'\<close>
+  have path: \<open>is_path ?\<pi>\<close> and ret: \<open>?\<pi> (n + r) = return\<close> and equpto:  \<open>?\<pi> =\<^bsub>n\<^esub>  \<pi>\<close> using assms path_cons * path_append_eq_up_to by auto
+  have \<pi>k: \<open>?\<pi> k = \<pi> k\<close> by (metis assms(3) less_imp_le_nat path_append_def)
+  obtain j where j: \<open>k < j \<and> j \<le> (n + r) \<and> ?\<pi> j = ipd (\<pi> k)\<close> (is \<open>?P j\<close> )by (metis \<pi>k assms(2) path path_ret_ipd ret)
+  define m where m: \<open>m \<equiv> LEAST m . ?P m\<close>
+  have Pm: \<open>?P m\<close> using LeastI[of \<open>?P\<close> \<open>j\<close>] j m by auto
+  hence km: \<open>k < m\<close> \<open>m \<le> (n + r)\<close> \<open>?\<pi> m = ipd (\<pi> k)\<close> by auto
+  have le: \<open>\<And>l. ?P l \<Longrightarrow> m \<le> l\<close> using Least_le[of \<open>?P\<close>] m by blast
+  have \<pi>knipd: \<open>?\<pi> k \<noteq> ipd (\<pi> k)\<close> by (metis \<pi>k assms(1) assms(2) ipd_not_self path_nodes)
+  have nipd': \<open>\<And>l. k < l \<Longrightarrow> l < m \<Longrightarrow> ?\<pi> l \<noteq> ipd (\<pi> k)\<close> apply (rule ccontr) using le km(2) by force
+  have \<open>\<forall> l \<in> {k..<m}. ?\<pi> l \<noteq> ipd(\<pi> k)\<close> using \<pi>knipd nipd' by(auto, metis le_eq_less_or_eq,metis le_eq_less_or_eq)
+  thus \<open>thesis\<close> using that by (metis \<pi>k eq_up_to_sym km(1) km(3) path path_append_eq_up_to)
+lemma cs_sorted_list_of_cd': \<open>cs\<^bsup>\<pi>\<^esup> k = map \<pi> (sorted_list_of_set { i . k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}) @ [\<pi> k]\<close> 
+proof (induction \<open>\<pi>\<close> \<open>k\<close> rule: cs.induct, cases)
+  assume \<open>\<exists> j. k icd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close>
+  hence csj: \<open>cs\<^bsup>\<pi>\<^esup> j = map \<pi> (sorted_list_of_set {i. j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}) @ [\<pi> j]\<close> by (metis "1.IH" icd_is_the_icd)
+  have \<open>{i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} = insert j {i. j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}\<close> using cdi_is_cd_icdi[OF j] by auto
+  have f: \<open>finite {i. j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}\<close> unfolding is_cdi_def by auto
+  have \<open>j \<notin> {i. j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}\<close> unfolding is_cdi_def by auto
+  have \<open>sorted_list_of_set { i . k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} = insort j (sorted_list_of_set { i . j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i})\<close> using sorted_list_of_set_insert by auto
+  have \<open>\<forall> x \<in>  {i. j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}. x < j\<close> unfolding is_cdi_def by auto
+  hence \<open>\<forall> x \<in> set (sorted_list_of_set {i. j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}). x < j\<close> by (simp add: f) 
+  have \<open>sorted_list_of_set { i . k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} = (sorted_list_of_set { i . j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i})@[j]\<close>  using insort_greater by auto
+  hence \<open>cs\<^bsup>\<pi>\<^esup> j = map \<pi> (sorted_list_of_set { i . k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i})\<close> using csj by auto
+  thus \<open>?case\<close> by (metis icd_cs j)
+  assume *: \<open>\<not> (\<exists> j. k icd\<^bsup>\<pi>\<^esup>\<rightarrow> j)\<close>
+  hence \<open>cs\<^bsup>\<pi>\<^esup> k = [\<pi> k]\<close> by (metis cs_cases)
+  have \<open>{ i . k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} = {}\<close> by (auto, metis * excd_impl_exicd)
+  show \<open>?case\<close> by (metis append_Nil list.simps(8) sorted_list_of_set_empty)
+lemma cs_sorted_list_of_cd: \<open>cs\<^bsup>\<pi>\<^esup> k = map \<pi> (sorted_list_of_set ({ i . k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} \<union> {k}))\<close> proof -
+  have le: \<open>\<forall> x \<in> {i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow>i}.\<forall> y \<in> {k}. x < y\<close> unfolding is_cdi_def by auto
+  have fin: \<open>finite {i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow>i}\<close> \<open>finite {k}\<close> unfolding is_cdi_def by auto  
+  show \<open>?thesis\<close> unfolding cs_sorted_list_of_cd'[of \<open>\<pi>\<close> \<open>k\<close>] sorted_list_of_set_append[OF fin le] by auto
+lemma cs_not_ipd: assumes \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<and> ipd (\<pi> j) \<noteq> ipd (\<pi> k)\<close> (is \<open>?Q j\<close>)
+shows \<open>cs\<^bsup>\<pi>\<^esup> (GREATEST j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<and> ipd (\<pi> j) \<noteq> ipd (\<pi> k)) = [n\<leftarrow>cs\<^bsup>\<pi>\<^esup> k . ipd n \<noteq> ipd (\<pi> k)]\<close>
+(is \<open>cs\<^bsup>\<pi>\<^esup> ?j = filter ?P _\<close>) 
+  have csk: \<open>cs\<^bsup>\<pi>\<^esup> k = map \<pi> (sorted_list_of_set ({ i . k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i } \<union> {k}))\<close> by (metis cs_sorted_list_of_cd)
+  have csj: \<open>cs\<^bsup>\<pi>\<^esup> ?j = map \<pi> (sorted_list_of_set ({i. ?j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i } \<union> {?j}))\<close> by (metis cs_sorted_list_of_cd)
+  have bound: \<open>\<forall> j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<and> ipd (\<pi> j) \<noteq> ipd(\<pi> k) \<longrightarrow> j \<le> k\<close> unfolding is_cdi_def by simp
+  have kcdj: \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> ?j\<close> and ipd': \<open>ipd (\<pi> ?j) \<noteq> ipd(\<pi> k)\<close> using GreatestI_nat[of \<open>?Q\<close> \<open>j\<close> \<open>k\<close>, OF assms] bound by auto
+  have greatest: \<open>\<And> j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<Longrightarrow> ipd (\<pi> j) \<noteq> ipd (\<pi> k) \<Longrightarrow> j \<le> ?j\<close> using Greatest_le_nat[of \<open>?Q\<close>  _ \<open>k\<close>] bound by auto
+  have less_not_ipdk: \<open>\<And> j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<Longrightarrow> j < ?j \<Longrightarrow> ipd (\<pi> j) \<noteq> ipd (\<pi> k)\<close>   by (metis (lifting) ipd' kcdj same_ipd_stable)
+  hence le_not_ipdk: \<open>\<And> j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<Longrightarrow> j \<le> ?j \<Longrightarrow> ipd (\<pi> j) \<noteq> ipd (\<pi> k)\<close> using kcdj ipd' by (case_tac \<open>j = ?j\<close>,auto)
+  have *: \<open>{j \<in> {i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow>i} \<union> {k}. ?P (\<pi> j)} = insert ?j { i . ?j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} \<close> 
+    apply (subgoal_tac \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> x\<close>)
+  have \<open>finite ({i . k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} \<union> {k})\<close> unfolding is_cdi_def by auto
+  note filter_sorted_list_of_set[OF this, of \<open>?P o \<pi>\<close>]
+  hence \<open>[n\<leftarrow>cs\<^bsup>\<pi>\<^esup> k . ipd n \<noteq> ipd(\<pi> k)] = map \<pi> (sorted_list_of_set {j \<in> {i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow>i} \<union> {k}. ?P (\<pi> j)})\<close> unfolding csk filter_map by auto 
+  have \<open>\<dots> =  map \<pi> (sorted_list_of_set (insert ?j { i . ?j cd\<^bsup>\<pi>\<^esup>\<rightarrow> i}))\<close> unfolding * by auto
+  have \<open>\<dots> = cs\<^bsup>\<pi>\<^esup> ?j\<close> using csj by auto
+  show \<open>?thesis\<close> by metis
+lemma cs_ipd: assumes ipd: \<open>\<pi> m = ipd (\<pi> k)\<close> \<open>\<forall> n \<in> {k..<m}. \<pi> n \<noteq> ipd (\<pi> k)\<close>
+and km: \<open>k < m\<close> shows \<open>cs\<^bsup>\<pi>\<^esup> m = [n\<leftarrow>cs\<^bsup>\<pi>\<^esup> k . ipd n \<noteq> \<pi> m] @ [\<pi> m]\<close>
+  assume \<open>\<exists> j. m icd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close>  
+  then obtain j where jicd: \<open>m icd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> by blast
+  hence *: \<open>cs\<^bsup>\<pi>\<^esup> m = cs\<^bsup>\<pi>\<^esup> j @ [\<pi> m]\<close> by (metis icd_cs)
+  have j: \<open>j = (GREATEST j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j \<and> ipd (\<pi> j) \<noteq> \<pi> m)\<close> using jicd assms ipd_icd_greatest_cd_not_ipd by blast
+  have \<open>ipd (\<pi> j) \<noteq> ipd (\<pi> k)\<close> by (metis is_cdi_def is_icdi_def is_ipd_def cd_not_pd ipd(1) ipd_is_ipd jicd path_nodes less_imp_le term_path_stable)
+  have \<open>k cd\<^bsup>\<pi>\<^esup>\<rightarrow> j\<close> unfolding j by (metis (lifting, no_types) assms(3) cd_ipd_is_cd icd_imp_cd ipd(1) ipd(2) j jicd)
+  have \<open>cs\<^bsup>\<pi>\<^esup> j = [n\<leftarrow>cs\<^bsup>\<pi>\<^esup> k . ipd n \<noteq> \<pi> m]\<close> using cs_not_ipd[of \<open>k\<close> \<open>\<pi>\<close> \<open>j\<close>] ipd(1) by metis
+  thus \<open>?thesis\<close> using * by metis
+  assume noicd: \<open>\<not> (\<exists> j. m icd\<^bsup>\<pi>\<^esup>\<rightarrow> j)\<close>  
+  hence csm: \<open>cs\<^bsup>\<pi>\<^esup> m = [\<pi> m]\<close> by auto
+  have \<open>\<And>j. k cd\<^bsup>\<pi>\<^esup>\<rightarrow>j \<Longrightarrow> ipd(\<pi> j) = \<pi> m\<close> using cd_is_cd_ipd[OF km ipd] by (metis excd_impl_exicd noicd)
+  hence *: \<open>{j \<in> {i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} \<union> {k}. ipd (\<pi> j) \<noteq> \<pi> m} = {}\<close> using ipd(1) by auto
+  have **: \<open>((\<lambda>n. ipd n \<noteq> \<pi> m) o \<pi>) = (\<lambda>n. ipd (\<pi> n) \<noteq> \<pi> m)\<close> by auto
+  have fin: \<open>finite ({i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} \<union> {k})\<close> unfolding is_cdi_def by auto
+  note csk = cs_sorted_list_of_cd[of \<open>\<pi>\<close> \<open>k\<close>]
+  hence \<open>[n\<leftarrow>cs\<^bsup>\<pi>\<^esup> k . ipd n \<noteq> \<pi> m] = [n\<leftarrow> (map \<pi> (sorted_list_of_set ({i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} \<union> {k}))) . ipd n \<noteq> \<pi> m]\<close> by simp
+  have \<open>\<dots> = map \<pi> [n <- sorted_list_of_set ({i. k cd\<^bsup>\<pi>\<^esup>\<rightarrow> i} \<union> {k}). ipd (\<pi> n) \<noteq> \<pi> m]\<close>  by (auto simp add: filter_map **) 

@@ -1,0 +1,1484 @@
+theory Chebyshev_Polynomials
+imports
+  "HOL-Analysis.Analysis"
+  "HOL-Real_Asymp.Real_Asymp"
+  "HOL-Computational_Algebra.Formal_Laurent_Series"
+  "Polynomial_Interpolation.Ring_Hom_Poly"
+  "Descartes_Sign_Rule.Descartes_Sign_Rule"
+  Polynomial_Transfer
+  Chebyshev_Polynomials_Library
+begin
+
+
+
+
+
+locale gen_cheb_poly =
+  fixes c :: "'a :: comm_ring_1"
+begin
+
+fun f :: "nat \<Rightarrow> 'a \<Rightarrow> 'a" where
+  "f 0 x = 1"
+| "f (Suc 0) x = c * x"
+| "f (Suc (Suc n )) x = 2 * x * f (Suc n) x - f n x"
+
+fun P :: "nat \<Rightarrow> ('a :: comm_ring_1) poly" where
+  "P 0 = 1"
+| "P (Suc 0) = [:0, c:]"
+| "P (Suc (Suc n)) = [:0, 2:] * P (Suc n) - P n"
+
+lemma eval [simp]: "poly (P n) x = f n x"
+  by (induction n rule: P.induct) simp_all
+
+lemma eval_0:
+  "f n 0 = (if odd n then 0 else (-1) ^ (n div 2))"
+  by (induction n rule: induct_nat_012) auto
+
+lemma eval_1 [simp]:
+  "f n 1 = of_nat n * (c - 1) + 1"
+proof (induction n rule: induct_nat_012)
+  case (ge2 n)
+  show ?case
+    by (auto simp: ge2.IH algebra_simps)
+qed auto
+
+lemma uminus [simp]: "f n (-x) = (-1) ^ n  * f n x"
+  by (induction n rule: P.induct) (simp_all add: algebra_simps)
+
+lemma pcompose_minus: "pcompose (P n) (monom (-1) 1) = (-1) ^ n * P n"
+  by (induction n rule: induct_nat_012)
+     (simp_all add: pcompose_diff pcompose_uminus pcompose_smult one_pCons
+                    poly_const_pow algebra_simps monom_altdef)
+
+lemma degree_le: "degree (P n) \<le> n"
+proof -
+  have "i > n \<Longrightarrow> coeff (P n) i = 0" for i
+  by (induction n arbitrary: i rule: P.induct)
+     (auto simp: coeff_pCons split: nat.splits)
+  thus ?thesis
+    using degree_le by blast
+qed
+
+lemma lead_coeff:
+  "coeff (P n) n = (if n = 0 then 1 else c * 2 ^ (n - 1))"
+proof (induction n rule: P.induct)
+  case (3 n)
+  thus ?case
+    using degree_le[of n] by (auto simp: coeff_eq_0 algebra_simps)
+qed auto
+
+lemma degree_eq:
+  "c * 2 ^ (n - 1) \<noteq> 0 \<Longrightarrow> degree (P n :: 'a poly) = n"
+  using lead_coeff[of n] degree_le[of n]
+  by (metis le_degree nle_le one_neq_zero)
+
+lemmas [simp del] = f.simps(3) P.simps(3)
+
+end
+
+
+definition cheb_poly :: "nat \<Rightarrow> 'a :: comm_ring_1 \<Rightarrow> 'a" where
+ "cheb_poly = gen_cheb_poly.f 1"
+
+definition Cheb_poly :: "nat \<Rightarrow> 'a :: comm_ring_1 poly" where
+ "Cheb_poly = gen_cheb_poly.P 1"
+
+interpretation cheb_poly: gen_cheb_poly 1
+  rewrites "gen_cheb_poly.f 1 \<equiv> cheb_poly" and "gen_cheb_poly.P 1 = Cheb_poly"
+       and "\<And>x :: 'a. 1 * x = x"
+       and "\<And>n. of_nat n * (1 - 1 :: 'a) + 1 = 1"
+  by unfold_locales (simp_all add: cheb_poly_def Cheb_poly_def)
+
+lemmas cheb_poly_simps [code] = cheb_poly.f.simps
+lemmas Cheb_poly_simps [code] = cheb_poly.P.simps
+
+lemma Cheb_poly_of_int: "of_int_poly (Cheb_poly n) = Cheb_poly n"
+  by (induction n rule: induct_nat_012) (simp_all add: hom_distribs Cheb_poly_simps)
+
+lemma degree_Cheb_poly [simp]:
+  "degree (Cheb_poly n :: 'a :: {idom, ring_char_0} poly) = n"
+  by (rule cheb_poly.degree_eq) auto
+
+lemma lead_coeff_Cheb_poly [simp]:
+  "lead_coeff (Cheb_poly n :: 'a :: {idom, ring_char_0} poly) = 2 ^ (n-1)"
+  unfolding degree_Cheb_poly by (subst cheb_poly.lead_coeff) auto
+
+lemma Cheb_poly_nonzero [simp]: "Cheb_poly n \<noteq> 0"
+  by (metis cheb_poly.eval cheb_poly.eval_1 one_neq_zero poly_0)
+
+lemma continuous_cheb_poly [continuous_intros]:
+  fixes f :: "'b :: topological_space \<Rightarrow> 'a :: {real_normed_algebra_1, comm_ring_1}"
+  shows "continuous_on A f \<Longrightarrow> continuous_on A (\<lambda>x. cheb_poly n (f x))"
+  unfolding cheb_poly.eval [symmetric]
+  by (induction n rule: induct_nat_012) (auto intro!: continuous_intros simp: cheb_poly_simps)
+
+
+definition cheb_poly' :: "nat \<Rightarrow> 'a :: comm_ring_1 \<Rightarrow> 'a" where
+ "cheb_poly' = gen_cheb_poly.f 2"
+
+definition Cheb_poly' :: "nat \<Rightarrow> 'a :: comm_ring_1 poly" where
+ "Cheb_poly' = gen_cheb_poly.P 2"
+
+interpretation cheb_poly': gen_cheb_poly 2
+  rewrites "gen_cheb_poly.f 2 \<equiv> cheb_poly'" and "gen_cheb_poly.P 2 = Cheb_poly'"
+       and "\<And>n. of_nat n * (2 - 1 :: 'a) + 1 = of_nat (Suc n)"
+  by unfold_locales (simp_all add: cheb_poly'_def Cheb_poly'_def)
+
+lemmas cheb_poly'_simps [code] = cheb_poly'.f.simps
+lemmas Cheb_poly'_simps [code] = cheb_poly'.P.simps
+
+lemma Cheb_poly'_of_int: "of_int_poly (Cheb_poly' n) = Cheb_poly' n"
+  by (induction n rule: induct_nat_012) (simp_all add: hom_distribs Cheb_poly'_simps)
+
+lemma degree_Cheb_poly' [simp]:
+  "degree (Cheb_poly' n :: 'a :: {idom, ring_char_0} poly) = n"
+  by (rule cheb_poly'.degree_eq) auto
+
+lemma lead_coeff_Cheb_poly' [simp]:
+  "lead_coeff (Cheb_poly' n :: 'a :: {idom, ring_char_0} poly) = 2 ^ n"
+  unfolding degree_Cheb_poly'
+  by (subst cheb_poly'.lead_coeff; cases n) auto
+
+lemma Cheb_poly_nonzero' [simp]: "Cheb_poly' n \<noteq> (0 :: 'a :: {comm_ring_1, ring_char_0} poly)"
+proof -
+  have "poly (Cheb_poly' n) 1 = (of_nat (Suc n) :: 'a)"
+    by simp
+  also have "\<dots> \<noteq> 0"
+    using of_nat_neq_0 by blast
+  finally show ?thesis
+    by force
+qed
+
+lemma continuous_cheb_poly' [continuous_intros]:
+  fixes f :: "'b :: topological_space \<Rightarrow> 'a :: {real_normed_algebra_1, comm_ring_1}"
+  shows "continuous_on A f \<Longrightarrow> continuous_on A (\<lambda>x. cheb_poly' n (f x))"
+  by (induction n rule: induct_nat_012) (auto intro!: continuous_intros simp: cheb_poly'_simps)
+
+
+
+lemma cheb_poly_cos [simp]: 
+  fixes x :: "'a :: {banach, real_normed_field}"
+  shows "cheb_poly n (cos x) = cos (of_nat n * x)"
+proof (induction n rule: induct_nat_012)
+  case (ge2 n)
+  have [simp]: "cos (x * 2) = 2 * (cos x)\<^sup>2 - 1" "sin (x * 2) = 2 * sin x * cos x"
+    using cos_double_cos[of x] sin_double[of x] by (simp_all add: mult_ac)
+  show ?case
+    by (simp add: ge2 cheb_poly_simps algebra_simps cos_add power2_eq_square)
+qed simp_all
+
+lemma cheb_poly'_cos:
+  fixes x :: "'a :: {banach, real_normed_field}"
+  shows "cheb_poly' n (cos x) * sin x = sin (of_nat (n+1) * x)"
+proof (induction n rule: induct_nat_012)
+  case (ge2 n)
+  have [simp]: "sin x * (sin x * t) = (1 - cos x ^ 2) * t" for x t :: 'a
+    using sin_squared_eq[of x] by algebra
+  have "cheb_poly' (Suc (Suc n)) (cos x) * sin x =
+        2 * cos x * (cheb_poly' (Suc n) (cos x) * sin x) - cheb_poly' n (cos x) * sin x"
+    by (simp add: algebra_simps cheb_poly'_simps)
+  also have "\<dots> = 2 * cos x * sin (of_nat (Suc n + 1) * x) - sin (of_nat (n + 1) * x)"
+    by (simp only: ge2.IH)
+  also have "\<dots> - sin (of_nat (Suc (Suc n) + 1) * x) = 0"
+    by (simp add: algebra_simps sin_add cos_add power2_eq_square power3_eq_cube
+                  sin_multiple_reduce cos_multiple_reduce)
+  finally show ?case by simp
+qed (auto simp: sin_double)
+
+
+lemma cheb_poly_conv_cos:
+  assumes "\<bar>x::real\<bar> \<le> 1"
+  shows   "cheb_poly n x = cos (n * arccos x)"
+  using cheb_poly_cos[of n "arccos x"] assms by simp
+
+lemma cheb_poly'_cos':
+  fixes x :: "'a :: {real_normed_field, banach}"
+  shows "sin x \<noteq> 0 \<Longrightarrow> cheb_poly' n (cos x) = sin (of_nat (n+1) * x) / sin x"
+  using cheb_poly'_cos[of n x] by (auto simp: field_simps)
+
+lemma cheb_poly'_conv_cos:
+  assumes "\<bar>x::real\<bar> < 1"
+  shows   "cheb_poly' n x = sin (real (n+1) * arccos x) / sqrt (1 - x\<^sup>2)"
+proof -
+  define y where "y = arccos x"
+  have x: "cos y = x"
+    unfolding y_def using assms cos_arccos_abs by fastforce
+  have "x ^ 2 \<noteq> 1"
+    using assms by (subst abs_square_eq_1) auto
+  hence y: "sin y \<noteq> 0"
+    using assms by (simp add: sin_arccos_abs y_def)
+  have "cheb_poly' n (cos y) = sin ((1 + real n) * y) / sin y"
+    using y by (subst cheb_poly'_cos') auto
+  also have "sin y = sqrt (1 - x\<^sup>2)"
+    unfolding y_def using assms by (subst sin_arccos_abs) auto
+  finally show ?thesis
+    using x by (simp add: x y_def)
+qed
+
+
+lemma cos_multiple:
+  fixes x :: "'a :: {banach, real_normed_field}"
+  shows "cos (numeral n * x) = poly (Cheb_poly (numeral n)) (cos x)"
+  using cheb_poly_cos[of "numeral n" x] unfolding of_nat_numeral by simp
+
+lemma sin_multiple:
+  fixes x :: "'a :: {banach, real_normed_field}"
+  shows "sin (numeral n * x) = sin x * poly (Cheb_poly' (pred_numeral n)) (cos x)"
+  by (metis Suc_eq_plus1 cheb_poly'.eval cheb_poly'_cos mult.commute numeral_eq_Suc of_nat_numeral)
+
+
+lemma cos_quadruple:
+  fixes x :: "'a :: {banach, real_normed_field}"
+  shows "cos (4 * x) = 8 * cos x ^ 4 - 8 * cos x ^ 2 + 1"
+  by (subst cos_multiple)
+     (simp add: eval_nat_numeral Cheb_poly_simps algebra_simps del: cheb_poly.eval)
+
+lemma sin_quadruple:
+  fixes x :: "'a :: {banach, real_normed_field}"
+  shows "sin (4 * x) = sin x * (8 * cos x ^ 3 - 4 * cos x)"
+  by (subst sin_multiple)
+     (simp add: eval_nat_numeral Cheb_poly'_simps algebra_simps del: cheb_poly'.eval)
+
+
+
+
+lemma cheb_poly_cosh [simp]:
+  fixes x :: "'a :: {banach, real_normed_field}"
+  shows "cheb_poly n (cosh x) = cosh (of_nat n * x)"
+proof (induction n rule: induct_nat_012)
+  case (ge2 n)
+  have [simp]: "cosh (x * 2) = 2 * (cosh x)\<^sup>2 - 1" "sinh (x * 2) = 2 * sinh x * cosh x"
+    using cosh_double_cosh[of x] sinh_double[of x] by (simp_all add: mult_ac)
+  show ?case
+    by (simp add: ge2 cheb_poly_simps algebra_simps cosh_add power2_eq_square)
+qed simp_all
+
+lemma cheb_poly'_cosh:
+  fixes x :: "'a :: {real_normed_field, banach}"
+  shows "cheb_poly' n (cosh x) * sinh x = sinh (of_nat (n+1) * x)"
+proof (induction n rule: induct_nat_012)
+  case (ge2 n)
+  have [simp]: "sinh x * (sinh x * t) = (cosh x ^ 2 - 1) * t" for x t :: 'a
+    using sinh_square_eq[of x] by algebra
+  have "cheb_poly' (Suc (Suc n)) (cosh x) * sinh x =
+        2 * cosh x * (cheb_poly' (Suc n) (cosh x) * sinh x) - cheb_poly' n (cosh x) * sinh x"
+    by (simp add: algebra_simps cheb_poly'_simps)
+  also have "\<dots> = 2 * cosh x * sinh (of_nat (Suc n + 1) * x) - sinh (of_nat (n + 1) * x)"
+    by (simp only: ge2.IH)
+  also have "\<dots> - sinh (of_nat (Suc (Suc n) + 1) * x) = 0"
+    by (simp add: algebra_simps sinh_add cosh_add power2_eq_square power3_eq_cube
+                  sinh_multiple_reduce cosh_multiple_reduce)
+  finally show ?case by simp
+qed (auto simp: sinh_double)
+
+lemma cheb_poly_conv_cosh:
+  assumes "(x :: real) \<ge> 1"
+  shows   "cheb_poly n x = cosh (n * arcosh x)"
+  using cheb_poly_cosh[of n "arcosh x"] assms
+  by (simp del: cheb_poly_cosh)
+
+lemma cheb_poly'_cosh':
+  fixes x :: "'a :: {real_normed_field, banach}"
+  shows "sinh x \<noteq> 0 \<Longrightarrow> cheb_poly' n (cosh x) = sinh (of_nat (n+1) * x) / sinh x"
+  using cheb_poly'_cosh[of n x] by (auto simp: field_simps)
+
+lemma cheb_poly'_conv_cosh:
+  assumes "x > (1 :: real)"
+  shows   "cheb_poly' n x = sinh (real (n+1) * arcosh x) / sqrt (x\<^sup>2 - 1)"
+proof -
+  have "x\<^sup>2 \<noteq> 1"
+    using assms by (simp add: power2_eq_1_iff)
+  hence "cheb_poly' n (cosh (arcosh x)) = sinh ((1 + real n) * arcosh x) / sqrt (x\<^sup>2 - 1)"
+    using assms by (subst cheb_poly'_cosh') (auto simp: sinh_arcosh_real)
+  thus ?thesis
+    using assms by simp
+qed
+
+
+
+
+definition cheb_node :: "nat \<Rightarrow> nat \<Rightarrow> real" where
+  "cheb_node n k = cos (real (2*k+1) / real (2*n) * pi)"
+
+lemma cheb_poly_cheb_node [simp]:
+  assumes "k < n"
+  shows   "cheb_poly n (cheb_node n k) = 0"
+proof -
+  have "cheb_poly n (cheb_node n k) = cos ((1 + 2 * real k) / 2 * pi)"
+    using assms by (simp add: cheb_node_def)
+  also have "(1 + 2 * real k) / 2 * pi = pi * real (Suc (2 * k)) / 2"
+    by (simp add: field_simps)
+  also have "cos \<dots> = 0"
+    by (rule cos_pi_eq_zero)
+  finally show ?thesis .
+qed
+
+lemma strict_antimono_cheb_node: "monotone_on {..<n} (<) (>) (cheb_node n)"
+  unfolding cheb_node_def
+proof (intro monotone_onI cos_monotone_0_pi)
+  fix k l assume kl: "k \<in> {..<n}" "l \<in> {..<n}"
+  have "real (2 * l + 1) / real (2 * n) * pi \<le> 1 * pi"
+    by (intro mult_right_mono; use kl in simp; fail)
+  thus "real (2 * l + 1) / real (2 * n) * pi \<le> pi"
+    by simp
+qed (auto simp: field_simps)
+
+lemma cheb_node_pos_iff:
+  assumes k: "k < n"
+  shows   "cheb_node n k > 0 \<longleftrightarrow> k < n div 2"
+proof -
+  have "(1 + 2 * real k) / (2 * real n) * pi \<le> 1 * pi"
+    by (intro mult_right_mono) (use k in auto)
+  hence "cos ((1 + 2 * real k) * pi / (2 * real n)) > cos (pi / 2) \<longleftrightarrow>
+          (1 + 2 * real k) / real n * pi < 1 * pi"
+    by (subst cos_mono_less_eq) auto
+  also have "\<dots> \<longleftrightarrow> (1 + 2 * real k) / real n < 1"
+    using pi_gt_zero by (subst mult_less_cancel_right) (auto simp del: pi_gt_zero)
+  also have "((1 + 2 * real k) / real n < 1) \<longleftrightarrow> 1 + 2 * real k < real n"
+    using k by (auto simp: field_simps)
+  also have "\<dots> \<longleftrightarrow> k < n div 2"
+    by linarith
+  finally show "cheb_node n k > 0 \<longleftrightarrow> k < n div 2"
+    by (simp add: cheb_node_def)
+qed
+
+lemma cheb_poly_roots_bij_betw:
+  "bij_betw (cheb_node n) {..<n} {x. cheb_poly n x = 0}"
+proof -
+  have inj: "inj_on (cheb_node n) {..<n}" (is "inj_on ?h _")
+    using strict_antimono_cheb_node[of n] unfolding strict_antimono_iff_antimono by blast
+
+  have "cheb_node n ` {..<n} = {x. cheb_poly n x = 0}"
+  proof (rule card_seteq)
+    have "finite {x. poly (Cheb_poly n) (x::real) = 0}"
+      by (intro poly_roots_finite) auto
+    thus "finite {x. cheb_poly n (x::real) = 0}" by simp
+  next
+    show "cheb_node n ` {..<n} \<subseteq> {x. cheb_poly n x = 0}"
+      by auto
+  next
+    have "{x. cheb_poly n x = 0} = {x. poly (Cheb_poly n) (x::real) = 0}" by simp
+    also have "card \<dots> \<le> degree (Cheb_poly n :: real poly)"
+      by (intro poly_roots_degree) auto
+    also have "\<dots> = n" by simp
+    also have "n = card (cheb_node n ` {..<n})"
+      using inj by (subst card_image) auto
+    finally show "card {x::real. cheb_poly n x = 0} \<le> card (cheb_node n ` {..<n})" .
+  qed
+
+  with inj show ?thesis
+    unfolding bij_betw_def by blast
+qed
+
+lemma card_cheb_poly_roots: "card {x::real. cheb_poly n x = 0} = n"
+  using bij_betw_same_card[OF cheb_poly_roots_bij_betw[of n]] by simp
+
+lemma order_Cheb_poly_cheb_node [simp]:
+  assumes "k < n"
+  shows   "order (cheb_node n k) (Cheb_poly n) = 1"
+proof -
+  have "(\<Sum>(x::real) | cheb_poly n x = 0. order x (Cheb_poly n)) \<le> n"
+    using sum_order_le_degree[of "Cheb_poly n :: real poly"] by simp
+  also have "(\<Sum>(x::real) | cheb_poly n x = 0. order x (Cheb_poly n)) =
+             (\<Sum>k<n. order (cheb_node n k) (Cheb_poly n))"
+    by (rule sum.reindex_bij_betw [symmetric], rule cheb_poly_roots_bij_betw)
+  finally have "(\<Sum>k<n. order (cheb_node n k) (Cheb_poly n)) \<le> n" .
+
+  have "(\<Sum>l\<in>{..<n}-{k}. 1 :: nat) \<le> (\<Sum>l\<in>{..<n}-{k}. order (cheb_node n l) (Cheb_poly n))"
+    by (intro sum_mono) (auto simp: Suc_le_eq order_gt_0_iff)
+  also have "\<dots> + order (cheb_node n k) (Cheb_poly n) = 
+              (\<Sum>l\<in>insert k ({..<n}-{k}). order (cheb_node n l) (Cheb_poly n))"
+    by (subst sum.insert) auto
+  also have "insert k ({..<n}-{k}) = {..<n}"
+    using assms by auto
+  also have "(\<Sum>k<n. order (cheb_node n k) (Cheb_poly n)) \<le> n"
+    by fact
+  finally have "order (cheb_node n k) (Cheb_poly n) \<le> 1"
+    using assms by simp
+  moreover have "order (cheb_node n k) (Cheb_poly n) > 0"
+    using assms by (auto simp: order_gt_0_iff)
+  ultimately show ?thesis
+    by linarith
+qed
+
+lemma order_Cheb_poly [simp]:
+  assumes "poly (Cheb_poly n) (x :: real) = 0"
+  shows   "order x (Cheb_poly n) = 1"
+proof -
+  have "x \<in> {x. poly (Cheb_poly n) x = 0}"
+    using assms by simp
+  also have "\<dots> = cheb_node n ` {..<n}"
+    using cheb_poly_roots_bij_betw assms by (auto simp: bij_betw_def)
+  finally show ?thesis
+    by auto
+qed
+
+lemma rsquarefree_Cheb_poly_real: "rsquarefree (Cheb_poly n :: real poly)"
+  unfolding rsquarefree_def by (auto simp: order_eq_0_iff)
+
+
+definition cheb_node' :: "nat \<Rightarrow> nat \<Rightarrow> real" where
+  "cheb_node' n k = cos (real (k+1) / real (n+1) * pi)"
+
+lemma cheb_poly'_cheb_node' [simp]:
+  assumes "k < n"
+  shows   "cheb_poly' n (cheb_node' n k) = 0"
+proof -
+  define x where "x = real (k + 1) / real (n + 1)"
+  have x: "x \<in> {0<..<1}"
+    using assms by (auto simp: x_def)
+  have "cheb_poly' n (cos (x * pi)) * sin (x * pi) = sin (real (n + 1) * (x * pi))"
+    using assms by (simp add: cheb_poly'_cos)
+  also have "real (n + 1) * (x * pi) = real (k + 1) * pi"
+    by (simp add: x_def)
+  also have "sin \<dots> = 0"
+    by (rule sin_npi)
+  finally have "cheb_poly' n (cheb_node' n k) * sin (x * pi) = 0"
+    unfolding cheb_node'_def x_def by simp
+  moreover have "sin (x * pi) > 0"
+    by (intro sin_gt_zero) (use x in auto)
+  ultimately show ?thesis
+    by simp
+qed
+
+lemma strict_antimono_cheb_node': "monotone_on {..<n} (<) (>) (cheb_node' n)"
+  unfolding cheb_node'_def
+proof (intro monotone_onI cos_monotone_0_pi)
+  fix k l assume kl: "k \<in> {..<n}" "l \<in> {..<n}"
+  have " real (l + 1) / real (n + 1) * pi \<le> 1 * pi"
+    by (intro mult_right_mono; use kl in simp; fail)
+  thus " real (l + 1) / real (n + 1) * pi \<le> pi"
+    by simp
+  assume "k < l"
+  show "real (k + 1) / real (n + 1) * pi < real (l + 1) / real (n + 1) * pi"
+qed (auto simp: field_simps)
+
+lemma cheb_node'_pos_iff:
+  assumes k: "k < n"
+  shows   "cheb_node' n k > 0 \<longleftrightarrow> k < n div 2"
+proof -
+  have "real (k + 1) / real (n + 1) * pi \<le> 1 * pi"
+    by (intro mult_right_mono) (use k in auto)
+  hence "cos (real (k + 1) / real (n + 1) * pi) > cos (pi / 2) \<longleftrightarrow>
+          real (k + 1) / real (n + 1) * pi < 1 / 2 * pi"
+    using assms by (subst cos_mono_less_eq) auto
+  also have "\<dots> \<longleftrightarrow> real (k + 1) / real (n + 1) < 1 / 2"
+    using pi_gt_zero by (subst mult_less_cancel_right) (auto simp del: pi_gt_zero)
+  also have "real (k + 1) / real (n + 1) < 1 / 2 \<longleftrightarrow> 2 * real k + 2 < real n + 1"
+    using k by (auto simp: field_simps)
+  also have "\<dots> \<longleftrightarrow> k < n div 2"
+    by linarith    
+  finally show "cheb_node' n k > 0 \<longleftrightarrow> k < n div 2"
+    by (simp add: cheb_node'_def)
+qed
+
+lemma cheb_poly'_roots_bij_betw:
+  "bij_betw (cheb_node' n) {..<n} {x. cheb_poly' n x = 0}"
+proof -
+  have inj: "inj_on (cheb_node' n) {..<n}"
+    using strict_antimono_cheb_node'[of n] unfolding strict_antimono_iff_antimono by blast
+
+  have "cheb_node' n ` {..<n} = {x. cheb_poly' n x = 0}"
+  proof (rule card_seteq)
+    have "finite {x. poly (Cheb_poly' n) (x::real) = 0}"
+      by (intro poly_roots_finite) auto
+    thus "finite {x. cheb_poly' n (x::real) = 0}" by simp
+  next
+    show "cheb_node' n ` {..<n} \<subseteq> {x. cheb_poly' n x = 0}"
+      by auto
+  next
+    have "{x. cheb_poly' n x = 0} = {x. poly (Cheb_poly' n) (x::real) = 0}" by simp
+    also have "card \<dots> \<le> degree (Cheb_poly' n :: real poly)"
+      by (intro poly_roots_degree) auto
+    also have "\<dots> = n" by simp
+    also have "n = card (cheb_node' n ` {..<n})"
+      using inj by (subst card_image) auto
+    finally show "card {x::real. cheb_poly' n x = 0} \<le> card (cheb_node' n ` {..<n})" .
+  qed
+
+  with inj show ?thesis
+    unfolding bij_betw_def by blast
+qed
+
+lemma card_cheb_poly'_roots: "card {x::real. cheb_poly' n x = 0} = n"
+  using bij_betw_same_card[OF cheb_poly'_roots_bij_betw[of n]] by simp
+
+lemma order_Cheb_poly'_cheb_node' [simp]:
+  assumes "k < n"
+  shows   "order (cheb_node' n k) (Cheb_poly' n) = 1"
+proof -
+  have "(\<Sum>(x::real) | cheb_poly' n x = 0. order x (Cheb_poly' n)) \<le> n"
+    using sum_order_le_degree[of "Cheb_poly' n :: real poly"] by simp
+  also have "(\<Sum>(x::real) | cheb_poly' n x = 0. order x (Cheb_poly' n)) =
+             (\<Sum>k<n. order (cheb_node' n k) (Cheb_poly' n))"
+    by (rule sum.reindex_bij_betw [symmetric], rule cheb_poly'_roots_bij_betw)
+  finally have "(\<Sum>k<n. order (cheb_node' n k) (Cheb_poly' n)) \<le> n" .
+
+  have "(\<Sum>l\<in>{..<n}-{k}. 1 :: nat) \<le> (\<Sum>l\<in>{..<n}-{k}. order (cheb_node' n l) (Cheb_poly' n))"
+    by (intro sum_mono) (auto simp: Suc_le_eq order_gt_0_iff)
+  also have "\<dots> + order (cheb_node' n k) (Cheb_poly' n) = 
+              (\<Sum>l\<in>insert k ({..<n}-{k}). order (cheb_node' n l) (Cheb_poly' n))"
+    by (subst sum.insert) auto
+  also have "insert k ({..<n}-{k}) = {..<n}"
+    using assms by auto
+  also have "(\<Sum>k<n. order (cheb_node' n k) (Cheb_poly' n)) \<le> n"
+    by fact
+  finally have "order (cheb_node' n k) (Cheb_poly' n) \<le> 1"
+    using assms by simp
+  moreover have "order (cheb_node' n k) (Cheb_poly' n) > 0"
+    using assms by (auto simp: order_gt_0_iff)
+  ultimately show ?thesis
+    by linarith
+qed
+
+lemma order_Cheb_poly' [simp]:
+  assumes "poly (Cheb_poly' n) (x :: real) = 0"
+  shows   "order x (Cheb_poly' n) = 1"
+proof -
+  have "x \<in> {x. poly (Cheb_poly' n) x = 0}"
+    using assms by simp
+  also have "\<dots> = cheb_node' n ` {..<n}"
+    using cheb_poly'_roots_bij_betw assms by (auto simp: bij_betw_def)
+  finally show ?thesis
+    by auto
+qed
+
+lemma rsquarefree_Cheb_poly'_real: "rsquarefree (Cheb_poly' n :: real poly)"
+  unfolding rsquarefree_def by (auto simp: order_eq_0_iff)
+
+
+
+theorem Abs_fps_Cheb_poly:
+  fixes F X T :: "real fps fps"
+  defines "X \<equiv> fps_const fps_X" and "T \<equiv> fps_X"
+  defines "F \<equiv> Abs_fps (fps_of_poly \<circ> Cheb_poly)"
+  shows   "F * (1 - 2 * T * X + T\<^sup>2) = 1 - T * X" 
+proof -
+  have "F = 1 - F * T * (T - 2 * X) - T * X"
+  proof (rule fps_ext)
+    fix n :: nat
+    define foo :: "real fps fps" where "foo = Abs_fps (\<lambda>na. fps_of_poly
+           (pCons 0 (smult 2 (Cheb_poly (Suc na))) - Cheb_poly na))"
+    have "fps_nth F n = fps_nth (1 + T * X + T\<^sup>2 * (foo)) n"
+      by (cases n rule: cheb_poly.P.cases)
+         (simp_all add: F_def T_def X_def fps_X_power_mult_nth Cheb_poly_simps foo_def)
+    also have "foo = 2 * X * fps_shift 1 F - F"
+      by (simp add: foo_def F_def X_def T_def fps_eq_iff numeral_fps_const
+                    mult.assoc coeff_pCons split: nat.splits)
+    also have "1 + T * X + T\<^sup>2 * (2 * X * fps_shift 1 F - F) =
+               1 + T * X * (1 + 2 * (T * fps_shift 1 F)) - T\<^sup>2 * F"
+      by (simp add: algebra_simps power2_eq_square)
+    also have "T * fps_shift 1 F = F - 1"
+      by (rule fps_ext) (auto simp: T_def F_def)
+    also have "1 + T * X * (1 + 2 * (F - 1)) - T\<^sup>2 * F = 1 - F * T * (T - 2 * X) - T * X"
+      by (simp add: algebra_simps power2_eq_square)
+    finally show "fps_nth F n = fps_nth \<dots> n" .
+  qed
+  thus ?thesis
+    by algebra
+qed
+
+theorem Abs_fps_Cheb_poly':
+  fixes F X T :: "real fps fps"
+  defines "X \<equiv> fps_const fps_X" and "T \<equiv> fps_X"
+  defines "F \<equiv> Abs_fps (fps_of_poly \<circ> Cheb_poly')"
+  shows   "F * (1 - 2 * T * X + T\<^sup>2) = 1" 
+proof -
+  have "F = 1 - F * T * (T - 2 * X)"
+  proof (rule fps_ext)
+    fix n :: nat
+    define foo :: "real fps fps" where "foo = Abs_fps (\<lambda>na. fps_of_poly
+           (pCons 0 (smult 2 (Cheb_poly' (Suc na))) - Cheb_poly' na))"
+    have "fps_nth F n = fps_nth (1 + 2 * T * X + T\<^sup>2 * (foo)) n"
+      by (cases n rule: cheb_poly.P.cases)
+         (simp_all add: F_def T_def X_def fps_X_power_mult_nth Cheb_poly'_simps
+                        foo_def numeral_fps_const)
+    also have "foo = 2 * X * fps_shift 1 F - F"
+      by (simp add: foo_def F_def X_def T_def fps_eq_iff numeral_fps_const
+                    mult.assoc coeff_pCons split: nat.splits)
+    also have "1 + 2 * T * X + T\<^sup>2 * (2 * X * fps_shift 1 F - F) =
+               1 + 2 * T * X * (1 + T * fps_shift 1 F) - T\<^sup>2 * F"
+      by (simp add: algebra_simps power2_eq_square)
+    also have "T * fps_shift 1 F = F - 1"
+      by (rule fps_ext) (auto simp: T_def F_def)
+    also have "1 + 2 * T * X * (1 + (F - 1)) - T\<^sup>2 * F = 1 - F * T * (T - 2 * X)"
+      by (simp add: algebra_simps power2_eq_square)
+    finally show "fps_nth F n = fps_nth \<dots> n" .
+  qed
+  thus ?thesis
+    by algebra
+qed
+
+
+
+lemma Sup_abs_poly_bound_aux:
+  fixes p :: "real poly"
+  assumes "lead_coeff p = 1"
+  shows   "\<exists>x\<in>{-1..1}. \<bar>poly p x\<bar> \<ge> 1 / 2 ^ (degree p - 1)"
+proof (rule ccontr)
+  define n where "n = degree p"
+  assume "\<not>(\<exists>x\<in>{-1..1}. \<bar>poly p x\<bar> \<ge> 1 / 2 ^ (degree p - 1))"
+  hence abs_less: "\<bar>poly p x\<bar> < 1 / 2 ^ (n - 1)" if "x \<in> {-1..1}" for x
+    using that unfolding n_def by force
+
+  have "n > 0"
+  proof (rule Nat.gr0I)
+    assume [simp]: "n = 0"
+    hence "p = 1"
+      using assms monic_degree_0 unfolding n_def by blast
+    with abs_less[of 0] show False
+      by simp
+  qed
+
+  define q where "q = p - smult (1 / 2 ^ (n - 1)) (Cheb_poly n)"
+  have "coeff q n = 0"
+    using assms by (auto simp: q_def n_def cheb_poly.lead_coeff)
+  moreover have "degree q \<le> n"
+    by (auto simp: n_def q_def degree_diff_le)
+  ultimately have "degree q < n"
+ 
+  define x where "x = (\<lambda>k. cos (real (2 * k) / real n * pi / 2))"
+  have antimono_x: "strict_antimono_on {0..n} x"
+
+  have sgn_q_x: "sgn (poly q (x k)) = (-1) ^ Suc k" if k: "k \<le> n" for k
+  proof -
+    from k have [simp]: "cheb_poly n (x k) = (-1) ^ k"
+      unfolding x_def by auto
+    have "poly q (x k) = poly p (x k) - (-1) ^ k / 2 ^ (n-1)"
+      by (auto simp: q_def)
+    moreover have "\<bar>poly p (x k)\<bar> < 1 / 2 ^ (n-1)"
+      using abs_less[of "x k"] by (auto simp: x_def n_def)
+
+    moreover have "x k \<in> {-1..1}"
+      by (auto simp: x_def)
+    ultimately have "if even k then poly q (x k) < 0 else poly q (x k) > 0"
+      using abs_less[of "x k"] by (auto simp: q_def sgn_if)
+    thus "sgn (poly q (x k)) = (-1) ^ Suc k"
+      by (simp add: minus_one_power_iff)
+  qed
+
+  have "\<exists>t\<in>{x (Suc k)<..<x k}. poly q t = 0" if k: "k < n" for k
+    using poly_IVT[of "x (Suc k)" "x k" q] sgn_q_x[of k] sgn_q_x[of "Suc k"] k
+          monotone_onD[OF antimono_x, of k "Suc k"]
+    by (force simp: sgn_if minus_one_power_iff mult_neg_pos mult_pos_neg split: if_splits)
+  then obtain y where y: "y k \<in> {x (Suc k)<..<x k} \<and> poly q (y k) = 0" if "k < n" for k
+    by metis
+  have "strict_antimono_on {0..<n} y"
+    unfolding monotone_on_def
+  proof safe
+    fix k l
+    assume kl: "k \<in> {0..<n}" "l \<in> {0..<n}" "k < l"
+    hence "y k > x (Suc k)" "x l > y l"
+      using y[of k] y[of l] by auto
+    moreover have "x (Suc k) \<ge> x l"
+    proof (cases "Suc k = l")
+      case False
+      hence "Suc k < l"
+        using kl by linarith
+      from monotone_onD[OF antimono_x _ _ this] show ?thesis
+        using kl by auto
+    qed auto
+    ultimately show "y k > y l"
+      by linarith
+  qed
+  hence "inj_on y {0..<n}"
+    using strict_antimono_iff_antimono by blast
+  hence "card (y ` {0..<n}) = n"
+    by (subst card_image) auto
+ 
+  have "q \<noteq> 0"
+    using abs_less[of 1] by (auto simp: q_def)
+  hence "finite {x. poly q x = 0}"
+    using poly_roots_finite by blast
+  moreover have "y ` {0..<n} \<subseteq> {x. poly q x = 0}"
+    using y by auto
+  ultimately have "card (y ` {0..<n}) \<le> card {x. poly q x = 0}"
+    using card_mono by blast
+  also have "\<dots> < n"
+  also have "card (y ` {0..<n}) = n"
+    by fact
+  finally show False
+    by simp
+qed
+  
+lemma Sup_abs_poly_bound_unit_ivl:
+  fixes p :: "real poly"
+  shows   "(SUP x\<in>{-1..1}. \<bar>poly p x\<bar>) \<ge> \<bar>lead_coeff p\<bar> / 2 ^ (degree p - 1)"
+proof (cases "p = 0")
+  case [simp]: False
+  define a where "a = lead_coeff p"
+  have [simp]: "a \<noteq> 0"
+    by (auto simp: a_def)
+  define q where "q = smult (1 / a) p"
+  have [simp]: "lead_coeff q = 1"
+    by (auto simp: q_def a_def)
+  have p_eq: "p = smult a q"
+    by (auto simp: q_def)
+
+  obtain x where x: "x \<in> {-1..1}" "\<bar>poly q x\<bar> \<ge> 1 / 2 ^ (degree q - 1)"
+    using Sup_abs_poly_bound_aux[of q] by auto
+  show ?thesis
+  proof (rule cSup_upper2[of "\<bar>poly p x\<bar>"])
+    show "bdd_above ((\<lambda>x. \<bar>poly p x\<bar>) ` {- 1..1})"
+      by (intro bounded_imp_bdd_above compact_imp_bounded compact_continuous_image)
+         (auto intro!: continuous_intros)
+qed auto
+
+theorem Sup_abs_poly_bound:
+  fixes p :: "real poly"
+  assumes "a < b" and "degree p > 0"
+  shows   "(SUP x\<in>{a..b}. \<bar>poly p x\<bar>) \<ge> 2 * \<bar>lead_coeff p\<bar> * ((b - a) / 4) ^ degree p"
+proof -
+  define q where "q = pcompose p [:(a + b) / 2, (b - a) / 2:]"
+  define f where "f = (\<lambda>x. (a + b) / 2 + x * (b - a) / 2)"
+  define g where "g = (\<lambda>x. (a + b) / (a - b) + x * 2 / (b - a))"
+  have p_eq: "p = pcompose q [:(a + b) / (a - b), 2 / (b - a):]"
+    using assms by (auto simp: q_def field_simps simp flip: pcompose_assoc)
+  have "(SUP x\<in>{-1..1}. \<bar>poly q x\<bar>) \<ge> \<bar>lead_coeff q\<bar> / 2 ^ (degree q - 1)"
+    by (rule Sup_abs_poly_bound_unit_ivl)
+  also have "(\<lambda>x. \<bar>poly q x\<bar>) = abs \<circ> poly p \<circ> f"
+    by (auto simp: fun_eq_iff q_def poly_pcompose f_def)
+  also have "\<dots> ` {-1..1} = abs ` poly p ` (f ` {-1..1})"
+    by (simp add: image_image)
+  also have "f ` {-1..1} = {a..b}"
+  proof -
+      by (simp add: image_image f_def algebra_simps)
+      using assms by (subst image_mult_atLeastAtMost) simp_all
+    also have "(+) ((a+b)/2) ` \<dots> = {a..b}"
+      by (subst image_add_atLeastAtMost) (simp_all add: field_simps)
+    finally show ?thesis .
+  qed
+  also have "abs ` poly p ` {a..b} = (\<lambda>x. \<bar>poly p x\<bar>) ` {a..b}"
+    by (simp add: image_image o_def)
+  also have "lead_coeff q = lead_coeff p * ((b - a) / 2) ^ degree p"
+    using assms unfolding q_def by (subst lead_coeff_comp) auto
+  also have "degree q = degree p"
+    using assms by (auto simp: q_def)
+  also have "\<bar>lead_coeff p * ((b - a) / 2) ^ degree p\<bar> / (2 ^ (degree p - 1)) =
+               2 * \<bar>lead_coeff p\<bar> * ((b - a) / 4) ^ degree p"
+    using assms
+    by (simp add:  power_divide abs_mult power_diff flip: power_mult_distrib)
+  finally show ?thesis .
+qed
+
+
+lemma abs_cheb_poly_le_1:
+  assumes "(x :: real) \<in> {-1..1}"
+  shows   "\<bar>cheb_poly n x\<bar> \<le> 1"
+proof -
+  have "\<bar>cheb_poly n (cos (arccos x))\<bar> \<le> 1"
+    by (subst cheb_poly_cos) auto
+  with assms show ?thesis
+    by simp
+qed
+
+theorem Sup_abs_poly_bound_sharp:
+  fixes n :: nat and p :: "real poly"
+  defines "p \<equiv> smult (1 / 2 ^ (n - 1)) (Cheb_poly n)"
+  shows   "degree p = n" and "lead_coeff p = 1"
+    and   "(SUP x\<in>{-1..1}. \<bar>poly p x\<bar>) = 1 / 2 ^ (n - 1)"
+proof -
+  show p: "degree p = n" "lead_coeff p = 1"
+    by (simp_all add: p_def cheb_poly.lead_coeff)
+  show "(SUP x\<in>{- 1..1}. \<bar>poly p x\<bar>) = 1 / 2 ^ (n - 1)"
+  proof (rule antisym)
+    show "(SUP x\<in>{- 1..1}. \<bar>poly p x\<bar>) \<ge> 1 / 2 ^ (n - 1)"
+      using Sup_abs_poly_bound_unit_ivl[of p] p by simp
+    show "(SUP x\<in>{- 1..1}. \<bar>poly p x\<bar>) \<le> 1 / 2 ^ (n - 1)"
+    proof (rule cSUP_least)
+      fix x :: real assume "x \<in> {-1..1}"
+      thus "\<bar>poly p x\<bar> \<le> 1 / 2 ^ (n - 1)"
+        using abs_cheb_poly_le_1[of x n] by (auto simp: p_def field_simps)
+    qed auto
+  qed
+qed
+
+
+theorem cheb_poly_fastest_growth:
+  fixes p :: "real poly"
+  defines "n \<equiv> degree p"
+  assumes p_bounded: "\<And>x. \<bar>x\<bar> \<le> 1 \<Longrightarrow> \<bar>poly p x\<bar> \<le> 1"
+  assumes x: "x \<notin> {-1<..<1}"
+  shows   "\<bar>cheb_poly n x\<bar> \<ge> \<bar>poly p x\<bar>"
+proof (cases "n > 0")
+  case False
+  thus ?thesis
+    using p_bounded[of 1] unfolding n_def
+    by (auto elim!: degree_eq_zeroE)
+next
+  case True
+  show ?thesis
+  proof (rule ccontr)
+    assume "\<not>\<bar>poly p x\<bar> \<le> \<bar>cheb_poly n x\<bar>"
+    hence gt: "\<bar>poly p x\<bar> > \<bar>cheb_poly n x\<bar>" by simp
+    define h where "h = smult (cheb_poly n x / poly p x) p"
+    have [simp]: "poly h x = cheb_poly n x" using gt by (simp add: h_def)
+  
+    have "degree (Cheb_poly n - h) \<le> n"
+      by (rule degree_diff_le) (auto simp: n_def h_def)
+    from gt have "poly (Cheb_poly n - h) x = 0"
+      by (simp add: h_def)
+    define a where "a = (\<lambda>k. cos (real k / n * pi))"
+    have cheb_poly_a: "cheb_poly n (a k) = (-1) ^ k" if "k \<le> n" for k
+      by (auto simp: cheb_poly_conv_cos field_simps arccos_cos a_def)
+    have a_mono: "a k \<le> a l" if "k \<ge> l" "k \<le> n" for k l
+    have a_bounds: "\<bar>a k\<bar> \<le> 1" for k by (simp add: a_def)
+
+    have h_a_bounded: "\<bar>poly h (a k)\<bar> < 1" if "k \<le> n" for k
+    proof -
+      have "\<bar>poly h (a k)\<bar> = \<bar>cheb_poly n x / poly p x\<bar> * \<bar>poly p (a k)\<bar>"
+        by (simp add: h_def abs_mult)
+      also have "\<dots> \<le>  \<bar>cheb_poly n x / poly p x\<bar> * 1" using a_bounds[of k]
+        by (intro mult_left_mono) (auto simp: p_bounded)
+      also have "\<dots> < 1 * 1" using gt
+        by (intro mult_strict_right_mono) (auto simp: field_simps)
+      finally show ?thesis by simp
+    qed
+
+    have "\<exists>t\<in>{a (Suc k)<..<a k}. cheb_poly n t = poly h t" if "k < n" for k
+    proof -
+      define l where "l = -1 - poly h (a (if even k then Suc k else k))"
+      define u where "u = 1 - poly h (a (if even k then k else Suc k))"
+      have lu: "l < 0" "u > 0"
+
+      have "continuous_on {a (Suc k)..a k} (\<lambda>t. cheb_poly n t - poly h t)"
+        by (intro continuous_intros)
+      moreover have "connected {a (Suc k)..a k}" by simp
+      ultimately have conn: "connected ((\<lambda>t. cheb_poly n t - poly h t) ` {a (Suc k)..a k})"
+        by (rule connected_continuous_image)
+
+        by (intro bexI[of _ "a (if even k then Suc k else k)"])
+           (auto intro!: a_mono simp: cheb_poly_a l_def)
+        by (intro bexI[of _ "a (if even k then k else Suc k)"])
+           (auto intro!: a_mono simp: cheb_poly_a u_def)
+      ultimately have "0 \<in> (\<lambda>t. cheb_poly n t - poly h t) ` {a (Suc k)..a k}" using lu
+        by (intro connectedD_interval[OF conn, of l u 0]) auto
+      then obtain t where t: "t \<in> {a (Suc k)..a k}" "cheb_poly n t = poly h t"
+        by auto
+      moreover have "t \<noteq> a l" if "l \<le> n" for l
+      proof
+        assume [simp]: "t = a l"
+        with t and that have "poly h t = (-1) ^ l" by (simp add: cheb_poly_a)
+        hence "\<bar>poly h t\<bar> = 1" by simp
+        with h_a_bounded[OF that] show False by auto
+      qed
+        have "t \<noteq> a k" "t \<noteq> a (Suc k)" by auto
+      ultimately show ?thesis by (intro bexI[of _ t]) auto
+    qed
+    hence "\<forall>k\<in>{..<n}. \<exists>t. t \<in> {a (Suc k)<..<a k} \<and> cheb_poly n t = poly h t" by blast
+    then obtain b where b: "\<And>k. k < n \<Longrightarrow> b k \<in> {a (Suc k)<..<a k}"
+                           "\<And>k. k < n \<Longrightarrow> cheb_poly n (b k) = poly h (b k)"
+      by (subst (asm) bchoice_iff) blast
+
+    have b_mono: "b k > b l" if "k < l" "l < n" for k l
+    proof -
+      have "b l < a l" using b(1)[of l] that by simp
+      also have "a l \<le> a (Suc k)" using that by (intro a_mono) auto
+      also have "a (Suc k) < b k" using b(1)[of k] that by simp
+      finally show ?thesis .
+    qed
+    have b_inj: "inj_on b {..<n}"
+    proof
+      fix k l assume "k \<in> {..<n}" "l \<in> {..<n}" "b k = b l"
+      thus "k = l" using b_mono[of k l] b_mono[of l k]
+        by (cases k l rule: linorder_cases) auto
+    qed
+
+    have "Cheb_poly n \<noteq> h"
+    proof
+      assume "Cheb_poly n = h"
+      hence "poly (Cheb_poly n) 1 = poly h 1" by (simp only: )
+      hence "\<bar>poly p x\<bar> = \<bar>cheb_poly n x\<bar> * \<bar>poly p 1\<bar>" using gt
+        by (auto simp: h_def field_simps abs_mult)
+      also have "\<dots> \<le> \<bar>cheb_poly n x\<bar> * 1" by (intro mult_left_mono p_bounded) auto
+      finally show False using gt by simp
+    qed
+
+    have "x \<notin> b ` {..<n}"
+    proof
+      assume "x \<in> b ` {..<n}"
+      then obtain k where "k < n" "x = b k" by blast
+      hence "abs x < 1" using b(1)[of k] a_bounds[of k] a_bounds[of "Suc k"] by force
+      with x show False by (simp add: abs_if split: if_splits)
+    qed
+    with b_inj have "Suc n = card (insert x (b ` {..<n}))"
+      by (subst card_insert_disjoint) (auto simp: card_image)
+    also have "\<dots> \<le> card {t. poly (Cheb_poly n - h) t = 0}"
+      by (intro poly_roots_degree) auto
+    also have "\<dots> \<le> n" by (intro degree_diff_le) (auto simp: h_def n_def)
+    finally show False by simp
+  qed
+qed
+
+
+
+
+definition rel_ring_int :: "'a :: ring_1 \<Rightarrow> 'b :: ring_1 \<Rightarrow> bool" where
+  "rel_ring_int x y \<longleftrightarrow> (\<exists>n::int. x = of_int n \<and> y = of_int n)"
+
+lemma rel_ring_int_0: "rel_ring_int 0 0"
+  unfolding rel_ring_int_def by (rule exI[of _ 0]) auto
+
+lemma rel_ring_int_1: "rel_ring_int 1 1"
+  unfolding rel_ring_int_def by (rule exI[of _ 1]) auto
+
+lemma rel_ring_int_add:
+  "rel_fun rel_ring_int (rel_fun rel_ring_int rel_ring_int) (+) (+)"
+  unfolding rel_ring_int_def rel_fun_def by (auto intro: exI[of _ "x + y" for x y])
+
+lemma rel_ring_int_mult:
+  unfolding rel_ring_int_def rel_fun_def by (auto intro: exI[of _ "x * y" for x y])
+
+lemma rel_ring_int_minus:
+  "rel_fun rel_ring_int (rel_fun rel_ring_int rel_ring_int) (-) (-)"
+  unfolding rel_ring_int_def rel_fun_def by (auto intro: exI[of _ "x - y" for x y])
+
+lemma rel_ring_int_uminus:
+  "rel_fun rel_ring_int rel_ring_int uminus uminus"
+  unfolding rel_ring_int_def rel_fun_def by (auto intro: exI[of _ "-x" for x])
+
+lemma sgn_of_int: "sgn (of_int n :: 'a :: linordered_idom) = of_int (sgn n)"
+  by (auto simp: sgn_if)
+
+lemma rel_ring_int_sgn:
+  "rel_fun rel_ring_int (rel_ring_int :: 'a :: linordered_idom \<Rightarrow> 'b :: linordered_idom \<Rightarrow> bool) sgn sgn"
+  unfolding rel_ring_int_def rel_fun_def using sgn_of_int by metis
+
+lemma bi_unique_rel_ring_int:
+  "bi_unique (rel_ring_int :: 'a :: ring_char_0 \<Rightarrow> 'b :: ring_char_0 \<Rightarrow> bool)"
+  by (auto simp: rel_ring_int_def bi_unique_def)
+
+lemmas rel_ring_int_transfer =
+  rel_ring_int_0 rel_ring_int_1 rel_ring_int_add rel_ring_int_mult rel_ring_int_minus
+  rel_ring_int_uminus bi_unique_rel_ring_int
+
+lemma rel_poly_rel_ring_int:
+  "rel_poly rel_ring_int p q \<longleftrightarrow> (\<exists>r. p = of_int_poly r \<and> q = of_int_poly r)"
+proof
+  assume "rel_poly rel_ring_int p q"
+  then obtain f where f: "of_int (f i) = coeff p i" "of_int (f i) = coeff q i" for i
+    unfolding rel_poly_def rel_ring_int_def rel_fun_def by metis
+  define g where "g = (\<lambda>i. if coeff p i = 0 \<and> coeff q i = 0 then 0 else f i)"
+  have g: "of_int (g i) = coeff p i" "of_int (g i) = coeff q i" for i
+    by (auto simp: g_def f)
+  define r where "r = Abs_poly g"
+  have "eventually (\<lambda>i. g i = 0) cofinite"
+    unfolding cofinite_eq_sequentially
+    using eventually_gt_at_top[of "degree p"] eventually_gt_at_top[of "degree q"]
+    by eventually_elim (auto simp: g_def coeff_eq_0)
+  hence r: "coeff r i = g i" for i
+    unfolding r_def by (simp add: Abs_poly_inverse)
+  show "\<exists>r. p = of_int_poly r \<and> q = of_int_poly r"
+    by (intro exI[of _ r]) (auto simp: poly_eq_iff r g)
+qed (auto simp: rel_poly_def rel_ring_int_def rel_fun_def)
+
+lemma Cheb_poly_transfer:
+  "rel_fun (=) (rel_poly rel_ring_int) Cheb_poly Cheb_poly"
+proof
+  fix m n :: nat assume "m = n"
+  thus "rel_poly rel_ring_int (Cheb_poly m) (Cheb_poly n :: 'b poly)"
+    unfolding rel_poly_rel_ring_int
+    by (intro exI[of _ "Cheb_poly m"]) (auto simp: Cheb_poly_of_int)
+qed
+
+lemma Cheb_poly'_transfer:
+  "rel_fun (=) (rel_poly rel_ring_int) Cheb_poly' Cheb_poly'"
+proof
+  fix m n :: nat assume "m = n"
+  thus "rel_poly rel_ring_int (Cheb_poly' m) (Cheb_poly' n :: 'b poly)"
+    unfolding rel_poly_rel_ring_int
+    by (intro exI[of _ "Cheb_poly' m"]) (auto simp: Cheb_poly'_of_int)
+qed
+
+context
+  fixes T :: "'a :: {idom, ring_char_0} itself"
+  notes [transfer_rule] = rel_ring_int_transfer [where ?'a = real and ?'b = 'a]
+                          Cheb_poly_transfer[where ?'a = real and ?'b = 'a]
+                          Cheb_poly'_transfer[where ?'a = real and ?'b = 'a]
+                          transfer_rule_of_nat transfer_rule_numeral
+begin
+
+lemma Cheb_poly_equalities_aux:
+  fixes p q :: "real poly"
+  assumes "a > 0"
+  assumes "\<And>x. x \<in> {0<..<a} \<Longrightarrow> poly p (cos x) = poly q (cos x)"
+  shows   "p = q"
+proof -
+  define a' where "a' = max 0 (cos (min a (pi/3)))"
+  have "cos (min a (pi / 3)) > cos (pi / 2)"
+  moreover have "cos (min a (pi / 3)) < cos 0"
+  ultimately have "a' \<ge> 0" "a' < 1"
+    by (auto intro!: cos_gt_zero simp: min_def)
+
+  have "infinite {a'<..<1}"
+  moreover have "poly (p - q) y = 0" if y: "y \<in> {a'<..<1}" for y
+  proof -
+    define x where "x = arccos y"
+    hence "x < arccos a'"
+      by (subst arccos_less_mono) auto
+    also have "arccos a' \<le> a" using assms(1)
+      by (auto simp: a'_def max_def min_def arccos_cos intro: cos_ge_zero split: if_splits)
+    finally have "x < a" .      
+    moreover have "cos x = y"
+    moreover have "x > 0"
+    ultimately show ?thesis
+      using assms(2)[of x] by simp
+  qed
+  hence "{a'<..<1} \<subseteq> {y. poly (p - q) y = 0}"
+    by blast
+  ultimately have "infinite {x. poly (p - q) x = 0}"
+    using finite_subset by blast
+  with poly_roots_finite[of "p - q"] show "p = q"
+    by auto
+qed
+
+lemma pderiv_Cheb_poly: "pderiv (Cheb_poly n) = of_nat n * (Cheb_poly' (n - 1) :: 'a poly)"
+proof (transfer fixing: n, goal_cases)
+  case 1
+  show ?case
+  proof (cases "n = 0")
+    case False
+    hence n: "n > 0"
+      by auto
+    show ?thesis
+    proof (rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+      case x: (1 x)
+      from x have [simp]: "sin x \<noteq> 0"
+        using sin_gt_zero by force
+      define Q :: "real poly" where "Q = Cheb_poly n"
+      define Q' :: "real poly" where "Q' = pderiv Q"
+      define f :: "real \<Rightarrow> real" 
+        where "f = (\<lambda>x. cheb_poly n (cos x) - poly Q (cos x))"
+      define g where "g = (\<lambda>x. - (sin (real n * x) * real n) + sin x * poly Q' (cos x))"
+      have "(f has_field_derivative g x) (at x)"
+        unfolding cheb_poly_cos g_def f_def
+        by (auto intro!: derivative_eq_intros simp: Q'_def)
+      moreover have "f = (\<lambda>_. 0)"
+        by (auto simp: f_def Q_def)
+      hence "(f has_field_derivative 0) (at x)"
+        by simp
+      ultimately have "g x = 0"
+        using DERIV_unique by blast
+      also have "g x = sin x * (poly (pderiv (Cheb_poly n)) (cos x) - real n * cheb_poly' (n-1) (cos x))"
+        using cheb_poly'_cos[of "n - 1" x] x n
+        by (simp add: g_def Q'_def Q_def of_nat_diff algebra_simps)
+      finally show "poly (pderiv (Cheb_poly n)) (cos x) = poly (of_nat n * Cheb_poly' (n-1)) (cos x)"
+        using x by simp
+    qed
+  qed auto
+qed
+
+lemma pderiv_Cheb_poly':
+  "pderiv (Cheb_poly' n) * [:-1, 0, 1 :: 'a:] =
+     of_nat (n+1) * Cheb_poly (n+1) - [:0,1:] * Cheb_poly' n"
+proof (transfer fixing: n, rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+  case x: (1 x)
+  from x have [simp]: "sin x \<noteq> 0"
+    using sin_gt_zero by force
+  define Q :: "real poly" where "Q = Cheb_poly' n"
+  define Q' :: "real poly" where "Q' = pderiv Q"
+  define R :: "real poly" where "R = Cheb_poly (n+1)"
+  define f :: "real \<Rightarrow> real" 
+    where "f = (\<lambda>x. sin (real (n+1) * x) / sin x - poly Q (cos x))"
+  define g where "g = (\<lambda>x::real. ((n+1) * cos ((n+1) * x) * sin x -
+                            sin ((n+1) * x) * cos x) / sin x ^ 2 +
+                          sin x * poly Q' (cos x))"
+  have "(f has_field_derivative g x) (at x)"
+    unfolding g_def f_def using x
+    by (auto intro!: derivative_eq_intros simp: Q'_def power2_eq_square)
+  moreover have ev: "eventually (\<lambda>y. f y = 0) (nhds x)"
+  proof -
+    have "eventually (\<lambda>y. y \<in> {0<..<pi}) (nhds x)"
+      by (rule eventually_nhds_in_open) (use x in auto)
+    thus ?thesis
+    proof eventually_elim
+      case (elim y)
+      hence "sin y > 0"
+        by (intro sin_gt_zero) auto
+      thus ?case
+        using cheb_poly'_cos[of n y] by (auto simp: f_def Q_def field_simps)
+    qed
+  qed
+  ultimately have "((\<lambda>_. 0) has_field_derivative g x) (at x)"
+    using DERIV_cong_ev[OF refl ev refl] by simp
+  hence "g x = 0"
+    using DERIV_unique DERIV_const by blast
+  also have "g x = sin x * poly Q' (cos x) +
+      (sin x * cos ((n+1) * x) + real n * (sin x * cos ((n+1)*x)) - cos x * sin ((n+1)*x)) / sin x ^ 2"
+    using cheb_poly_cos[of "n - 1" x] x
+    by (simp add: g_def Q'_def Q_def of_nat_diff algebra_simps)
+  finally have "poly Q' (cos x) = -
+                  (real (n+1) * sin x * cos ((n+1) * x) -
+                   cos x * sin ((n+1) * x)) / sin x ^ 3"
+    by (auto simp: field_simps eval_nat_numeral)
+  also have "sin ((n+1) * x) = cheb_poly' n (cos x) * sin x"
+    by (rule cheb_poly'_cos [symmetric])
+  also have "cos ((n+1) * x) = cheb_poly (n+1) (cos x)"
+    by simp
+  also have "-(real (n+1) * sin x * cheb_poly (n+1) (cos x) - cos x * (cheb_poly' n (cos x) * sin x)) / sin x ^ 3 =
+               (cos x * cheb_poly' n (cos x) - real (n+1) * cheb_poly (n+1) (cos x)) / sin x ^ 2"
+    by (simp add: field_simps power3_eq_cube power2_eq_square)
+  finally have "poly Q' (cos x) * sin x ^ 2 =
+                  cos x * cheb_poly' n (cos x) - real (n + 1) * cheb_poly (n + 1) (cos x)"
+  thus ?case
+    unfolding sin_squared_eq Q'_def Q_def
+    by (simp add: algebra_simps power2_eq_square)
+qed
+
+lemma Cheb_poly_rec:
+  assumes n: "n \<ge> 2"
+  shows "2 * Cheb_poly n = Cheb_poly' n - (Cheb_poly' (n - 2) :: 'a poly)"
+proof (transfer fixing: n, rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+  case (1 x)
+  have *: "sin x * (sin x * t) = (1 - cos x ^ 2) * t" for t
+    using sin_squared_eq[of x] by algebra
+  from 1 have "sin x > 0"
+    by (intro sin_gt_zero) auto
+  hence "(poly (2 * Cheb_poly n) (cos x) - poly (Cheb_poly' n - Cheb_poly' (n - 2)) (cos x)) = 0"
+    using n
+    by (auto simp: cheb_poly'_cos' * field_simps sin_add sin_diff cos_add
+          power2_eq_square power3_eq_cube of_nat_diff)
+  thus ?case
+    by simp
+qed
+
+lemma cheb_poly_rec:
+  assumes n: "n \<ge> 2"
+  shows "2 * cheb_poly n x = cheb_poly' n x - cheb_poly' (n - 2) (x::'a)"
+  using arg_cong[OF Cheb_poly_rec[OF assms], of "\<lambda>P. poly P x", unfolded cheb_poly.eval cheb_poly'.eval]
+  by (simp add: power2_eq_square algebra_simps)
+
+lemma Cheb_poly'_rec:
+  assumes n: "n > 0"
+  shows   "Cheb_poly' n = [:0,1::'a:] * Cheb_poly' (n - 1) + Cheb_poly n"
+proof (transfer fixing: n, rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+  case (1 x)
+  have *: "sin x * (sin x * t) = (1 - cos x ^ 2) * t" for t
+    using sin_squared_eq[of x] by algebra
+  from 1 have "sin x > 0"
+    by (intro sin_gt_zero) auto
+  hence "(poly (Cheb_poly' n) (cos x) - poly ([:0, 1:] * Cheb_poly' (n - 1) + Cheb_poly n) (cos x)) = 0"
+    using n
+    by (auto simp: cheb_poly'_cos' * field_simps sin_add cos_add power2_eq_square
+                   power3_eq_cube of_nat_diff)
+  thus ?case
+    by simp
+qed
+
+lemma cheb_poly'_rec:
+  assumes n: "n > 0"
+  shows "cheb_poly' n x = x * cheb_poly' (n-1) x + cheb_poly n (x::'a)"
+  using arg_cong[OF Cheb_poly'_rec[OF assms], of "\<lambda>P. poly P x", unfolded cheb_poly.eval cheb_poly'.eval]
+  by (simp add: power2_eq_square algebra_simps)
+
+lemma Cheb_poly_rec':
+  assumes n: "n \<ge> 2"
+  shows "Cheb_poly n = [:0,1::'a:] * Cheb_poly (n-1) + [:-1,0,1:] * Cheb_poly' (n-2)"
+proof (transfer fixing: n, rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+  case (1 x)
+  have *: "sin x * (sin x * t) = (1 - cos x ^ 2) * t" for t
+    using sin_squared_eq[of x] by algebra
+  from 1 have "sin x > 0"
+    by (intro sin_gt_zero) auto
+  hence "poly (Cheb_poly n) (cos x) - poly ([:0, 1:] * Cheb_poly (n-1) - [:1, 0, - 1:] * Cheb_poly' (n-2)) (cos x) = 0"
+    using n
+    by (auto simp: cheb_poly'_cos' * field_simps sin_add cos_add sin_diff cos_diff 
+                   power2_eq_square power3_eq_cube of_nat_diff)
+  thus ?case
+    by simp
+qed
+
+lemma cheb_poly_rec':
+  assumes n: "n \<ge> 2"
+  shows "cheb_poly n x = x * cheb_poly (n-1) x + (x\<^sup>2 - 1) * cheb_poly' (n-2) (x::'a)"
+  using arg_cong[OF Cheb_poly_rec'[OF assms], of "\<lambda>P. poly P x", unfolded cheb_poly.eval cheb_poly'.eval]
+  by (simp add: power2_eq_square algebra_simps)
+
+lemma Cheb_poly_Pell:
+  assumes n: "n > 0"
+  shows   "Cheb_poly n ^ 2 + [:1, 0, -1::'a:] * Cheb_poly' (n - 1) ^ 2 = 1"
+proof (transfer fixing: n, rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+  case (1 x)
+  from 1 have "sin x > 0"
+    by (intro sin_gt_zero) auto
+  hence "sin x ^ 2 * (poly (Cheb_poly n ^ 2 + [:1, 0, -1::real:] * Cheb_poly' (n - 1) ^ 2) (cos x) - 1) = 
+         sin x ^ 2 * (cos (n*x) ^ 2 - 1) + (1 - cos x ^ 2) * sin (n*x) ^ 2"
+    using n by (auto simp: cheb_poly'_cos' field_simps power2_eq_square)
+  also have "\<dots> = 0"
+    by (simp add: sin_squared_eq algebra_simps)
+  finally show ?case
+qed
+
+lemma cheb_poly_Pell:
+  assumes n: "n > 0"
+  shows "cheb_poly n x ^ 2 + (1 - x\<^sup>2) * cheb_poly' (n-1) x ^ 2 = (1 :: 'a)"
+  using arg_cong[OF Cheb_poly_Pell[OF assms], of "\<lambda>P. poly P x", unfolded cheb_poly.eval cheb_poly'.eval]
+  by (simp add: power2_eq_square algebra_simps)
+
+lemma Cheb_poly_Turan:
+  "Cheb_poly (n+1) ^ 2  - Cheb_poly (n+2) * Cheb_poly n = [:1,0,-1::'a:]"
+proof (transfer fixing: n, rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+  case (1 x)
+  have *: "sin x * sin x = 1 - cos x ^ 2"
+          "sin x * (sin x * t) = (1 - cos x ^ 2) * t" for t x :: real
+    using sin_squared_eq[of x] by algebra+
+  from 1 have "sin x > 0"
+    by (intro sin_gt_zero) auto
+  hence "(poly ((Cheb_poly (Suc n))\<^sup>2 - Cheb_poly (Suc (Suc n)) * Cheb_poly n) (cos x) - (1 - cos x ^ 2)) = 0"
+    apply (simp add: field_simps cheb_poly'_cos')
+    apply (auto simp: cheb_poly'_cos' field_simps sin_add cos_add power2_eq_square *
+                      sin_multiple_reduce cos_multiple_reduce)
+    done
+  thus ?case
+    by (simp add: power2_eq_square)
+qed
+
+lemma cheb_poly_Turan:
+  "cheb_poly (n+1) x ^ 2  - cheb_poly (n+2) x * cheb_poly n x = (1 - x ^ 2 :: 'a)"
+  using arg_cong[OF Cheb_poly_Turan[of n], of "\<lambda>P. poly P x", unfolded cheb_poly.eval]
+  by (simp add: power2_eq_square algebra_simps)
+
+
+lemma Cheb_poly'_Turan:
+  "Cheb_poly' (n+1) ^ 2  - Cheb_poly' (n+2) * Cheb_poly' n = (1 :: 'a poly)"
+proof (transfer fixing: n, rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+  case (1 x)
+  have *: "sin x * sin x = 1 - cos x ^ 2"
+          "sin x * (sin x * t) = (1 - cos x ^ 2) * t" for t x :: real
+    using sin_squared_eq[of x] by algebra+
+  from 1 have "sin x > 0"
+    by (intro sin_gt_zero) auto
+  hence "sin x * ((poly ((Cheb_poly' (Suc n))\<^sup>2 - Cheb_poly' (Suc (Suc n)) * Cheb_poly' n) (cos x) - 1)) = 0"
+    apply (simp add: field_simps cheb_poly'_cos')
+    apply (auto simp: cheb_poly'_cos' field_simps sin_add cos_add power3_eq_cube power2_eq_square *
+                      sin_multiple_reduce cos_multiple_reduce)
+    done
+  thus ?case
+qed
+
+lemma cheb_poly'_Turan:
+  "cheb_poly' (n+1) x ^ 2  - cheb_poly' (n+2) x * cheb_poly' n x = (1 :: 'a)"
+  using arg_cong[OF Cheb_poly'_Turan[of n], of "\<lambda>P. poly P x", unfolded cheb_poly'.eval]
+  by (simp add: mult_ac)
+
+
+lemma Cheb_poly_prod:
+  assumes "n \<le> m"
+  shows   "2 * Cheb_poly m * Cheb_poly n = Cheb_poly (m + n) + (Cheb_poly (m - n) :: 'a poly)"
+proof (transfer fixing: m n, rule Cheb_poly_equalities_aux[OF pi_gt_zero], goal_cases)
+  case (1 x)
+  have *: "sin x * sin x = 1 - cos x ^ 2"
+          "sin x * (sin x * t) = (1 - cos x ^ 2) * t" for t x :: real
+    using sin_squared_eq[of x] by algebra+
+  have "poly (Cheb_poly (m + n) + Cheb_poly (m - n) - 2 * Cheb_poly m * Cheb_poly n) (cos x) = 0"
+    using assms 
+    by (simp add: * cos_add cos_diff of_nat_diff power2_eq_square algebra_simps)
+  thus ?case
+    by simp
+qed
+
+lemma cheb_poly_prod':
+  assumes "n \<le> m"
+  shows   "2 * cheb_poly m x * cheb_poly n x = cheb_poly (m + n) x + cheb_poly (m - n) (x :: 'a)"
+  using arg_cong[OF Cheb_poly_prod[OF assms], of "\<lambda>P. poly P x", unfolded cheb_poly'.eval]
+  by (simp add: poly_pcompose)
+
+
+lemma Cheb_poly_even:
+  "Cheb_poly (2 * n) = 2 * Cheb_poly n ^ 2 - (1 :: 'a poly)"
+  using Cheb_poly_prod[of n n]
+  by (simp add: power2_eq_square algebra_simps flip: mult_2)
+
+lemma cheb_poly_even:
+  "cheb_poly (2 * n) x = 2 * cheb_poly n x ^ 2 - (1 :: 'a)"
+  using arg_cong[OF Cheb_poly_even[of n], of "\<lambda>P. poly P x", unfolded cheb_poly'.eval]
+  by (simp add: poly_pcompose)
+
+lemma Cheb_poly_odd:
+  "Cheb_poly (2 * n + 1) = 2 * Cheb_poly n * Cheb_poly (Suc n) - [:0,1::'a:]"
+  using Cheb_poly_prod[of n "n + 1"]
+  by (simp add: power2_eq_square algebra_simps flip: mult_2)
+
+lemma cheb_poly_odd:
+  "cheb_poly (2 * n + 1) x = 2 * cheb_poly n x * cheb_poly (Suc n) x - (x :: 'a)"
+  using arg_cong[OF Cheb_poly_odd[of n], of "\<lambda>P. poly P x", unfolded cheb_poly'.eval]
+  by (simp add: poly_pcompose)
+
+
+theorem Cheb_poly_mult:
+  "(Cheb_poly (m * n) :: 'a poly) = pcompose (Cheb_poly m) (Cheb_poly n)"
+proof (transfer fixing: m n, rule ccontr)
+  assume neq: "(Cheb_poly (m * n) :: real poly) \<noteq> pcompose (Cheb_poly m) (Cheb_poly n)" (is "?lhs \<noteq> ?rhs")
+  have "{-1..1} \<subseteq> {x. poly (?lhs - ?rhs) x = 0}"
+    by (auto simp: cheb_poly_conv_cos mult_ac poly_pcompose)
+  moreover have "\<not>finite ({-1..1} :: real set)" by simp
+  ultimately have "\<not>finite {x. poly (?lhs - ?rhs) x = 0}" using finite_subset by blast
+  moreover have "finite {x. poly (?lhs - ?rhs) x = 0}" using neq
+    by (intro poly_roots_finite) auto
+  ultimately show False by contradiction
+qed
+
+corollary cheb_poly_mult: "cheb_poly m (cheb_poly n x) = cheb_poly (m * n) (x :: 'a)"
+proof -
+  have "cheb_poly m (cheb_poly n x) = poly (pcompose (Cheb_poly m) (Cheb_poly n)) x"
+    by (simp add: poly_pcompose)
+  also note Cheb_poly_mult[symmetric]
+  finally show ?thesis by simp
+qed
+
+theorem Cheb_poly'_mult:
+  assumes "m > 0" "n > 0"
+  shows   "(Cheb_poly' (m * n - 1) :: 'a poly) =
+              pcompose (Cheb_poly' (m-1)) (Cheb_poly n) * Cheb_poly' (n-1)"
+proof (transfer fixing: m n, rule Cheb_poly_equalities_aux[of "pi / n"], goal_cases)
+  case (2 x)
+  have *: "sin x * sin x = 1 - cos x ^ 2"
+          "sin x * (sin x * t) = (1 - cos x ^ 2) * t" for t x :: real
+    using sin_squared_eq[of x] by algebra+
+  have "x < pi / n"
+    using 2 by auto
+  also have "pi / n \<le> pi / 1"
+    using assms by (intro divide_left_mono) auto
+  finally have "x < pi"
+    by simp
+  hence A: "sin x > 0"
+    by (intro sin_gt_zero) (use 2 in auto)
+  from 2 have B: "sin (n * x) > 0"
+  have "poly ((Cheb_poly' (m * n - 1) :: real poly) -
+              pcompose (Cheb_poly' (m-1)) (Cheb_poly n) * Cheb_poly' (n-1)) (cos x) = 0"
+    using assms A B
+    by (simp add: * cos_add cos_diff of_nat_diff power2_eq_square algebra_simps poly_pcompose cheb_poly'_cos')
+  thus ?case
+    by simp
+qed (use assms in auto)
+
+lemma cheb_poly'_mult:
+  assumes "m > 0" "n > 0"
+  shows   "cheb_poly' (m * n - 1) (x :: 'a) =
+              cheb_poly' (m-1) (cheb_poly n x) * cheb_poly' (n-1) x"
+  using arg_cong[OF Cheb_poly'_mult[OF assms], of "\<lambda>P. poly P x",
+                 unfolded cheb_poly'.eval]
+  by (simp add: poly_pcompose)
+
+
+lemma poly_pderiv_Cheb_poly'_1:
+  "3 * poly (pderiv (Cheb_poly' n) :: 'a poly) 1 = of_nat ((n + 2) * (n + 1) * n)"
+proof (transfer fixing: n)
+  have "poly (pderiv (Cheb_poly' n)) 1 = real ((n + 2) * (n + 1) * n) / 3"
+  proof (induction n rule: induct_nat_012)
+    case (ge2 n)
+    show ?case
+      by (auto simp: pderiv_pCons Cheb_poly'_simps pderiv_diff pderiv_smult ge2 field_simps)
+  qed (auto simp: pderiv_pCons)
+  thus "3 * poly (pderiv (Cheb_poly' n)) 1 = real ((n + 2) * (n + 1) * n)"
+    by (simp add: field_simps)
+qed
+
+lemma poly_pderiv_Cheb_poly'_neg_1:
+  "3 * poly (pderiv (Cheb_poly' n) :: 'a poly) (-1) = (-1)^Suc n * of_nat ((n + 2) * (n + 1) * n)"
+proof -
+  have "3 * poly (pderiv (pcompose (Cheb_poly' n) (monom (-1::'a) 1))) 1 =
+          -3 * poly (pderiv (Cheb_poly' n)) (- 1)"
+    by (subst pderiv_pcompose) (auto simp: pderiv_pCons poly_pcompose monom_altdef)
+  also have "3 * poly (pderiv (pcompose (Cheb_poly' n) (monom (-1::'a) 1))) 1 =
+             (- 1) ^ n * (3 * poly (pderiv (Cheb_poly' n)) 1)"
+    by (subst cheb_poly'.pcompose_minus)
+       (auto simp: pderiv_mult one_pCons poly_const_pow pderiv_smult)
+  also have "3 * poly (pderiv (Cheb_poly' n) :: 'a poly) 1 = of_nat ((n + 2) * (n + 1) * n)"
+    by (rule poly_pderiv_Cheb_poly'_1)
+  finally show ?thesis 
+    by simp
+qed  
+
+lemma Cheb_poly_ODE:
+  fixes n :: nat
+  defines "p \<equiv> (Cheb_poly n :: 'a poly)"
+  shows   "[:1,0,-1:] * (pderiv ^^ 2) p - [:0,1:] * pderiv p + of_nat n ^ 2 * p = 0"
+proof (cases "n = 0")
+  case n: False
+  define f where "f = [:-1, 0, 1 :: 'a:]"
+  have "[:1,0,-1:] * (pderiv ^^ 2) p - [:0, 1:] * pderiv p + of_nat n ^ 2 * p =
+        -(f * (pderiv ^^ 2) p) - [:0, 1:] * pderiv p + of_nat n ^ 2 * p"
+    by (simp add: f_def)
+  also have "f * (pderiv ^^ 2) p = of_nat n * (pderiv (Cheb_poly' (n - 1)) * f)"
+    by (simp add: p_def numeral_2_eq_2 pderiv_Cheb_poly pderiv_mult)
+  also have "pderiv (Cheb_poly' (n - 1)) * f = 
+              of_nat n * Cheb_poly n - [:0, 1:] * Cheb_poly' (n - 1)"
+    unfolding f_def by (subst pderiv_Cheb_poly') (use n in auto)
+  also have "- (of_nat n * (of_nat n * Cheb_poly n - [:0, 1:] * Cheb_poly' (n - 1))) -
+                [:0, 1:] * pderiv p + (of_nat n)\<^sup>2 * p = 0"
+    by (simp add: p_def pderiv_Cheb_poly power2_eq_square algebra_simps)
+  finally show ?thesis .
+qed (auto simp: p_def numeral_2_eq_2)
+
+lemma Cheb_poly'_ODE:
+  fixes n :: nat
+  defines "p \<equiv> (Cheb_poly' n :: 'a poly)"
+  shows   "[:1,0,-1:] * (pderiv ^^ 2) p - [:0,3:] * pderiv p + of_nat (n*(n+2)) * p = 0"
+proof (cases "n = 0")
+  case n: False
+  define f where "f = [:-1, 0, 1 :: 'a:]"
+  have "[:1,0,-1:] * (pderiv ^^ 2) p - [:0,3:] * pderiv p + of_nat (n*(n+2)) * p =
+        -((pderiv ^^ 2) p * f + [:0,3:] * pderiv p) + of_nat (n*(n+2)) * p"
+    by (simp add: algebra_simps f_def)
+  also have "(pderiv ^^ 2) p * f = pderiv (pderiv p * f) - pderiv p * pderiv f"
+    by (simp add: numeral_2_eq_2 pderiv_mult)
+  also have "pderiv p * f = of_nat (n + 1) * Cheb_poly (n + 1) - [:0, 1:] * Cheb_poly' n"
+    unfolding p_def f_def by (subst pderiv_Cheb_poly') auto
+  also have "pderiv (of_nat (n + 1) * Cheb_poly (n + 1) - [:0, 1:] * Cheb_poly' n) -
+               pderiv p * pderiv f + [:0, 3:] * pderiv p =
+             of_nat (n^2 + 2 * n) * p"
+    by (auto simp: p_def f_def pderiv_pCons pderiv_diff pderiv_mult
+                   pderiv_add pderiv_Cheb_poly power2_eq_square algebra_simps)
+  also have "-\<dots> + of_nat (n * (n + 2)) * p = 0"
+    by (simp add: power2_eq_square)
+  finally show ?thesis .
+qed (auto simp: numeral_2_eq_2 p_def)
+
+end
+
+lemma cheb_poly_prod:
+  fixes x :: "'a :: field_char_0"
+  assumes "n \<le> m"
+  shows   "cheb_poly m x * cheb_poly n x = (cheb_poly (m + n) x + cheb_poly (m - n) x) / 2"
+  using cheb_poly_prod'[OF assms, of x] by (simp add: field_simps)
+
+lemma has_field_derivative_cheb_poly [derivative_intros]:
+  assumes "(f has_field_derivative f') (at x within A)"
+  shows   "((\<lambda>x. cheb_poly n (f x)) has_field_derivative
+              (of_nat n * cheb_poly' (n- 1) (f x) * f')) (at x within A)"
+  unfolding cheb_poly.eval [symmetric] 
+  by (rule derivative_eq_intros refl assms)+ (simp add: pderiv_Cheb_poly)
+
+lemma has_field_derivative_cheb_poly' [derivative_intros]:
+  "(cheb_poly' n has_field_derivative
+     (if x = 1 then of_nat ((n + 2) * (n + 1) * n) / 3
+      else if x = -1 then (-1)^Suc n * of_nat ((n + 2) * (n + 1) * n) / 3
+      else (of_nat (n+1) * cheb_poly (Suc n) x - x * cheb_poly' n x) / (x\<^sup>2 - 1)))
+   (at x within A)" (is "(_ has_field_derivative ?f') (at _ within _)")
+proof -
+  define a where "a = poly (pderiv (Cheb_poly' n)) x"
+  have "((\<lambda>x. cheb_poly' n x) has_field_derivative a) (at x within A)"
+    unfolding cheb_poly'.eval [symmetric] 
+    by (rule derivative_eq_intros refl)+ (simp add: pderiv_Cheb_poly' a_def)
+  also {
+    have "(x ^ 2 - 1) * a = poly (pderiv (Cheb_poly' n) * [:-1, 0, 1:]) x"
+      by (simp add: a_def power2_eq_square pderiv_minus algebra_simps)
+    also have "\<dots> = of_nat (n+1) * cheb_poly (Suc n) x - x * cheb_poly' n x"
+      by (subst pderiv_Cheb_poly') auto
+    finally have *: "of_nat (n+1) * cheb_poly (Suc n) x - x * cheb_poly' n x = (x ^ 2 - 1) * a" ..
+    have "a = ?f'"
+    proof (cases "x ^ 2 = 1")
+      case x: True
+      show ?thesis
+      proof (cases "n = 0")
+        case False
+        thus ?thesis using x
+          using poly_pderiv_Cheb_poly'_1[of n, where ?'a = 'a]
+                poly_pderiv_Cheb_poly'_neg_1[of n, where ?'a = 'a]
+          by (auto simp: power2_eq_1_iff a_def field_simps)
+      qed (auto simp: a_def)
+    next
+      case False
+      thus ?thesis
+        by (subst *) auto

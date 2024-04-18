@@ -1,0 +1,214 @@
+theory SAT_Plan_Base
+  imports  "List-Index.List_Index"
+    "Propositional_Proof_Systems.Formulas"
+    "STRIPS_Semantics"
+    "Map_Supplement" "List_Supplement"
+    "CNF_Semantics_Supplement" "CNF_Supplement"
+begin
+
+hide_const (open) Orderings.bot_class.bot
+no_notation Orderings.bot_class.bot ("\<bottom>")
+
+warnings. \<close>
+\<comment> \<open> Hide constant and notation for \isaname{Relation.converse} (\<open>(_\<^sup>+)\<close>) to prevent
+Let in the following \<open>\<Phi> \<equiv> encode_to_sat \<Pi> t\<close> denote the SATPlan encoding for a STRIPS problem \<open>\<Pi>\<close>
+and makespan \<open>t\<close>. Let \<^term>\<open>k < t\<close> and \<open>I \<equiv> (\<Pi>)\<^sub>I\<close> be the initial state of \<open>\<Pi>\<close>, \<open>G \<equiv> (\<Pi>)\<^sub>G\<close> be
+its goal state, \<open>\<V> \<equiv> (\<Pi>)\<^sub>\<V>\<close> its variable set, and \<open>\<O> \<equiv> (\<Pi>)\<^sub>\<O>\<close> its operator set. \<close>
+text \<open> Since the SATPlan encoding uses propositional variables for both operators and state
+variables of the problem as well as time points, we define a datatype using separate constructors
+facilitate case distinction.
+The natural number values store the time index resp. the indexes of the variable or operator
+within their lists in the problem representation.
+% TODO Note on why formulas are used instead of CNF (simple representation and good basis; e.g.
+% export to cnf lists using CNF_Formulas.cnf_lists) \<close>
+text \<open> A SATPlan formula is a regular propositional formula over SATPlan variables. We add a type
+synonym to improve readability. \<close>
+text \<open> We now continue with the concrete definitions used in the implementation of the SATPlan
+constructor of \isaname{sat_plan_variable}. \<close>
+text \<open> The initial state encoding (definition \ref{isadef:initial-state-encoding}) is a conjunction
+goal state encoding (\ref{isadef:goal-state-encoding}).
+is easy to show that we can normalize to conjunctive normal form (CNF). \<close>
+text \<open> Operator preconditions are encoded using activation-implies-precondition formulation as
+mentioned in \autoref{subsub:basic-sat-plan-encoding}: i.e. for each
+  @{text[display, indent=4] "Atom (Operator k (index ops op)) \<^bold>\<rightarrow> Atom (State k (index vs v))"}
+We use the equivalent disjunction in the formalization to simplify conversion to CNF.
+
+\<close>
+text \<open> Analogously to the operator precondition, add and delete effects of operators have to be
+implied by operator activation. That being said, we have to encode both positive and negative
+effects and the effect must be active at the following time point: i.e.
+  @{text[display, indent=4] "Atom (Operator k m) \<^bold>\<rightarrow> Atom (State (Suc k) n)"}
+for add effects respectively
+  @{text[display, indent=4] "Atom (Operator k m) \<^bold>\<rightarrow> \<^bold>\<not>Atom (State (Suc k) n)"}
+for delete effects. We again encode the implications as their equivalent disjunctions in
+definition \ref{isadef:operator-effect-encoding}. \<close>
+text \<open>
+
+Definitions \ref{isadef:negative-transition-frame-axiom-encoding} and
+\ref{isadef:positive-transition-frame-axiom-encoding} similarly encode the negative resp. positive
+transition frame axioms as disjunctions.  \<close>
+text \<open> Finally, the basic SATPlan encoding is the
+conjunction of the initial state, goal state, operator and frame axiom encoding for all time steps.
+The functions \isaname{encode_operators} and \isaname{encode_all_frame_axioms}\footnote{Not shown.}
+take care of mapping the operator precondition, effect and frame axiom encoding over all possible
+combinations of time point and operators resp. time points, variables, and operators. \<close>
+text \<open> Decoding plans from a valuation \<^term>\<open>\<A>\<close> of a
+time points except the last one. We implement this by mapping over all \<^term>\<open>k < t\<close>
+operator encoding at time \<^term>\<open>k\<close> to true---into a parallel operator (see definition
+operator declarations in the operator list of the problem. Since \<^term>\<open>index op = index op'\<close> for equal
+\<^term>\<open>remdups ops\<close> and then filter out activated operators. \<close>
+\<comment> \<open> We decode maps over range \<open>0, \<dots>, t - 1\<close> because the last operator takes effect in \<^term>\<open>t\<close> and
+must therefore have been applied in step \<^term>\<open>t - 1\<close>. \<close>
+text \<open> Similarly to the operator decoding, we can decode a state at time \<^term>\<open>k\<close> from a valuation
+of of the SATPlan encoding \<^term>\<open>\<A>\<close> by constructing a map from list of assignments
+\<^term>\<open>(v, \<A> (State k (index vs v)))\<close> for all \<^term>\<open>v \<in> \<V>\<close>. \<close>
+text \<open> We continue by setting up the \isaname{sat_plan} context for the proofs of soundness and
+completeness. \<close>
+\<comment> \<open> Immediately proof the sublocale proposition for strips in order to gain access to definitions
+and lemmas. \<close>
+\<comment> \<open> Setup simp rules. \<close>
+\<comment> \<open> Simp flag alone did not do it, so we have to assign a name to this lemma as well. \<close>
+\<comment> \<open> A technical lemma which shows a simpler form of the CNF of the initial state encoding. \<close>
+\<comment> \<open> A simplification lemma for the above one. \<close>
+\<comment> \<open> A technical lemma used in \isaname{cnf_of_encode_goal_state_set}. \<close>
+\<comment> \<open> A simplification lemma for the above one. \<close>
+\<comment> \<open> This lemma essentially states that the cnf for the cnf formula for the encoding has a
+clause for each variable whose state is defined in the goal state with the corresponding literal. \<close>
+text \<open> We omit the proofs that the partial encoding functions produce formulas in CNF form due to
+their more technical nature.
+The following sublocale proof confirms that definition \ref{isadef:encode-problem-sat-plan-base}
+
+
+subsection "Soundness of the Basic SATPlan Algorithm"
+
+
+lemma valuation_models_encoding_cnf_formula_equals:
+  assumes "is_valid_problem_strips \<Pi>"
+  shows "\<A> \<Turnstile> \<Phi> \<Pi> t = cnf_semantics \<A> (cnf (\<Phi> \<Pi> t))"
+proof -
+  let ?\<Phi> = "\<Phi> \<Pi> t"
+  {
+    have "is_cnf ?\<Phi>"
+      using is_cnf_encode_problem[OF assms].
+    hence "is_nnf ?\<Phi>"
+      using is_nnf_cnf
+      by blast
+  }
+  thus ?thesis
+    using cnf_semantics[of ?\<Phi> \<A>]
+    by blast
+qed
+
+corollary valuation_models_encoding_cnf_formula_equals_corollary:
+  assumes "is_valid_problem_strips \<Pi>"
+  shows "\<A> \<Turnstile> (\<Phi> \<Pi> t)
+    = (\<forall>C \<in> cnf (\<Phi> \<Pi> t). \<exists>L \<in> C. lit_semantics \<A> L)"
+  using valuation_models_encoding_cnf_formula_equals[OF assms]
+  unfolding cnf_semantics_def clause_semantics_def encode_problem_def
+  by presburger
+
+lemma decode_plan_length:
+  assumes "\<pi> = \<Phi>\<inverse> \<Pi> \<nu> t"
+  shows "length \<pi> = t"
+  using assms
+  unfolding decode_plan_def SAT_Plan_Base.decode_plan_def
+  by simp
+
+lemma decode_plan'_set_is[simp]:
+  "set (decode_plan' \<Pi> \<A> k)
+    = { (strips_problem.operators_of \<Pi>) ! (index (strips_problem.operators_of \<Pi>) op)
+      | op. op \<in> set (strips_problem.operators_of \<Pi>)
+        \<and> \<A> (Operator k (index (strips_problem.operators_of \<Pi>) op)) }"
+proof -
+  let ?ops = "strips_problem.operators_of \<Pi>"
+  let ?f = "\<lambda>op. Operator k (index ?ops op)"
+  let ?vs = "map ?f ?ops"
+  {
+    have "set (filter \<A> ?vs) = set (map ?f (filter (\<A> \<circ> ?f) ?ops))"
+      unfolding filter_map[of \<A> "\<lambda>op. Operator k (index ?ops op)" ?ops]..
+    hence "set (filter \<A> ?vs) = (\<lambda>op. Operator k (index ?ops op)) `
+      { op \<in> set ?ops. \<A> (Operator k (index ?ops op)) }"
+      unfolding set_map set_filter
+      by simp
+  }
+  have "set (decode_plan' \<Pi> \<A> k) = (\<lambda>v. case v of Operator k i \<Rightarrow> ?ops ! i)
+    ` (\<lambda>op. Operator k (index ?ops op)) ` { op \<in> set ?ops. \<A> (Operator k (index ?ops op)) }"
+    unfolding decode_plan'_def set_map Let_def
+    by auto
+  also have "\<dots> = (\<lambda>op. case Operator k (index ?ops op) of Operator k i \<Rightarrow> ?ops ! i)
+    ` { op \<in> set ?ops. \<A> (Operator k (index ?ops op)) }"
+    unfolding image_comp comp_apply
+    by argo
+  also have "\<dots> = (\<lambda>op. ?ops ! (index ?ops op))
+    ` { op \<in> set ?ops. \<A> (Operator k (index ?ops op)) }"
+    by force
+  finally show ?thesis
+    by blast
+qed
+
+lemma decode_plan_set_is[simp]:
+  "set (\<Phi>\<inverse> \<Pi> \<A> t) = (\<Union>k \<in> {..<t}. { decode_plan' \<Pi> \<A> k })"
+  unfolding decode_plan_def SAT_Plan_Base.decode_plan_def set_map
+  using atLeast_upt
+  by blast
+
+lemma decode_plan_step_element_then_i:
+  assumes "k < t"
+  shows "set ((\<Phi>\<inverse> \<Pi> \<A> t) ! k)
+    = { (strips_problem.operators_of \<Pi>) ! (index (strips_problem.operators_of \<Pi>) op)
+      | op. op \<in> set ((\<Pi>)\<^sub>\<O>) \<and> \<A> (Operator k (index (strips_problem.operators_of \<Pi>) op)) }"
+proof -
+  have "(\<Phi>\<inverse> \<Pi> \<A> t) ! k = decode_plan' \<Pi> \<A> k"
+    unfolding decode_plan_def SAT_Plan_Base.decode_plan_def
+    using assms
+    by simp
+  thus ?thesis
+    by force
+qed
+
+lemma decode_plan_step_element_then:
+  fixes \<Pi>::"'a strips_problem"
+  assumes "k < t"
+    and "op \<in> set ((\<Phi>\<inverse> \<Pi> \<A> t) ! k)"
+  shows "op \<in> set ((\<Pi>)\<^sub>\<O>)"
+    and "\<A> (Operator k (index (strips_problem.operators_of \<Pi>) op))"
+proof -
+  let ?ops = "strips_problem.operators_of \<Pi>"
+  let ?Ops = "{ ?ops ! (index ?ops op)
+    | op. op \<in> set ((\<Pi>)\<^sub>\<O>) \<and> \<A> (Operator k (index ?ops op)) }"
+  have "op \<in> ?Ops"
+    using assms(2)
+    unfolding decode_plan_step_element_then_i[OF assms(1)] assms
+    by blast
+  moreover have "op \<in> set ((\<Pi>)\<^sub>\<O>)"
+    and "\<A> (Operator k (index ?ops op))"
+    using calculation
+    by fastforce+
+  ultimately show "op \<in> set ((\<Pi>)\<^sub>\<O>)"
+    and "\<A> (Operator k (index ?ops op))"
+    by blast+
+qed
+
+contain duplicates). \<close>
+\<comment> \<open> Show that there exists an equivalence between a model \<open>\<A>\<close> of the (CNF of the) encoded
+problem and the state at step \<open>k\<close> decoded from the encoded problem. \<close>
+\<comment> \<open> Show that the operator activation implies precondition constraints hold at every time step
+of the decoded plan. \<close>
+\<comment> \<open> This lemma shows that for a problem encoding with makespan zero for which a model exists,
+the goal state encoding must be subset of the initial state encoding. In this case, the state
+variable encodings for the goal state are included in the initial state encoding. \<close>
+  \<comment> \<open> Show that the model of the encoding is also a model of the partial encodings. \<close>
+  \<comment> \<open> Show that every clause in the CNF of the goal state encoding @{text "\<Phi>\<^sub>G"} is also in
+  the CNF of the initial state encoding @{text "\<Phi>\<^sub>I"} thus making it a subset. We can conclude this
+  from the fact that both @{text "\<Phi>\<^sub>I"} and @{text "\<Phi>\<^sub>G"} contain singleton clauses---which must all
+  partial encodings.
+
+  By extension, if we decode the goal state @{text "G"} and the initial state @{text "I"} from a
+  model of the encoding,  @{text "G v = I v"} must hold for variable @{text "v"} in the domain of
+  the goal state. \<close>
+\<comment> \<open> Show that the encoding secures that for every parallel operator \<open>ops\<close>
+decoded from the plan at every time step \<open>t < length pi\<close> the following hold:
+\item  \<open>ops\<close> is applicable, and
+\item the effects of \<open>ops\<close> are consistent.
+\<^term>\<open>k' \<in> {length \<tau>..(length \<pi> + 1)}\<close> since no more operators are executed after the trace ends
+anyway. The definition of \<^term>\<open>\<A>\<^sub>0\<close> as the valuation that is false for every argument ensures

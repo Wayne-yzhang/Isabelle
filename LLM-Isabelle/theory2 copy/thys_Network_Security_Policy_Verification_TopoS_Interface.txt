@@ -1,0 +1,261 @@
+theory TopoS_Interface
+imports Main "Lib/FiniteGraph" TopoS_Vertices "Lib/TopoS_Util"
+begin
+
+
+
+
+
+  record ('v::vertex, 'a) TopoS_Params =
+    node_properties :: "'v::vertex \<Rightarrow> 'a option"
+
+
+  locale SecurityInvariant_withOffendingFlows = 
+   begin
+    definition is_offending_flows::"('v \<times> 'v) set \<Rightarrow> 'v graph \<Rightarrow> ('v \<Rightarrow> 'a) \<Rightarrow> bool" where
+      "is_offending_flows f G nP \<equiv> \<not> sinvar G nP \<and> sinvar (delete_edges G f) nP"
+    
+    definition is_offending_flows_min_set::"('v \<times> 'v) set \<Rightarrow> 'v graph \<Rightarrow> ('v \<Rightarrow> 'a) \<Rightarrow> bool" where
+      "is_offending_flows_min_set f G nP \<equiv> is_offending_flows f G nP \<and> 
+        (\<forall> (e1, e2) \<in> f. \<not> sinvar (add_edge e1 e2 (delete_edges G f)) nP)"
+
+    definition set_offending_flows::"'v graph \<Rightarrow> ('v \<Rightarrow> 'a) \<Rightarrow> ('v \<times> 'v) set set" where
+      "set_offending_flows G  nP = {F. F \<subseteq> (edges G) \<and> is_offending_flows_min_set F G nP}"
+  
+
+    lemma offending_not_empty: "\<lbrakk> F \<in> set_offending_flows G nP \<rbrakk> \<Longrightarrow> F \<noteq> {}"
+     by(auto simp add: set_offending_flows_def is_offending_flows_def is_offending_flows_min_set_def)
+    lemma empty_offending_contra:
+       "\<lbrakk> F \<in> set_offending_flows G nP; F = {}\<rbrakk> \<Longrightarrow> False"
+     by(simp add: set_offending_flows_def is_offending_flows_def is_offending_flows_min_set_def)
+    lemma offending_notevalD: "F \<in> set_offending_flows G nP \<Longrightarrow> \<not> sinvar G nP"
+     by(simp add: set_offending_flows_def is_offending_flows_def is_offending_flows_min_set_def)
+    lemma sinvar_no_offending: "sinvar G nP \<Longrightarrow> set_offending_flows G nP = {}"
+      by(simp add: set_offending_flows_def is_offending_flows_def is_offending_flows_min_set_def)
+    theorem removing_offending_flows_makes_invariant_hold:
+      "\<forall>F \<in> set_offending_flows G nP. sinvar (delete_edges G F) nP"
+      proof(cases "sinvar G nP")
+       case True
+        hence no_offending: "set_offending_flows G nP = {}" using sinvar_no_offending by simp
+        thus "\<forall>F\<in>set_offending_flows G nP. sinvar (delete_edges G F) nP" using empty_iff by simp
+       next
+       case False thus "\<forall>F\<in>set_offending_flows G nP. sinvar (delete_edges G F) nP"
+        by(simp add: set_offending_flows_def is_offending_flows_def is_offending_flows_min_set_def graph_ops)
+      qed
+  corollary valid_without_offending_flows:
+  "\<lbrakk> F \<in> set_offending_flows G nP \<rbrakk> \<Longrightarrow> sinvar (delete_edges G F) nP"
+    by(simp add: removing_offending_flows_makes_invariant_hold)
+
+  lemma set_offending_flows_simp: 
+    "\<lbrakk> wf_graph G \<rbrakk> \<Longrightarrow>
+      set_offending_flows G nP = {F. F \<subseteq> edges G \<and>
+        (\<not> sinvar G nP \<and> sinvar \<lparr>nodes = nodes G, edges = edges G - F\<rparr> nP) \<and>
+        (\<forall>(e1, e2)\<in>F. \<not> sinvar \<lparr>nodes = nodes G, edges = {(e1, e2)} \<union> (edges G - F)\<rparr> nP)}"
+    apply(simp only: set_offending_flows_def is_offending_flows_min_set_def 
+      is_offending_flows_def delete_edges_simp2 add_edge_def graph.select_convs)
+    apply(subgoal_tac "\<And>F e1 e2. F \<subseteq> edges G \<Longrightarrow> (e1, e2) \<in> F \<Longrightarrow> nodes G \<union> {e1, e2} = nodes G")
+     apply fastforce
+    apply(simp add: wf_graph_def)
+    by (metis fst_conv imageI in_mono insert_absorb snd_conv)
+
+   end
+
+
+
+print_locale! SecurityInvariant_withOffendingFlows
+
+
+lemma "SecurityInvariant_withOffendingFlows.set_offending_flows (\<lambda>_ _. False) \<lparr> nodes = {''v1''}, edges={} \<rparr> id = {}"
+by %invisible (simp add: SecurityInvariant_withOffendingFlows.set_offending_flows_def 
+  SecurityInvariant_withOffendingFlows.is_offending_flows_min_set_def SecurityInvariant_withOffendingFlows.is_offending_flows_def)
+lemma "SecurityInvariant_withOffendingFlows.set_offending_flows (\<lambda>_ _. False) 
+  \<lparr> nodes = {''v1'', ''v2''}, edges = {(''v1'', ''v2'')} \<rparr> id = {}"
+by %invisible (simp add: SecurityInvariant_withOffendingFlows.set_offending_flows_def 
+  SecurityInvariant_withOffendingFlows.is_offending_flows_min_set_def SecurityInvariant_withOffendingFlows.is_offending_flows_def)
+
+  lemma "\<exists>sinvar. \<not> sinvar G nP \<and> SecurityInvariant_withOffendingFlows.set_offending_flows sinvar G nP = {}"
+  apply(simp add: SecurityInvariant_withOffendingFlows.set_offending_flows_def
+    SecurityInvariant_withOffendingFlows.is_offending_flows_min_set_def SecurityInvariant_withOffendingFlows.is_offending_flows_def)
+  apply(rule_tac x="(\<lambda>_ _. False)" in exI)
+  apply(simp)
+  done
+
+
+
+  locale SecurityInvariant_preliminaries = SecurityInvariant_withOffendingFlows sinvar
+    for sinvar
+    +
+    assumes 
+      defined_offending:
+      "\<lbrakk> wf_graph G; \<not> sinvar G nP \<rbrakk> \<Longrightarrow> set_offending_flows G nP \<noteq> {}"
+    and
+      mono_sinvar:
+      "\<lbrakk> wf_graph \<lparr> nodes = N, edges = E \<rparr>; E' \<subseteq> E; sinvar \<lparr> nodes = N, edges = E \<rparr> nP \<rbrakk> \<Longrightarrow> 
+        sinvar \<lparr> nodes = N, edges = E' \<rparr> nP"
+    and mono_offending:
+      "\<lbrakk> wf_graph G; is_offending_flows ff G nP \<rbrakk> \<Longrightarrow> is_offending_flows (ff \<union> f') G nP"
+  begin
+
+  end
+
+
+
+
+
+  locale SecurityInvariant = SecurityInvariant_preliminaries sinvar
+    for sinvar::"('v::vertex) graph \<Rightarrow> ('v::vertex \<Rightarrow> 'a) \<Rightarrow> bool"
+    +
+    fixes default_node_properties :: "'a" ("\<bottom>") 
+    and receiver_violation :: "bool"
+    assumes 
+      default_secure:
+      "\<lbrakk> wf_graph G; \<not> sinvar G nP; F \<in> set_offending_flows G nP \<rbrakk> \<Longrightarrow>
+        (\<not> receiver_violation \<longrightarrow> i \<in> fst ` F \<longrightarrow> \<not> sinvar G (nP(i := \<bottom>))) \<and>
+        (receiver_violation \<longrightarrow> i \<in> snd ` F \<longrightarrow> \<not> sinvar G (nP(i := \<bottom>)))"
+      and
+      default_unique:
+      "otherbot \<noteq> \<bottom> \<Longrightarrow> 
+        \<exists> (G::('v::vertex) graph) nP i F. wf_graph G \<and> \<not> sinvar G nP \<and> F \<in> set_offending_flows G nP \<and> 
+         sinvar (delete_edges G F) nP \<and>
+         (\<not> receiver_violation \<longrightarrow> i \<in> fst ` F \<and> sinvar G (nP(i := otherbot))) \<and>
+         (receiver_violation \<longrightarrow> i \<in> snd ` F \<and> sinvar G (nP(i := otherbot))) "
+   begin
+    fun node_props :: "('v, 'a) TopoS_Params \<Rightarrow> ('v \<Rightarrow> 'a)" where
+    "node_props P = (\<lambda> i. (case (node_properties P) i of Some property \<Rightarrow> property | None \<Rightarrow> \<bottom>))"
+
+    definition node_props_formaldef :: "('v, 'a) TopoS_Params \<Rightarrow> ('v \<Rightarrow> 'a)" where
+    "node_props_formaldef P \<equiv>
+    (\<lambda> i. (if i \<in> dom (node_properties P) then the (node_properties P i) else \<bottom>))"
+
+    lemma node_props_eq_node_props_formaldef: "node_props_formaldef = node_props"
+     by(simp add: fun_eq_iff node_props_formaldef_def option.case_eq_if domIff)
+
+    definition eval::"'v graph \<Rightarrow> ('v, 'a) TopoS_Params \<Rightarrow> bool" where
+    "eval G P \<equiv> wf_graph G \<and> sinvar G (node_props P)"
+
+
+    lemma unique_common_math_notation:
+    assumes "\<forall>G nP i F. wf_graph (G::('v::vertex) graph) \<and> \<not> sinvar G nP \<and> F \<in> set_offending_flows G nP \<and> 
+         sinvar (delete_edges G F) nP \<and> 
+         (\<not> receiver_violation \<longrightarrow> i \<in> fst ` F \<longrightarrow> \<not> sinvar G (nP(i := otherbot))) \<and>
+         (receiver_violation \<longrightarrow> i \<in> snd ` F \<longrightarrow> \<not> sinvar G (nP(i := otherbot)))"
+    shows "otherbot = \<bottom>"
+    apply(rule ccontr)
+    apply(drule default_unique)
+    using assms by blast
+   end
+
+print_locale! SecurityInvariant
+
+
+
+
+  locale SecurityInvariant_IFS = SecurityInvariant_preliminaries sinvar
+      for sinvar::"('v::vertex) graph \<Rightarrow> ('v::vertex \<Rightarrow> 'a) \<Rightarrow> bool"
+      +
+      fixes default_node_properties :: "'a" ("\<bottom>") 
+      assumes  default_secure_IFS:
+        "\<lbrakk> wf_graph G; f \<in> set_offending_flows G nP \<rbrakk> \<Longrightarrow>
+          \<forall>i \<in> snd` f. \<not> sinvar G (nP(i := \<bottom>))"
+      and
+      default_unique_IFS:
+      "(\<forall>G f nP i. wf_graph G \<and> f \<in> set_offending_flows G nP \<and> i \<in> snd` f 
+                \<longrightarrow> \<not> sinvar G (nP(i := otherbot))) \<Longrightarrow> otherbot = \<bottom>"
+      begin
+        lemma default_unique_EX_notation: "otherbot \<noteq> \<bottom> \<Longrightarrow> 
+          \<exists> G nP i f. wf_graph G \<and> \<not> sinvar G nP \<and> f \<in> set_offending_flows G nP \<and> 
+           sinvar (delete_edges G f) nP \<and>
+           (i \<in> snd` f \<and> sinvar G (nP(i := otherbot)))"
+          apply(erule contrapos_pp)
+          apply(simp)
+          using default_unique_IFS SecurityInvariant_withOffendingFlows.valid_without_offending_flows offending_notevalD
+          by metis
+      end
+  
+  sublocale SecurityInvariant_IFS \<subseteq> SecurityInvariant where receiver_violation=True
+  apply(unfold_locales)
+   apply(simp add: default_secure_IFS)
+  apply(simp only: HOL.simp_thms)
+  apply(drule default_unique_EX_notation)
+  apply(assumption)
+  done
+
+  locale SecurityInvariant_IFS_otherDirectrion = SecurityInvariant where receiver_violation=True
+  sublocale SecurityInvariant_IFS_otherDirectrion \<subseteq> SecurityInvariant_IFS
+  apply(unfold_locales)
+   apply (metis default_secure offending_notevalD)
+  apply(erule contrapos_pp)
+  apply(simp)
+  apply(drule default_unique)
+  apply(simp)
+  apply(blast)
+  done
+  
+
+lemma default_uniqueness_by_counterexample_IFS:
+  assumes "(\<forall>G F nP i. wf_graph G \<and> F \<in> SecurityInvariant_withOffendingFlows.set_offending_flows sinvar G nP \<and> i \<in> snd` F 
+                \<longrightarrow> \<not> sinvar G (nP(i := otherbot)))"
+  and "otherbot \<noteq> default_value \<Longrightarrow>
+    \<exists>G nP i F. wf_graph G \<and> \<not> sinvar G nP \<and> F \<in> (SecurityInvariant_withOffendingFlows.set_offending_flows sinvar G nP) \<and>
+       sinvar (delete_edges G F) nP \<and>
+        i \<in> snd ` F \<and> sinvar G (nP(i := otherbot)) "
+   shows "otherbot = default_value"
+   using assms by blast
+
+
+  locale SecurityInvariant_ACS = SecurityInvariant_preliminaries sinvar
+      for sinvar::"('v::vertex) graph \<Rightarrow> ('v::vertex \<Rightarrow> 'a) \<Rightarrow> bool"
+      +
+      fixes default_node_properties :: "'a" ("\<bottom>") 
+      assumes  default_secure_ACS:
+        "\<lbrakk> wf_graph G; f \<in> set_offending_flows G nP \<rbrakk> \<Longrightarrow>
+          \<forall>i \<in> fst` f. \<not> sinvar G (nP(i := \<bottom>))"
+      and
+      default_unique_ACS:
+      "(\<forall>G f nP i. wf_graph G \<and> f \<in> set_offending_flows G nP \<and> i \<in> fst` f 
+                \<longrightarrow> \<not> sinvar G (nP(i := otherbot))) \<Longrightarrow> otherbot = \<bottom>"
+      begin
+        lemma default_unique_EX_notation: "otherbot \<noteq> \<bottom> \<Longrightarrow> 
+          \<exists> G nP i f. wf_graph G \<and> \<not> sinvar G nP \<and> f \<in> set_offending_flows G nP \<and> 
+           sinvar (delete_edges G f) nP \<and>
+           (i \<in> fst` f \<and> sinvar G (nP(i := otherbot)))"
+          apply(erule contrapos_pp)
+          apply(simp)
+          using default_unique_ACS SecurityInvariant_withOffendingFlows.valid_without_offending_flows offending_notevalD
+          by metis
+      end
+  
+  sublocale SecurityInvariant_ACS \<subseteq> SecurityInvariant where receiver_violation=False
+  apply(unfold_locales)
+   apply(simp add: default_secure_ACS)
+  apply(simp only: HOL.simp_thms)
+  apply(drule default_unique_EX_notation)
+  apply(assumption)
+  done
+
+
+  locale SecurityInvariant_ACS_otherDirectrion = SecurityInvariant where receiver_violation=False
+  sublocale SecurityInvariant_ACS_otherDirectrion \<subseteq> SecurityInvariant_ACS
+  apply(unfold_locales)
+   apply (metis default_secure offending_notevalD)
+  apply(erule contrapos_pp)
+  apply(simp)
+  apply(drule default_unique)
+  apply(simp)
+  apply(blast)
+  done
+
+
+lemma default_uniqueness_by_counterexample_ACS:
+  assumes "(\<forall>G F nP i. wf_graph G \<and> F \<in> SecurityInvariant_withOffendingFlows.set_offending_flows sinvar G nP \<and> i \<in> fst ` F 
+                \<longrightarrow> \<not> sinvar G (nP(i := otherbot)))"
+  and "otherbot \<noteq> default_value \<Longrightarrow>
+    \<exists>G nP i F. wf_graph G \<and> \<not> sinvar G nP \<and> F \<in> (SecurityInvariant_withOffendingFlows.set_offending_flows sinvar G nP) \<and>
+       sinvar (delete_edges G F) nP \<and>
+        i \<in> fst ` F \<and> sinvar G (nP(i := otherbot))"
+  shows "otherbot = default_value"
+  using assms by blast
+
+
+
+end

@@ -1,0 +1,427 @@
+theory MultiSequents
+imports "HOL-Library.Multiset"
+begin
+
+
+datatype 'a form = At "nat"
+                        | Compound "'a" "'a form list"
+                        | ff
+
+
+
+datatype Gp = con | dis | imp
+type_synonym Gp_form = "Gp form"
+
+abbreviation con_form (infixl "\<and>*" 80) where
+   "p \<and>* q \<equiv> Compound con [p,q]"
+
+abbreviation dis_form (infixl "\<or>*" 80) where
+   "p \<or>* q \<equiv> Compound dis [p,q]"
+
+abbreviation imp_form (infixl "\<supset>" 80) where
+   "p \<supset> q  \<equiv> Compound imp [p,q]"
+abbreviation multiset_abbrev ("\<LM> _  \<RM>" [75]75) where
+   "\<LM> A \<RM> \<equiv> {# A #}"
+
+abbreviation multiset_empty ("\<Empt>" 75) where
+  "\<Empt> \<equiv> {#}"
+
+datatype 'a sequent = Sequent "('a form) multiset" "('a form) multiset" (" (_) \<Rightarrow>* (_)" [6,6] 5)
+
+type_synonym 'a rule = "'a sequent list * 'a sequent"
+
+type_synonym 'a deriv = "'a sequent * nat"
+
+abbreviation
+multiset_plus (infixl "\<oplus>" 80) where
+   "(\<Gamma> :: 'a multiset) \<oplus> (A :: 'a) \<equiv> \<Gamma> + \<LM>A\<RM>"
+abbreviation
+multiset_minus (infixl "\<ominus>" 80) where
+   "(\<Gamma> :: 'a multiset) \<ominus>  (A :: 'a) \<equiv> \<Gamma> - \<LM>A\<RM>" 
+
+consts
+  extend :: "'a sequent \<Rightarrow> 'a sequent \<Rightarrow> 'a sequent"
+  extendRule :: "'a sequent \<Rightarrow> 'a rule \<Rightarrow> 'a rule"
+
+  uniqueConclusion :: "'a rule set \<Rightarrow> bool"
+
+  invertible :: "'a rule \<Rightarrow> 'a rule set \<Rightarrow> bool"
+  invertible_set :: "'a rule set \<Rightarrow> bool"
+
+primrec antec :: "'a sequent \<Rightarrow> 'a form multiset" where "antec (Sequent ant suc) = ant"
+primrec succ :: "'a sequent \<Rightarrow> 'a form multiset" where "succ (Sequent ant suc) = suc"
+primrec mset :: "'a sequent \<Rightarrow> 'a form multiset" where "mset (Sequent ant suc) = ant + suc"
+primrec seq_size :: "'a sequent \<Rightarrow> nat" where "seq_size (Sequent ant suc) = size ant + size suc"
+
+primrec max_list :: "nat list \<Rightarrow> nat" where
+  "max_list [] = 0"
+| "max_list (n # ns) = max n (max_list ns)"
+
+fun depth :: "'a form \<Rightarrow> nat"
+where
+   "depth (At i) = 0"
+|  "depth (Compound f fs) = (max_list (map depth fs)) + 1"
+|  "depth (ff) = 0"
+
+
+inductive_set "Ax" where
+
+
+inductive_set "upRules" where
+
+
+
+inductive_set "g3cp"
+where
+
+lemma g3cp_upRules:
+shows "g3cp \<subseteq> upRules"
+proof-
+ {
+  fix ps c
+  assume "(ps,c) \<in> g3cp"
+  then have "(ps,c) \<in> upRules" by (induct) auto
+ }
+thus "g3cp \<subseteq> upRules" by auto
+qed
+
+
+
+
+overloading
+  extend \<equiv> extend
+  extendRule \<equiv> extendRule
+begin
+
+definition extend
+  where "extend forms seq \<equiv> (antec forms + antec seq) \<Rightarrow>* (succ forms + succ seq)"
+
+definition extendRule
+  where "extendRule forms R \<equiv> (map (extend forms) (fst R), extend forms (snd R))"
+
+end
+
+
+inductive_set extRules :: "'a rule set \<Rightarrow> 'a rule set"  ("_*")
+  for R :: "'a rule set" 
+
+
+
+overloading uniqueConclusion \<equiv> uniqueConclusion
+begin
+
+definition uniqueConclusion :: "'a rule set \<Rightarrow> bool"
+  where "uniqueConclusion R \<equiv> \<forall> r1 \<in> R. \<forall> r2 \<in> R. (snd r1 = snd r2) \<longrightarrow> (r1 = r2)"
+
+end
+
+lemma g3cp_uc:
+shows "uniqueConclusion g3cp"
+apply (auto simp add:uniqueConclusion_def Ball_def)
+apply (rule g3cp.cases) apply auto by (rotate_tac 1,rule g3cp.cases,auto)+
+
+inductive leftPrincipal :: "'a rule \<Rightarrow> 'a form \<Rightarrow> bool"
+  where
+  up[intro]: "C = (\<LM>Compound F Fs\<RM> \<Rightarrow>* \<Empt>)  \<Longrightarrow> 
+                   leftPrincipal (Ps,C) (Compound F Fs)"
+
+
+
+inductive rightPrincipal :: "'a rule \<Rightarrow> 'a form \<Rightarrow> bool"
+  where
+                        rightPrincipal (Ps,C) (Compound F Fs)"
+
+
+
+lemma principal_means_premiss:
+assumes a: "rightPrincipal r (A \<and>* B)"
+and     b: "r \<in> g3cp"
+shows      "(\<Empt> \<Rightarrow>* \<LM> A \<RM>) \<in> set (fst r)"
+proof-
+    from a and b obtain Ps where req: "r = (Ps, \<Empt> \<Rightarrow>* \<LM> A\<and>*B \<RM>)" 
+         by (cases r) auto
+    with b have "Ps = [\<Empt> \<Rightarrow>* \<LM> A \<RM>, \<Empt> \<Rightarrow>* \<LM> B \<RM>]"
+         apply (cases r) by (rule g3cp.cases) auto
+    with req show "(\<Empt> \<Rightarrow>* \<LM> A \<RM>) \<in> set (fst r)" by auto
+qed
+
+
+
+
+
+
+
+
+inductive_set derivable :: "'a rule set \<Rightarrow> 'a deriv set"
+  for R :: "'a rule set"
+  where
+                       \<Longrightarrow> (snd r,m + 1) \<in> derivable R"
+
+
+inductive_set derivable' :: "'a rule set \<Rightarrow> 'a sequent set"
+   for R :: "'a rule set"
+   where
+                       \<Longrightarrow> (snd r) \<in> derivable' R"
+
+
+assumes "(C,n) \<in> derivable R"
+shows "C \<in> derivable' R"
+using assms by (induct) auto
+
+lemma deriv_to_deriv2:
+assumes "C \<in> derivable' R"
+shows "\<exists> n. (C,n) \<in> derivable R"
+using assms
+  proof (induct)
+  case (base C)
+  then have "(C,0) \<in> derivable R" by auto
+  then show ?case by blast
+next
+  case (step r)
+  then obtain ps c where "r = (ps,c)" and "ps \<noteq> []" by (cases r) auto
+  with step(3) have aa: "\<forall> p \<in> set ps. \<exists> n. (p,n) \<in> derivable R" by auto
+  then have "\<exists> m. \<forall> p \<in> set ps. \<exists> n\<le>m. (p,n) \<in> derivable R"
+    case Nil
+    then show ?case by auto
+  next
+    case (Cons a as)
+    then have "\<exists> m. \<forall> p \<in> set as. \<exists> n\<le>m. (p,n) \<in> derivable R" by auto
+    then obtain m where "\<forall> p \<in> set as. \<exists> n\<le>m. (p,n) \<in> derivable R" by auto
+      "\<exists> n. (a,n) \<in> derivable R" by auto
+    then obtain m' where "(a,m') \<in> derivable R" by blast
+    ultimately have "\<forall> p \<in> set (a # as). \<exists> n\<le>(max m m'). (p,n) \<in> derivable R" 
+
+      apply (auto simp add:Ball_def)
+      apply (rule_tac x=m' in exI) apply simp
+    then show ?case by blast
+  qed
+  then obtain m where "\<forall> p \<in> set ps. \<exists> n\<le>m. (p,n) \<in> derivable R" by blast
+    derivable.step[where r="(ps,c)" and R=R and m=m] by auto
+qed
+
+
+
+
+
+lemma characteriseSeq:
+shows "\<exists> A B. (C :: 'a sequent) = (A \<Rightarrow>* B)"
+apply (rule_tac x="antec C" in exI, rule_tac x="succ C" in exI) by (cases C) (auto)
+
+
+lemma nonEmptySet:
+shows "A \<noteq> [] \<longrightarrow> (\<exists> a. a \<in> set A)"
+by (auto simp add:neq_Nil_conv)
+
+lemma midMultiset:
+  assumes "\<Gamma> \<oplus> A = \<Gamma>' \<oplus> B" and "A \<noteq> B"
+  shows "\<exists> \<Gamma>''. \<Gamma> = \<Gamma>'' \<oplus> B \<and> \<Gamma>' = \<Gamma>'' \<oplus> A"
+proof-
+  from assms have "A \<in># \<Gamma>'"
+      proof-
+      from assms have "set_mset (\<Gamma> \<oplus> A) = set_mset (\<Gamma>' \<oplus> B)" by auto
+      then have "set_mset \<Gamma> \<union> {A} = set_mset \<Gamma>' \<union> {B}" by auto
+      then have "set_mset \<Gamma> \<union> {A} \<subseteq> set_mset \<Gamma>' \<union> {B}" by simp
+      then have "A \<in> set_mset \<Gamma>'" using assms by auto
+      thus "A \<in># \<Gamma>'" by simp
+      qed
+  then have "\<Gamma>' \<ominus> A \<oplus> A = \<Gamma>'" by (auto simp add:multiset_eq_iff)
+  then have "\<exists> \<Gamma>''. \<Gamma>' = \<Gamma>'' \<oplus> A" apply (rule_tac x="\<Gamma>' \<ominus> A" in exI) by auto
+  then obtain \<Gamma>'' where eq1:"\<Gamma>' = \<Gamma>'' \<oplus> A" by blast
+  then have "\<Gamma> = \<Gamma>'' \<oplus> B" by auto
+  thus ?thesis using eq1 by blast
+qed
+
+lemma extendID:
+assumes "extend S (\<LM> At i \<RM> \<Rightarrow>* \<LM> At i \<RM>) = (\<Gamma> \<Rightarrow>* \<Delta>)"
+shows "At i \<in># \<Gamma> \<and> At i \<in># \<Delta>"
+using assms
+proof-
+  from assms have "\<exists> \<Gamma>' \<Delta>'. \<Gamma> = \<Gamma>' \<oplus> At i \<and> \<Delta> = \<Delta>' \<oplus> At i" 
+     using extend_def[where forms=S and seq="\<LM> At i \<RM> \<Rightarrow>* \<LM> At i \<RM>"]
+     by (rule_tac x="antec S" in exI,rule_tac x="succ S" in exI) auto
+  then show ?thesis by auto
+qed
+
+lemma extendFalsum:
+assumes "extend S (\<LM> ff \<RM> \<Rightarrow>* \<Empt>) = (\<Gamma> \<Rightarrow>* \<Delta>)"
+shows "ff \<in># \<Gamma>"
+proof-
+  from assms have "\<exists> \<Gamma>'. \<Gamma> = \<Gamma>' \<oplus> ff" 
+     using extend_def[where forms=S and seq="\<LM>ff \<RM> \<Rightarrow>* \<Empt>"]
+     by (rule_tac x="antec S" in exI) auto
+  then show ?thesis by auto
+qed
+
+
+lemma containID:
+assumes a:"At i \<in># \<Gamma> \<and> At i \<in># \<Delta>"
+    and b:"Ax \<subseteq> R"
+shows "(\<Gamma> \<Rightarrow>* \<Delta>,0) \<in> derivable R*"
+proof-
+from a have "\<Gamma> = \<Gamma> \<ominus> At i \<oplus> At i \<and> \<Delta> = \<Delta> \<ominus> At i \<oplus> At i" by auto
+then have "extend ((\<Gamma> \<ominus> At i) \<Rightarrow>* (\<Delta> \<ominus> At i)) (\<LM> At i \<RM> \<Rightarrow>* \<LM> At i \<RM>) = (\<Gamma> \<Rightarrow>* \<Delta>)" 
+     using extend_def[where forms="\<Gamma> \<ominus> At i \<Rightarrow>* \<Delta> \<ominus> At i" and seq="\<LM>At i\<RM> \<Rightarrow>* \<LM>At i\<RM>"] by auto
+moreover
+have "([],\<LM> At i \<RM> \<Rightarrow>* \<LM> At i \<RM>) \<in> R" using b by auto
+ultimately
+have "([],\<Gamma> \<Rightarrow>* \<Delta>) \<in> R*" 
+     using extRules.I[where R=R and r="([],  \<LM>At i\<RM> \<Rightarrow>* \<LM>At i\<RM>)" and seq="\<Gamma> \<ominus> At i \<Rightarrow>* \<Delta> \<ominus> At i"] 
+       and extendRule_def[where forms="\<Gamma> \<ominus> At i \<Rightarrow>* \<Delta> \<ominus> At i" and R="([],  \<LM>At i\<RM> \<Rightarrow>* \<LM>At i\<RM>)"] by auto
+then show ?thesis using derivable.base[where R="R*" and C="\<Gamma> \<Rightarrow>* \<Delta>"] by auto
+qed
+
+lemma containFalsum:
+assumes a: "ff \<in># \<Gamma>"
+   and  b: "Ax \<subseteq> R"
+shows "(\<Gamma> \<Rightarrow>* \<Delta>,0) \<in> derivable R*"
+proof-
+from a have "\<Gamma> = \<Gamma> \<ominus> ff \<oplus> ff" by auto
+then have "extend (\<Gamma> \<ominus> ff \<Rightarrow>* \<Delta>) (\<LM>ff\<RM> \<Rightarrow>* \<Empt>) = (\<Gamma> \<Rightarrow>* \<Delta>)"
+     using extend_def[where forms="\<Gamma> \<ominus> ff \<Rightarrow>* \<Delta>" and seq="\<LM>ff\<RM> \<Rightarrow>* \<Empt>"] by auto 
+moreover
+have "([],\<LM>ff\<RM> \<Rightarrow>* \<Empt>) \<in> R" using b by auto
+ultimately have "([],\<Gamma> \<Rightarrow>* \<Delta>) \<in> R*"
+     using extRules.I[where R=R and r="([],  \<LM>ff\<RM> \<Rightarrow>* \<Empt>)" and seq="\<Gamma> \<ominus> ff \<Rightarrow>* \<Delta>"] 
+       and extendRule_def[where forms="\<Gamma> \<ominus> ff \<Rightarrow>* \<Delta>" and R="([],  \<LM>ff\<RM> \<Rightarrow>* \<Empt>)"] by auto
+then show ?thesis using derivable.base[where R="R*" and C="\<Gamma> \<Rightarrow>* \<Delta>"] by auto
+qed 
+
+lemma characteriseAx:
+shows "r \<in> Ax \<Longrightarrow> r = ([],\<LM> ff \<RM> \<Rightarrow>* \<Empt>) \<or> (\<exists> i. r = ([], \<LM> At i \<RM> \<Rightarrow>* \<LM> At i \<RM>))"
+apply (cases r) by (rule Ax.cases) auto
+
+lemma characteriseLast:
+assumes "(C,m+1) \<in> derivable R"
+shows "\<exists> Ps. Ps \<noteq> [] \<and>
+             (Ps,C) \<in> R \<and> 
+             (\<forall> p \<in> set Ps. \<exists> n\<le>m. (p,n) \<in> derivable R)"
+using assms
+by (cases) auto
+
+
+lemma succ_upRule:
+assumes "(Ps,\<Phi> \<Rightarrow>* \<Psi>) \<in> upRules"
+shows "\<Psi> = \<Empt> \<or> (\<exists> A. \<Psi> = \<LM>A\<RM>)"
+using assms 
+proof (cases)
+    case (I R Rs)
+    then show "\<Psi> = \<Empt> \<or> (\<exists> A. \<Psi> = \<LM>A\<RM>)" using mset.simps[where ant=\<Phi> and suc=\<Psi>] 
+         and union_is_single[where M=\<Phi> and N=\<Psi> and a="Compound R Rs"] by (simp,elim disjE) (auto)
+qed
+
+lemma antec_upRule:
+assumes "(Ps,\<Phi> \<Rightarrow>* \<Psi>) \<in> upRules"
+shows "\<Phi> = \<Empt> \<or> (\<exists> A. \<Phi> = \<LM>A\<RM>)"
+using assms 
+proof (cases)
+    case (I R Rs)
+    then show "\<Phi> = \<Empt> \<or> (\<exists> A. \<Phi> = \<LM>A\<RM>)" using mset.simps[where ant=\<Phi> and suc=\<Psi>] 
+         and union_is_single[where M=\<Phi> and N=\<Psi> and a="Compound R Rs"] by (simp,elim disjE) (auto)
+qed
+
+lemma upRule_Size:
+assumes "r \<in> upRules"
+shows "seq_size (snd r) = 1"
+using assms
+proof-
+    obtain Ps C where "r = (Ps,C)" by (cases r)
+    then have "(Ps,C) \<in> upRules" using assms by simp
+    then show ?thesis
+       proof (cases)
+          case (I R Rs)
+          obtain G H where "C = (G \<Rightarrow>* H)" by (cases C) (auto)
+          then have "size (G+H) = 1" by auto 
+          then have "size G + size H = 1" by auto
+          ultimately show "seq_size (snd r) = 1" by simp
+       qed
+qed
+
+lemma upRuleCharacterise:
+assumes "(Ps,C) \<in> upRules"
+shows "\<exists> F Fs. C = (\<Empt> \<Rightarrow>* \<LM>Compound F Fs\<RM>) \<or> C = (\<LM>Compound F Fs\<RM> \<Rightarrow>* \<Empt>)"
+using assms
+proof (cases)
+  case (I F Fs)
+  then obtain \<Gamma> \<Delta> where "C = (\<Gamma> \<Rightarrow>* \<Delta>)" using characteriseSeq[where C=C] by auto
+  then have "(Ps,\<Gamma> \<Rightarrow>* \<Delta>) \<in> upRules" using assms by simp
+  then show "\<exists> F Fs. C = (\<Empt> \<Rightarrow>* \<LM>Compound F Fs\<RM>) \<or> C = (\<LM>Compound F Fs\<RM> \<Rightarrow>* \<Empt>)" 
+      and mset.simps[where ant=\<Gamma> and suc=\<Delta>] and union_is_single[where M=\<Gamma> and N=\<Delta> and a="Compound F Fs"]
+    by auto
+qed
+
+lemma extendEmpty:
+shows "extend (\<Empt> \<Rightarrow>* \<Empt>) C = C"
+apply (auto simp add:extend_def) by (cases C) auto
+
+lemma extendContain:
+assumes "r = (ps,c)"
+    and "(Ps,C) = extendRule S r"
+    and "p \<in> set ps"
+shows "extend S p \<in> set Ps"
+proof-
+ultimately show ?thesis by auto
+qed
+
+lemma nonPrincipalID:
+fixes A :: "'a form"
+assumes "r \<in> Ax"
+shows "\<not> rightPrincipal r A \<and> \<not> leftPrincipal r A"
+proof-
+from assms obtain i where r1:"r = ([], \<LM> ff \<RM> \<Rightarrow>* \<Empt>) \<or> r = ([], \<LM> At i \<RM> \<Rightarrow>* \<LM> At i\<RM>)" 
+     using characteriseAx[where r=r] by auto
+{ assume "rightPrincipal r A" then obtain Ps where r2:"r = (Ps, \<Empt> \<Rightarrow>* \<LM> A \<RM>)" by (cases r) auto
+  with r1 have "False" by simp
+}
+then have "\<not> rightPrincipal r A" by auto
+moreover
+{ assume "leftPrincipal r A" then obtain Ps' F Fs where r3:"r = (Ps', \<LM>Compound F Fs\<RM> \<Rightarrow>* \<Empt>)" by (cases r) auto
+  with r1 have "False" by auto
+}
+then have "\<not> leftPrincipal r A" by auto
+ultimately show ?thesis by simp
+qed
+
+lemma extendCommute:
+shows "(extend S) (extend R c) = (extend R) (extend S c)"
+by (auto simp add:extend_def union_ac)
+
+lemma mapCommute:
+shows "map (extend S) (map (extend R) c) = map (extend R) (map (extend S) c)"
+by (induct_tac c) (auto simp add:extendCommute)
+
+lemma extendAssoc:
+shows "(extend S) (extend R c) = extend (extend S R) c" 
+by (auto simp add:extend_def union_ac)
+
+lemma mapAssoc:
+shows "map (extend S) (map (extend R) c) = map (extend (extend S R)) c"
+by (induct_tac c) (auto simp add:extendAssoc)
+
+lemma extended_Ax_prems_empty:
+assumes "r \<in> Ax"
+shows "fst (extendRule S r) = []"
+using assms apply (cases r) by (rule Ax.cases) (auto simp add:extendRule_def)
+
+inductive lastRule :: "'a deriv \<Rightarrow> 'a rule \<Rightarrow> 'a rule set \<Rightarrow> bool"
+  where
+  base[intro]: "\<lbrakk> r \<in> Ax; Ax \<subseteq> R ; snd (extendRule S r) = (\<Gamma> \<Rightarrow>* \<Delta>)\<rbrakk>
+                 \<Longrightarrow> lastRule (\<Gamma> \<Rightarrow>* \<Delta>,0) r R"
+|    I[intro]:  "\<lbrakk> r\<in>R ; r \<notin> Ax ; snd (extendRule S r) = (\<Gamma> \<Rightarrow>* \<Delta>) ; 
+                \<forall> p \<in> set (fst (extendRule S r)). \<exists> m\<le>n. (p,m) \<in> derivable R* \<rbrakk> 
+                 \<Longrightarrow> lastRule (\<Gamma> \<Rightarrow>* \<Delta>,n+1) r R" 
+
+lemma obv:
+fixes a :: "('a * 'b)"
+shows "a = (fst a, snd a)" by auto
+
+lemma getLast:
+assumes "lastRule (\<Gamma> \<Rightarrow>* \<Delta>,n+1) r R"
+shows "\<exists> S Ps. extendRule S r = (Ps, \<Gamma> \<Rightarrow>* \<Delta>) \<and> (\<forall> p \<in> set Ps. \<exists> m\<le>n. (p,m) \<in> derivable R*) \<and> r \<in> R \<and> r \<notin> Ax"
+(* -------------------------------------------
+   -------------------------------------------
+       THIS IS NOW INVERTIBLERULESPOLY.THY
+   -------------------------------------------
+   ------------------------------------------- *)
+(* Constructing the rule set we will use.  It contains all axioms, but only a subset
+   of the possible logical rules. *)
+(*>*)

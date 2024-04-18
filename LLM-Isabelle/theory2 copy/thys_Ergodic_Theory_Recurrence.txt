@@ -1,0 +1,464 @@
+theory Recurrence
+  imports Measure_Preserving_Transformations
+begin
+
+
+
+locale conservative = qmpt +
+  assumes conservative: "\<And>A. A \<in> sets M \<Longrightarrow> emeasure M A > 0 \<Longrightarrow> \<exists>n>0. emeasure M ((T^^n)-`A \<inter> A) >0"
+
+lemma conservativeI:
+  assumes "qmpt M T"
+    "\<And>A. A \<in> sets M \<Longrightarrow> emeasure M A > 0 \<Longrightarrow> \<exists>n>0. emeasure M ((T^^n)-`A \<inter> A) >0"
+  shows "conservative M T"
+unfolding conservative_def conservative_axioms_def using assms by auto
+
+
+lemma conservativeI2:
+  assumes "qmpt M T"
+    "\<And>A. A \<in> sets M \<Longrightarrow> emeasure M A > 0 \<Longrightarrow> \<exists>n>0. (T^^n)-`A \<inter> A \<noteq> {}"
+  shows "conservative M T"
+unfolding conservative_def conservative_axioms_def
+proof (auto simp add: assms)
+  interpret qmpt M T using assms by auto
+  fix A
+  assume A_meas [measurable]: "A \<in> sets M" and "emeasure M A > 0"
+  show "\<exists>n>0. 0 < emeasure M ((T ^^ n) -` A \<inter> A)"
+  proof (rule ccontr)
+    assume "\<not> (\<exists>n>0. 0 < emeasure M ((T ^^ n) -` A \<inter> A))"
+    then have meas_0: "emeasure M ((T ^^ n) -` A \<inter> A) = 0" if "n>0" for n
+      by (metis zero_less_iff_neq_zero that)
+    define C where "C = (\<Union>n. (T^^(Suc n))-`A \<inter> A)"
+    have C_meas [measurable]: "C \<in> sets M" unfolding C_def by measurable
+    have "emeasure M C = 0" unfolding C_def
+      by (intro emeasure_UN_eq_0[of M, of "\<lambda>n. (T^^(Suc n))-`A \<inter> A", OF meas_0], auto)
+
+    define A2 where "A2 = A-C"
+    then have A2_meas [measurable]: "A2 \<in> sets M" by simp
+    have "\<not>(\<exists>n>0. (T^^n)-`A2 \<inter> A2 \<noteq> {})"
+    proof (rule ccontr, simp)
+      assume "\<exists>n>0. (T^^n)-`A2 \<inter> A2 \<noteq> {}"
+      then obtain n where n: "n > 0" "(T^^n)-`A2 \<inter> A2 \<noteq> {}" by auto
+      define m where "m = n-1"
+      have "(T^^(m+1))-`A2 \<inter> A2 \<noteq> {}" unfolding m_def using n by auto
+      then show False using C_def A2_def by auto
+    qed
+    then have "emeasure M A2 = 0" using assms(2)[OF A2_meas] by (meson zero_less_iff_neq_zero)
+    moreover have "A \<subseteq> C \<union> A2" unfolding A2_def by auto
+    ultimately have "emeasure M A = 0" by (meson A2_meas C_meas emeasure_eq_0 sets.Un)
+  qed
+qed
+
+
+lemma conservativeI3:
+  assumes "qmpt M T"
+          "\<And>A. A \<in> sets M \<Longrightarrow> (\<forall>n>0. (T^^n)-`A \<inter> A = {}) \<Longrightarrow> A \<in> null_sets M"
+  shows "conservative M T"
+proof (rule conservativeI2[OF assms(1)])
+  fix A assume "A \<in> sets M" "0 < emeasure M A"
+  then have "\<not>(A \<in> null_sets M)" unfolding null_sets_def by auto
+  then show "\<exists>n>0. (T ^^ n) -` A \<inter> A \<noteq> {}"
+qed
+
+
+lemma (in conservative) conservative_Tinv:
+  assumes "invertible_qmpt"
+  shows "conservative M Tinv"
+proof (rule conservativeI2)
+  show "qmpt M Tinv" using Tinv_qmpt[OF assms].
+  have "bij T" using assms unfolding invertible_qmpt_def by auto
+  fix A assume [measurable]: "A \<in> sets M" and "emeasure M A > 0"
+  then obtain n where *: "n>0" "emeasure M ((T^^n)-`A \<inter> A) > 0"
+  then have "bij(inv (T^^n))" using bij_imp_bij_inv by auto
+
+  have "(T^^n)-`A \<inter> A \<noteq> {}" using * by auto
+  then have "(Tinv^^n)-`((T^^n)-`A \<inter> A) \<noteq> {}"
+  then have **: "(Tinv^^n)-`((T^^n)-`A) \<inter> (Tinv^^n)-` A \<noteq> {}"
+    by auto
+
+  have "(Tinv^^n)-`((T^^n)-`A) = ((T^^n) o (Tinv^^n))-`A"
+    by auto
+  moreover have "(T^^n) o (Tinv^^n) = (\<lambda>x. x)"
+  ultimately have "(Tinv^^n)-`((T^^n)-`A) = A" by auto
+  then have "(Tinv^^n)-` A \<inter> A \<noteq> {}" using ** by auto
+qed
+
+
+locale conservative_mpt = mpt + conservative
+
+lemma conservative_mptI:
+  assumes "mpt M T"
+    "\<And>A. A \<in> sets M \<Longrightarrow> emeasure M A > 0 \<Longrightarrow> \<exists>n>0. (T^^n)-`A \<inter> A \<noteq> {}"
+  shows "conservative_mpt M T"
+unfolding conservative_mpt_def
+apply (auto simp add: assms(1), rule conservativeI2)
+using assms(1) by (auto simp add: mpt_def assms(2))
+
+
+sublocale fmpt \<subseteq> conservative_mpt
+proof (rule conservative_mptI)
+  show "mpt M T" by (simp add: mpt_axioms)
+  fix A assume A_meas [measurable]: "A \<in> sets M" and "emeasure M A > 0"
+  show "\<exists>n>0. (T^^n)-`A \<inter> A \<noteq> {}"
+  proof (rule ccontr)
+    assume "\<not>(\<exists>n>0. (T^^n)-`A \<inter> A \<noteq> {})"
+    then have disj: "(T^^(Suc n))--`A \<inter> A = {}" for n unfolding vimage_restr_def using zero_less_one by blast
+
+    define B where "B = (\<lambda> n. (T^^n)--`A)"
+    then have B_meas [measurable]: "B n \<in> sets M" for n by simp
+    have same: "measure M (B n) = measure M A" for n
+      by (simp add: B_def A_meas T_vrestr_same_measure(2))
+
+    have "B n \<inter> B m = {}" if "n > m" for m n
+    proof -
+      have "B n \<inter> B m = (T^^m)--` (B (n-m) \<inter> A)"
+      moreover have "B (n-m) \<inter> A = {}" unfolding B_def
+      ultimately show ?thesis by simp
+    qed
+    then have "disjoint_family B" by (metis disjoint_family_on_def inf_sup_aci(1) less_linear)
+
+    have "measure M A < e" if "e>0" for e::real
+    proof -
+        by (metis divide_less_0_iff reals_Archimedean2 less_eq_real_def measure_nonneg not_gr0 not_le of_nat_0)
+        by (metis bounded_measure div_0 le_less_trans measure_empty mult.commute pos_divide_less_eq)
+      have *: "disjoint_family_on B {..<N}"
+      then have "(\<Sum>i\<in>{..<N}. measure M (B i)) \<le> measure M (space M)"
+            image_subset_iff finite_lessThan finite_measure_finite_Union)
+      also have "(\<Sum>i\<in>{..<N}. measure M (B i)) = (\<Sum>i\<in>{..<N}. measure M A)" using same by simp
+      also have "... = N * (measure M A)" by simp
+      finally have "N * (measure M A) \<le> measure M (space M)" by simp
+    qed
+    then have "measure M A \<le> 0" using not_less by blast
+    then have "measure M A = 0" by (simp add: measure_le_0_iff)
+    then have "emeasure M A = 0" using emeasure_eq_measure by simp
+  qed
+qed
+
+
+proposition (in conservative) conservative_power:
+  "conservative M (T^^n)"
+proof (unfold_locales)
+  show "T ^^ n \<in> quasi_measure_preserving M M"
+    by (auto simp add: Tn_quasi_measure_preserving)
+
+  fix A assume [measurable]: "A \<in> sets M" "0 < emeasure M A"
+  define good_time where "good_time = (\<lambda>K. Inf{(i::nat). i > 0 \<and> emeasure M ((T^^i)-`K \<inter> A) > 0})"
+  define next_good_set where "next_good_set = (\<lambda>K. (T^^(good_time K))-`K \<inter> A)"
+
+  have good_rec: "((good_time K > 0) \<and> (next_good_set K \<subseteq> A) \<and>
+          (next_good_set K \<in> sets M) \<and> (emeasure M (next_good_set K) > 0))"
+        if [measurable]: "K \<in> sets M" and "K \<subseteq> A" "emeasure M K > 0" for K
+  proof -
+    have a: "next_good_set K \<in> sets M" "next_good_set K \<subseteq> A"
+      using next_good_set_def by simp_all
+    obtain k where "k > 0" and posK: "emeasure M ((T^^k)-`K \<inter> K) > 0"
+    have posKA: "emeasure M ((T^^k)-`K \<inter> A) > 0" using emeasure_mono[OF *, of M] posK by simp
+    let ?S = "{(i::nat). i>0 \<and> emeasure M ((T^^i)-`K \<inter> A) > 0}"
+    then have "?S \<noteq> {}" by auto
+    then have "Inf ?S \<in> ?S" using Inf_nat_def1[of ?S] by simp
+    then have "good_time K \<in> ?S" using good_time_def by simp
+    then show "(good_time K > 0) \<and> (next_good_set K \<subseteq> A) \<and>
+          (next_good_set K \<in> sets M) \<and> (emeasure M (next_good_set K) > 0)"
+      using a next_good_set_def by auto
+  qed
+
+  define B where "B = (\<lambda>i. (next_good_set^^i) A)"
+  define t where "t = (\<lambda>i. good_time (B i))"
+  have good_B: "(B i \<subseteq> A) \<and> (B i \<in> sets M) \<and> (emeasure M (B i) > 0)" for i
+  proof (induction i)
+    case 0
+    have "B 0 = A" using B_def by simp
+  next
+    case (Suc i)
+    moreover have "B (i+1) = next_good_set (B i)" using B_def by simp
+    ultimately show ?case using good_rec[of "B i"] by auto
+  qed
+  have t_pos: "\<And>i. t i > 0" using t_def by (simp add: good_B good_rec)
+
+  define s where "s = (\<lambda>i k. (\<Sum>n \<in> {i..<i+k}. t n))"
+  have "B (i+k) \<subseteq> (T^^(s i k))-`A \<inter> A" for i k
+  proof (induction k)
+    case 0
+    show ?case using s_def good_B[of i] by simp
+  next
+    case (Suc k)
+    have "B(i+k+1) = (T^^(t (i+k)))-`(B (i+k)) \<inter> A" using t_def B_def next_good_set_def by simp
+    moreover have "B(i+k) \<subseteq> (T^^(s i k))-`A" using Suc.IH by simp
+    ultimately have "B(i+k+1) \<subseteq> (T^^(t (i+k)))-` (T^^(s i k))-`A \<inter> A" by auto
+    then have "B(i+k+1) \<subseteq> (T^^(t(i+k) + s i k))-`A \<inter> A" by (simp add: add.commute funpow_add vimage_comp)
+    moreover have "t(i+k) + s i k = s i (k+1)" using s_def by simp
+    ultimately show ?case by simp
+  qed
+  moreover have "(T^^j)-`A \<inter> A \<in> sets M" for j by simp
+  ultimately have *: "emeasure M ((T^^(s i k))-`A \<inter> A) > 0" for i k
+    by (metis inf.orderE inf.strict_boundedE good_B emeasure_mono)
+
+  show "\<exists>k>0. 0 < emeasure M (((T ^^ n) ^^ k) -` A \<inter> A)"
+  proof (cases)
+    assume "n = 0"
+    then have "((T ^^ n) ^^ 1) -` A = A" by simp
+  next
+    assume "\<not>(n = 0)"
+    then have "n > 0" by simp
+    define u where "u = (\<lambda>i. s 0 i mod n)"
+    then have "finite (range u)" using finite_nat_iff_bounded by auto
+    then have "\<exists>i j. (i<j) \<and> (u i = u j)" by (metis finite_imageD infinite_UNIV_nat injI less_linear)
+    then obtain i k where "k>0" "u i = u (i+k)" using less_imp_add_positive by blast
+    moreover have "s 0 (i+k) = s 0 i + s i k" unfolding s_def by (simp add: sum.atLeastLessThan_concat)
+    ultimately have "(s i k) mod n = 0" using u_def nat_mod_cong by metis
+    then obtain r where "s i k = n * r" by auto
+    moreover have "s i k > 0" unfolding s_def
+    ultimately have "r > 0" by simp
+    ultimately show ?thesis by (metis funpow_mult)
+  qed
+qed
+
+proposition (in conservative_mpt) conservative_mpt_power:
+  "conservative_mpt M (T^^n)"
+using conservative_power mpt_power unfolding conservative_mpt_def by auto
+
+
+lemma (in conservative) ae_disjoint_then_null:
+  assumes "A \<in> sets M"
+          "\<And>n. n > 0 \<Longrightarrow> A \<inter> (T^^n)-`A \<in> null_sets M"
+  shows "A \<in> null_sets M"
+by (metis Int_commute assms(1) assms(2) conservative zero_less_iff_neq_zero null_setsD1 null_setsI)
+
+lemma (in conservative) disjoint_then_null:
+  assumes "A \<in> sets M"
+          "\<And>n. n > 0 \<Longrightarrow> A \<inter> (T^^n)-`A = {}"
+  shows "A \<in> null_sets M"
+by (rule ae_disjoint_then_null, auto simp add: assms)
+
+
+lemma (in conservative) conservative_density:
+  assumes [measurable]: "h \<in> borel_measurable M"
+      and "AE x in M. h x \<noteq> 0" "AE x in M. h x \<noteq> \<infinity>"
+  shows "conservative (density M h) T"
+proof -
+  interpret A: qmpt "density M h" T
+    by (rule qmpt_density[OF assms])
+  show ?thesis
+    apply (rule conservativeI3) apply (simp add: A.qmpt_axioms)
+    unfolding sets_density null_sets_density[OF assms(1) assms(2)]
+    by (metis conservative emeasure_empty not_gr_zero null_setsI)
+qed
+
+context qmpt begin
+
+
+definition recurrent_subset::"'a set \<Rightarrow> 'a set"
+  where "recurrent_subset A = (\<Union>n \<in> {1..}. A \<inter> (T^^n)-`A)"
+
+definition recurrent_subset_infty::"'a set \<Rightarrow> 'a set"
+  where "recurrent_subset_infty A = A - (\<Union>n. (T^^n)-` (A - recurrent_subset A))"
+
+lemma recurrent_subset_infty_inf_returns:
+  "x \<in> recurrent_subset_infty A \<longleftrightarrow> (x \<in> A \<and> infinite {n. (T^^n) x \<in> A})"
+proof
+  assume *: "x \<in> recurrent_subset_infty A"
+  have "infinite {n. (T^^n) x \<in> A}"
+  proof (rule ccontr)
+    assume "\<not>(infinite {n. (T^^n) x \<in> A})"
+    then have F: "finite {n. (T^^n) x \<in> A}" by auto
+    have "0 \<in> {n. (T^^n) x \<in> A}" using * recurrent_subset_infty_def by auto
+    then have NE: "{n. (T^^n) x \<in> A} \<noteq> {}" by blast
+    define N where "N = Max {n. (T^^n) x \<in> A}"
+    have "N \<in> {n. (T^^n) x \<in> A}" unfolding N_def using F NE using Max_in by auto
+    then have "(T^^N) x \<in> A" by auto
+    moreover have "x \<notin> (T^^N)-` (A - recurrent_subset A)" using * unfolding recurrent_subset_infty_def by auto
+    ultimately have "(T^^N) x \<in> recurrent_subset A" by auto
+    then have "(T ^^ N) x \<in> A \<and> (\<exists>n. n \<in> {1..} \<and> (T ^^ n) ((T ^^ N) x) \<in> A)"
+      unfolding recurrent_subset_def by blast
+    then obtain n where "n>0" "(T^^n) ((T^^N) x) \<in> A"
+      by (metis atLeast_iff gr0I not_one_le_zero)
+    then have "n+N \<in> {n. (T^^n) x \<in> A}" by (simp add: funpow_add)
+      by (metis Max_ge Nat.add_0_right add.commute nat_add_left_cancel_less not_le)
+  qed
+  then show "x \<in> A \<and> infinite {n. (T^^n) x \<in> A}" using * recurrent_subset_infty_def by auto
+next
+  assume *: "(x \<in> A \<and> infinite {n. (T ^^ n) x \<in> A})"
+  {
+    fix n
+    obtain N where "N>n" "(T^^N) x \<in> A" using *
+      using infinite_nat_iff_unbounded by force
+    define k where "k = N-n"
+    then have "(T^^k) ((T^^n) x) \<in> A"
+    then have "(T^^ n) x \<notin> A - recurrent_subset A"
+  }
+  then show "x \<in> recurrent_subset_infty A" unfolding recurrent_subset_infty_def using * by auto
+qed
+
+lemma recurrent_subset_infty_series_infinite:
+  assumes "x \<in> recurrent_subset_infty A"
+  shows "(\<Sum>n. indicator A ((T^^n) x)) = (\<infinity>::ennreal)"
+proof (rule ennreal_ge_nat_imp_PInf)
+  have *: "\<not> finite {n. (T^^n) x \<in> A}" using recurrent_subset_infty_inf_returns assms by auto
+  fix N::nat
+  obtain F where F: "finite F" "F \<subseteq> {n. (T^^n) x \<in> A}" "card F = N"
+    using infinite_arbitrarily_large[OF *] by blast
+  have "N = (\<Sum>n \<in> F. 1::ennreal)"
+    using F(3) by auto
+  also have "... = (\<Sum>n \<in> F. (indicator A ((T^^n) x))::ennreal)"
+    apply (rule sum.cong) using F(2) indicator_def by auto
+  also have "... \<le> (\<Sum>n. indicator A ((T^^n) x))"
+    by (rule sum_le_suminf, auto simp add: F)
+  finally show "N \<le> (\<Sum>n. (indicator A ((T^^n) x))::ennreal)" by auto
+qed
+
+lemma recurrent_subset_infty_def':
+  "recurrent_subset_infty A = (\<Inter>m. (\<Union>n\<in>{m..}. A \<inter> (T^^n)-`A))"
+proof (auto)
+  fix x assume x: "x \<in> recurrent_subset_infty A"
+  then show "x \<in> A" unfolding recurrent_subset_infty_def by auto
+  fix N::nat
+  show "\<exists>n\<in>{N..}. (T^^n) x \<in> A" using recurrent_subset_infty_inf_returns x
+    using infinite_nat_iff_unbounded_le by auto
+next
+  fix x assume "x \<in> A" "\<forall>N. \<exists>n\<in>{N..}. (T^^n) x \<in> A"
+  then show "x \<in> recurrent_subset_infty A"
+    unfolding recurrent_subset_infty_inf_returns using infinite_nat_iff_unbounded_le by auto
+qed
+
+lemma recurrent_subset_incl:
+  "recurrent_subset A \<subseteq> A"
+  "recurrent_subset_infty A \<subseteq> A"
+  "recurrent_subset_infty A \<subseteq> recurrent_subset A"
+unfolding recurrent_subset_def recurrent_subset_infty_def' by (simp, simp, fast)
+
+lemma recurrent_subset_meas [measurable]:
+  assumes [measurable]: "A \<in> sets M"
+  shows "recurrent_subset A \<in> sets M"
+        "recurrent_subset_infty A \<in> sets M"
+unfolding recurrent_subset_def recurrent_subset_infty_def' by measurable
+
+lemma recurrent_subset_rel_incl:
+  assumes "A \<subseteq> B"
+  shows "recurrent_subset A \<subseteq> recurrent_subset B"
+        "recurrent_subset_infty A \<subseteq> recurrent_subset_infty B"
+proof -
+  show "recurrent_subset A \<subseteq> recurrent_subset B"
+    unfolding recurrent_subset_def using assms by auto
+  show "recurrent_subset_infty A \<subseteq> recurrent_subset_infty B"
+    apply (auto, subst recurrent_subset_infty_inf_returns)
+    using assms recurrent_subset_incl(2) infinite_nat_iff_unbounded_le recurrent_subset_infty_inf_returns by fastforce
+qed
+
+
+lemma recurrent_subset_infty_returns:
+  assumes "x \<in> recurrent_subset_infty A" "(T^^n) x \<in> A"
+  shows "(T^^n) x \<in> recurrent_subset_infty A"
+proof (subst recurrent_subset_infty_inf_returns, rule ccontr)
+  assume "\<not> ((T ^^ n) x \<in> A \<and> infinite {k. (T ^^ k) ((T ^^ n) x) \<in> A})"
+  then have 1: "finite {k. (T^^k) ((T^^n) x) \<in> A}" using assms(2) by auto
+  have "0 \<in> {k. (T^^k) ((T^^n) x) \<in> A}" using assms(2) by auto
+  then have 2: "{k. (T^^k) ((T^^n) x) \<in> A} \<noteq> {}" by blast
+  define M where "M = Max {k. (T^^k) ((T^^n) x) \<in> A}"
+  have M_prop: "\<And>k. k > M \<Longrightarrow> (T^^k) ((T^^n) x) \<notin> A"
+    unfolding M_def using 1 2 by auto
+  {
+    fix N assume *: "(T^^N) x \<in> A"
+    have "N \<le> n+M"
+    proof (cases)
+      assume "N \<le> n"
+      then show ?thesis by auto
+    next
+      assume "\<not>(N \<le> n)"
+      then have "N > n" by simp
+      define k where "k = N-n"
+      then have "(T^^k) ((T^^n)x) \<in> A" using * by (simp add: add.commute funpow_add)
+      then have "k \<le> M" using M_prop using not_le by blast
+      then show ?thesis unfolding k_def by auto
+    qed
+  }
+  then have "finite {N. (T^^N) x \<in> A}"
+    by (metis (no_types, lifting) infinite_nat_iff_unbounded mem_Collect_eq not_less)
+  moreover have "infinite {N. (T^^N) x \<in> A}"
+    using recurrent_subset_infty_inf_returns assms(1) by auto
+  ultimately show False by auto
+qed
+
+lemma recurrent_subset_of_recurrent_subset:
+  "recurrent_subset_infty(recurrent_subset_infty A) = recurrent_subset_infty A"
+proof
+  show "recurrent_subset_infty (recurrent_subset_infty A) \<subseteq> recurrent_subset_infty A"
+    using recurrent_subset_incl(2)[of A] recurrent_subset_rel_incl(2) by auto
+  show "recurrent_subset_infty A \<subseteq> recurrent_subset_infty (recurrent_subset_infty A)"
+    using recurrent_subset_infty_returns recurrent_subset_infty_inf_returns
+    by (metis (no_types, lifting) Collect_cong subsetI)
+qed
+
+
+theorem (in conservative) Poincare_recurrence_thm:
+  assumes [measurable]: "A \<in> sets M"
+  shows "A - recurrent_subset A \<in> null_sets M"
+        "A - recurrent_subset_infty A \<in> null_sets M"
+        "A \<Delta> recurrent_subset A \<in> null_sets M"
+        "A \<Delta> recurrent_subset_infty A \<in> null_sets M"
+        "emeasure M (recurrent_subset A) = emeasure M A"
+        "emeasure M (recurrent_subset_infty A) = emeasure M A"
+        "AE x \<in> A in M. x \<in> recurrent_subset_infty A"
+proof -
+  define B where "B = {x \<in> A. \<forall> n\<in>{1..}. (T^^n) x \<in> (space M - A)}"
+
+  have rs: "recurrent_subset A = A - B"
+    by (auto simp add: B_def recurrent_subset_def)
+       (meson Tn_meas assms measurable_space sets.sets_into_space subsetCE)
+  then have *: "A - recurrent_subset A = B" using B_def by blast
+  have "B \<in> null_sets M"
+    by (rule disjoint_then_null, auto simp add: B_def)
+  then show "A - recurrent_subset A \<in> null_sets M" using * by simp
+
+  then have *: "(\<Union>n. (T^^n)--`(A-recurrent_subset A)) \<in> null_sets M"
+    using T_quasi_preserves_null2(2) by blast
+  have "recurrent_subset_infty A = recurrent_subset_infty A \<inter> space M" using sets.sets_into_space by auto
+  also have "... = A \<inter> space M - (\<Union>n. (T^^n)-`(A-recurrent_subset A) \<inter> space M)" unfolding recurrent_subset_infty_def by blast
+  also have "... = A - (\<Union>n. (T^^n)--`(A-recurrent_subset A))" unfolding vimage_restr_def using sets.sets_into_space by auto
+  finally have **: "recurrent_subset_infty A = A - (\<Union>n. (T ^^ n) --` (A - recurrent_subset A))" .
+  then have "A - recurrent_subset_infty A \<subseteq> (\<Union>n. (T^^n)--`(A-recurrent_subset A))" by auto
+  with * ** show "A - recurrent_subset_infty A \<in> null_sets M"
+    by (simp add: Diff_Diff_Int null_set_Int1)
+
+  have "A \<Delta> recurrent_subset A = A - recurrent_subset A" using recurrent_subset_incl(1)[of A] by blast
+  then show "emeasure M (recurrent_subset A) = emeasure M A"
+    by (rule Delta_null_same_emeasure[symmetric], auto)
+
+  have "A \<Delta> recurrent_subset_infty A = A - recurrent_subset_infty A" using recurrent_subset_incl(2)[of A] by blast
+  then show "emeasure M (recurrent_subset_infty A) = emeasure M A"
+    by (rule Delta_null_same_emeasure[symmetric], auto)
+
+  show "AE x\<in>A in M. x \<in> recurrent_subset_infty A"
+    unfolding eventually_ae_filter
+qed
+
+
+theorem (in conservative) recurrence_series_infinite:
+  fixes f::"'a \<Rightarrow> ennreal"
+  assumes [measurable]: "f \<in> borel_measurable M"
+  shows "AE x in M. f x > 0 \<longrightarrow> (\<Sum>n. f ((T^^n) x)) = \<infinity>"
+proof -
+  have *: "AE x in M. f x > epsilon \<longrightarrow> (\<Sum>n. f ((T^^n) x)) = \<top>" if "epsilon > 0" for epsilon
+  proof -
+    define B where "B = {x \<in> space M. f x > epsilon}"
+    have [measurable]: "B \<in> sets M" unfolding B_def by auto
+    have "(\<Sum>n. f ((T^^n) x)) = \<infinity>" if "x \<in> recurrent_subset_infty B" for x
+    proof -
+      also have "... = epsilon * (\<Sum>n. indicator B ((T^^n) x))"
+        using recurrent_subset_infty_series_infinite[OF that] by simp
+      also have "... = (\<Sum>n. epsilon * indicator B ((T^^n) x))"
+        by auto
+      also have "... \<le> (\<Sum>n. f ((T^^n) x))"
+        apply (rule suminf_le) unfolding indicator_def B_def by auto
+      finally show ?thesis
+        by (simp add: dual_order.antisym)
+    qed
+    moreover have "AE x in M. f x > epsilon \<longrightarrow> x \<in> recurrent_subset_infty B"
+    ultimately show ?thesis by auto
+  qed
+  have "\<exists>u::(nat \<Rightarrow> ennreal). (\<forall>n. u n > 0) \<and> u \<longlonglongrightarrow> 0"
+    by (meson approx_from_above_dense_linorder ex_gt_or_lt gr_implies_not_zero)
+  then obtain u::"nat \<Rightarrow> ennreal" where u: "\<And>n. u n > 0" "u \<longlonglongrightarrow> 0"
+    by auto
+  have "AE x in M. (\<forall>n::nat. (f x > u n \<longrightarrow> (\<Sum>n. f ((T^^n) x)) = \<top>))"
+    unfolding AE_all_countable using u by (auto intro!: *)
+end (*of Recurrence.thy*)

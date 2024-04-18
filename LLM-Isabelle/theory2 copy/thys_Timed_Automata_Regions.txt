@@ -1,0 +1,671 @@
+theory Regions
+imports Timed_Automata Misc
+begin
+
+
+
+type_synonym 'c ceiling = "('c \<Rightarrow> nat)"
+
+datatype intv =
+  Const nat |
+  Intv nat |
+  Greater nat
+
+type_synonym t = real
+
+instantiation real :: time
+begin
+  instance proof
+    fix x y :: real assume "x < y"
+    then show "\<exists> z > x. z < y" using Rats_cases using dense_order_class.dense by blast
+  next
+    have "(1:: real) \<noteq> 0" by auto
+    then show "\<exists>x. (x::real) \<noteq> 0" by blast
+  qed
+end
+
+inductive valid_intv :: "nat \<Rightarrow> intv \<Rightarrow> bool"
+where
+  "0 \<le> d \<Longrightarrow> d \<le> c \<Longrightarrow> valid_intv c (Const d)" |
+  "0 \<le> d \<Longrightarrow> d < c  \<Longrightarrow> valid_intv c (Intv d)" |
+  "valid_intv c (Greater c)"
+
+inductive intv_elem :: "'c \<Rightarrow> ('c,t) cval \<Rightarrow> intv \<Rightarrow> bool"
+where
+  "u x = d \<Longrightarrow> intv_elem x u (Const d)" |
+  "d < u x \<Longrightarrow> u x < d + 1 \<Longrightarrow> intv_elem x u (Intv d)" |
+  "c < u x \<Longrightarrow> intv_elem x u (Greater c)"
+
+abbreviation "total_preorder r \<equiv> refl r \<and> trans r"
+
+inductive valid_region :: "'c set \<Rightarrow> ('c \<Rightarrow> nat) \<Rightarrow> ('c \<Rightarrow> intv) \<Rightarrow> 'c rel \<Rightarrow> bool"
+where
+  "\<lbrakk>X\<^sub>0 = {x \<in> X. \<exists> d. I x = Intv d}; refl_on X\<^sub>0 r; trans r; total_on X\<^sub>0 r; \<forall> x \<in> X. valid_intv (k x) (I x)\<rbrakk>
+  \<Longrightarrow> valid_region X k I r"
+
+inductive_set region for X I r
+where
+  "\<forall> x \<in> X. u x \<ge> 0 \<Longrightarrow> \<forall> x \<in> X. intv_elem x u (I x) \<Longrightarrow> X\<^sub>0 = {x \<in> X. \<exists> d. I x = Intv d} \<Longrightarrow>
+   \<forall> x \<in> X\<^sub>0. \<forall> y \<in> X\<^sub>0. (x, y) \<in> r \<longleftrightarrow> frac (u x) \<le> frac (u y)
+  \<Longrightarrow> u \<in> region X I r"
+
+
+definition part ("[_]\<^sub>_" [61,61] 61) where "part v \<R> \<equiv> THE R. R \<in> \<R> \<and> v \<in> R"
+
+inductive_set Succ for \<R> R where
+  "u \<in> R \<Longrightarrow> R \<in> \<R> \<Longrightarrow> R' \<in> \<R> \<Longrightarrow> t \<ge> 0 \<Longrightarrow> R' = [u \<oplus> t]\<^sub>\<R> \<Longrightarrow> R' \<in> Succ \<R> R"
+
+
+inductive_cases[elim!]: "intv_elem x u (Const d)"
+inductive_cases[elim!]: "intv_elem x u (Intv d)"
+inductive_cases[elim!]: "intv_elem x u (Greater d)"
+inductive_cases[elim!]: "valid_intv c (Greater d)"
+inductive_cases[elim!]: "valid_intv c (Const d)"
+inductive_cases[elim!]: "valid_intv c (Intv d)"
+
+declare valid_intv.intros[intro]
+declare intv_elem.intros[intro]
+declare Succ.intros[intro]
+
+declare Succ.cases[elim]
+
+declare region.cases[elim]
+declare valid_region.cases[elim]
+
+
+
+lemma valid_intv_distinct:
+  "valid_intv c I \<Longrightarrow> valid_intv c I' \<Longrightarrow> intv_elem x u I \<Longrightarrow> intv_elem x u I' \<Longrightarrow> I = I'"
+by (cases I; cases I'; auto)
+
+
+lemma valid_regions_distinct:
+  "valid_region X k I r \<Longrightarrow> valid_region X k I' r' \<Longrightarrow> v \<in> region X I r \<Longrightarrow> v \<in> region X I' r'
+  \<Longrightarrow> region X I r = region X I' r'"
+proof goal_cases
+  case A: 1
+  { fix x assume x: "x \<in> X"
+    with A(1) have "valid_intv (k x) (I x)" by auto
+    moreover from A(2) x have "valid_intv (k x) (I' x)" by auto
+    moreover from A(3) x have "intv_elem x v (I x)" by auto
+    moreover from A(4) x have "intv_elem x v (I' x)" by auto
+    ultimately have "I x = I' x" using valid_intv_distinct by fastforce
+  } note * = this
+  from A show ?thesis
+  proof (safe, goal_cases)
+    case A: (1 u)
+    have "intv_elem x u (I' x)" if "x \<in> X" for x using A(5) * that by auto
+    then have B: "\<forall> x \<in> X. intv_elem x u (I' x)" by auto
+    let ?X\<^sub>0 = "{x \<in> X. \<exists> d. I' x = Intv d}"
+    { fix x y assume x: "x \<in> ?X\<^sub>0" and y: "y \<in> ?X\<^sub>0"
+      have "(x, y) \<in> r' \<longleftrightarrow> frac (u x) \<le> frac (u y)"
+      proof
+        assume "frac (u x) \<le> frac (u y)"
+        with A(5) x y * have "(x,y) \<in> r" by auto
+        with A(3) x y * have "frac (v x) \<le> frac (v y)" by auto
+        with A(4) x y   show "(x,y) \<in> r'" by auto
+      next
+        assume "(x,y) \<in> r'"
+        with A(4) x y   have "frac (v x) \<le> frac (v y)" by auto
+        with A(3) x y * have "(x,y) \<in> r" by auto
+        with A(5) x y * show "frac (u x) \<le> frac (u y)" by auto
+      qed
+    }
+    then have *: "\<forall> x \<in> ?X\<^sub>0. \<forall> y \<in> ?X\<^sub>0. (x, y) \<in> r' \<longleftrightarrow> frac (u x) \<le> frac (u y)" by auto
+    from A(5) have "\<forall>x\<in>X. 0 \<le> u x" by auto
+    from region.intros[OF this B _ *] show ?case by auto
+  next
+    case A: (2 u)
+    have "intv_elem x u (I x)" if "x \<in> X" for x using * A(5) that by auto
+    then have B: "\<forall> x \<in> X. intv_elem x u (I x)" by auto
+    let ?X\<^sub>0 = "{x \<in> X. \<exists> d. I x = Intv d}"
+    { fix x y assume x: "x \<in> ?X\<^sub>0" and y: "y \<in> ?X\<^sub>0"
+      have "(x, y) \<in> r \<longleftrightarrow> frac (u x) \<le> frac (u y)"
+      proof
+        assume "frac (u x) \<le> frac (u y)"
+        with A(5) x y * have "(x,y) \<in> r'" by auto
+        with A(4) x y * have "frac (v x) \<le> frac (v y)" by auto
+        with A(3) x y   show "(x,y) \<in> r" by auto
+      next
+        assume "(x,y) \<in> r"
+        with A(3) x y   have "frac (v x) \<le> frac (v y)" by auto
+        with A(4) x y * have "(x,y) \<in> r'" by auto
+        with A(5) x y * show "frac (u x) \<le> frac (u y)" by auto
+      qed
+    }
+    then have *:"\<forall> x \<in> ?X\<^sub>0. \<forall> y \<in> ?X\<^sub>0. (x, y) \<in> r \<longleftrightarrow> frac (u x) \<le> frac (u y)" by auto
+    from A(5) have "\<forall>x\<in>X. 0 \<le> u x" by auto
+    from region.intros[OF this B _ *] show ?case by auto
+  qed
+qed
+
+lemma \<R>_regions_distinct:
+  "\<lbrakk>\<R> = {region X I r | I r. valid_region X k I r}; R \<in> \<R>; v \<in> R; R' \<in> \<R>; R \<noteq> R'\<rbrakk> \<Longrightarrow> v \<notin> R'"
+using valid_regions_distinct by blast
+
+
+definition intv_of :: "nat \<Rightarrow> t \<Rightarrow> intv" where
+  "intv_of k c \<equiv>
+    if (c > k) then Greater k
+    else if (\<exists> x :: nat. x = c) then (Const (nat (floor c)))
+    else (Intv (nat (floor c)))"
+
+lemma region_cover:
+  "\<forall> x \<in> X. u x \<ge> 0 \<Longrightarrow> \<exists> R. R \<in> {region X I r | I r. valid_region X k I r} \<and> u \<in> R"
+proof (standard, standard)
+  assume assm: "\<forall> x \<in> X. 0 \<le> u x"
+  let ?I = "\<lambda> x. intv_of (k x) (u x)"
+  let ?X\<^sub>0 = "{x \<in> X. \<exists> d. ?I x = Intv d}"
+  let ?r = "{(x,y). x \<in> ?X\<^sub>0 \<and> y \<in> ?X\<^sub>0 \<and> frac (u x) \<le> frac (u y)}"
+  show "u \<in> region X ?I ?r"
+  proof (standard, auto simp: assm, goal_cases)
+    case (1 x)
+    thus ?case unfolding intv_of_def
+    proof (auto, goal_cases)
+      case A: (1 a)
+      from A(2) have "\<lfloor>u x\<rfloor> = u x" by (metis of_int_floor_cancel of_int_of_nat_eq) 
+      with assm A(1) have "u x = real (nat \<lfloor>u x\<rfloor>)" by auto
+      then show ?case by auto
+    next
+      case A: 2
+      from A(1,2) have "real (nat \<lfloor>u x\<rfloor>) < u x"
+      by (metis assm floor_less_iff int_nat_eq less_eq_real_def less_irrefl not_less
+                of_int_of_nat_eq of_nat_0)
+      moreover from assm have "u x < real (nat (\<lfloor>u x\<rfloor>) + 1)" by linarith
+      ultimately show ?case by auto
+    qed
+  qed
+  have "valid_intv (k x) (intv_of (k x) (u x))" if "x \<in> X" for x using that
+  proof (auto simp: intv_of_def, goal_cases)
+    case 1 then show ?case by (intro valid_intv.intros(1)) (auto, linarith)
+  next
+    case 2
+    then show ?case using assm floor_less_iff nat_less_iff
+    by (intro valid_intv.intros(2)) fastforce+
+  qed
+  then have "valid_region X k ?I ?r"
+  by (intro valid_region.intros) (auto simp: refl_on_def trans_def total_on_def)
+  then show "region X ?I ?r \<in> {region X I r | I r. valid_region X k I r}" by auto
+qed
+
+lemma intv_not_empty:
+  obtains d where "intv_elem x (v(x := d)) (I x)"
+proof (cases "I x", goal_cases)
+  case (1 d)
+  then have "intv_elem x (v(x := d)) (I x)" by auto
+  with 1 show ?case by auto
+next
+  case (2 d)
+  then have "intv_elem x (v(x := d + 0.5)) (I x)" by auto
+  with 2 show ?case by auto
+next
+  case (3 d)
+  then have "intv_elem x (v(x := d + 0.5)) (I x)" by auto
+  with 3 show ?case by auto
+qed
+
+fun get_intv_val :: "intv \<Rightarrow> real \<Rightarrow> real"
+where
+  "get_intv_val (Const d)   _ = d" |
+  "get_intv_val (Intv d)    f = d + f"  |
+  "get_intv_val (Greater d) _ = d + 1"
+
+lemma region_not_empty_aux:
+  assumes "0 < f" "f < 1" "0 < g" "g < 1"
+  shows "frac (get_intv_val (Intv d) f) \<le> frac (get_intv_val (Intv d') g) \<longleftrightarrow> f \<le> g"
+using assms by (simp, metis frac_eq frac_nat_add_id less_eq_real_def) 
+
+lemma region_not_empty:
+  assumes "finite X" "valid_region X k I r"
+  shows "\<exists> u. u \<in> region X I r"
+proof -
+  let ?X\<^sub>0 = "{x \<in> X. \<exists>d. I x = Intv d}"
+  obtain f :: "'a \<Rightarrow> nat" where f:
+    "\<forall>x\<in>?X\<^sub>0. \<forall>y\<in>?X\<^sub>0. f x \<le> f y \<longleftrightarrow> (x, y) \<in> r"
+     apply (rule finite_total_preorder_enumeration)
+         apply (subgoal_tac "finite ?X\<^sub>0")
+          apply assumption
+  using assms by auto
+  let ?M = "if ?X\<^sub>0 \<noteq> {} then Max {f x | x. x \<in> ?X\<^sub>0} else 1"
+  let ?f = "\<lambda> x. (f x + 1) / (?M + 2)"
+  let ?v = "\<lambda> x. get_intv_val (I x) (if x \<in> ?X\<^sub>0 then ?f x else 1)"
+  have frac_intv: "\<forall>x\<in>?X\<^sub>0. 0 < ?f x \<and> ?f x < 1"
+  proof (standard, goal_cases)
+    case (1 x)
+    then have *: "?X\<^sub>0 \<noteq> {}" by auto
+    with 1 show ?case by auto
+  qed
+  with region_not_empty_aux have *:
+    "\<forall>x\<in>?X\<^sub>0. \<forall>y\<in>?X\<^sub>0. frac (?v x) \<le> frac (?v y) \<longleftrightarrow> ?f x \<le> ?f y"
+  by force
+  have "\<forall>x\<in>?X\<^sub>0. \<forall>y\<in>?X\<^sub>0. ?f x \<le> ?f y \<longleftrightarrow> f x \<le> f y" by (simp add: divide_le_cancel)+
+  with f have "\<forall>x\<in>?X\<^sub>0. \<forall>y\<in>?X\<^sub>0. ?f x \<le> ?f y \<longleftrightarrow> (x, y) \<in> r" by auto
+  with * have frac_order: "\<forall>x\<in>?X\<^sub>0. \<forall>y\<in>?X\<^sub>0. frac (?v x) \<le> frac (?v y) \<longleftrightarrow> (x, y) \<in> r" by auto
+  have "?v \<in> region X I r"
+  proof standard
+    show "\<forall>x\<in>X. intv_elem x ?v (I x)"
+    proof (standard, case_tac "I x", goal_cases)
+      case (2 x d)
+      then have *: "x \<in> ?X\<^sub>0" by auto
+      with frac_intv have "0 < ?f x" "?f x < 1" by auto
+      moreover from 2 have "?v x = d + ?f x" by auto
+      ultimately have "?v x < d + 1 \<and> d < ?v x" by linarith
+      then show "intv_elem x ?v (I x)" by (subst 2(2)) (intro intv_elem.intros(2), auto)
+    qed auto
+  next
+    show "\<forall>x\<in>X. 0 \<le> get_intv_val (I x) (if x \<in> ?X\<^sub>0 then ?f x else 1)"
+    by (standard, case_tac "I x") auto
+  next
+    show "{x \<in> X. \<exists>d. I x = Intv d} = {x \<in> X. \<exists>d. I x = Intv d}" ..
+  next  
+    from frac_order show "\<forall>x\<in>?X\<^sub>0. \<forall>y\<in>?X\<^sub>0. ((x, y) \<in> r) = (frac (?v x) \<le> frac (?v y))" by blast
+  qed
+  then show ?thesis by auto
+qed
+
+
+lemma regions_partition:
+  "\<R> = {region X I r | I r. valid_region X k I r} \<Longrightarrow> \<forall>x \<in> X. 0 \<le> u x \<Longrightarrow> \<exists>! R \<in> \<R>. u \<in> R"
+proof (goal_cases)
+  case 1
+  note A = this
+  with region_cover[OF A(2)] obtain R where R: "R \<in> \<R> \<and> u \<in> R" by fastforce
+  moreover have "R' = R" if "R' \<in> \<R> \<and> u \<in> R'" for R'
+  using that R valid_regions_distinct unfolding A(1) by blast
+  ultimately show ?thesis by auto
+qed
+
+lemma region_unique:
+  "\<R> = {region X I r | I r. valid_region X k I r} \<Longrightarrow> u \<in> R \<Longrightarrow> R \<in> \<R> \<Longrightarrow> [u]\<^sub>\<R> = R"
+proof (goal_cases)
+  case 1
+  note A = this
+  from A obtain I r where *: "valid_region X k I r" "R = region X I r" "u \<in> region X I r" by auto
+  from this(3) have "\<forall>x\<in>X. 0 \<le> u x" by auto
+  from theI'[OF regions_partition[OF A(1) this]] A(1) obtain I' r' where
+    v: "valid_region X k I' r'" "[u]\<^sub>\<R> = region X I' r'" "u \<in> region X I' r'"
+  unfolding part_def by auto
+  from valid_regions_distinct[OF *(1) v(1) *(3) v(3)] v(2) *(2) show ?case by auto
+qed
+
+lemma regions_partition':
+  "\<R> = {region X I r | I r. valid_region X k I r} \<Longrightarrow> \<forall>x\<in>X. 0 \<le> v x \<Longrightarrow> \<forall>x\<in>X. 0 \<le> v' x \<Longrightarrow> v' \<in> [v]\<^sub>\<R>
+  \<Longrightarrow> [v']\<^sub>\<R> = [v]\<^sub>\<R>"
+proof (goal_cases)
+  case 1
+  note A = this
+  from theI'[OF regions_partition[OF A(1,2)]] A(1,4) obtain I r where
+    v: "valid_region X k I r" "[v]\<^sub>\<R> = region X I r" "v' \<in> region X I r"
+  unfolding part_def by auto
+  from theI'[OF regions_partition[OF A(1,3)]] A(1) obtain I' r' where
+    v': "valid_region X k I' r'" "[v']\<^sub>\<R> = region X I' r'" "v' \<in> region X I' r'"
+  unfolding part_def by auto
+  from valid_regions_distinct[OF v'(1) v(1) v'(3) v(3)] v(2) v'(2) show ?case by simp
+qed
+
+lemma regions_closed:
+  "\<R> = {region X I r | I r. valid_region X k I r} \<Longrightarrow> R \<in> \<R> \<Longrightarrow> v \<in> R \<Longrightarrow> t \<ge> 0 \<Longrightarrow> [v \<oplus> t]\<^sub>\<R> \<in> \<R>"
+proof goal_cases
+  case A: 1
+  then obtain I r where "v \<in> region X I r" by auto
+  from this(1) have "\<forall> x \<in> X. v x \<ge> 0" by auto
+  with A(4) have "\<forall> x \<in> X. (v \<oplus> t) x \<ge> 0" unfolding cval_add_def by simp
+  from regions_partition[OF A(1) this] obtain R' where "R' \<in> \<R>" "(v \<oplus> t) \<in> R'" by auto
+  with region_unique[OF A(1) this(2,1)] show ?case by auto
+qed
+
+lemma regions_closed':
+  "\<R> = {region X I r | I r. valid_region X k I r} \<Longrightarrow> R \<in> \<R> \<Longrightarrow> v \<in> R \<Longrightarrow> t \<ge> 0 \<Longrightarrow> (v \<oplus> t) \<in> [v \<oplus> t]\<^sub>\<R>"
+proof goal_cases
+  case A: 1
+  then obtain I r where "v \<in> region X I r" by auto
+  from this(1) have "\<forall> x \<in> X. v x \<ge> 0" by auto
+  with A(4) have "\<forall> x \<in> X. (v \<oplus> t) x \<ge> 0" unfolding cval_add_def by simp
+  from regions_partition[OF A(1) this] obtain R' where "R' \<in> \<R>" "(v \<oplus> t) \<in> R'" by auto
+  with region_unique[OF A(1) this(2,1)] show ?case by auto
+qed
+
+lemma valid_regions_I_cong:
+  "valid_region X k I r \<Longrightarrow> \<forall> x \<in> X. I x = I' x \<Longrightarrow> region X I r = region X I' r \<and> valid_region X k I' r"
+proof (safe, goal_cases)
+  case (1 v)
+  note A = this
+  then have [simp]:"\<And> x. x \<in> X \<Longrightarrow> I' x = I x" by metis
+  show ?case
+  proof (standard, goal_cases)
+    case 1
+    from A(3) show ?case by auto
+  next
+    case 2
+    from A(3) show ?case by auto
+  next
+    case 3
+    show "{x \<in> X. \<exists>d. I x = Intv d} = {x \<in> X. \<exists>d. I' x = Intv d}" by auto
+  next
+    case 4
+    let ?X\<^sub>0 = "{x \<in> X. \<exists>d. I x = Intv d}"
+    from A(3) show "\<forall> x \<in> ?X\<^sub>0. \<forall> y \<in> ?X\<^sub>0. ((x, y) \<in> r) = (frac (v x) \<le> frac (v y))" by auto
+  qed
+next
+  case (2 v)
+  note A = this
+  then have [simp]:"\<And> x. x \<in> X \<Longrightarrow> I' x = I x" by metis
+  show ?case
+  proof (standard, goal_cases)
+    case 1
+    from A(3) show ?case by auto
+  next
+    case 2
+    from A(3) show ?case by auto
+  next
+    case 3
+    show "{x \<in> X. \<exists>d. I' x = Intv d} = {x \<in> X. \<exists>d. I x = Intv d}" by auto
+  next
+    case 4
+    let ?X\<^sub>0 = "{x \<in> X. \<exists>d. I' x = Intv d}"
+    from A(3) show "\<forall> x \<in> ?X\<^sub>0. \<forall> y \<in> ?X\<^sub>0. ((x, y) \<in> r) = (frac (v x) \<le> frac (v y))" by auto
+  qed
+next
+  case 3
+  note A = this
+  then have [simp]:"\<And> x. x \<in> X \<Longrightarrow> I' x = I x" by metis
+  show ?case
+   apply rule
+       apply (subgoal_tac "{x \<in> X. \<exists>d. I x = Intv d} = {x \<in> X. \<exists>d. I' x = Intv d}")
+        apply assumption
+  using A by auto
+qed
+
+fun intv_const :: "intv \<Rightarrow> nat"
+where
+  "intv_const (Const d) = d" |
+  "intv_const (Intv d) = d"  |
+  "intv_const (Greater d) = d"
+
+lemma finite_\<R>:
+  notes [[simproc add: finite_Collect]] finite_subset[intro]
+  fixes X k
+  defines "\<R> \<equiv> {region X I r | I r. valid_region X k I r}"
+  assumes "finite X"
+  shows "finite \<R>"
+proof -
+  { fix I r assume A: "valid_region X k I r"
+    let ?X\<^sub>0 = "{x \<in> X. \<exists>d. I x = Intv d}"
+    from A have "refl_on ?X\<^sub>0 r" by auto
+    then have "r \<subseteq> X \<times> X" by (auto simp: refl_on_def)
+    then have "r \<in> Pow (X \<times> X)" by auto
+  }
+  then have "{r. \<exists>I. valid_region X k I r} \<subseteq> Pow (X \<times> X)" by auto
+  let ?m = "Max {k x | x. x \<in> X}"
+  let ?I = "{intv. intv_const intv \<le> ?m}"
+  let ?fin_map = "\<lambda> I. \<forall>x. (x \<in> X \<longrightarrow> I x \<in> ?I) \<and> (x \<notin> X \<longrightarrow> I x = Const 0)"
+  let ?\<R> = "{region X I r | I r. valid_region X k I r \<and> ?fin_map I}"
+  have "?I = (Const ` {d. d \<le> ?m}) \<union> (Intv ` {d. d \<le> ?m}) \<union> (Greater ` {d. d \<le> ?m})"
+  by auto (case_tac x, auto)
+  then have "finite ?I" by auto
+  with fin have "finite {(I, r). valid_region X k I r \<and> ?fin_map I}"
+  by (fastforce intro: pairwise_finiteI finite_ex_and1 frac_add_le_preservation del: finite_subset)
+  then have "finite ?\<R>" by fastforce
+  moreover have "\<R> \<subseteq> ?\<R>"
+  proof
+    fix R assume R: "R \<in> \<R>"
+    then obtain I r where I: "R = region X I r" "valid_region X k I r" unfolding \<R>_def by auto
+    let ?I = "\<lambda> x. if x \<in> X then I x else Const 0"
+    let ?R = "region X ?I r"
+    from valid_regions_I_cong[OF I(2)] I have "R = ?R" "valid_region X k ?I r" by auto
+    moreover have "\<forall>x. x \<notin> X \<longrightarrow> ?I x = Const 0" by auto
+    moreover have "\<forall>x. x \<in> X \<longrightarrow> intv_const (I x) \<le> ?m"
+    proof auto
+      fix x assume x: "x \<in> X"
+      with I(2) have "valid_intv (k x) (I x)" by auto
+      ultimately  show "intv_const (I x) \<le> Max {k x |x. x \<in> X}" by (cases "I x") auto
+    qed
+    ultimately show "R \<in> ?\<R>" by force
+  qed
+  ultimately show "finite \<R>" by blast
+qed
+
+lemma SuccI2:
+  "\<R> = {region X I r | I r. valid_region X k I r} \<Longrightarrow> v \<in> R \<Longrightarrow> R \<in> \<R> \<Longrightarrow> t \<ge> 0 \<Longrightarrow> R' = [v \<oplus> t]\<^sub>\<R>
+  \<Longrightarrow> R' \<in> Succ \<R> R"
+proof goal_cases
+  case A: 1
+  from Succ.intros[OF A(2) A(3) regions_closed[OF A(1,3,2,4)] A(4)] A(5) show ?case by auto
+qed
+
+
+
+
+
+lemma Succ_refl:
+  "\<R> = {region X I r |I r. valid_region X k I r} \<Longrightarrow> finite X \<Longrightarrow> R \<in> \<R> \<Longrightarrow> R \<in> Succ \<R> R"
+proof goal_cases
+  case A: 1
+  then obtain I r where R: "valid_region X k I r" "R = region X I r" by auto
+  with A region_not_empty obtain v where v: "v \<in> region X I r" by metis
+  with R have *: "(v \<oplus> 0) \<in> R" unfolding cval_add_def by auto
+  from regions_closed'[OF A(1,3-)] v R have "(v \<oplus> 0) \<in> [v \<oplus> 0]\<^sub>\<R>" by auto
+  from region_unique[OF A(1) * A(3)] A(3) v[unfolded R(2)[symmetric]] show ?case by auto
+qed
+
+lemma Succ_refl':
+  "\<R> = {region X I r |I r. valid_region X k I r} \<Longrightarrow> finite X \<Longrightarrow> \<forall> x \<in> X. \<exists> c. I x = Greater c
+  \<Longrightarrow> region X I r \<in> \<R> \<Longrightarrow> Succ \<R> (region X I r) = {region X I r}"
+proof goal_cases
+  case A: 1
+  have *: "(v \<oplus> t) \<in> region X I r" if v: "v \<in> region X I r" and t: "t \<ge> 0" for v and t :: t
+  proof ((rule region.intros), auto, goal_cases)
+    case 1
+    with v t show ?case unfolding cval_add_def by auto
+  next
+    case (2 x)
+    with A obtain c where c: "I x = Greater c" by auto
+    with v 2 have "v x > c" by fastforce
+    with t have "v x + t > c" by auto
+    then have "(v \<oplus> t) x > c" by (simp add: cval_add_def)
+    from intv_elem.intros(3)[of c "v \<oplus> t", OF this] c show ?case by auto
+  next
+    case (3 x)
+    from this(1) A obtain c where "I x = Greater c" by auto
+    with 3(2) show ?case by auto
+  next
+    case (4 x)
+    from this(1) A obtain c where "I x = Greater c" by auto
+    with 4(2) show ?case by auto
+  qed
+  show ?case
+  proof (standard, standard)
+    fix R assume R: "R \<in> Succ \<R> (region X I r)"
+    then obtain v t where v:
+      "v \<in> region X I r" "R = [v \<oplus> t]\<^sub>\<R>" "R \<in> \<R>" "t \<ge> 0"
+    by (cases rule: Succ.cases) auto
+    from v(1) have **: "\<forall>x \<in> X. 0 \<le> v x" by auto
+    with v(4) have "\<forall>x \<in> X. 0 \<le> (v \<oplus> t) x" unfolding cval_add_def by auto
+    from *[OF v(1,4)] regions_partition'[OF A(1) ** this] region_unique[OF A(1) v(1) A(4)] v(2)
+    show "R \<in> {region X I r}" by auto
+  next
+    from A(4) obtain I' r' where R': "region X I r = region X I' r'" "valid_region X k I' r'"
+    unfolding A(1) by auto
+    with region_not_empty[OF A(2) this(2)] obtain v where v: "v \<in> region X I r" by auto
+    from region_unique[OF A(1) this A(4)] have *: "[v \<oplus> 0]\<^sub>\<R> = region X I r"
+    unfolding cval_add_def by auto
+    with v A(4) have "[v \<oplus> 0]\<^sub>\<R> \<in> Succ \<R> (region X I r)" by (intro Succ.intros; auto)
+    with * show "{region X I r} \<subseteq> Succ \<R> (region X I r)" by auto
+  qed
+qed
+
+
+definition
+  "succ \<R> R =
+  (SOME R'. R' \<in> Succ \<R> R \<and> (\<forall> u \<in> R. \<forall> t \<ge> 0. (u \<oplus> t) \<notin> R \<longrightarrow> (\<exists> t' \<le> t. (u \<oplus> t') \<in> R' \<and> 0 \<le> t')))"
+
+inductive isConst :: "intv \<Rightarrow> bool"
+where
+  "isConst (Const _)"
+
+inductive isIntv :: "intv \<Rightarrow> bool"
+where
+  "isIntv (Intv _)"
+
+inductive isGreater :: "intv \<Rightarrow> bool"
+where
+  "isGreater (Greater _)"
+
+declare isIntv.intros[intro!] isConst.intros[intro!] isGreater.intros[intro!]
+
+declare isIntv.cases[elim!] isConst.cases[elim!] isGreater.cases[elim!]
+
+
+lemma closest_prestable_1:
+  fixes I X k r
+  defines "\<R> \<equiv> {region X I r |I r. valid_region X k I r}"
+  defines "R \<equiv> region X I r"
+  defines "Z \<equiv> {x \<in> X . \<exists> c. I x = Const c}"
+  assumes "Z \<noteq> {}"
+  defines "I'\<equiv> \<lambda> x. if x \<notin> Z then I x else if intv_const (I x) = k x then Greater (k x) else Intv (intv_const (I x))"
+  defines "r' \<equiv> r \<union> {(x,y) . x \<in> Z \<and> y \<in> X \<and> intv_const (I x) < k x \<and> isIntv (I' y)}"
+  assumes "finite X"
+  assumes "valid_region X k I r"
+  shows   "\<forall> v \<in> R. \<forall> t>0. \<exists>t'\<le>t. (v \<oplus> t') \<in> region X I' r' \<and> t' \<ge> 0"
+  and     "\<forall> v \<in> region X I' r'. \<forall> t\<ge>0. (v \<oplus> t) \<notin> R"
+  and     "\<forall> x \<in> X. \<not> isConst (I' x)"
+  and     "\<forall> v \<in> R. \<forall> t < 1. \<forall> t' \<ge> 0. (v \<oplus> t') \<in> region X I' r'
+           \<longrightarrow> {x. x \<in> X \<and> (\<exists> c. I x = Intv c \<and> v x + t \<ge> c + 1)}
+                = {x. x \<in> X \<and> (\<exists> c. I' x = Intv c \<and> (v \<oplus> t') x + (t - t') \<ge> c + 1)}"
+proof (safe, goal_cases)
+  fix v assume v: "v \<in> R" fix t :: t assume t: "0 < t"
+  have elem: "intv_elem x v (I x)" if x: "x \<in> X" for x using v x unfolding R_def by auto
+  have *: "(v \<oplus> t) \<in> region X I' r'" if A: "\<forall> x \<in> X. \<not> isIntv (I x)" and t: "t > 0" "t < 1" for t
+  proof (standard, goal_cases)
+    case 1
+    from v have "\<forall> x \<in> X. v x \<ge> 0" unfolding R_def by auto
+    with t show ?case unfolding cval_add_def by auto
+  next
+    case 2
+    show ?case
+    proof (standard, case_tac "I x", goal_cases)
+      case (1 x c)
+      show ?case
+      proof (cases "intv_const (I x) = k x", auto simp: 1 I'_def Z_def, goal_cases)
+        case 1
+        with t show ?case by (auto simp: cval_add_def)
+      next
+        case 2
+        from assms(8) 1 have "c \<le> k x" by (cases rule: valid_region.cases) auto
+        with 2 have "c < k x" by linarith
+      qed
+    next
+      case (2 x c)
+      with A show ?case by auto
+    next
+      case (3 x c)
+      then have "I' x = Greater c" unfolding I'_def Z_def by auto
+    qed
+  next
+    case 3 show "{x \<in> X. \<exists>d. I' x = Intv d} = {x \<in> X. \<exists>d. I' x = Intv d}" ..
+  next
+    case 4
+    let ?X\<^sub>0' = "{x \<in> X. \<exists>d. I' x = Intv d}"
+    show "\<forall>x\<in>?X\<^sub>0'. \<forall>y\<in>?X\<^sub>0'. ((x, y) \<in> r') = (frac ((v \<oplus> t) x) \<le> frac ((v \<oplus> t) y))"
+    proof (safe, goal_cases)
+      case (1 x y d d')
+      note B = this
+      have "x \<in> Z" apply (rule ccontr) using A B by (auto simp: I'_def)
+      with elem[OF B(1)] have "frac (v x) = 0 " unfolding Z_def by auto
+      with frac_distr[of t "v x"] t have *: "frac (v x + t) = t" by auto
+      have "y \<in> Z" apply (rule ccontr) using A B by (auto simp: I'_def)
+      with elem[OF B(3)] have "frac (v y) = 0 " unfolding Z_def by auto
+      with frac_distr[of t "v y"] t have "frac (v y + t) = t" by auto
+      with * show ?case unfolding cval_add_def by auto
+    next
+      case B: (2 x)
+      have "x \<in> Z" apply (rule ccontr) using A B by (auto simp: I'_def)
+      with B have "intv_const (I x) \<noteq> k x" unfolding I'_def by auto
+      with B(1) assms(8) have "intv_const (I x) < k x" by (fastforce elim!: valid_intv.cases)
+    qed
+  qed
+  let ?S = "{1 - frac (v x) | x. x \<in> X \<and> isIntv (I x)}"
+  let ?t = "Min ?S"
+  { assume A: "\<exists> x \<in> X. isIntv (I x)"
+    from A have "?S \<noteq> {}" by auto
+      x: "x \<in> X" "isIntv (I x)" "?t = 1 - frac (v x)"
+    by force
+    have "frac (v x) < 1" by (simp add: frac_lt_1)
+    then have "?t > 0" by (simp add: x(3))
+    then have "?t / 2 > 0" by auto
+    from x(2) obtain c where "I x = Intv c" by (auto)
+    with elem[OF x(1)] have v_x: "c < v x" "v x < c + 1" by auto
+    from nat_intv_frac_gt0[OF this] have "frac (v x) > 0" .
+    with x(3) have "?t < 1" by auto
+    { fix t :: t assume t: "0 < t" "t \<le> ?t / 2"
+      { fix y assume "y \<in> X" "isIntv (I y)"
+        then have "1 - frac (v y) \<in> ?S" by auto
+      } note frac_bound = this
+      have "(v \<oplus> t) \<in> region X I' r'"
+      proof (standard, goal_cases)
+        case 1
+        from v have "\<forall> x \<in> X. v x \<ge> 0" unfolding R_def by auto
+      next
+        case 2
+        show ?case
+        proof (standard, case_tac "I x", goal_cases)
+          case A: (1 x c)
+          show ?case
+          proof (cases "intv_const (I x) = k x", auto simp: A I'_def Z_def, goal_cases)
+            case 1
+          next
+            case 2
+            from assms(8) A have "c \<le> k x" by (cases rule: valid_region.cases) auto
+            with 2 have "c < k x" by linarith
+            by (auto simp: cval_add_def)
+          qed
+        next
+          case (2 x c)
+          from 2 have "I' x = I x" unfolding I'_def Z_def by auto
+          from frac_bound[OF 2(1)] 2(2) have "t  < 1 - frac (v x)" by auto
+          from frac_add_le_preservation[OF v(2) this] t v(1) 2 show ?case
+        next
+          case (3 x c)
+          then have "I' x = Greater c" unfolding I'_def Z_def by auto
+          by (auto simp: cval_add_def)
+        qed
+      next
+        case 3 show "{x \<in> X. \<exists>d. I' x = Intv d} = {x \<in> X. \<exists>d. I' x = Intv d}" ..
+      next
+        case 4
+        let ?X\<^sub>0  = "{x \<in> X. \<exists>d. I x = Intv d}"
+        let ?X\<^sub>0' = "{x \<in> X. \<exists>d. I' x = Intv d}"
+        show "\<forall>x\<in>?X\<^sub>0'. \<forall>y\<in>?X\<^sub>0'. ((x, y) \<in> r') = (frac ((v \<oplus> t) x) \<le> frac ((v \<oplus> t) y))"
+        proof (safe, goal_cases)
+          case (1 x y d d')
+          note B = this
+          show ?case
+          proof (cases "x \<in> Z")
+            case False
+            note F = this
+            show ?thesis
+            proof (cases "y \<in> Z")
+              case False
+              with F B have *: "x \<in> ?X\<^sub>0" "y \<in> ?X\<^sub>0" unfolding I'_def by auto
+              from B(5) show ?thesis unfolding r'_def
+              proof (safe, goal_cases)
+                case 1
+                with v * have le: "frac (v x) <= frac (v y)" unfolding R_def by auto
+                from frac_bound * have "t < 1 - frac (v x)" "t < 1 - frac (v y)" by fastforce+
+                with frac_distr t have
+                  "frac (v x) + t = frac (v x + t)" "frac (v y) + t = frac (v y + t)"
+                by simp+
+                with le show ?case unfolding cval_add_def by fastforce
+              next
+                case 2
+                from this(1) elem have **: "frac (v x) = 0" unfolding Z_def by force
+                from 2(4) obtain c where "I' y = Intv c" by (auto )
+                then have "y \<in> Z \<or> I y = Intv c" unfolding I'_def by presburger
+                then show ?case
+                proof
+                  assume "y \<in> Z"
+                  with elem[OF 2(2)] have ***: "frac (v y) = 0" unfolding Z_def by force
+                  show ?thesis by (simp add: ** *** frac_add cval_add_def)
+                next
+                  assume A: "I y = Intv c"
+                  have le: "frac (v x) <= frac (v y)" by (simp add: **)

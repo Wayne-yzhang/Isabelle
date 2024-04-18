@@ -1,0 +1,610 @@
+  is perhaps the best-known solution, there are many others. In his PhD 
+  solution is based on enumerating SCCs in a depth-first traversal of the graph.
+  also falls into this category of solutions.
+  Nevertheless, Bloemen goes on to present a parallel variant of the algorithm
+  suitable for execution on multi-core processors, based on clever data structures
+  that minimize locking.
+
+  In the following, we encode the sequential version of the algorithm in the
+  proof assistant Isabelle/HOL, and prove its correctness. Bloemen's thesis
+  briefly and informally explains why the algorithm is correct. Our proof expands
+  on these arguments, making them completely formal. The encoding is based on
+  a direct representation of the algorithm as a pair of mutually recursive
+  functions; we are not aiming at extracting executable code.
+\<close>
+text \<open>
+  The record below represents the variables of the
+  algorithm. Most variables correspond to those used in
+  Bloemen's presentation. Thus, the variable @{text \<S>}
+  associates to every node the set of nodes that have
+  already been determined to be part of the same SCC. A core
+  invariant of the algorithm will be that this mapping represents
+  equivalence classes of nodes: for all nodes @{text v} and @{text w},
+  we maintain the relationship
+
+  @{text "v \<in> \<S> w \<longleftrightarrow> \<S> v = \<S> w."}
+
+  In an actual implementation of this algorithm, this variable
+  could conveniently be represented by a union-find structure.
+  Variable @{text stack} holds the list of roots of these 
+  (not yet maximal) SCCs, in depth-first order,
+  @{text visited} and @{text explored}
+  represent the nodes that have already been seen, respectively
+  that have been completely explored, by the algorithm, and
+  @{text sccs} is the set of maximal SCCs that the algorithm
+  has found so far.
+
+  Additionally, the record holds some auxiliary variables that
+  are used in the proof of correctness. In particular,
+  @{text root} denotes the node on which the algorithm was called,
+  @{text cstack} represents the call stack of the recursion of
+  function @{text dfs},
+  and @{text vsuccs} stores the successors of each node
+  that have already been visited by the function @{text dfss}
+  that loops over all successors of a given node.
+\<close>
+text \<open>
+  The algorithm is initially called with an environment that
+  initializes the root node and trivializes all other components.
+\<close>
+\<comment> \<open>Make the simplifier expand let-constructions automatically.\<close>
+section \<open>Auxiliary lemmas about lists\<close>
+text \<open>
+  We use the precedence order on the elements that appear
+  in a list. In particular, stacks are represented as lists,
+  and a node @{text x} precedes another node @{text y} on the
+  stack if @{text x} was pushed on the stack later
+  than @{text y}.
+\<close>
+    with \<open>y \<in> set (x # r)\<close> show ?rhs
+    with \<open>y \<in> set (x # r)\<close> assms show ?rhs
+    with \<open>y \<in> set (x # r)\<close> assms 
+    show ?rhs by auto \<comment> \<open>contradiction\<close>
+text \<open>
+  Precedence determines an order on the elements of a list,
+  provided elements have unique occurrences. However, consider
+  a list such as @{text "[2,3,1,2]"}: then $1$ precedes $2$ and
+  $2$ precedes $3$, but $1$ does not precede $3$.
+\<close>
+  from \<open>x \<preceq> y in xs\<close> \<open>distinct xs\<close> obtain as bs where
+  from \<open>y \<preceq> x in xs\<close> \<open>distinct xs\<close> obtain cs ds where
+    assume "?P" with \<open>y \<notin> set as\<close> show ?thesis 
+    assume "?Q" with \<open>x \<notin> set cs\<close> show ?thesis
+section \<open>Finite directed graphs\<close>
+text \<open>
+  We represent a graph as an Isabelle locale that identifies a finite
+  set of vertices (of some base type @{text "'v"}) and associates to
+  each vertex its set of successor vertices.
+\<close>
+text \<open>
+  We inductively define reachability of nodes in the graph.
+\<close>
+text \<open>
+  In order to derive a ``reverse'' induction rule for @{const "reachable"},
+  we define an alternative reachability predicate and prove that the two
+  coincide.
+\<close>
+text \<open>
+  We also need the following variant of reachability avoiding
+  certain edges. More precisely, @{text y} is reachable from @{text x}
+  avoiding a set @{text E} of edges if there exists a path such that
+  no edge from @{text E} appears along the path.
+\<close>
+text \<open>
+  Reachability avoiding some edges obviously implies reachability.
+  Conversely, reachability implies reachability avoiding the empty set.
+\<close>
+section \<open>Strongly connected components\<close>
+text \<open>
+  A strongly connected component is a set @{text S} of nodes
+  such that any two nodes in @{text S} are reachable from each other.
+  This concept is represented by the predicate @{text "is_subscc"} below.
+  We are ultimately interested in non-empty, maximal strongly connected
+  components, represented by the predicate @{text "is_scc"}.
+\<close>
+  \<comment> \<open>Two nodes that are reachable from each other are in the same SCC.\<close>
+  \<comment> \<open>Two SCCs that contain a common element are identical.\<close>
+section \<open>Algorithm for computing strongly connected components\<close>
+text \<open>
+  We now introduce our representation of Bloemen's algorithm in Isabelle/HOL.
+  The auxiliary function @{text unite} corresponds to the inner \textsf{while}
+  two nodes @{text v} and @{text w} (and the environment @{text e} holding the
+  current values of the program variables) when a loop is found, i.e.\ when
+  @{text w} is a successor of @{text v} in the graph that has already been
+  visited in the depth-first search. In that case, the root of the SCC
+  of node @{text w} determined so far must appear below the root of
+  @{text v}'s SCC in the @{text stack} maintained by the algorithm. 
+  The effect of the function is to merge the SCCs of all nodes on the
+  top of the stack above (and including) @{text w}. Node @{text w}'s root
+  will be the root of the merged SCC.
+\<close>
+text \<open>
+  We now represent the algorithm as two mutually recursive functions @{text dfs} and
+  @{text dfss} in Isabelle/HOL. The function @{text dfs} corresponds to Bloemen's
+  function \textsf{SetBased}, whereas @{text dfss} corresponds to the \textsf{forall}
+  loop over the successors of the node on which @{text dfs} was called. Instead of
+  using global program variables in imperative style, our functions explicitly pass
+  environments that hold the current values of these variables.
+
+  A technical complication in the development of the algorithm in Isabelle is the
+  fact that the functions need not terminate when their pre-conditions (introduced
+  below) are violated, for example when @{text dfs} is called for a node that was
+  already visited previously. We therefore cannot prove termination at this point, 
+  but will later show that the explicitly given pre-conditions ensure termination.
+\<close>
+section \<open>Definition of the predicates used in the correctness proof\<close>
+text \<open>
+  Environments are partially ordered according to the following definition.
+\<close>
+text \<open>
+  The set @{text "unvisited e u"} contains all edges @{text "(a,b)"}
+  such that node @{text a} is in the same SCC as
+  node @{text u} and the edge has not yet been followed, in the
+  sense represented by variable @{text vsuccs}.
+\<close>
+subsection \<open>Main invariant\<close>
+text \<open>
+  The following definition characterizes well-formed environments.
+  This predicate will be shown to hold throughout the execution
+  of the algorithm. In words, it asserts the following facts:
+  \begin{itemize}
+  \item Only nodes reachable from the root (for which the algorithm
+    was originally called) are visited.
+  \item The two stacks @{text stack} and @{text cstack} do not
+    contain duplicate nodes, and @{text stack} contains a subset
+    of the nodes on @{text cstack}, in the same order.
+  \item Any node higher on the @{text stack} (i.e., that was pushed
+    later) is reachable from nodes lower in the @{text stack}.
+    This property also holds for nodes on the call stack,
+    but this is not needed for the correctness proof.
+  \item Every explored node, and every node on the call stack,
+    has been visited.
+  \item Nodes reachable from fully explored nodes have 
+    themselves been fully explored.
+  \item The set @{text "vsuccs e n"}, for any node @{text n},
+    is a subset of @{text n}'s successors, and all these nodes
+    are in @{text visited}. The set is empty if @{text "n \<notin> visited"},
+    and it contains all successors if @{text n} has been fully 
+    explored or if @{text n} has been visited, but is no longer
+    on the call stack.
+  \item The sets @{text "\<S> e n"} represent an equivalence relation.
+    The equivalence classes of nodes that have not yet been visited 
+    are singletons. Also, equivalence classes for two distinct nodes
+    on the @{text stack} are disjoint because the stack only stores
+    roots of SCCs, and the union of the equivalence classes for these
+    root nodes corresponds to the set of live nodes, i.e. those nodes
+    that have already been visited but not yet fully explored.
+  \item More precisely, an equivalence class is represented on the
+    stack by the oldest node in the sense of the call order: any
+    node in the class that is still on the call stack precedes the
+    representative on the call stack and was therefore pushed later.
+  \item Equivalence classes represent the maximal available
+    information about strong connectedness: nodes represented by
+    some node @{text n} on the @{text stack} can reach some node
+    @{text m} that is lower in the stack only by taking an
+    edge from some node in @{text n}'s equivalence class that 
+    has not yet been followed. (Remember that @{text m} can reach
+    @{text n} by one of the previous conjuncts.)
+  \item Equivalence classes represent partial SCCs in the sense
+    of the predicate @{text is_subscc}. Variable @{text sccs}
+    holds maximal SCCs in the sense of the predicate @{text is_scc},
+    and their union corresponds to the set of explored nodes.
+  \end{itemize}
+\<close>
+subsection \<open>Consequences of the invariant\<close>
+text \<open>
+  Since every node on the call stack is an element
+  of @{text visited} and every node on the @{text stack}
+  also appears on @{text cstack}, all these nodes are
+  also in @{text visited}.
+\<close>
+text \<open>
+  Classes represented on the stack consist of visited nodes
+  that have not yet been fully explored.
+\<close>
+text \<open>
+  Conversely, every such node belongs to some class
+  represented on the stack.
+\<close>
+text \<open>
+  Every node belongs to its own equivalence class.
+\<close>
+text \<open>
+  No node on the stack has been fully explored.
+\<close>
+text \<open>
+  If @{text w} is reachable from visited node @{text v}, but
+  no unvisited successor of a node reachable from @{text v}
+  can reach @{text w}, then @{text w} must be visited.
+\<close>
+text \<open>
+  Edges towards explored nodes do not contribute to reachability
+  of unexplored nodes avoiding some set of edges.
+\<close>
+  from e \<open>z \<in> successors y\<close> \<open>z \<notin> explored e\<close>
+  from w \<open>(y,z) \<notin> E\<close> \<open>z \<notin> explored e\<close> have "(y,z) \<notin> E \<union> {(v,w)}"
+    using  \<open>z \<in> successors y\<close> by auto
+subsection \<open>Pre- and post-conditions of function @{text dfs}\<close>
+text \<open>
+  Function @{text dfs} should be called for a well-formed
+  environment and a node @{text v} that has not yet been
+  visited and that is reachable from the root node, 
+  as well as from all nodes in the stack. No outgoing edges
+  from node @{text v} have yet been followed.
+\<close>
+text \<open>
+  Function @{text dfs} maintains the invariant
+  @{text wf_env} and returns an environment @{text e'} that
+  extends the input environment @{text e}. Node @{text v} has been 
+  visited and all its outgoing edges have been followed.
+  Because the algorithm works in depth-first fashion, no 
+  new outgoing edges of nodes that had already been
+  visited in the input environment have been followed, and
+  the stack of @{text e'} is a suffix of the one of @{text e}
+  such that @{text v} is still reachable from all nodes on the
+  stack. The stack may have been shortened because SCCs
+  represented at the top of the stack may have been
+  merged. The call stack is reestablished as it was in @{text e}.
+  There are two possible outcomes of the algorithm:
+  \begin{itemize}
+  \item Either @{text v} has been fully explored, in which case
+    the stacks of @{text e} and @{text e'} are the same, and
+    the equivalence classes of all nodes represented on the
+    stack are unchanged. This corresponds to the case where
+    @{text v} is the root node of its (maximal) SCC.
+  \item Alternatively, the stack of @{text e'} must be
+    non-empty and @{text v} must be represented by the node at
+    the top of the stack. The SCCs of the nodes
+    lower on the stack are unchanged. This corresponds to the
+    case where @{text v} is not the root node of its SCC, but
+    some SCCs at the top of the stack may have been merged.
+  \end{itemize}
+\<close>
+text \<open>
+  The initial environment is easily seen to satisfy @{text dfs}'s
+  pre-condition.
+\<close>
+text \<open>
+  Any node represented by the top stack element of the
+  input environment is still represented by the top
+  element of the output stack.
+\<close>
+      with u \<open>stack e' \<noteq> []\<close> show ?thesis
+      with n wf \<open>hd (stack e) \<in> set (stack e)\<close> show ?thesis
+text \<open>
+  Function @{text dfs} leaves the SCCs represented
+  by elements in the (new) tail of the @{text stack} unchanged.
+\<close>
+subsection \<open>Pre- and post-conditions of function @{text dfss}\<close>
+text \<open>
+  The pre- and post-conditions of function @{text dfss}
+  correspond to the invariant of the loop over all outgoing
+  edges from node @{text v}. The environment must be
+  well-formed, node @{text v} must be visited and represented
+  by the top element of the (non-empty) stack. Node @{text v}
+  must be reachable from all nodes on the stack, and it must be
+  the top node on the call stack. All outgoing
+  edges of node @{text v} that have already been followed must
+  either lead to completely explored nodes (that are no longer
+  represented on the stack) or to nodes that are part of the
+  same SCC as @{text v}.
+\<close>
+text \<open>
+  The post-condition establishes that all outgoing edges
+  of node @{text v} have been followed. As for function
+  @{text dfs}, no new outgoing edges of previously visited
+  nodes have been followed. Also as before, the new stack
+  is a suffix of the old one, and the call stack is restored.
+  In case node @{text v} is still on the stack (and therefore
+  is the root node of its SCC), no node that is lower on the stack
+  can be reachable from @{text v}. This condition guarantees
+  the maximality of the computed SCCs.
+\<close>
+section \<open>Proof of partial correctness\<close>
+subsection \<open>Lemmas about function @{text unite}\<close>
+text \<open>
+  We start by establishing a few lemmas about function @{text unite}
+  in the context where it is called.
+\<close>
+  with \<open>w \<in> cc\<close> \<open>\<S> e' = (\<lambda>x. if x \<in> cc then cc else \<S> e x)\<close>
+text \<open>
+  Function @{text unite} leaves intact the equivalence classes
+  represented by the tail of the new stack.
+\<close>
+    with S_reflexive[OF wf, of n] n wf \<open>stack e = pfx @ stack e'\<close> \<open>stack e' \<noteq> []\<close>
+text \<open>
+  The stack of the result of @{text unite} represents the
+  same vertices as the input stack, potentially in fewer
+  equivalence classes.
+\<close>
+  from \<open>stack e' \<noteq> []\<close>
+  from \<open>stack e = pfx @ stack e'\<close> \<open>stack e' \<noteq> []\<close>
+text \<open>
+  The head of the stack represents a (not necessarily maximal) SCC.
+\<close>
+    with nx \<open>stack e = pfx @ (stack e')\<close> \<open>stack e' \<noteq> []\<close>
+    from \<open>stack e = pfx @ (stack e')\<close> \<open>stack e' \<noteq> []\<close> ny
+    from wf \<open>stack e' \<noteq> []\<close> \<open>w \<in> \<S> e (hd (stack e'))\<close>
+    from \<open>reachable x nx\<close> \<open>reachable nx (hd (stack e))\<close>
+         \<open>reachable (hd (stack e)) v\<close> \<open>reachable v w\<close>
+         \<open>reachable w (hd (stack e'))\<close> 
+         \<open>reachable (hd (stack e')) ny\<close> \<open>reachable ny y\<close>
+text \<open>
+  The environment returned by function @{text unite} extends the input environment.
+\<close>
+text \<open>
+  The environment returned by function @{text unite} is well-formed.
+\<close>
+    with n m wf \<open>stack e = pfx @ stack e'\<close> \<open>stack e' \<noteq> []\<close>
+  from wf \<open>stack e = pfx @ stack e'\<close>
+    with \<open>stack e = pfx @ stack e'\<close> wf
+  from wf \<open>stack e = pfx @ stack e'\<close>
+        with \<open>\<S> e n = \<S> e m\<close> False show ?thesis
+          with S_reflexive[OF wf, of m] \<open>\<S> e' m = cc\<close> \<open>m \<notin> cc\<close>
+          with \<open>\<S> e' n = \<S> e n\<close> r have "\<S> e n = cc"
+          with \<open>n \<notin> cc\<close> show "False" ..
+        with r \<open>\<S> e' n = \<S> e n\<close> have "\<S> e m = \<S> e n"
+        with \<open>\<S> e' n = \<S> e n\<close> show ?thesis
+      with \<open>stack e = pfx @ stack e'\<close> \<open>stack e' \<noteq> []\<close>
+      with stack_class[OF wf this \<open>n \<in> \<S> e m\<close>] \<open>n \<notin> visited e\<close>
+      with \<open>m \<in> set (stack e')\<close> \<open>n \<noteq> m\<close> \<open>stack e' \<noteq> []\<close>
+      with \<open>n \<in> set (stack e')\<close> \<open>stack e' \<noteq> []\<close>
+        with \<open>n \<in> set (tl (stack e'))\<close> hd_cc tl_cc unite_S_tl[OF wf w]
+        with \<open>m \<in> set (stack e')\<close> \<open>stack e' \<noteq> []\<close>
+        with \<open>n \<in> set (tl (stack e'))\<close>
+        from \<open>m \<in> set (stack e')\<close> \<open>n \<in> set (stack e')\<close> \<open>stack e = pfx @ stack e'\<close>
+          using wf \<open>n \<noteq> m\<close> by (auto simp: wf_env_def)
+    from \<open>m \<in> set (cstack e')\<close> have "m \<in> set (cstack e)"
+      with \<open>m \<in> \<S> e' n\<close> have "m \<in> cc"
+      with \<open>stack e = pfx @ stack e'\<close> \<open>stack e' \<noteq> []\<close>
+      with \<open>m \<in> \<S> e l\<close> \<open>m \<in> set (cstack e)\<close> wf
+      from \<open>l \<in> set pfx \<union> {hd (stack e')}\<close> True 
+           \<open>stack e = pfx @ stack e'\<close> \<open>stack e' \<noteq> []\<close>
+      with \<open>n \<in> set (stack e')\<close> \<open>stack e' \<noteq> []\<close>
+      with unite_S_tl[OF wf w] \<open>m \<in> \<S> e' n\<close>
+      with \<open>n \<in> set (stack e')\<close> \<open>stack e = pfx @ stack e'\<close>
+           \<open>m \<in> set (cstack e)\<close> wf
+      with \<open>u \<in> \<S> e' x\<close> obtain x' where
+      from \<open>stack e = pfx @ stack e'\<close> \<open>stack e' \<noteq> []\<close>
+      from xy \<open>stack e = pfx @ stack e'\<close> have "x \<preceq> y in stack e"
+      from \<open>x' \<preceq> x in stack e\<close> \<open>x \<preceq> y in stack e\<close> wf \<open>x \<noteq> y\<close>
+      from \<open>\<S> e' x = cc\<close> have "?unv = unvisited e' x"
+      with \<open>reachable_avoiding u y (unvisited e' x)\<close>
+      with \<open>x' \<preceq> y in stack e\<close> \<open>x' \<noteq> y\<close> \<open>u \<in> \<S> e x'\<close> wf
+      with \<open>x \<preceq> y in stack e'\<close> \<open>stack e' \<noteq> []\<close>
+      with \<open>u \<in> \<S> e' x\<close> have "u \<in> \<S> e x"
+      from \<open>x \<preceq> y in stack e'\<close> \<open>stack e = pfx @ stack e'\<close>
+      from unite_S_tl[OF wf w] \<open>x \<in> set (tl (stack e'))\<close>
+        using \<open>x \<noteq> y\<close> \<open>reachable_avoiding u y (unvisited e' x)\<close> wf
+subsection \<open>Lemmas establishing the pre-conditions\<close>
+text \<open>
+  The precondition of function @{text dfs} ensures the precondition
+  of @{text dfss} at the call of that function.
+\<close>
+      with \<open>x \<preceq> y in stack ?e'\<close> assms show ?thesis
+      with \<open>x \<preceq> y in stack ?e'\<close> wf show ?thesis
+      with wf v \<open>u \<in> \<S> ?e' x\<close> have "u = v" "vsuccs ?e' v = {}"
+      with \<open>reachable_avoiding u y (unvisited ?e' x)\<close>[THEN ra_cases]
+           True \<open>x \<noteq> y\<close> wf
+      with wf v \<open>m \<in> \<S> ?e' n\<close> show ?thesis
+      with \<open>n \<in> set (stack ?e')\<close> \<open>m \<in> \<S> ?e' n\<close>
+      with wf v False \<open>m \<in> \<S> e n\<close> \<open>m \<in> set (cstack ?e')\<close>
+  from \<open>\<forall>n m. n \<preceq> m in stack ?e' \<longrightarrow> reachable m n\<close>
+text \<open>
+  Similarly, we now show that the pre-conditions of the different
+  function calls in the body of function @{text dfss} are satisfied.
+  First, it is very easy to see that the pre-condition of @{text dfs}
+  holds at the call of that function.
+\<close>
+text \<open>
+  The pre-condition of @{text dfss} holds when the successor
+  considered in the current iteration has already been explored.
+\<close>
+        with prec \<open>x \<noteq> y\<close> \<open>reachable_avoiding u y (unvisited e'' x)\<close> wf
+        with wf \<open>reachable_avoiding u y (unvisited e'' x)\<close>
+             \<open>y \<notin> explored e\<close> \<open>w \<in> explored e\<close> prec \<open>x \<noteq> y\<close>
+text \<open>
+  The call to @{text dfs} establishes the pre-condition for the
+  recursive call to @{text dfss} in the body of @{text dfss}.
+\<close>
+    from wf' \<open>w \<in> visited e'\<close> have "\<forall>n. vsuccs e'' n \<subseteq> visited e''"
+    from post \<open>v \<in> visited e\<close>
+        with 1 \<open>x \<noteq> y\<close> \<open>reachable_avoiding u y (unvisited e'' x)\<close> wf'
+          with wf' unv \<open>reachable_avoiding u y (unvisited e'' x)\<close>
+               \<open>y \<notin> explored e'\<close> 1 \<open>x \<noteq> y\<close>
+          from \<open>reachable_avoiding u y (unvisited e'' x)\<close>[THEN ra_add_edge]
+            with \<open>x \<preceq> y in stack e''\<close> \<open>x \<noteq> y\<close> \<open>u \<in> \<S> e'' x\<close> wf'
+            from \<open>x \<preceq> y in stack e''\<close> have "x \<in> set (stack e')"
+              with \<open>x \<in> set (stack e')\<close> \<open>stack e' \<noteq> []\<close>
+              with w \<open>v \<in> \<S> e' x\<close> have "v \<in> \<S> e x"
+              from post \<open>stack e' \<noteq> []\<close> \<open>x \<in> set (stack e')\<close> \<open>x \<in> set (tl (stack e'))\<close>
+            with \<open>reachable_avoiding w y (unvisited e' x)\<close>
+                 \<open>x \<preceq> y in stack e''\<close> \<open>x \<noteq> y\<close> w wf'
+    from wf' \<open>\<forall>n. vsuccs e'' n \<subseteq> successors n\<close>
+          with \<open>wf_env e\<close> post \<open>stack e \<noteq> []\<close>
+    from \<open>stack e' \<noteq> []\<close> have "stack e'' \<noteq> []"
+    from \<open>v \<in> \<S> e' (hd (stack e'))\<close> have "v \<in> \<S> e'' (hd (stack e''))"
+      using \<open>wf_env e''\<close> unfolding pre_dfss_def by blast
+text \<open>
+  Finally, the pre-condition for the recursive call to @{text dfss}
+  at the end of the body of function @{text dfss} also holds if
+  @{text unite} was applied.
+\<close>
+  from \<open>stack e = pfx @ stack e'\<close> \<open>stack e' \<noteq> []\<close>
+  with pfx \<open>v \<in> cc\<close> have "v \<in> \<S> e' (hd (stack e'))"
+    from wf' w \<open>sub_env e e'\<close>
+    from wf' \<open>v \<in> visited e\<close> \<open>sub_env e e'\<close>
+    from wf' \<open>v \<notin> explored e\<close>
+    from wf' \<open>w \<in> successors v\<close>
+        with \<open>v \<in> \<S> e' (hd (stack e'))\<close>
+          with prec \<open>x \<noteq> y\<close> \<open>reachable_avoiding u y (unvisited e'' x)\<close> wf'
+          with \<open>reachable_avoiding u y (unvisited e'' x)\<close>[THEN ra_add_edge]
+            with prec \<open>x \<noteq> y\<close> wf' show ?thesis
+            with \<open>x = hd (stack e')\<close> \<open>w \<in> \<S> e' (hd (stack e'))\<close> 
+                 \<open>x \<preceq> y in stack e'\<close> \<open>x \<noteq> y\<close> wf'
+        with \<open>x \<preceq> y in stack e'\<close> \<open>stack e' \<noteq> []\<close>
+        with unite_S_tl[OF wf w] \<open>u \<in> \<S> e' x\<close>
+        from \<open>x \<preceq> y in stack e'\<close> \<open>stack e = pfx @ stack e'\<close>
+        from \<open>v \<in> \<S> e' (hd (stack e'))\<close> \<open>x \<in> set (tl (stack e'))\<close>
+             \<open>stack e' \<noteq> []\<close> wf'
+        from \<open>x \<in> set (tl (stack e'))\<close> unite_S_tl[OF wf w]
+          using \<open>x \<noteq> y\<close> \<open>reachable_avoiding u y (unvisited e'' x)\<close> wf
+        with \<open>w \<in> \<S> e' (hd (stack e'))\<close> show ?thesis 
+          with \<open>hd (stack e) \<in> set pfx \<union> {hd (stack e')}\<close>
+    from pre \<open>stack e = pfx @ stack e'\<close>
+    from \<open>stack e' \<noteq> []\<close> have "stack e'' \<noteq> []"
+    from \<open>v \<in> \<S> e' (hd (stack e'))\<close> have "v \<in> \<S> e'' (hd (stack e''))"
+      using \<open>wf_env e''\<close> unfolding pre_dfss_def by blast
+subsection \<open>Lemmas establishing the post-conditions\<close>
+text \<open>
+  Assuming the pre-condition of function @{text dfs} and the post-condition of
+  the call to @{text dfss} in the body of that function, the post-condition of
+  @{text dfs} is established.
+\<close>
+        with True ns \<open>ns \<noteq> []\<close> have "\<not> distinct (stack e1)"
+          with \<open>u \<in> explored ?e2\<close> have "u \<in> \<S> e' v"
+              from notempty \<open>u \<in> \<S> e' v\<close> stack_class[OF wf'] False
+                with notempty \<open>u \<in> \<S> e' v\<close> \<open>wf_env e'\<close> have "u \<preceq> v in cstack e'"
+          with \<open>wf_env e'\<close> \<open>reachable x y\<close> show ?thesis
+          with \<open>explored ?e2 \<subseteq> visited ?e2\<close> have "x \<in> visited e'"
+          from \<open>x \<in> \<S> e' v\<close> wf' have "reachable v x"
+            with reachable_visited[OF wf' \<open>x \<in> visited e'\<close> \<open>reachable x y\<close>]
+            from wf' \<open>m \<in> successors n - vsuccs e' n\<close>
+              by (rule visited_unexplored[OF wf' \<open>n \<in> visited e'\<close> \<open>n \<notin> explored e'\<close>])
+              with \<open>n' \<in> set (stack e')\<close> \<open>v = hd (stack e')\<close>
+              from \<open>n \<in> \<S> e' n'\<close> \<open>wf_env e'\<close> have "reachable n n'"
+              with \<open>reachable v x\<close> \<open>reachable x n\<close> reachable_trans 
+                using 3 \<open>v = hd (stack e')\<close> 
+            with \<open>n \<in> \<S> e' n'\<close> \<open>m \<in> successors n - vsuccs e' n\<close> explored_vsuccs
+              by (rule visited_unexplored[OF wf' \<open>y \<in> visited e'\<close> False])
+              with \<open>reachable v x\<close> \<open>reachable x y\<close>
+                using \<open>v = hd (stack e')\<close> 3 
+        with wf notempty \<open>n \<in> set (tl (stack e'))\<close> \<open>m \<in> set (cstack e)\<close>
+        with wf' \<open>x \<noteq> y\<close> u have "False"
+            with \<open>S \<noteq> {}\<close> \<open>is_subscc S\<close> obtain S' where
+            from \<open>\<forall>v w. w \<in> \<S> ?e2 v \<longleftrightarrow> (\<S> ?e2 v = \<S> ?e2 w)\<close>
+            with \<open>\<forall>x \<in> explored ?e2. \<forall>y. reachable x y \<longrightarrow> y \<in> explored ?e2\<close>
+                 xv \<open>S = \<S> e' v\<close> \<open>x \<in> S' \<and> x \<notin> S\<close>
+    from \<open>wf_env ?e2\<close> have "v \<in> explored ?e2"
+          with 3 \<open>n = v\<close> have "v = hd (stack e')"
+          with \<open>v \<noteq> hd (stack e')\<close> show "False"
+    from 3 \<open>v \<noteq> hd (stack e')\<close>
+text \<open>
+  The following lemma is central for proving
+  partial correctness: assuming termination (represented by
+  the predicate @{text dfs_dfss_dom}) and the pre-condition
+  of the functions, both @{text dfs} and @{text dfss}
+  establish their post-conditions. The first part of the
+  theorem follows directly from the preceding lemma and the
+  computational induction rule generated by Isabelle, the
+  second part is proved directly, distinguishing the different
+  cases in the definition of function @{text dfss}.
+\<close>
+      from predfss \<open>vsuccs e v = successors v\<close>
+        with \<open>stack e \<noteq> []\<close> have "v \<preceq> n in stack e"
+        from wf \<open>stack e \<noteq> []\<close> asm have "v \<noteq> n"
+          with \<open>vsuccs e v = successors v\<close> have "a \<noteq> v"
+          from \<open>stack e \<noteq> []\<close> \<open>hd (stack e) = v\<close> 
+          with \<open>a \<noteq> v\<close> \<open>a \<in> \<S> e v\<close> wf have "a \<in> visited e"
+            with \<open>v \<in> set (stack e)\<close> \<open>a \<in> \<S> e v\<close> \<open>wf_env e\<close>
+            with \<open>a \<noteq> v\<close> show ?thesis ..
+            with \<open>a \<in> visited e\<close> wf have "vsuccs e a = successors a"
+            with \<open>b \<in> successors a - vsuccs e a\<close> show ?thesis
+        with \<open>reachable v n\<close> have "False"
+          with predfss wvs True \<open>e' = dfs w e\<close>
+            from \<open>pre_dfss v e''\<close> n post'' 
+          from predfss wvs notexplored False \<open>e' = unite v w e\<close>
+          with prepostdfss vs_case \<open>e' = unite v w e\<close>  \<open>w \<notin> explored e\<close> \<open>w \<in> visited e\<close>
+            from predfss wvs \<open>w \<in> visited e\<close> notexplored
+          from post'' \<open>stack e = pfx @ stack e'\<close>
+            from n post'' \<open>stack e' \<noteq> []\<close> 
+            with wf wvs \<open>w \<in> visited e\<close> notexplored
+text \<open>
+  We can now show partial correctness of the algorithm:
+  applied to some node @{text "v"} and the empty environment,
+  it computes the set of strongly connected components in
+  the subgraph reachable from node @{text "v"}. In particular,
+  if @{text "v"} is a root of the graph, the algorithm computes
+  the set of SCCs of the graph.
+\<close>
+    with wf \<open>cstack e = []\<close> show "False"
+  from wf \<open>stack e = []\<close> have "explored e = visited e"
+    with post \<open>explored e = visited e\<close> have "\<forall>n\<in>S. reachable v n"
+    from \<open>\<forall>n\<in>S. reachable v n\<close> vexp wf
+    with \<open>is_scc S\<close> obtain S' where S': "S' \<in> sccs e \<and> S \<inter> S' \<noteq> {}"
+    with S' \<open>is_scc S\<close> have "S \<in> sccs e"
+section \<open>Proof of termination and total correctness\<close>
+text \<open>
+  We define a binary relation on the arguments of functions @{text dfs} and @{text dfss},
+  and prove that this relation is well-founded and that all calls within
+  the function bodies respect the relation, assuming that the pre-conditions
+  of the initial function call are satisfied. By well-founded induction,
+  we conclude that the pre-conditions of the functions are sufficient to
+  ensure termination.
+
+  Following the internal representation of the two mutually recursive
+  functions in Isabelle as a single function on the disjoint sum of the
+  types of arguments, our relation is defined as a set of argument pairs
+  injected into the sum type. The left injection @{text Inl} takes
+  arguments of function @{text dfs}, the right injection @{text Inr}
+  takes arguments of function @{text dfss}.\footnote{Note that the
+    types of the arguments of @{text dfs} and @{text dfss} are actually
+    identical. We nevertheless use the sum type in order to remember
+    the function that was called.}
+  The conditions on the arguments in the definition of the relation
+  overapproximate the arguments in the actual calls.
+\<close>
+text \<open>
+  Informally, termination is ensured because at each call,
+  either a new vertex is visited (hence the complement of
+  the set of visited nodes w.r.t. the finite set of vertices
+  decreases) or a new successor is added to the set 
+  @{text "vsuccs e v"} of some vertex @{text v}.
+
+  In order to make this argument formal, we inject the argument
+  tuples that appear in our relation into tuples consisting of
+  the sets mentioned in the informal argument. However, there is
+  one added complication because the call of @{text dfs} from
+  @{text dfss} does not immediately add the vertex to the set
+  of visited nodes (this happens only at the beginning of
+  function @{text dfs}). We therefore add a third component of
+  $0$ or $1$ to these tuples, reflecting the fact that there
+  can only be one call of @{text dfs} from @{text dfss} for a
+  given vertex @{text v}.
+\<close>
+text \<open>
+  The triples defined in this way can be ordered lexicographically
+  (with the first two components ordered as finite subsets and the
+  third one following the predecessor relation on natural numbers).
+  We prove that the injection of the above relation into sets
+  of triples respects the lexicographic ordering and conclude that
+  our relation is well-founded.
+\<close>
+text \<open>
+  The following theorem establishes sufficient conditions that ensure
+  termination of the two functions @{text dfs} and @{text dfss}. 
+  The proof proceeds by well-founded induction using the relation 
+  @{text dfs_dfss_term}. Isabelle represents the termination domains
+  of the functions by the predicate @{text dfs_dfss_dom} and
+  generates a theorem @{text dfs_dfss.domintros} for proving
+  membership of arguments in the termination domains. The
+  actual formulation is a litte technical because the mutual
+  induction must again be encoded in a single induction argument
+  over the sum type representing the arguments of both functions.
+\<close>
+              with \<open>w \<in> successors v\<close> have sw: "?sw \<in> successors v - vsuccs e v"
+              with pre \<open>?sw \<notin> visited e\<close> have "pre_dfs ?sw e"
+              with \<open>\<not> dfs_dfss_dom (Inl (?sw, e))\<close> 
+            from \<open>w \<in> successors v\<close> \<open>w \<notin> vsuccs e v\<close>
+            with pre \<open>?sw \<notin> visited e\<close> have "pre_dfs ?sw e"
+            from this \<open>pre_dfs ?sw e\<close> have post: "post_dfs ?sw e ?e'"
+            with pre \<open>?sw \<in> vertices\<close> sw
+            from pre post sw \<open>?sw \<notin> visited e\<close> have "pre_dfss v ?e''"
+            from \<open>w \<in> successors v\<close> \<open>w \<notin> vsuccs e v\<close>
+            from pre sw \<open>?sw \<in> explored e\<close> have "?P ?recarg"
+            from \<open>w \<in> successors v\<close> \<open>w \<notin> vsuccs e v\<close>
+            from pre sw \<open>?sw \<in> visited e\<close> \<open>?sw \<notin> explored e\<close> have "?P ?recarg"
+text \<open>
+  Putting everything together, we prove the total correctness of
+  the algorithm when applied to some (root) vertex.
+\<close>

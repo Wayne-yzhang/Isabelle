@@ -1,0 +1,269 @@
+theory Bonk_Schramm_Extension
+  imports Morse_Gromov_Theorem
+begin
+
+
+
+
+datatype 'a Bonk_Schramm_extension_unfolded =
+  basepoint 'a
+  | middle "'a Bonk_Schramm_extension_unfolded" "'a Bonk_Schramm_extension_unfolded"
+  | would_be_Cauchy "nat \<Rightarrow> 'a Bonk_Schramm_extension_unfolded"
+
+context metric_space
+begin
+
+
+definition Bonk_Schramm_extension_unfolded_wo where
+  "Bonk_Schramm_extension_unfolded_wo = (SOME (r::'a Bonk_Schramm_extension_unfolded rel).
+      well_order_on UNIV r
+      \<and> (\<forall>x \<in> range basepoint. \<forall>y \<in> - range basepoint. (x, y) \<in> r)
+      \<and> (\<forall> a b. (a, middle a b) \<in> r)
+      \<and> (\<forall> a b. (b, middle a b) \<in> r)
+      \<and> (\<forall> u n. (u n, would_be_Cauchy u) \<in> r))"
+
+
+definition wo_aux where
+  "wo_aux = (SOME (r:: (nat + 'a Bonk_Schramm_extension_unfolded set) rel).
+      Card_order r \<and> \<not>finite(Field r) \<and> regularCard r \<and> |UNIV::'a Bonk_Schramm_extension_unfolded set| <o r)"
+
+lemma wo_aux_exists:
+  "Card_order wo_aux \<and> \<not>finite (Field wo_aux) \<and> regularCard wo_aux \<and> |UNIV::'a Bonk_Schramm_extension_unfolded set| <o wo_aux"
+proof -
+  have *: "\<forall>r \<in> {|UNIV::'a Bonk_Schramm_extension_unfolded set|}. Card_order r" by auto
+  have **: "\<exists>(r::(nat + 'a Bonk_Schramm_extension_unfolded set) rel).
+    Card_order r \<and> \<not>finite(Field r) \<and> regularCard r \<and> ( |UNIV::'a Bonk_Schramm_extension_unfolded set| <o r)"
+    by (metis card_of_card_order_on Field_card_of singletonI infinite_regularCard_exists[OF *])
+  then show ?thesis unfolding wo_aux_def using someI_ex[OF **] by auto
+qed
+
+interpretation wo_aux: wo_rel wo_aux
+  using wo_aux_exists Card_order_wo_rel by auto
+
+primrec map_aux::"'a Bonk_Schramm_extension_unfolded \<Rightarrow> nat + 'a Bonk_Schramm_extension_unfolded set" where
+  "map_aux (basepoint x) = wo_aux.zero"
+  | "map_aux (middle a b) = wo_aux.suc ({map_aux a} \<union> {map_aux b})"
+  | "map_aux (would_be_Cauchy u) = wo_aux.suc ((map_aux o u)`UNIV)"
+
+lemma map_aux_AboveS_not_empty:
+  assumes "map_aux`S \<subseteq> Field wo_aux"
+  shows "wo_aux.AboveS (map_aux`S) \<noteq> {}"
+apply (rule AboveS_not_empty_in_regularCard'[of S])
+using wo_aux_exists assms apply auto
+using card_of_UNIV ordLeq_ordLess_trans by blast
+
+lemma map_aux_in_Field:
+  "map_aux x \<in> Field wo_aux"
+proof (induction)
+  case (basepoint x)
+  have "wo_aux.zero \<in> Field wo_aux"
+    using Card_order_infinite_not_under wo_aux_exists under_empty wo_aux.zero_in_Field by fastforce
+  then show ?case by auto
+next
+  case mid: (middle a b)
+  have "({map_aux a} \<union> {map_aux b}) \<subseteq> Field wo_aux" using mid.IH by auto
+  then have "wo_aux.AboveS ({map_aux a} \<union> {map_aux b}) \<noteq> {}"
+    using map_aux_AboveS_not_empty[of "{a} \<union> {b}"] by auto
+  then show ?case
+    by (simp add: AboveS_Field wo_aux.suc_def)
+next
+  case cauchy: (would_be_Cauchy u)
+  have "(map_aux o u)`UNIV \<subseteq> Field wo_aux" using cauchy.IH by auto
+  then have "wo_aux.AboveS ((map_aux o u)`UNIV) \<noteq> {}"
+    using map_aux_AboveS_not_empty[of "u`(UNIV)"] by (simp add: image_image)
+  then show ?case
+    by (simp add: AboveS_Field wo_aux.suc_def)
+qed
+
+lemma middle_rel_a:
+  "(map_aux a, map_aux (middle a b)) \<in> wo_aux - Id"
+proof -
+  have *: "({map_aux a} \<union> {map_aux b}) \<subseteq> Field wo_aux" using map_aux_in_Field by auto
+  then have "wo_aux.AboveS ({map_aux a} \<union> {map_aux b}) \<noteq> {}"
+    using map_aux_AboveS_not_empty[of "{a} \<union> {b}"] by auto
+  then show ?thesis
+    using * by (simp add: wo_aux.suc_greater Id_def)
+qed
+
+lemma middle_rel_b:
+  "(map_aux b, map_aux (middle a b)) \<in> wo_aux - Id"
+proof -
+  have *: "({map_aux a} \<union> {map_aux b}) \<subseteq> Field wo_aux" using map_aux_in_Field by auto
+  then have "wo_aux.AboveS ({map_aux a} \<union> {map_aux b}) \<noteq> {}"
+    using map_aux_AboveS_not_empty[of "{a} \<union> {b}"] by auto
+  then show ?thesis
+    using * by (simp add: wo_aux.suc_greater Id_def)
+qed
+
+lemma cauchy_rel:
+  "(map_aux (u n), map_aux (would_be_Cauchy u)) \<in> wo_aux - Id"
+proof -
+  have *: "(map_aux o u)`UNIV \<subseteq> Field wo_aux" using map_aux_in_Field by auto
+  then have "wo_aux.AboveS ((map_aux o u)`UNIV) \<noteq> {}"
+    using map_aux_AboveS_not_empty[of "u`(UNIV)"] by (simp add: image_image)
+  then show ?thesis
+    using * by (simp add: wo_aux.suc_greater Id_def)
+qed
+
+
+lemma Bonk_Schramm_extension_unfolded_wo_props:
+  "well_order_on UNIV Bonk_Schramm_extension_unfolded_wo"
+  "\<forall>x \<in> range basepoint. \<forall>y \<in> - range basepoint. (x, y) \<in> Bonk_Schramm_extension_unfolded_wo"
+  "\<forall> a b. (a, middle a b) \<in> Bonk_Schramm_extension_unfolded_wo"
+  "\<forall> a b. (b, middle a b) \<in> Bonk_Schramm_extension_unfolded_wo"
+  "\<forall>u n. (u n, would_be_Cauchy u) \<in> Bonk_Schramm_extension_unfolded_wo"
+proof -
+  obtain r::"'a Bonk_Schramm_extension_unfolded rel" where r:
+    "Well_order r"
+    "Field r = UNIV"
+    "\<And>x y. (map_aux x, map_aux y) \<in> wo_aux - Id \<Longrightarrow> (x, y) \<in> r"
+  using Well_order_pullback[of wo_aux map_aux] by (metis wo_aux.WELL)
+
+  have "(x, y) \<in> r" if "x \<in> range basepoint" "y \<in> - range basepoint" for x y
+    apply (rule r(3)) using that
+    apply (cases y)
+      apply (auto cong del: image_cong_simp)
+       apply (metis insert_is_Un map_aux.simps(2) map_aux_in_Field wo_aux.zero_smallest)
+      apply (metis Diff_iff insert_is_Un wo_aux.leq_zero_imp map_aux.simps(2) middle_rel_a pair_in_Id_conv)
+     apply (metis map_aux.simps(3) map_aux_in_Field wo_aux.zero_smallest)
+    apply (metis Diff_iff cauchy_rel wo_aux.leq_zero_imp map_aux.simps(3) pair_in_Id_conv)
+    done
+  moreover have "(a, middle a b) \<in> r" for a b
+    apply (rule r(3)) using middle_rel_a by auto
+  moreover have "(b, middle a b) \<in> r" for a b
+    apply (rule r(3)) using middle_rel_b by auto
+  moreover have "(u n, would_be_Cauchy u) \<in> r" for u n
+    apply (rule r(3)) using cauchy_rel by auto
+  moreover have "well_order_on UNIV r"
+    using r(1) r(2) by auto
+  ultimately have *: "\<exists> (r::'a Bonk_Schramm_extension_unfolded rel).
+      well_order_on UNIV r
+      \<and> (\<forall>x \<in> range basepoint. \<forall>y \<in> - range basepoint. (x, y) \<in> r)
+      \<and> (\<forall> a b. (a, middle a b) \<in> r)
+      \<and> (\<forall> a b. (b, middle a b) \<in> r)
+      \<and> (\<forall>u n. (u n, would_be_Cauchy u) \<in> r)"
+    by blast
+
+  show
+    "well_order_on UNIV Bonk_Schramm_extension_unfolded_wo"
+    "\<forall>x \<in> range basepoint. \<forall>y \<in> - range basepoint. (x, y) \<in> Bonk_Schramm_extension_unfolded_wo"
+    "\<forall> a b. (a, middle a b) \<in> Bonk_Schramm_extension_unfolded_wo"
+    "\<forall> a b. (b, middle a b) \<in> Bonk_Schramm_extension_unfolded_wo"
+    "\<forall>u n. (u n, would_be_Cauchy u) \<in> Bonk_Schramm_extension_unfolded_wo"
+  unfolding Bonk_Schramm_extension_unfolded_wo_def using someI_ex[OF *] by auto
+qed
+
+interpretation wo: wo_rel Bonk_Schramm_extension_unfolded_wo
+  using well_order_on_Well_order wo_rel_def wfrec_def Bonk_Schramm_extension_unfolded_wo_props(1) by blast
+
+
+lemma Bonk_Schramm_extension_unfolded_wo_props':
+  "a \<in> wo.underS (middle a b)"
+  "b \<in> wo.underS (middle a b)"
+  "u n \<in> wo.underS (would_be_Cauchy u)"
+proof -
+  have "(a, middle a b) \<in> Bonk_Schramm_extension_unfolded_wo"
+    using Bonk_Schramm_extension_unfolded_wo_props(3) by auto
+  then show "a \<in> wo.underS (middle a b)"
+    by (metis Diff_iff middle_rel_a pair_in_Id_conv underS_I)
+  have "(b, middle a b) \<in> Bonk_Schramm_extension_unfolded_wo"
+    using Bonk_Schramm_extension_unfolded_wo_props(4) by auto
+  then show "b \<in> wo.underS (middle a b)"
+    by (metis Diff_iff middle_rel_b pair_in_Id_conv underS_I)
+  have "(u n, would_be_Cauchy u) \<in> Bonk_Schramm_extension_unfolded_wo"
+    using Bonk_Schramm_extension_unfolded_wo_props(5) by auto
+  then show "u n \<in> wo.underS (would_be_Cauchy u)"
+    by (metis Diff_iff cauchy_rel pair_in_Id_conv underS_I)
+qed
+
+
+fun extend_distance::"('a Bonk_Schramm_extension_unfolded \<Rightarrow> ('a Bonk_Schramm_extension_unfolded \<Rightarrow> 'a Bonk_Schramm_extension_unfolded \<Rightarrow> real))
+                    \<Rightarrow> ('a Bonk_Schramm_extension_unfolded \<Rightarrow> ('a Bonk_Schramm_extension_unfolded \<Rightarrow> 'a Bonk_Schramm_extension_unfolded \<Rightarrow> real))"
+  where
+    "extend_distance f (basepoint x) = (\<lambda>y z. if y \<in> range basepoint \<and> z \<in> range basepoint then
+        dist (SOME y'. y = basepoint y') (SOME z'. z = basepoint z') else 1)"
+  | "extend_distance f (middle a b) = (\<lambda>y z.
+      if (y \<in> wo.underS (middle a b)) \<and> (z \<in> wo.underS (middle a b)) then f (wo.max2 y z) y z
+      else if (y \<in> wo.underS (middle a b)) \<and> (z = middle a b) then (f (wo.max2 a b) a b)/2 + (SUP w\<in>{z \<in> wo.underS (middle a b). f z z z = 0}. f (wo.max2 y w) y w - max (f (wo.max2 a w) a w) (f (wo.max2 b w) b w))
+      else if (y = middle a b) \<and> (z \<in> wo.underS (middle a b)) then (f (wo.max2 a b) a b)/2 + (SUP w\<in>{z \<in> wo.underS (middle a b). f z z z = 0}. f (wo.max2 z w) z w - max (f (wo.max2 a w) a w) (f (wo.max2 b w) b w))
+      else if (y = middle a b) \<and> (z = middle a b) \<and> (f a a a = 0) \<and> (f b b b = 0) then 0
+      else 1)"
+  | "extend_distance f (would_be_Cauchy u) = (\<lambda>y z.
+      if (y \<in> wo.underS (would_be_Cauchy u)) \<and> (z \<in> wo.underS (would_be_Cauchy u)) then f (wo.max2 y z) y z
+      else if (\<not>(\<forall>eps > (0::real). \<exists>N. \<forall>n \<ge> N. \<forall>m \<ge> N. f (wo.max2 (u n) (u m)) (u n) (u m) < eps)) then 1
+      else if (y \<in> wo.underS (would_be_Cauchy u)) \<and> (z = would_be_Cauchy u) then lim (\<lambda>n. f (wo.max2 (u n) y) (u n) y)
+      else if (y = would_be_Cauchy u) \<and> (z \<in> wo.underS (would_be_Cauchy u)) then lim (\<lambda>n. f (wo.max2 (u n) z) (u n) z)
+      else if (y = would_be_Cauchy u) \<and> (z = would_be_Cauchy u) \<and> (\<forall>n. f (u n) (u n) (u n) = 0) then 0
+      else 1)"
+
+definition "extend_distance_fp = wo.worec extend_distance"
+
+definition "extended_distance x y = extend_distance_fp (wo.max2 x y) x y"
+
+definition "extended_distance_set = {z. extended_distance z z = 0}"
+
+lemma wo_adm_extend_distance:
+  "wo.adm_wo extend_distance"
+unfolding wo.adm_wo_def proof (auto)
+  fix f g::"'a Bonk_Schramm_extension_unfolded \<Rightarrow> 'a Bonk_Schramm_extension_unfolded \<Rightarrow> 'a Bonk_Schramm_extension_unfolded \<Rightarrow> real"
+  fix x::"'a Bonk_Schramm_extension_unfolded"
+  assume "\<forall>y\<in>wo.underS x. f y = g y"
+  then have *: "f y = g y" if "y \<in> wo.underS x" for y using that by auto
+  show "extend_distance f x = extend_distance g x"
+    apply (cases x)
+    apply (insert Bonk_Schramm_extension_unfolded_wo_props' *)
+    (* Deal with the case of a middle, treating separately all the ifs *)
+    (* Deal with the case of a sequence, treating separately all the ifs *)
+  (* The proof of the triangular inequality is done by induction: one should show that adding
+  a middle or a Cauchy sequence does not spoil the estimates. Technically, we show that the
+  triangular inequality holds on all points under $t$, for all $t$, using a transfinite induction.
+  The conclusion of the lemma then follows by using for $t$ the maximum of $x$, $y$, $z$.*)
+    (*Reformulate the induction assumption in more convenient terms*)
+    (* The conclusion is easy if $t$ is not in \verb+extended_distance_set+, as there is no
+    additional point to consider for the triangular inequality. The interesting case is when
+    $t$ is admissible, then we will argue differently depending on its type.*)
+      (*We assume now that $t$ is admissible.
+      We will prove now the triangular inequality for points under t, in the two basic cases
+      where t is either the first point in the inequality, or the middle point.
+      All other cases can be reduced to this one by permuting the variables, or they are
+      trivial (if several variables are equal to t, for instance).*)
+        (*In the case of a basepoint, the distance comes from the original distance, hence
+        it satisfies the triangular inequality*)
+        (*In the case of a middle, the triangular inequality follows from the specific formula
+        devised by Bonk and Schramm and (not very complicated) computations. The only mild difficulty
+        is that the formula is defined in terms of a supremum, so one should check that this
+        supremum is taken over a bounded set. This boundedness comes from the triangular inequality
+        for point strictly below $t$, i.e., our inductive assumption.*)
+        (*For Cauchy sequences, the distance to the Cauchy sequence is the limit of the distances
+        to terms of the sequence, hence the triangular inequality follows from the triangular inequality
+        for points strictly below $t$ by passing to the limit.*)
+      (* Now, we deduce (from the above bounds in specific cases) the general triangular inequality,
+      by considering separately if each point is equal to $t$ or strictly under it.*)
+  qed (*End of the inductive proof*)
+end (* of context \verb+metric_space+ *)
+  (*To prove the hyperbolicity inequality, we prove it on larger and larger sets, by induction, adding
+  one point $a$ at a time. Then the result will follow readily.*)
+    (*Reformulate the induction assumption in more convenient terms*)
+      (* If the point $a$ is not admissible for the distance, then we are not adding any point,
+      and the result follows readily from the assumption hypothesis.*)
+      (*Now, we assume that the point $a$ is admissible. We will first check the desired
+      inequality when the first point is $a$, and the other points are strictly below $a$.
+      The general inequality will follow from this one by a simple reduction below*)
+        (*In the case of a basepoint, the desired inequality follows from the corresponding
+        inequality in the original --hyperbolic-- space.*)
+        (*In the case of a Cauchy sequence, the desired inequality is obtained from the inequality
+        for the points defining the Cauchy sequence --which holds thanks to the induction
+        assumption-- by passing to the limit.*)
+        (*In the case of a middle, the desired inequality follows from the formula defining
+        the distance to the middle, and simple computations, as explained by Bonk and Schramm.*)
+      (*To prove the general inequality, we consider
+      separately if each point is equal to $a$ or different from $a$. If no point is equal to $a$,
+      then the inequality follows from the induction assumption. If exactly one point is equal to
+      $a$, we can put in first position by permuting the variables, and use the main inequality
+      above.
+      Finally, if at least two points are equal to $a$, then the inequality follows from the
+      triangular inequality.
+      This reduction is straightforward, and should be automatable, but since there are 4 variables
+      it is too complicated for metis, and we have to do it by hand below.*)
+end (* of instantiation proof *)
+end (*of theory Bonk_Schramm_Extension*)

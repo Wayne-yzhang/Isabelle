@@ -1,0 +1,111 @@
+theory ETTS_Tests
+  imports
+    "../ETTS_Auxiliary"
+    Conditional_Transfer_Rule.IML_UT
+begin
+
+
+
+
+
+locale test_amend_ctxt_data =
+  fixes UA :: "'ao set" and UB :: "'bo set" and UC :: "'co set"
+    and f :: "['ao, 'bo] \<Rightarrow> 'co"
+  assumes closed_f: "\<lbrakk> a \<in> UA; b \<in> UB \<rbrakk> \<Longrightarrow> f a b \<in> UC"
+begin
+
+
+proof-
+  assume "Domainp AOA = (\<lambda>x. x \<in> UA)" "bi_unique AOA" "right_total AOA" 
+  from tts_AA_eq_transfer[OF this] show ?thesis by auto
+qed
+
+proof-
+  assume "Domainp BOA = (\<lambda>x. x \<in> UB)" "bi_unique BOA" "right_total BOA"
+  from tts_AA_eq_transfer[OF this] show ?thesis by auto
+qed
+
+tts_register_sbts f | UA and UB and UC
+proof-
+  assume 
+    "Domainp AOC = (\<lambda>x. x \<in> UA)" "bi_unique AOC" "right_total AOC"
+    "Domainp BOB = (\<lambda>x. x \<in> UB)" "bi_unique BOB" "right_total BOB"
+    "Domainp COA = (\<lambda>x. x \<in> UC)" "bi_unique COA" "right_total COA"
+  from tts_AB_C_transfer[OF closed_f this] show ?thesis by auto
+qed
+
+end
+
+context test_amend_ctxt_data
+begin
+end
+
+
+
+
+
+
+lemma exI': "P x \<Longrightarrow> \<exists>x. P x" by auto
+
+class tta_mult =
+  fixes tta_mult :: "'a \<Rightarrow> 'a \<Rightarrow> 'a" (infixl "*\<^sub>t\<^sub>t\<^sub>a" 65)
+
+class tta_semigroup = tta_mult +
+  assumes tta_assoc[simp]: "(a *\<^sub>t\<^sub>t\<^sub>a b) *\<^sub>t\<^sub>t\<^sub>a c = a *\<^sub>t\<^sub>t\<^sub>a (b *\<^sub>t\<^sub>t\<^sub>a c)"
+
+definition set_mult :: "'a::tta_mult set \<Rightarrow> 'a set \<Rightarrow> 'a set" (infixl "\<^bold>*\<^sub>t\<^sub>t\<^sub>a" 65) 
+  where "set_mult S T = {s *\<^sub>t\<^sub>t\<^sub>a t | s t. s \<in> S \<and> t \<in> T}"
+
+definition left_ideal :: "'a::tta_mult set \<Rightarrow> bool"
+  where "left_ideal T \<longleftrightarrow> (\<forall>s. \<forall>t\<in>T. s *\<^sub>t\<^sub>t\<^sub>a t \<in> T)"
+
+lemma left_idealI[intro]:
+  assumes "\<And>s t. t \<in> T \<Longrightarrow> s *\<^sub>t\<^sub>t\<^sub>a t \<in> T"
+  shows "left_ideal T"
+  using assms unfolding left_ideal_def by simp
+
+lemma left_idealE[elim]:
+  assumes "left_ideal T"
+  obtains "\<And>s t. t \<in> T \<Longrightarrow> s *\<^sub>t\<^sub>t\<^sub>a t \<in> T"
+  using assms unfolding left_ideal_def by simp
+
+lemma left_ideal_set_mult_iff: "left_ideal T \<longleftrightarrow> UNIV \<^bold>*\<^sub>t\<^sub>t\<^sub>a T \<subseteq> T"
+  unfolding left_ideal_def set_mult_def by auto
+
+
+ctr relativization
+  synthesis ctr_simps
+  assumes [transfer_domain_rule]: "Domainp A = (\<lambda>x. x \<in> U)"
+    and [transfer_rule]: "bi_unique A" "right_total A" 
+  trp (?'a A)
+  in set_mult_ow: set_mult.with_def 
+    and left_ideal_ow: left_ideal.with_def 
+
+locale tta_semigroup_hom =
+  fixes f :: "'a::tta_semigroup \<Rightarrow> 'b::tta_semigroup"
+  assumes hom: "f (a *\<^sub>t\<^sub>t\<^sub>a b) = f a *\<^sub>t\<^sub>t\<^sub>a f b"
+
+context tta_semigroup_hom
+begin
+
+lemma tta_left_ideal_closed:
+  assumes "left_ideal T" and "surj f"
+  shows "left_ideal (f ` T)"
+  unfolding left_ideal_def
+proof(intro allI ballI)
+  fix fs ft assume prems: "ft \<in> f ` T"
+  then obtain t where t: "t \<in> T" and ft_def: "ft = f t" by clarsimp
+  from assms(2) obtain s where fs_def: "fs = f s" by auto
+  from assms have "t \<in> T \<Longrightarrow> s *\<^sub>t\<^sub>t\<^sub>a t \<in> T" for s t by auto
+  with t show "fs *\<^sub>t\<^sub>t\<^sub>a ft \<in> f ` T" 
+    unfolding ft_def fs_def hom[symmetric] by simp
+qed
+
+end
+
+locale semigroup_mult_hom_with = 
+  dom: tta_semigroup times_a + cod: tta_semigroup times_b
+  fixes f :: "'a \<Rightarrow> 'b"
+  assumes f_hom: "f (a *\<^sub>o\<^sub>w\<^sub>.\<^sub>a b) = f a *\<^sub>o\<^sub>w\<^sub>.\<^sub>b f b"
+
+lemma semigroup_mult_hom_with[ud_with]:

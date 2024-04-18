@@ -1,0 +1,196 @@
+theory Sepref_Frame
+imports Sepref_Basic Sepref_Constraints
+begin
+
+definition mismatch_assn :: "('a \<Rightarrow> 'c \<Rightarrow> assn) \<Rightarrow> ('a \<Rightarrow> 'c \<Rightarrow> assn) \<Rightarrow> 'a \<Rightarrow> 'c \<Rightarrow> assn"
+  where "mismatch_assn R1 R2 x y \<equiv> R1 x y \<or>\<^sub>A R2 x y"
+
+abbreviation "hn_mismatch R1 R2 \<equiv> hn_ctxt (mismatch_assn R1 R2)"
+
+lemma recover_pure_aux: "CONSTRAINT is_pure R \<Longrightarrow> hn_invalid R x y \<Longrightarrow>\<^sub>t hn_ctxt R x y"
+  by (auto simp: is_pure_conv invalid_pure_recover hn_ctxt_def)
+
+
+
+lemma frame_thms:
+  "P \<Longrightarrow>\<^sub>t P"
+  "P\<Longrightarrow>\<^sub>tP' \<Longrightarrow> F\<Longrightarrow>\<^sub>tF' \<Longrightarrow> F*P \<Longrightarrow>\<^sub>t F'*P'"
+  "hn_ctxt R x y \<Longrightarrow>\<^sub>t hn_invalid R x y"
+  "hn_ctxt R x y \<Longrightarrow>\<^sub>t hn_ctxt (\<lambda>_ _. true) x y"
+  "CONSTRAINT is_pure R \<Longrightarrow> hn_invalid R x y \<Longrightarrow>\<^sub>t hn_ctxt R x y"
+  apply -
+  applyS simp
+  applyS (rule entt_star_mono; assumption)
+  subgoal
+    apply (simp add: hn_ctxt_def)
+    apply (rule enttI)
+    apply (rule ent_trans[OF invalidate[of R]])
+    by solve_entails
+  applyS (sep_auto simp: hn_ctxt_def)  
+  applyS (erule recover_pure_aux)
+  done
+
+
+lemma frame_rem1: "P\<Longrightarrow>\<^sub>tP" by simp
+
+lemma frame_rem2: "F \<Longrightarrow>\<^sub>t F' \<Longrightarrow> F * hn_ctxt A x y \<Longrightarrow>\<^sub>t F' * hn_ctxt A x y"
+  apply (rule entt_star_mono) by auto
+
+lemma frame_rem3: "F \<Longrightarrow>\<^sub>t F' \<Longrightarrow> F * hn_ctxt A x y \<Longrightarrow>\<^sub>t F'"
+  using frame_thms(2) by fastforce
+  
+lemma frame_rem4: "P \<Longrightarrow>\<^sub>t emp" by simp
+
+lemmas frame_rem_thms = frame_rem1 frame_rem2 frame_rem3 frame_rem4
+
+named_theorems_rev sepref_frame_rem_rules
+
+lemma ent_disj_star_mono:
+  "\<lbrakk> A \<or>\<^sub>A C \<Longrightarrow>\<^sub>A E; B \<or>\<^sub>A D \<Longrightarrow>\<^sub>A F \<rbrakk> \<Longrightarrow> A*B \<or>\<^sub>A C*D \<Longrightarrow>\<^sub>A E*F"
+  by (metis ent_disjI1 ent_disjI2 ent_disjE ent_star_mono)  
+
+lemma entt_disj_star_mono:
+  "\<lbrakk> A \<or>\<^sub>A C \<Longrightarrow>\<^sub>t E; B \<or>\<^sub>A D \<Longrightarrow>\<^sub>t F \<rbrakk> \<Longrightarrow> A*B \<or>\<^sub>A C*D \<Longrightarrow>\<^sub>t E*F"
+proof -
+  assume a1: "A \<or>\<^sub>A C \<Longrightarrow>\<^sub>t E"
+  assume "B \<or>\<^sub>A D \<Longrightarrow>\<^sub>t F"
+  then have "A * B \<or>\<^sub>A C * D \<Longrightarrow>\<^sub>A true * E * (true * F)"
+    using a1 by (simp add: ent_disj_star_mono enttD)
+  then show ?thesis
+    by (metis (no_types) assn_times_comm enttI merge_true_star_ctx star_aci(3))
+qed
+    
+
+
+lemma hn_merge1:
+  "F \<or>\<^sub>A F \<Longrightarrow>\<^sub>t F"
+  "\<lbrakk> hn_ctxt R1 x x' \<or>\<^sub>A hn_ctxt R2 x x' \<Longrightarrow>\<^sub>t hn_ctxt R x x'; Fl \<or>\<^sub>A Fr \<Longrightarrow>\<^sub>t F \<rbrakk> 
+    \<Longrightarrow> Fl * hn_ctxt R1 x x' \<or>\<^sub>A Fr * hn_ctxt R2 x x' \<Longrightarrow>\<^sub>t F * hn_ctxt R x x'"
+  apply simp
+  by (rule entt_disj_star_mono; simp)
+
+lemma hn_merge2:
+  "hn_invalid R x x' \<or>\<^sub>A hn_ctxt R x x' \<Longrightarrow>\<^sub>t hn_invalid R x x'"
+  "hn_ctxt R x x' \<or>\<^sub>A hn_invalid R x x' \<Longrightarrow>\<^sub>t hn_invalid R x x'"
+  by (sep_auto eintros: invalidate ent_disjE intro!: ent_imp_entt simp: hn_ctxt_def)+
+
+lemma invalid_assn_mono: "hn_ctxt A x y \<Longrightarrow>\<^sub>t hn_ctxt B x y 
+  \<Longrightarrow> hn_invalid A x y \<Longrightarrow>\<^sub>t hn_invalid B x y"
+  by (clarsimp simp: invalid_assn_def entailst_def entails_def hn_ctxt_def)
+      (force simp: mod_star_conv)
+
+  "\<lbrakk>NO_MATCH (hn_invalid XX) R2; hn_ctxt R1 x x' \<or>\<^sub>A hn_ctxt R2 x x' \<Longrightarrow>\<^sub>t hn_ctxt Rm x x'\<rbrakk> \<Longrightarrow> hn_invalid R1 x x' \<or>\<^sub>A hn_ctxt R2 x x' \<Longrightarrow>\<^sub>t hn_invalid Rm x x'"
+  "\<lbrakk>NO_MATCH (hn_invalid XX) R1; hn_ctxt R1 x x' \<or>\<^sub>A hn_ctxt R2 x x' \<Longrightarrow>\<^sub>t hn_ctxt Rm x x'\<rbrakk> \<Longrightarrow> hn_ctxt R1 x x' \<or>\<^sub>A hn_invalid R2 x x' \<Longrightarrow>\<^sub>t hn_invalid Rm x x'"
+  apply (meson entt_disjD1 entt_disjD2 entt_disjE entt_trans frame_thms(3) invalid_assn_mono)  
+  apply (meson entt_disjD1 entt_disjD2 entt_disjE entt_trans frame_thms(3) invalid_assn_mono)  
+  done
+
+lemmas merge_thms = hn_merge1 hn_merge2 
+
+
+
+lemma hn_merge_mismatch: "hn_ctxt R1 x x' \<or>\<^sub>A hn_ctxt R2 x x' \<Longrightarrow>\<^sub>t hn_mismatch R1 R2 x x'"
+  by (sep_auto simp: hn_ctxt_def mismatch_assn_def)
+
+lemma is_merge: "P1\<or>\<^sub>AP2\<Longrightarrow>\<^sub>tP \<Longrightarrow> P1\<or>\<^sub>AP2\<Longrightarrow>\<^sub>tP" .
+
+lemma merge_mono: "\<lbrakk>A\<Longrightarrow>\<^sub>tA'; B\<Longrightarrow>\<^sub>tB'; A'\<or>\<^sub>AB' \<Longrightarrow>\<^sub>t C\<rbrakk> \<Longrightarrow> A\<or>\<^sub>AB \<Longrightarrow>\<^sub>t C"
+  by (meson entt_disjE entt_disjI1_direct entt_disjI2_direct entt_trans)
+  
+lemma gen_merge_cons1: "\<lbrakk>A\<Longrightarrow>\<^sub>tA'; A'\<or>\<^sub>AB \<Longrightarrow>\<^sub>t C\<rbrakk> \<Longrightarrow> A\<or>\<^sub>AB \<Longrightarrow>\<^sub>t C"
+  by (meson merge_mono entt_refl)
+
+lemma gen_merge_cons2: "\<lbrakk>B\<Longrightarrow>\<^sub>tB'; A\<or>\<^sub>AB' \<Longrightarrow>\<^sub>t C\<rbrakk> \<Longrightarrow> A\<or>\<^sub>AB \<Longrightarrow>\<^sub>t C"
+  by (meson merge_mono entt_refl)
+  
+lemmas gen_merge_cons = gen_merge_cons1 gen_merge_cons2
+
+
+
+definition "RECOVER_PURE P Q \<equiv> P \<Longrightarrow>\<^sub>t Q"
+
+lemma recover_pure:
+  "RECOVER_PURE emp emp"
+  "\<lbrakk>RECOVER_PURE P2 Q2; RECOVER_PURE P1 Q1\<rbrakk> \<Longrightarrow> RECOVER_PURE (P1*P2) (Q1*Q2)"
+  "CONSTRAINT is_pure R \<Longrightarrow> RECOVER_PURE (hn_invalid R x y) (hn_ctxt R x y)"
+  "RECOVER_PURE (hn_ctxt R x y) (hn_ctxt R x y)"
+  unfolding RECOVER_PURE_def
+  subgoal by sep_auto
+  subgoal by (drule (1) entt_star_mono)
+  subgoal by (rule recover_pure_aux)
+  subgoal by sep_auto
+  done
+  
+lemma recover_pure_triv: 
+  "RECOVER_PURE P P"
+  unfolding RECOVER_PURE_def by sep_auto
+
+
+definition "WEAKEN_HNR_POST \<Gamma> \<Gamma>' \<Gamma>'' \<equiv> (\<exists>h. h\<Turnstile>\<Gamma>) \<longrightarrow> (\<Gamma>'' \<Longrightarrow>\<^sub>t \<Gamma>')"
+
+lemma weaken_hnr_postI:
+  assumes "WEAKEN_HNR_POST \<Gamma> \<Gamma>'' \<Gamma>'"
+  assumes "hn_refine \<Gamma> c \<Gamma>' R a"
+  shows "hn_refine \<Gamma> c \<Gamma>'' R a"
+  apply (rule hn_refine_preI)
+  apply (rule hn_refine_cons_post)
+  apply (rule assms)
+  using assms(1) unfolding WEAKEN_HNR_POST_def by blast
+
+lemma weaken_hnr_post_triv: "WEAKEN_HNR_POST \<Gamma> P P"
+  unfolding WEAKEN_HNR_POST_def
+  by sep_auto
+
+lemma weaken_hnr_post:
+  "\<lbrakk>WEAKEN_HNR_POST \<Gamma> P P'; WEAKEN_HNR_POST \<Gamma>' Q Q'\<rbrakk> \<Longrightarrow> WEAKEN_HNR_POST (\<Gamma>*\<Gamma>') (P*Q) (P'*Q')"
+  "WEAKEN_HNR_POST (hn_ctxt R x y) (hn_ctxt R x y) (hn_ctxt R x y)"
+  "WEAKEN_HNR_POST (hn_ctxt R x y) (hn_invalid R x y) (hn_ctxt (\<lambda>_ _. true) x y)"
+proof (goal_cases)
+  case 1 thus ?case
+    unfolding WEAKEN_HNR_POST_def
+    apply clarsimp
+    apply (rule entt_star_mono) 
+    by (auto simp: mod_star_conv)
+next
+  case 2 thus ?case by (rule weaken_hnr_post_triv)
+next
+  case 3 thus ?case 
+    unfolding WEAKEN_HNR_POST_def 
+    by (sep_auto simp: invalid_assn_def hn_ctxt_def)
+qed
+
+
+
+lemma reorder_enttI:
+  assumes "A*true = C*true"
+  assumes "B*true = D*true"
+  shows "(A\<Longrightarrow>\<^sub>tB) \<equiv> (C\<Longrightarrow>\<^sub>tD)"
+  apply (intro eq_reflection)
+  unfolding entt_def_true
+  by (simp add: assms)
+  
+  
+
+lemma merge_sat1: "(A\<or>\<^sub>AA' \<Longrightarrow>\<^sub>t Am) \<Longrightarrow> (A\<or>\<^sub>AAm \<Longrightarrow>\<^sub>t Am)"
+  using entt_disjD1 entt_disjE by blast
+lemma merge_sat2: "(A\<or>\<^sub>AA' \<Longrightarrow>\<^sub>t Am) \<Longrightarrow> (Am\<or>\<^sub>AA' \<Longrightarrow>\<^sub>t Am)"
+  using entt_disjD2 entt_disjE by blast
+
+
+
+
+
+
+setup Sepref_Frame.setup
+
+
+method extract_hnr_invalids = (
+  rule hn_refine_preI,
+  ((drule mod_starD hn_invalidI | elim conjE exE)+)?
+  
+
+
+lemmas [sepref_frame_normrel_eqs] = the_pure_pure pure_the_pure
+
+end
+

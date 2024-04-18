@@ -1,0 +1,373 @@
+theory Decreasing_Diagrams imports "HOL-Library.Multiset" "Abstract-Rewriting.Abstract_Rewriting" begin
+
+
+
+
+definition diff :: "'a multiset \<Rightarrow> 'a set \<Rightarrow> 'a multiset"
+ where "diff M S = filter_mset (\<lambda>x. x \<notin> S) M"
+
+definition intersect :: "'a multiset \<Rightarrow> 'a set \<Rightarrow> 'a multiset"
+ where "intersect M S = filter_mset (\<lambda>x. x \<in> S) M"
+
+notation
+ diff      (infixl "-s" 800) and
+ intersect (infixl "\<inter>s" 800)
+
+lemma count_diff [simp]:
+  "count (M -s A) a = count M a * of_bool (a \<notin> A)"
+  by (simp add: diff_def)
+
+lemma set_mset_diff [simp]:
+  "set_mset (M -s A) = set_mset M - A"
+  by (auto simp add: diff_def)
+
+lemma diff_eq_singleton_imp:
+  "M -s A = {#a#} \<Longrightarrow> a \<in> (set_mset M - A)"
+  unfolding diff_def filter_mset_eq_conv by auto
+
+lemma count_intersect [simp]:
+  "count (M \<inter>s A) a = count M a * of_bool (a \<in> A)"
+  by (simp add: intersect_def)
+
+lemma set_mset_intersect [simp]:
+  "set_mset (M \<inter>s A) = set_mset M \<inter> A"
+  by (auto simp add: intersect_def)
+
+lemma diff_from_empty: "{#}-s S = {#}" unfolding diff_def by auto
+
+lemma diff_empty: "M -s {} = M" unfolding diff_def by (rule multiset_eqI) simp
+
+lemma submultiset_implies_subset: assumes "M \<subseteq># N" shows "set_mset M \<subseteq> set_mset N"
+ using assms mset_subset_eqD by auto
+
+lemma subset_implies_remove_empty: assumes "set_mset M \<subseteq> S" shows "M -s S = {#}"
+ unfolding diff_def using assms by (induct M) auto
+
+lemma remove_empty_implies_subset: assumes "M -s S = {#}" shows "set_mset M \<subseteq> S" proof
+ fix x assume A: "x \<in> set_mset M"
+ have "x \<notin> set_mset (M -s S)" using assms by auto
+ thus "x \<in> S" using A unfolding diff_def by auto
+qed
+
+lemma lemmaA_3_8:  "(M + N) -s S = (M -s S) + (N -s S)" unfolding diff_def by (rule multiset_eqI) simp
+lemma lemmaA_3_9:  "(M -s S) -s T = M -s (S \<union> T)" unfolding diff_def by (rule multiset_eqI) simp
+lemma lemmaA_3_10: "M = (M \<inter>s S) + (M -s S)" unfolding diff_def intersect_def by auto
+lemma lemmaA_3_11: "(M -s T) \<inter>s S = (M \<inter>s S) -s T" unfolding diff_def intersect_def by (rule multiset_eqI) simp
+
+definition ds :: "'a rel \<Rightarrow> 'a set \<Rightarrow> 'a set"
+ where "ds r S = {y . \<exists>x \<in> S. (y,x) \<in> r}"
+
+definition dm :: "'a rel \<Rightarrow> 'a multiset \<Rightarrow> 'a set"
+ where "dm r M = ds r (set_mset M)"
+
+definition dl :: "'a rel \<Rightarrow> 'a list \<Rightarrow> 'a set"
+ where "dl r \<sigma> = ds r (set \<sigma>)"
+
+notation
+ ds (infixl "\<down>s" 900) and
+ dm (infixl "\<down>m" 900) and
+ dl (infixl "\<down>l" 900)
+
+lemma ds_ds_subseteq_ds: assumes t: "trans r" shows "ds r (ds r S) \<subseteq> ds r S" proof
+ fix x assume A: "x \<in> ds r (ds r S)" show "x \<in> ds r S" proof -
+  from A obtain y z where "(x,y) \<in> r" and "(y,z) \<in> r" and mem: "z \<in> S" unfolding ds_def by auto
+  thus ?thesis using mem t trans_def unfolding ds_def by fast
+ qed
+qed
+
+lemma ds_monotone: assumes "S \<subseteq> T" shows "ds r S \<subseteq> ds r T" using assms unfolding ds_def by auto
+
+lemma subset_imp_ds_subset: assumes "trans r" and "S \<subseteq> ds r T" shows "ds r S \<subseteq> ds r T"
+ using assms ds_monotone ds_ds_subseteq_ds by blast
+
+
+definition mult_eq :: "'a rel \<Rightarrow> 'a multiset rel" where
+  "mult_eq r = (mult1 r)\<^sup>*"
+
+definition mul :: "'a rel \<Rightarrow> 'a multiset rel" where
+  "mul r = {(M,N).\<exists>I J K. M = I + K \<and> N = I + J \<and> set_mset K \<subseteq> dm r J \<and> J \<noteq> {#}}"
+
+definition mul_eq :: "'a rel \<Rightarrow> 'a multiset rel" where
+  "mul_eq r = {(M,N).\<exists>I J K. M = I + K \<and> N = I + J \<and> set_mset K \<subseteq> dm r J}"
+
+lemma in_mul_eqI:
+  assumes "M = I + K" "N = I + J" "set_mset K \<subseteq> r \<down>m J"
+  shows "(M, N) \<in> mul_eq r"
+  using assms by (auto simp add: mul_eq_def)
+
+lemma downset_intro:
+assumes "\<forall>k\<in>set_mset K.\<exists>j\<in>set_mset J.(k,j)\<in>r" shows "set_mset K \<subseteq> dm r J" proof
+ fix x assume "x\<in>set_mset K" thus "x \<in> dm r J" using assms unfolding dm_def ds_def by fast
+qed
+
+lemma downset_elim:
+assumes "set_mset K \<subseteq> dm r J" shows "\<forall>k\<in>set_mset K.\<exists>j\<in>set_mset J.(k,j)\<in>r" proof
+ fix k assume "k\<in> set_mset K" thus "\<exists>j\<in>set_mset J.(k,j)\<in> r" using assms unfolding dm_def ds_def by fast
+qed
+
+lemma mult_eq_implies_one_or_zero_step:
+assumes "trans r" and "(M,N) \<in> mult_eq r" shows "\<exists>I J K. N = I + J \<and> M = I + K \<and> set_mset K \<subseteq> dm r J"
+proof (cases "(M,N) \<in> mult r")
+  case True thus ?thesis using mult_implies_one_step[OF assms(1)] downset_intro by blast
+ next
+  case False hence A: "M = N" using assms rtrancl_eq_or_trancl unfolding mult_eq_def mult_def by metis
+  hence "N = N + {#} \<and> M = M + {#} \<and> set_mset {#} \<subseteq> dm r{#}" by auto
+  thus ?thesis unfolding A by fast
+qed
+
+lemma one_step_implies_mult_eq: assumes "trans r" and "set_mset K \<subseteq> dm r J" shows "(I+K,I+J)\<in>mult_eq r"
+proof (cases "set_mset J = {}")
+ case True hence "set_mset K = {}" using assms downset_elim by (metis all_not_in_conv emptyE)
+ thus ?thesis using True unfolding mult_eq_def by auto
+next
+ case False hence h:"J \<noteq> {#}" using set_mset_eq_empty_iff by auto
+  hence "(I+K,I+J)\<in> mult r" using set_mset_eq_empty_iff assms one_step_implies_mult downset_elim
+    by auto blast
+  thus ?thesis unfolding mult_eq_def mult_def by auto
+qed
+
+lemma mult_is_mul: assumes "trans r" shows "mult r = mul r" proof
+ show "mult r \<subseteq> mul r" proof
+  fix N M assume A: "(N,M) \<in> mult r" show "(N,M) \<in> mul r" proof -
+   obtain I J K where "M = I + J" and "N = I + K" and "J \<noteq> {#}" and "set_mset K \<subseteq> dm r J"
+    using mult_implies_one_step[OF assms A] downset_intro by metis
+   thus ?thesis unfolding mul_def by auto
+  qed
+ qed
+ next
+ show "mul r \<subseteq> mult r" proof
+  fix N M assume A: "(N,M) \<in> mul r" show "(N,M) \<in> mult r" proof -
+   obtain I J K where "M = I + J" and "N = I + K" and "J \<noteq> {#}" and "set_mset K \<subseteq> dm r J"
+    using A unfolding mul_def by auto
+   thus ?thesis using one_step_implies_mult assms downset_elim by metis
+  qed
+  qed
+qed
+
+lemma mult_eq_is_mul_eq: assumes "trans r" shows "mult_eq r = mul_eq r" proof
+ show "mult_eq r \<subseteq> mul_eq r" proof
+  fix N M assume A: "(N,M) \<in> mult_eq r" show "(N,M) \<in> mul_eq r" proof (cases "(N,M) \<in> mult r")
+   case True thus ?thesis unfolding mult_is_mul[OF assms] mul_def mul_eq_def by auto
+  next
+   case False hence eq: "N = M" using A rtranclD unfolding mult_def mult_eq_def by metis
+   hence "M = M + {#} \<and> N = N + {#} \<and> set_mset {#} \<subseteq> dm r {#}" by auto
+   thus ?thesis unfolding eq unfolding mul_eq_def by fast
+  qed
+ qed
+ show "mul_eq r \<subseteq> mult_eq r" using one_step_implies_mult_eq[OF assms] unfolding mul_eq_def by auto
+qed
+
+lemma "mul_eq r = (mul r)\<^sup>=" proof
+ show "mul_eq r \<subseteq> (mul r)\<^sup>=" proof
+  fix M N assume A:"(M,N) \<in> mul_eq r" show "(M,N) \<in> (mul r)\<^sup>=" proof -
+   from A obtain I J K where 1: "M = I + K" and 2: "N = I + J" and 3: "set_mset K \<subseteq> dm r J" unfolding mul_eq_def by auto
+   show ?thesis proof (cases "J = {#}")
+    case True hence "K = {#}" using 3 unfolding dm_def ds_def by auto
+    hence "M = N" using True 1 2 by auto
+    thus ?thesis by auto
+   next
+    case False thus ?thesis using 1 2 3 unfolding mul_def mul_eq_def by auto
+   qed
+  qed
+ qed
+ show "mul_eq r \<supseteq> (mul r)\<^sup>=" proof
+  fix M N assume A:"(M,N) \<in> (mul r)\<^sup>=" show "(M,N) \<in> mul_eq r"
+   proof (cases "M = N")
+    case True hence "M = M + {#}" and "N = M + {#}" and "set_mset {#} \<subseteq> dm r {#}" by auto
+    thus ?thesis unfolding mul_eq_def by fast
+   next
+    case False hence "(M,N) \<in> mul r" using A by auto
+    thus ?thesis unfolding mul_def mul_eq_def by auto
+  qed
+ qed
+qed
+
+lemma mul_eq_reflexive: "(M,M) \<in> mul_eq r" proof -
+ have "M = M + {#}" and "set_mset {#} \<subseteq> dm r {#}" by auto
+ thus ?thesis unfolding mul_eq_def by fast
+qed
+
+lemma mul_eq_trans: assumes "trans r" and "(M,N) \<in> mul_eq r" and "(N,P) \<in> mul_eq r" shows "(M,P) \<in> mul_eq r"
+ using assms unfolding mult_eq_is_mul_eq[symmetric,OF assms(1)] mult_eq_def
+by auto
+
+lemma mul_eq_singleton: assumes "(M, {#\<alpha>#}) \<in> mul_eq r" shows "M = {#\<alpha>#} \<or> set_mset M \<subseteq> dm r {#\<alpha>#}" proof -
+ from assms obtain I J K where 1:"M = I + K" and 2:"{#\<alpha>#} = I + J" and 3:"set_mset K \<subseteq> dm r J" unfolding mul_eq_def by auto
+ thus ?thesis proof (cases "I = {#}")
+  case True hence "J = {#\<alpha>#}" using 2 by auto
+  thus ?thesis using 1 3 True by auto
+ next
+  case False hence i: "I = {#\<alpha>#}" using 2 union_is_single by metis
+  hence "J = {#}" using 2 union_is_single by metis
+  thus ?thesis using 1 i 3 unfolding dm_def ds_def by auto
+ qed
+qed
+
+lemma mul_and_mul_eq_imp_mul: assumes "trans r" and "(M,N) \<in> mul r" and "(N,P) \<in> mul_eq r" shows "(M,P) \<in> mul r"
+ using assms unfolding mult_is_mul[symmetric,OF assms(1)] mult_eq_is_mul_eq[symmetric,OF assms(1)] mult_def mult_eq_def by auto
+
+lemma mul_eq_and_mul_imp_mul: assumes "trans r" and "(M,N) \<in> mul_eq r" and "(N,P) \<in> mul r" shows "(M,P) \<in> mul r"
+ using assms unfolding mult_is_mul[symmetric,OF assms(1)] mult_eq_is_mul_eq[symmetric,OF assms(1)] mult_def mult_eq_def by auto
+
+lemma wf_mul: assumes "trans r" and "wf r" shows "wf (mul r)"
+ unfolding mult_is_mul[symmetric,OF assms(1)] using wf_mult[OF assms(2)] by auto
+
+lemma remove_is_empty_imp_mul: assumes "M -s dm r {#\<alpha>#} = {#}" shows "(M,{#\<alpha>#}) \<in> mul r" proof -
+ from assms have C: "set_mset M \<subseteq> dm r {#\<alpha>#}" by (metis remove_empty_implies_subset)
+ have "M = {#}+M" and "{#\<alpha>#}={#}+{#\<alpha>#}" and "{#\<alpha>#} \<noteq> {#}" by auto
+ thus ?thesis using C unfolding mul_def by fast
+qed
+
+
+lemma lemma2_6_1_set: "ds r (S \<union> T) = ds r S \<union> ds r T"
+ unfolding set_mset_union ds_def by auto
+
+lemma lemma2_6_1_list: "dl r (\<sigma>@\<tau>) = dl r \<sigma> \<union> dl r \<tau>"
+ unfolding dl_def ds_def set_append by auto
+
+lemma lemma2_6_1_multiset: "dm r (M + N) = dm r M \<union> dm r N"
+ unfolding dm_def set_mset_union ds_def by auto
+
+lemma lemma2_6_1_diff: "(dm r M) - ds r S \<subseteq> dm r (M -s S)"
+ unfolding diff_def dm_def ds_def by (rule subsetI) auto
+
+lemma dl_monotone: "dl r (\<sigma>@\<tau>) \<subseteq> dl r (\<sigma>@\<tau>'@\<tau>)" unfolding lemma2_6_1_list by auto
+
+
+lemma lemma2_6_2_a: assumes t: "trans r" and "M \<subseteq># N" shows "(M,N) \<in> mul_eq r" proof -
+ from assms(2) obtain J where "N=M+J" by (metis assms(2) mset_subset_eq_exists_conv)
+ hence "M = M + {#}" and "N = M + J" and "set_mset {#} \<subseteq> dm r J" by auto
+ thus ?thesis unfolding mul_eq_def by fast
+qed
+
+lemma mul_eq_not_equal_imp_elt:
+assumes "(M,N)\<in>mul_eq r" and "y\<in>set_mset M - set_mset N" shows "\<exists>z\<in>set_mset N.(y,z)\<in>r" proof -
+ from assms obtain I J K where "N=I+J" and "M=I+K" and F3:"set_mset K \<subseteq> dm r J" unfolding mul_eq_def by auto
+ thus ?thesis using assms(2) downset_elim[OF F3] by auto
+qed
+
+lemma lemma2_6_2_b: assumes "trans r" and "(M,N) \<in> mul_eq r" shows "dm r M \<subseteq> dm r N" proof
+ fix x assume A: "x \<in> dm r M" show "x \<in> dm r N" proof -
+  from A obtain y where F2:"y\<in>set_mset M" and F3:"(x,y)\<in>r" unfolding dm_def ds_def by auto
+  hence "\<exists> z \<in> set_mset N. (x,z)\<in>r" proof (cases "y\<in>set_mset N")
+   case True thus ?thesis using F3 unfolding ds_def by auto
+   next
+   case False thus ?thesis using mul_eq_not_equal_imp_elt assms F2 F3 trans_def by fast
+  qed
+  thus ?thesis unfolding dm_def ds_def by auto
+ qed
+qed
+
+lemma ds_trans_contrapos: assumes t: "trans r" and "x \<notin> ds r S" and "(x,y) \<in> r" shows "y \<notin> ds r S"
+ using assms unfolding ds_def trans_def by fast
+
+lemma dm_max_elt: assumes i: "irrefl r" and t: "trans r"  shows "x \<in> dm r M \<Longrightarrow> \<exists> y \<in> set_mset (M -s dm r M). (x,y) \<in> r"
+ proof (induct M arbitrary: x)
+  case empty thus ?case unfolding dm_def ds_def by auto
+ next
+  case (add p P)
+  hence mem: "x \<in> (dm r P \<union> dm r {#p#})" unfolding dm_def ds_def by auto
+  from i t have not_mem_dm: "p \<notin> dm r {#p#}" unfolding dm_def ds_def irrefl_def by auto
+  thus ?case
+  proof (cases "x \<in> dm r P")
+   case False hence relp: "(x,p) \<in> r" using mem unfolding dm_def ds_def by auto
+   show ?thesis proof (cases "p \<in> dm r P")
+    case True thus ?thesis using relp t ds_trans_contrapos False unfolding dm_def by fast
+     next
+    case False thus ?thesis using not_mem_dm relp unfolding dm_def ds_def diff_def by auto
+   qed
+  next
+    case True obtain y where key: "y \<in> set_mset P" "y \<notin> dm r P" "(x,y) \<in> r" using add(1)[OF True] unfolding diff_def by auto
+    thus ?thesis
+    proof (cases "y \<in> dm r {#p#}")
+     case True hence rely: "(y,p) \<in> r" unfolding dm_def ds_def by auto
+     hence relp: "(x,p) \<in> r" using rely t key trans_def by metis
+     have not_memp: "p \<notin> set_mset P" using rely key unfolding dm_def ds_def by auto
+     have memp: "p \<in> set_mset (P + {#p#})" by auto
+     have "p \<notin> dm r P" using ds_trans_contrapos[OF t] key(2) rely unfolding dm_def by auto
+     hence "p \<notin> dm r (P + {#p#})" using not_mem_dm unfolding dm_def ds_def by auto
+     thus ?thesis using relp unfolding diff_def by auto
+    next
+     case False thus ?thesis using key unfolding dm_def ds_def diff_def by auto
+    qed
+  qed
+ qed
+
+lemma dm_subset: assumes i:"irrefl r" and t: "trans r"  shows "dm r M \<subseteq> dm r (M -s dm r M)"
+ using assms dm_max_elt unfolding dm_def ds_def by fast
+
+lemma dm_eq: assumes i:"irrefl r" and t: "trans r" shows "dm r M = dm r (M -s dm r M)"
+ using dm_subset[OF assms] unfolding dm_def ds_def diff_def by auto
+
+lemma lemma2_6_3: assumes t:"trans r" and i:"irrefl r" and "(M,N) \<in> mul_eq r"
+ shows "\<exists> I' J' K' . N = I' + J' \<and> M = I' + K' \<and> J' \<inter># K' = {#} \<and> set_mset K' \<subseteq> dm r J'"
+proof -
+ from assms obtain I J K where 1:"N = I + J" and 2:"M = I + K"  and 3:"set_mset K \<subseteq> dm r J" unfolding mul_eq_def by auto
+ have "set_mset (J \<inter># K) \<subseteq> r \<down>m J" using 3 by auto
+ then obtain A where "r \<down>m J = set_mset (J \<inter># K) \<union> A"
+  by blast
+ then have key: "set_mset (J -s dm r J) \<subseteq> set_mset (J - (J \<inter># K))"
+  by clarsimp (metis Multiset.count_diff add.left_neutral add_diff_cancel_left' mem_Collect_eq not_gr0 set_mset_def)
+ from 1 2 3 have "N = (I + (J \<inter># K)) + (J - (J \<inter># K))"
+  by (metis diff_union_cancelL subset_mset.inf_le2 multiset_diff_union_assoc multiset_inter_commute union_commute union_lcomm)
+ moreover have "M = (I + (J \<inter># K)) + (K - (J \<inter># K))"
+  by (rule multiset_eqI) (simp add: 2)
+ moreover have "set_mset (K-(J\<inter>#K)) \<subseteq> dm r (J-(J\<inter>#K))"
+ proof -
+  have "set_mset (K-(J\<inter>#K)) \<subseteq> dm r J" using 3
+    by (meson Multiset.diff_subset_eq_self mset_subset_eqD subset_eq)
+  moreover have "... = dm r (J -s dm r J)" using dm_eq[OF i t] by auto
+  moreover have "... \<subseteq> dm r (J - (J \<inter># K))" using ds_monotone[OF key] unfolding dm_def by auto
+  ultimately show ?thesis by auto
+qed
+ moreover have "(J-(J\<inter>#K)) \<inter># (K-(J\<inter>#K)) = {#}" by (rule multiset_eqI) auto
+ ultimately show ?thesis by auto
+qed
+
+lemma lemma2_6_3_step:
+assumes t:"trans r" and i:"irrefl r" and P:"set_mset K \<subseteq> dm r J" shows "set_mset (K-(J\<inter>#K)) \<subseteq> dm r (J-(J\<inter>#K))" proof
+ fix k assume K: "k \<in> set_mset (K - (J\<inter>#K))" show "k \<in> dm r (J - (J\<inter>#K))" proof -
+  have k: "k \<in># K" using K by simp
+  have step: "k \<in> dm r (J-K)" proof -
+   {
+   fix P have "P \<le> K \<Longrightarrow> k \<in> dm r (J-P)" using k proof (induct P arbitrary:k rule:multiset_induct)
+    case empty thus ?case using P by auto
+   next
+    case (add Q q)
+    have h1: "q \<in># K" and h2: "Q \<le> K" using mset_subset_eq_insertD[OF add(2)] by auto
+    obtain j where mem1: "j\<in>set_mset (J - Q)" and rel1: "(k, j) \<in> r" using add(1)[OF h2 add(3)] unfolding dm_def ds_def by auto
+    show ?case proof (cases "j \<in># J - (Q + {#q#})")
+     case True thus ?thesis using rel1 unfolding dm_def ds_def by force
+    next
+     case False hence eq: "q = j" using mem1 by (cases "q = j") auto
+     obtain j2 where mem2: "j2\<in>set_mset (J - Q)" and rel2: "(j, j2) \<in> r" using eq add(1)[OF h2 h1] unfolding dm_def ds_def by auto
+     have rel: "(k,j2) \<in> r" using transD[OF assms(1) rel1 rel2] by auto
+     have "j2 \<noteq> q" using rel2 eq i irrefl_def by fast
+     thus ?thesis using rel mem2 unfolding dm_def ds_def by (cases "j2=k") auto
+    qed
+   qed
+   }
+   thus ?thesis by auto
+  qed
+  have eq: "J - K = J - (J \<inter># K)" by (rule multiset_eqI) auto
+  show ?thesis using step unfolding eq dm_def ds_def by auto
+ qed
+qed
+
+lemma lemma2_6_3: assumes t: "trans r" and i: "irrefl r" and "(M,N) \<in> mul_eq r"
+shows "\<exists> I J K. N = I + J \<and> M = I + K \<and> J\<inter>#K = {#} \<and> set_mset K \<subseteq> dm r J" proof -
+ from assms(1,3)
+ obtain I J K where f1:"N = I + J" and f2:"M = I + K" and f3:"set_mset K \<subseteq> dm r J" unfolding mul_eq_def by fast
+ hence "N = (I + (J \<inter># K)) + (J - (J \<inter># K))"
+  by (metis diff_union_cancelL inf_le2 multiset_diff_union_assoc multiset_inter_commute union_commute union_lcomm)
+ moreover have "M = (I + (J \<inter># K)) + (K - (J \<inter># K))"
+  by (metis diff_le_self diff_union_cancelL f1 f2 f3 multiset_diff_union_assoc multiset_inter_commute multiset_inter_def union_assoc)
+ moreover have "(J-(J\<inter>#K)) \<inter># (K-(J\<inter>#K)) = {#}" by (rule multiset_eqI) auto
+ ultimately show ?thesis using lemma2_6_3_step[OF t i f3] by auto
+qed
+*)
+(*reverse direction*)
+(* lift to combined concept *)
+    (*concat*)
+   (* difference begin*)
+   (*difference end*)

@@ -1,0 +1,185 @@
+theory NonDetMonad
+imports "../Lib"
+begin
+
+
+section "The Monad"
+
+type_synonym ('s,'a) nondet_monad = "'s \<Rightarrow> ('a \<times> 's) set \<times> bool"
+
+
+definition
+  return :: "'a \<Rightarrow> ('s,'a) nondet_monad" where
+  "return a \<equiv> \<lambda>s. ({(a,s)},False)"
+
+definition
+  bind :: "('s, 'a) nondet_monad \<Rightarrow> ('a \<Rightarrow> ('s, 'b) nondet_monad) \<Rightarrow> 
+           ('s, 'b) nondet_monad" (infixl ">>=" 60)
+  where
+  "bind f g \<equiv> \<lambda>s. (\<Union>(fst ` case_prod g ` fst (f s)),
+                   True \<in> snd ` case_prod g ` fst (f s) \<or> snd (f s))"
+
+abbreviation(input)
+  bind_rev :: "('c \<Rightarrow> ('a, 'b) nondet_monad) \<Rightarrow> ('a, 'c) nondet_monad \<Rightarrow> 
+               ('a, 'b) nondet_monad" (infixl "=<<" 60) where 
+  "g =<< f \<equiv> f >>= g"
+
+definition
+  get :: "('s,'s) nondet_monad" where
+  "get \<equiv> \<lambda>s. ({(s,s)}, False)"
+
+definition
+  put :: "'s \<Rightarrow> ('s, unit) nondet_monad" where
+  "put s \<equiv> \<lambda>_. ({((),s)}, False)"
+
+
+subsection "Nondeterminism"
+
+definition
+  select :: "'a set \<Rightarrow> ('s,'a) nondet_monad" where
+  "select A \<equiv> \<lambda>s. (A \<times> {s}, False)"
+
+definition
+  alternative :: "('s,'a) nondet_monad \<Rightarrow> ('s,'a) nondet_monad \<Rightarrow> 
+                  ('s,'a) nondet_monad" 
+  (infixl "\<sqinter>" 20)
+where
+  "f \<sqinter> g \<equiv> \<lambda>s. (fst (f s) \<union> fst (g s), snd (f s) \<or> snd (g s))"
+
+
+  whether the execution failed. This is useful to lift monads between
+  different state spaces.
+\<close>
+text \<open>\<open>select_state\<close> takes a relationship between
+  return result \<open>v\<close> for @{term "Some v"}\<close>
+text \<open>An assertion that also can introspect the current state.\<close>
+text \<open>Apply a function to the current state and return the result
+without changing the state.\<close>
+text \<open>Modify the current state using the function passed in.\<close>
+text \<open>Execute the given monad when the condition is true, 
+definition
+  "when" :: "bool \<Rightarrow> ('s, unit) nondet_monad \<Rightarrow> 
+           ('s, unit) nondet_monad" where 
+  "when P m \<equiv> if P then m else return ()"
+
+definition
+  K_bind_def [iff]: "K_bind \<equiv> \<lambda>x y. x"
+
+nonterminal
+  dobinds and dobind and nobind
+
+syntax (ASCII)
+  "_dobind"    :: "[pttrn, 'a] => dobind"             ("(_ <-/ _)" 10)
+syntax
+  "_dobind"    :: "[pttrn, 'a] => dobind"             ("(_ \<leftarrow>/ _)" 10)
+  ""           :: "dobind => dobinds"                 ("_")
+  "_nobind"    :: "'a => dobind"                      ("_")
+  "_dobinds"   :: "[dobind, dobinds] => dobinds"      ("(_);//(_)")
+
+  "_do"        :: "[dobinds, 'a] => 'a"               ("(do ((_);//(_))//od)" 100)
+translations
+  "_do (_dobinds b bs) e"  == "_do b (_do bs e)"
+  "_do (_nobind b) e"      == "b >>= (CONST K_bind e)"
+  "do x <- a; e od"        == "a >>= (\<lambda>x. e)"  
+
+lemma "do x \<leftarrow> return 1; 
+          return (2::nat); 
+          return x 
+       od = 
+       return 1 >>= 
+       (\<lambda>x. return (2::nat) >>= 
+            K_bind (return x))" 
+  by (rule refl)
+
+lemma "do x \<leftarrow> return 1; 
+          return 2; 
+          return x 
+       od = return 1" 
+  by simp
+
+subsection "Syntax for the Exception Monad"
+
+
+syntax
+  "_doE" :: "[dobinds, 'a] => 'a"  ("(doE ((_);//(_))//odE)" 100)
+
+translations
+  "_doE (_dobinds b bs) e"  == "_doE b (_doE bs e)"
+  "_doE (_nobind b) e"      == "b >>=E (CONST K_bind e)"
+  "doE x <- a; e odE"       == "a >>=E (\<lambda>x. e)"
+
+lemma "doE x \<leftarrow> returnOk 1; 
+           returnOk (2::nat); 
+           returnOk x 
+       odE =
+       returnOk 1 >>=E 
+       (\<lambda>x. returnOk (2::nat) >>=E 
+            K_bind (returnOk x))"
+  by (rule refl)
+
+lemma "doE x \<leftarrow> returnOk 1; 
+           returnOk 2; 
+           returnOk x 
+       odE = returnOk 1" 
+  by simp
+
+
+
+section "Library of Monadic Functions and Combinators"
+
+
+definition
+  liftM :: "('a \<Rightarrow> 'b) \<Rightarrow> ('s,'a) nondet_monad \<Rightarrow> ('s, 'b) nondet_monad"
+where
+  "liftM f m \<equiv> do x \<leftarrow> m; return (f x) od"
+
+definition
+  liftME :: "('a \<Rightarrow> 'b) \<Rightarrow> ('s,'e+'a) nondet_monad \<Rightarrow> ('s,'e+'b) nondet_monad"
+where
+  "liftME f m \<equiv> doE x \<leftarrow> m; returnOk (f x) odE"
+
+definition
+  sequence_x :: "('s, 'a) nondet_monad list \<Rightarrow> ('s, unit) nondet_monad" 
+where
+  "sequence_x xs \<equiv> foldr (\<lambda>x y. x >>= (\<lambda>_. y)) xs (return ())"
+
+definition
+  mapM_x :: "('a \<Rightarrow> ('s,'b) nondet_monad) \<Rightarrow> 'a list \<Rightarrow> ('s, unit) nondet_monad"
+where
+  "mapM_x f xs \<equiv> sequence_x (map f xs)"
+
+definition
+  zipWithM_x :: "('a \<Rightarrow> 'b \<Rightarrow> ('s,'c) nondet_monad) \<Rightarrow> 
+                 'a list \<Rightarrow> 'b list \<Rightarrow> ('s, unit) nondet_monad"
+where
+  "zipWithM_x f xs ys \<equiv> sequence_x (zipWith f xs ys)"
+
+
+definition
+  det :: "('a,'s) nondet_monad \<Rightarrow> bool"
+where
+  "det f \<equiv> \<forall>s. \<exists>r. f s = ({r},False)" 
+
+  into a normal state monad:\<close>
+text \<open>
+  With the failure flag, we can formulate non-failure separately
+  the failure flag.
+\<close>
+text \<open>
+  It is often desired to prove non-failure and a Hoare triple
+  simultaneously, as the reasoning is often similar. The following
+  definitions allow such reasoning to take place.
+\<close>
+text \<open>
+  Usually, well-formed monads constructed from the primitives
+  above will have the following property: if they return an
+  empty set of results, they will have the failure flag set.
+\<close>
+text \<open>
+  Useful in forcing otherwise unknown executions to have
+  the @{const empty_fail} property.
+\<close>
+text \<open>
+  reasoning that functions in the exception monad either do
+  no throw an exception or never return normally.
+\<close>

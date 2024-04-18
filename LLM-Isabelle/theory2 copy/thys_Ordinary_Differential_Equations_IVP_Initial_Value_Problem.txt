@@ -1,0 +1,122 @@
+theory Initial_Value_Problem
+  imports
+    "../ODE_Auxiliarities"
+    "../Library/Interval_Integral_HK"
+    "../Library/Gronwall"
+begin
+
+lemma clamp_le[simp]: "x \<le> a \<Longrightarrow> clamp a b x = a" for x::"'a::ordered_euclidean_space"
+  by (auto simp: clamp_def eucl_le[where 'a='a] intro!: euclidean_eqI[where 'a='a])
+
+lemma clamp_ge[simp]: "a \<le> b \<Longrightarrow> b \<le> x \<Longrightarrow> clamp a b x = b" for x::"'a::ordered_euclidean_space"
+  by (force simp: clamp_def eucl_le[where 'a='a] not_le not_less  intro!: euclidean_eqI[where 'a='a])
+
+abbreviation cfuncset :: "'a::topological_space set \<Rightarrow> 'b::metric_space set \<Rightarrow> ('a \<Rightarrow>\<^sub>C 'b) set"
+  (infixr "\<rightarrow>\<^sub>C" 60)
+  where "A \<rightarrow>\<^sub>C B \<equiv> PiC A (\<lambda>_. B)"
+
+lemma closed_segment_translation_zero: "z \<in> {z + a--z + b} \<longleftrightarrow> 0 \<in> {a -- b}"
+  by (metis add.right_neutral closed_segment_translation_eq)
+
+lemma closed_segment_subset_interval: "is_interval T \<Longrightarrow> a \<in> T \<Longrightarrow> b \<in> T \<Longrightarrow> closed_segment a b \<subseteq> T"
+  by (rule closed_segment_subset) (auto intro!: closed_segment_subset is_interval_convex)
+
+definition half_open_segment::"'a::real_vector \<Rightarrow> 'a \<Rightarrow> 'a set" ("(1{_--<_})")
+  where "half_open_segment a b = {a -- b} - {b}"
+
+lemma half_open_segment_real:
+  fixes a b::real
+  shows "{a --< b} = (if a \<le> b then {a ..< b} else {b <.. a})"
+  by (auto simp: half_open_segment_def closed_segment_eq_real_ivl)
+
+lemma closure_half_open_segment:
+  fixes a b::real
+  shows "closure {a --< b} = (if a = b then {} else {a -- b})"
+  unfolding closed_segment_eq_real_ivl if_distrib half_open_segment_real
+  unfolding if_distribR
+  by simp
+
+lemma half_open_segment_subset[intro, simp]:
+  "{t0--<t1} \<subseteq> {t0 -- t1}"
+  "x \<in> {t0--<t1} \<Longrightarrow> x \<in> {t0 -- t1}"
+  by (auto simp: half_open_segment_def)
+
+lemma half_open_segment_closed_segmentI:
+  "t \<in> {t0 -- t1} \<Longrightarrow> t \<noteq> t1 \<Longrightarrow> t \<in> {t0 --< t1}"
+  by (auto simp: half_open_segment_def)
+
+lemma islimpt_half_open_segment:
+  fixes t0 t1 s::real
+  assumes "t0 \<noteq> t1" "s \<in> {t0--t1}"
+  shows "s islimpt {t0--<t1}"
+proof -
+  have "s islimpt {t0..<t1}" if "t0 \<le> s" "s \<le> t1" for s
+  proof -
+    have *: "{t0..<t1} - {s} = {t0..<s} \<union> {s<..<t1}"
+      using that by auto
+    show ?thesis
+      by (cases "t0 = s") (auto simp: islimpt_in_closure)
+  qed
+  moreover have "s islimpt {t1<..t0}" if "t1 \<le> s" "s \<le> t0" for s
+  proof -
+    have *: "{t1<..t0} - {s} = {t1<..<s} \<union> {s<..t0}"
+      using that by auto
+    show ?thesis
+      by (cases "t0 = s") (auto simp: islimpt_in_closure)
+  qed
+  ultimately show ?thesis using assms
+    by (auto simp: half_open_segment_real closed_segment_eq_real_ivl)
+qed
+
+lemma
+  mem_half_open_segment_eventually_in_closed_segment:
+  fixes t::real
+  assumes "t \<in> {t0--<t1'}"
+  shows "\<forall>\<^sub>F t1' in at t1' within {t0--<t1'}. t \<in> {t0--t1'}"
+  unfolding half_open_segment_real
+proof (split if_split, safe)
+  assume le: "t0 \<le> t1'"
+  with assms have t: "t0 \<le> t" "t < t1'"
+    by (auto simp: half_open_segment_real)
+  then have "\<forall>\<^sub>F t1' in at t1' within {t0..<t1'}. t0 \<le> t"
+    by simp
+  moreover
+  have "\<forall>\<^sub>F t1' in at t1' within {t0..<t1'}. t < t1'"
+    by (rule order_tendstoD)
+  ultimately show "\<forall>\<^sub>F t1' in at t1' within {t0..<t1'}. t \<in> {t0--t1'}"
+    by eventually_elim (auto simp add: closed_segment_eq_real_ivl)
+next
+  assume le: "\<not> t0 \<le> t1'"
+  with assms have t: "t \<le> t0" "t1' < t"
+    by (auto simp: half_open_segment_real)
+  then have "\<forall>\<^sub>F t1' in at t1' within {t1'<..t0}. t \<le> t0"
+    by simp
+  moreover
+  have "\<forall>\<^sub>F t1' in at t1' within {t1'<..t0}. t1' < t"
+    by (rule order_tendstoD)
+  ultimately show "\<forall>\<^sub>F t1' in at t1' within {t1'<..t0}. t \<in> {t0--t1'}"
+    by eventually_elim (auto simp add: closed_segment_eq_real_ivl)
+qed
+
+lemma closed_segment_half_open_segment_subsetI:
+  fixes x::real shows "x \<in> {t0--<t1} \<Longrightarrow> {t0--x} \<subseteq> {t0--<t1}"
+  by (auto simp: half_open_segment_real closed_segment_eq_real_ivl split: if_split_asm)
+
+lemma dist_component_le:
+  fixes x y::"'a::euclidean_space"
+  assumes "i \<in> Basis"
+  shows "dist (x \<bullet> i) (y \<bullet> i) \<le> dist x y"
+  using assms
+  by (auto simp: euclidean_dist_l2[of x y] intro: member_le_L2_set)
+
+lemma sum_inner_Basis_one: "i \<in> Basis \<Longrightarrow> (\<Sum>x\<in>Basis. x \<bullet> i) = 1"
+  by (subst sum.mono_neutral_right[where S="{i}"])
+    (auto simp: inner_not_same_Basis)
+
+lemma cball_in_cbox:
+  fixes y::"'a::euclidean_space"
+  shows "cball y r \<subseteq> cbox (y - r *\<^sub>R One) (y + r *\<^sub>R One)"
+  unfolding scaleR_sum_right interval_cbox cbox_def
+proof safe
+  fix x i::'a assume "i \<in> Basis" "x \<in> cball y r"
+  have "dist (y \<bullet> i) (x \<bullet> i) \<le> r" by (simp add: mem_cball)

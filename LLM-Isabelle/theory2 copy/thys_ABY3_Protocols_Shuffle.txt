@@ -1,0 +1,418 @@
+theory Shuffle
+  imports 
+    CryptHOL.CryptHOL
+    Additive_Sharing
+    Spmf_Common
+    Sharing_Lemmas
+begin
+
+
+no_notation (ASCII) comp  (infixl "o" 55)
+no_notation m_inv ("inv\<index> _" [81] 80)
+
+no_adhoc_overloading Monad_Syntax.bind bind_pmf
+
+fun shuffleF :: "natL sharing list \<Rightarrow> natL sharing list spmf" where
+  "shuffleF xsl = spmf_of_set (permutations_of_multiset (mset xsl))"
+
+type_synonym zero_sharing = "natL sharing list"
+type_synonym party2_data = "natL list"
+type_synonym party01_permutation = "nat \<Rightarrow> nat"
+type_synonym phase_msg = "zero_sharing \<times> party2_data \<times> party01_permutation"
+
+type_synonym role_msg = "(natL list \<times> natL list \<times> natL list) \<times> party2_data \<times> (party01_permutation \<times> party01_permutation)"
+
+definition aby3_stack_sharing :: "Role \<Rightarrow> natL sharing \<Rightarrow> natL sharing" where
+  "aby3_stack_sharing r s = make_sharing' r (next_role r) (prev_role r)
+                             (get_party r s)
+                             (get_party (next_role r) s + get_party (prev_role r) s)
+                             0"
+
+definition aby3_do_permute :: "Role \<Rightarrow> natL sharing list \<Rightarrow> (phase_msg \<times> natL sharing list) spmf" where
+  "aby3_do_permute r x = (do {
+    let n = length x;
+    \<zeta> \<leftarrow> sequence_spmf (replicate n zero_sharing);
+    \<pi> \<leftarrow> spmf_of_set {\<pi>. \<pi> permutes {..<n}};
+    let x2 = map (get_party (prev_role r)) x;
+    let y' = map (aby3_stack_sharing r) x;
+    let y = map2 (map_sharing2 (+)) (permute_list \<pi> y') \<zeta>;
+    let msg = (\<zeta>, x2, \<pi>);
+    return_spmf (msg, y)
+  })"
+
+definition aby3_shuffleR :: "natL sharing list \<Rightarrow> (role_msg sharing \<times> natL sharing list) spmf" where
+  "aby3_shuffleR x = (do {
+    let msg1 = ((map (get_party Party1) \<zeta>a, map (get_party Party1) \<zeta>b, map (get_party Party1) \<zeta>c), b', \<pi>a, \<pi>c);
+    let msg2 = ((map (get_party Party2) \<zeta>a, map (get_party Party2) \<zeta>b, map (get_party Party2) \<zeta>c), x', \<pi>a, \<pi>b);
+    let msg3 = ((map (get_party Party3) \<zeta>a, map (get_party Party3) \<zeta>b, map (get_party Party3) \<zeta>c), a', \<pi>b, \<pi>c);
+    let msg = make_sharing msg1 msg2 msg3;
+    return_spmf (msg, c)
+  })"
+
+
+definition aby3_shuffleF :: "natL sharing list \<Rightarrow> natL sharing list spmf" where
+  "aby3_shuffleF x = (do {
+    \<pi> \<leftarrow> spmf_of_set {\<pi>. \<pi> permutes {..<length x}};
+    let x1 = map reconstruct x;
+    let x\<pi> = permute_list \<pi> x1;
+    y \<leftarrow> sequence_spmf (map share_nat x\<pi>);
+    return_spmf y
+  })"
+
+definition S1 :: "natL list \<Rightarrow> natL list \<Rightarrow> role_msg spmf" where
+    "S1 x1 yc1 = (do {
+       let n = length x1;
+
+         \<pi>a \<leftarrow> spmf_of_set {\<pi>. \<pi> permutes {..<n}};
+         \<pi>c \<leftarrow> spmf_of_set {\<pi>. \<pi> permutes {..<n}};
+
+         ya1::natL list \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+
+         yb1::natL list \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+         yb2::natL list \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+
+         let \<zeta>a1 = map2 (-) ya1 (permute_list \<pi>a x1);
+
+         let \<zeta>b1 = yb1;
+
+         let b' = yb2;
+
+       let msg1 = ((\<zeta>a1, \<zeta>b1, \<zeta>c1), b', \<pi>a, \<pi>c);
+       return_spmf msg1
+    })"
+
+definition S2 :: "natL list \<Rightarrow> natL list \<Rightarrow> role_msg spmf" where
+    "S2 x2 yc2 = (do {
+       let n = length x2;
+       x3 \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+
+         \<pi>a \<leftarrow> spmf_of_set {\<pi>. \<pi> permutes {..<n}};
+         \<pi>b \<leftarrow> spmf_of_set {\<pi>. \<pi> permutes {..<n}};
+
+         ya2::natL list \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+
+         yb2::natL list \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+
+         let x' = x3;
+         let \<zeta>a2 = map2 (-) ya2 (permute_list \<pi>a (map2 (+) x2 x3));
+
+         let \<zeta>b2 = map2 (-) yb2 (permute_list \<pi>b ya2);
+
+
+       let msg2 = ((\<zeta>a2, \<zeta>b2, \<zeta>c2), x', \<pi>a, \<pi>b);
+       return_spmf msg2
+    })"
+
+definition S3 :: "natL list \<Rightarrow> natL list \<Rightarrow> role_msg spmf" where
+    "S3 x3 yc3 = (do {
+       let n = length x3;
+
+         \<pi>b \<leftarrow> spmf_of_set {\<pi>. \<pi> permutes {..<n}};
+         \<pi>c \<leftarrow> spmf_of_set {\<pi>. \<pi> permutes {..<n}};
+
+         ya3::natL list \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+         ya1::natL list \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+
+         yb3::natL list \<leftarrow> sequence_spmf (replicate n (spmf_of_set UNIV));
+
+         let \<zeta>a3 = ya3;
+
+         let a' = ya1;
+         let \<zeta>b3 = map2 (-) yb3 (permute_list \<pi>b (map2 (+) ya3 ya1));
+
+
+       let msg3 = ((\<zeta>a3, \<zeta>b3, \<zeta>c3), a', \<pi>b, \<pi>c);
+       return_spmf msg3
+
+    })"
+
+definition S :: "Role \<Rightarrow> natL list \<Rightarrow> natL list \<Rightarrow> role_msg spmf" where
+  "S r = get_party r (make_sharing S1 S2 S3)"
+  
+definition is_uniform_sharing_list :: "natL sharing list spmf \<Rightarrow> bool" where
+  "is_uniform_sharing_list xss \<longleftrightarrow> (\<exists>xs. xss = bind_spmf xs (sequence_spmf \<circ> map share_nat))"
+
+lemma case_prod_nesting_same:
+  "case_prod (\<lambda>a b. f (case_prod g x) a b ) x = case_prod (\<lambda>a b. f (g a b) a b ) x"
+  by (cases x) simp
+
+lemma zip_map_map_same:
+  "map (\<lambda>x. (f x, g x)) xs = zip (map f xs) (map g xs)"
+  unfolding zip_map_map
+  unfolding zip_same_conv_map
+  by simp
+
+lemma dup_map_eq:
+  "length xs = length ys \<Longrightarrow> (xs, map2 f ys xs) = (\<lambda>xys. (map fst xys, map snd xys)) (map2 (\<lambda>x y. (y, f x y)) ys xs)"
+  by (auto simp: map_snd_zip[unfolded snd_def])
+
+
+abbreviation "map2_spmf f xs ys \<equiv> map_spmf (case_prod f) (pair_spmf xs ys)"
+abbreviation "map3_spmf f xs ys zs \<equiv> map2_spmf (\<lambda>a. case_prod (f a)) xs (pair_spmf ys zs)"
+
+lemma map_spmf_cong2:
+  assumes "p = map_spmf m q" "\<And>x. x\<in>set_spmf q \<Longrightarrow> f (m x) = g x"
+  shows "map_spmf f p = map_spmf g q"
+  using assms by (simp add: spmf.map_comp cong: map_spmf_cong)
+
+lemma bind_spmf_cong2:
+  assumes "p = map_spmf m q" "\<And>x. x\<in>set_spmf q \<Longrightarrow> f (m x) = g x"
+  shows "bind_spmf p f = bind_spmf q g"
+  using assms by (simp add: map_spmf_conv_bind_spmf cong: bind_spmf_cong)
+
+lemma map2_spmf_map2_sequence:
+  "length xss = length yss \<Longrightarrow> map2_spmf (map2 f) (sequence_spmf xss) (sequence_spmf yss) = sequence_spmf (map2 (map2_spmf f) xss yss)"
+  apply (induction xss yss rule: list_induct2)
+  subgoal by simp
+  subgoal premises IH for x xs y ys
+    apply simp
+    apply (fold IH)
+    apply (unfold pair_map_spmf)
+    apply (unfold spmf.map_comp)
+    apply (rule map_spmf_cong2[where m="\<lambda>((x,y),(xs,ys)). ((x,xs),(y,ys))"])
+    subgoal 
+      unfolding pair_spmf_alt_def
+      apply (simp add: map_spmf_conv_bind_spmf)
+      apply (subst bind_commute_spmf[where q=y])
+      ..
+    subgoal by auto
+    done
+  done
+
+abbreviation map3 :: "('a \<Rightarrow> 'b \<Rightarrow> 'c \<Rightarrow> 'd) \<Rightarrow> 'a list \<Rightarrow> 'b list \<Rightarrow> 'c list \<Rightarrow> 'd list" where
+  "map3 f a b c \<equiv> map2 (\<lambda>a (b,c). f a b c) a (zip b c)"
+
+lemma map3_spmf_map3_sequence:
+  "length xss = length yss \<Longrightarrow> length yss = length zss \<Longrightarrow> map3_spmf (map3 f) (sequence_spmf xss) (sequence_spmf yss) (sequence_spmf zss) = sequence_spmf (map3 (map3_spmf f) xss yss zss)"
+  apply (induction xss yss zss rule: list_induct3)
+  subgoal by simp
+  subgoal premises IH for x xs y ys z zs
+    apply simp
+    apply (fold IH)
+    apply (unfold pair_map_spmf)
+    apply (unfold spmf.map_comp)
+    apply (rule map_spmf_cong2[where m="\<lambda>((x,y,z),(xs,ys,zs)). ((x,xs),(y,ys),(z,zs))"])
+    subgoal 
+      unfolding pair_spmf_alt_def
+      apply (simp add: map_spmf_conv_bind_spmf)
+      apply (subst bind_commute_spmf[where q=y])
+      apply (subst bind_commute_spmf[where q=z])
+      apply (subst bind_commute_spmf[where q=z])
+      ..
+    subgoal by auto
+    done
+  done
+
+
+lemma in_pairD2:
+  "x \<in> A \<times> B \<Longrightarrow> snd x \<in> B"
+  by auto
+
+lemma list_map_cong2:
+  "x = map m y \<Longrightarrow> (\<And>z. z\<in>set y =simp=> f (m z) = g z) \<Longrightarrow> map f x = map g y"
+  unfolding simp_implies_def
+  by simp
+
+lemma map_swap_zip:
+  "map prod.swap (zip xs ys) = zip ys xs"
+  apply (induction xs arbitrary: ys)
+  subgoal by simp
+  subgoal for x xs ys
+    by (cases ys) auto
+  done
+
+lemma inv_zero_sharing_sequence:
+  "n = length x \<Longrightarrow>
+   map_spmf (\<lambda>\<zeta>s. (\<zeta>s, map2 (map_sharing2 (+)) x \<zeta>s)) (sequence_spmf (replicate n zero_sharing))
+   =
+   map_spmf (\<lambda>ys. (map2 (map_sharing2 (-)) ys x, ys)) (sequence_spmf (map (share_nat \<circ>reconstruct) x))"
+proof -
+  assume n: "n = length x"
+  have "map_spmf (\<lambda>\<zeta>s. (\<zeta>s, map2 (map_sharing2 (+)) x \<zeta>s)) (sequence_spmf (replicate n zero_sharing))
+=
+map2_spmf (\<lambda>\<zeta>s x. (\<zeta>s, map2 (map_sharing2 (+)) x \<zeta>s)) (sequence_spmf (replicate n zero_sharing)) (sequence_spmf (map return_spmf x))"
+    unfolding sequence_map_return_spmf
+    apply (rule map_spmf_cong2[where m="fst"])
+    subgoal by simp
+    subgoal by (auto simp: case_prod_unfold dest: in_pairD2)
+    done
+
+  also have "... = map_spmf (\<lambda>\<zeta>xs. (map fst \<zeta>xs, map snd \<zeta>xs)) (map2_spmf (map2 (\<lambda>\<zeta> x. (\<zeta>, map_sharing2 (+) x \<zeta>))) (sequence_spmf (replicate n zero_sharing)) (sequence_spmf (map return_spmf x)))"
+    apply (unfold spmf.map_comp)
+    apply (rule map_spmf_cong[OF refl])
+    using n by (auto simp: case_prod_unfold comp_def set_sequence_spmf list_all2_iff map_swap_zip intro: list_map_cong2[where m=prod.swap])
+
+  also have "... = map_spmf (\<lambda>\<zeta>xs. (map fst \<zeta>xs, map snd \<zeta>xs)) (map2_spmf (map2 (\<lambda>y x. (map_sharing2 (-) y x, y))) (sequence_spmf (map (share_nat \<circ> reconstruct) x)) (sequence_spmf (map return_spmf x)))"
+    apply (rule arg_cong[where f="map_spmf _"])
+    using n     apply (simp add: map2_spmf_map2_sequence)
+    apply (rule arg_cong[where f=sequence_spmf])
+    apply (unfold list_eq_iff_nth_eq)
+    apply safe
+    subgoal by simp
+    apply (simp add: )
+    apply (subst map_spmf_cong2[where p="pair_spmf _ (return_spmf _)"])
+      apply (rule pair_spmf_return_spmf2)
+     apply simp
+    apply (subst map_spmf_cong2[where p="pair_spmf _ (return_spmf _)"])
+      apply (rule pair_spmf_return_spmf2)
+     apply simp
+    using inv_zero_sharing .
+
+  also have "... = map2_spmf (\<lambda>ys x. (map2 (map_sharing2 (-)) ys x, ys)) (sequence_spmf (map (share_nat \<circ>reconstruct) x)) (sequence_spmf (map return_spmf x))"
+    apply (unfold spmf.map_comp)
+    apply (rule map_spmf_cong[OF refl])
+    using n by (auto simp: case_prod_unfold comp_def set_sequence_spmf list_all2_iff map_swap_zip intro: list_map_cong2[where m=prod.swap])
+
+  also have "... = map_spmf (\<lambda>ys. (map2 (map_sharing2 (-)) ys x, ys)) (sequence_spmf (map (share_nat \<circ>reconstruct) x))"
+    unfolding sequence_map_return_spmf
+    apply (rule map_spmf_cong2[where m="fst", symmetric])
+    subgoal by simp
+    subgoal by (auto simp: case_prod_unfold dest: in_pairD2)
+    done
+
+  finally show ?thesis .
+qed
+
+lemma get_party_map_sharing2:
+  "get_party p \<circ> (case_prod (map_sharing2 f)) = case_prod f \<circ> map_prod (get_party p) (get_party p)"
+  by auto
+
+lemma map_map_prod_zip:
+  "map (map_prod f g) (zip xs ys) = zip (map f xs) (map g ys)"
+  by (simp add: map_prod_def zip_map_map)
+
+lemma map_map_prod_zip':
+  "map (h \<circ> map_prod f g) (zip xs ys) = map h (zip (map f xs) (map g ys))"
+  by (simp add: map_prod_def zip_map_map)
+
+lemma eq_map_spmf_conv:
+  assumes "\<And>x. f (f' x) = x" "f' = inv f" "map_spmf f' x = y"
+  shows "x = map_spmf f y"
+proof -
+  have surj: "surj f"
+    apply (rule surjI) using assms(1) .
+  have "map_spmf f (map_spmf f' x) = map_spmf f y"
+    unfolding assms(3) ..
+  thus ?thesis
+    using assms(1) by (simp add: spmf.map_comp surj_iff comp_def)
+qed
+
+
+lemma lift_map_spmf_pairs:
+  "map2_spmf f = F \<Longrightarrow> map_spmf (case_prod f) (pair_spmf A B) = F A B"
+  by auto
+
+lemma measure_pair_spmf_times':
+    "C = A \<times> B \<Longrightarrow> measure (measure_spmf (pair_spmf p q)) C = measure (measure_spmf p) A * measure (measure_spmf q) B"
+  by (simp add: measure_pair_spmf_times)
+
+lemma map_spmf_pairs_tmp:
+  "map_spmf (\<lambda>(a,b,c,d,e,f,g). (a,e,b,f,c,g,d)) (pair_spmf A (pair_spmf B (pair_spmf C (pair_spmf D (pair_spmf E (pair_spmf F G))))))
+       = (pair_spmf A (pair_spmf E (pair_spmf B (pair_spmf F (pair_spmf C (pair_spmf G  D))))))"
+  apply (rule spmf_eqI)
+  apply (clarsimp simp add: spmf_map)
+  subgoal for a e b f c g d
+    apply (subst measure_pair_spmf_times'[where A="{a}"]) defer
+    apply (subst measure_pair_spmf_times'[where A="{b}"]) defer
+    apply (subst measure_pair_spmf_times'[where A="{c}"]) defer
+    apply (subst measure_pair_spmf_times'[where A="{d}"]) defer
+    apply (subst measure_pair_spmf_times'[where A="{e}"]) defer
+         apply (subst measure_pair_spmf_times'[where A="{f}" and B="{g}"]) defer
+          apply (auto simp: spmf_conv_measure_spmf)
+    done
+  done
+
+lemma case_case_prods_tmp:
+  "(case case x of (a, b, c, d, e, f, g) \<Rightarrow> (a, e, b, f, c, g, d) of
+                (ya, yb, yc, yd, ye, yf, yg) \<Rightarrow> F ya yb yc yd ye yf yg)
+      = (case x of (a,b,c,d,e,f,g) \<Rightarrow> F a e b f c g d)"
+  by (cases x) simp
+
+lemma bind_spmf_permutes_cong:
+  "(\<And>\<pi>. \<pi> permutes {..<(x::nat)} \<Longrightarrow> f \<pi> = g \<pi>)
+    \<Longrightarrow> bind_spmf (spmf_of_set {\<pi>. \<pi> permutes {..<x}}) f = bind_spmf (spmf_of_set {\<pi>. \<pi> permutes {..<x}}) g"
+  by (rule bind_spmf_cong[OF refl]) (simp add: set_spmf_of_set finite_permutations set_sequence_spmf[unfolded list_all2_iff])
+
+lemma map_eq_iff_list_all2:
+  "map f xs = map g ys \<longleftrightarrow> list_all2 (\<lambda>x y. f x = g y) xs ys"
+  apply (induction xs arbitrary: ys)
+  subgoal by auto
+  subgoal for x xs ys by (cases ys) (auto)
+  done
+
+lemma bind_spmf_sequence_map_share_nat_cong:
+  "(\<And>l. map reconstruct l = x \<Longrightarrow> f l = g l)
+    \<Longrightarrow> bind_spmf (sequence_spmf (map share_nat x)) f = bind_spmf (sequence_spmf (map share_nat x)) g"
+  subgoal premises prems
+    apply (rule bind_spmf_cong[OF refl])
+    apply (rule prems)
+    unfolding set_sequence_spmf mem_Collect_eq
+    apply (simp add: map_eq_iff_list_all2[where g=id, simplified])
+    apply (simp add: list_all2_map2)
+    apply (erule list_all2_mono)
+    unfolding share_nat_def
+    by simp
+  done
+
+lemma map_reconstruct_comp_eq_iff:
+  "(\<And>x. x\<in>set xs \<Longrightarrow> reconstruct (f x) = reconstruct x) \<Longrightarrow> map (reconstruct \<circ> f) xs = map reconstruct xs"
+  by (induction xs) auto
+
+lemma permute_list_replicate:
+  "p permutes {..<n} \<Longrightarrow> permute_list p (replicate n x) = replicate n x"
+  apply (fold map_replicate_const[where lst="[0..<n]", simplified])
+  apply (simp add: permute_list_map)
+  unfolding map_replicate_const
+  by simp
+
+lemma map2_minus_zero:
+  "length xs = length ys \<Longrightarrow> (\<And>y::natL. y\<in>set ys \<Longrightarrow> y = 0) \<Longrightarrow> map2 (-) xs ys = xs"
+  by (induction xs ys rule: list_induct2) auto
+
+lemma permute_comp_left_inj:
+  "p permutes {..<n} \<Longrightarrow> inj (\<lambda>p'. p \<circ> p')"
+  by (rule fun.inj_map) (rule permutes_inj_on)
+
+lemma permute_comp_left_inj_on:
+  "p permutes {..<n} \<Longrightarrow> inj_on (\<lambda>p'. p \<circ> p') A"
+  using permute_comp_left_inj inj_on_subset by blast
+
+lemma permute_comp_right_inj:
+  "p permutes {..<n} \<Longrightarrow> inj (\<lambda>p'. p' \<circ> p)"
+  using inj_onI comp_id o_assoc permutes_surj surj_iff
+  by (smt)
+
+lemma permute_comp_right_inj_on:
+  "p permutes {..<n} \<Longrightarrow> inj_on (\<lambda>p'. p' \<circ> p) A"
+  using permute_comp_right_inj inj_on_subset by blast
+
+lemma permutes_inv_comp_left:
+  "p permutes {..<n} \<Longrightarrow> inv (\<lambda>p'. p \<circ> p') = (\<lambda>p'. inv p \<circ> p')"
+  by (rule inv_unique_comp; rule ext, simp add: permutes_inv_o comp_assoc[symmetric])
+
+lemma permutes_inv_comp_right:
+  "p permutes {..<n} \<Longrightarrow> inv (\<lambda>p'. p' \<circ> p) = (\<lambda>p'. p' \<circ> inv p)"
+  by (rule inv_unique_comp; rule ext, simp add: permutes_inv_o comp_assoc)
+
+lemma permutes_inv_comp_left_right:
+  "\<pi>a permutes {..<n} \<Longrightarrow> \<pi>b permutes {..<n} \<Longrightarrow> inv (\<lambda>p'. \<pi>a \<circ> p' \<circ> \<pi>b) = (\<lambda>p'. inv \<pi>a \<circ> p' \<circ> inv \<pi>b)"
+  by (rule inv_unique_comp; rule ext, simp add: permutes_inv_o comp_assoc, simp add: permutes_inv_o comp_assoc[symmetric])
+
+lemma permutes_inv_comp_left_left:
+  "\<pi>a permutes {..<n} \<Longrightarrow> \<pi>b permutes {..<n} \<Longrightarrow> inv (\<lambda>p'. \<pi>a \<circ> \<pi>b \<circ> p') = (\<lambda>p'. inv \<pi>b \<circ> inv \<pi>a \<circ> p')"
+  by (rule inv_unique_comp; rule ext, simp add: permutes_inv_o comp_assoc, simp add: permutes_inv_o comp_assoc[symmetric])
+
+lemma permutes_inv_comp_right_right:
+  "\<pi>a permutes {..<n} \<Longrightarrow> \<pi>b permutes {..<n} \<Longrightarrow> inv (\<lambda>p'. p' \<circ> \<pi>a \<circ>  \<pi>b) = (\<lambda>p'. p' \<circ> inv \<pi>b \<circ> inv \<pi>a)"
+  by (rule inv_unique_comp; rule ext, simp add: permutes_inv_o comp_assoc, simp add: permutes_inv_o comp_assoc[symmetric])
+
+lemma image_compose_permutations_left_right:
+  fixes S
+  assumes "\<pi>a permutes S" "\<pi>b permutes S"
+  shows "{\<pi>a \<circ> \<pi> \<circ> \<pi>b |\<pi>. \<pi> permutes S} = {\<pi>. \<pi> permutes S}"
+proof -
+  have *: "(\<lambda>\<pi>. \<pi>a \<circ> \<pi> \<circ> \<pi>b) = (\<lambda>\<pi>'. \<pi>a \<circ> \<pi>') \<circ> (\<lambda>\<pi>. \<pi> \<circ> \<pi>b)"
+    by (simp add: comp_def)
+  then show ?thesis
+    apply (fold image_Collect)
+    apply (unfold *)

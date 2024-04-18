@@ -1,0 +1,155 @@
+theory VOIP
+  imports  StatefulCore
+begin
+
+
+
+
+
+datatype 'a voip_msg =  ARQ
+                     | ACF 'a 
+                     | ARJ
+                     | Setup port 
+                     | Connect port 
+                     | Stream 
+                     | Fin 
+                     | other
+
+
+definition
+  is_arq :: "NetworkCore.id \<Rightarrow> ('a::adr, 'b voip_msg) packet \<Rightarrow> bool" where 
+  "is_arq i p = (NetworkCore.id p = i \<and> content p = ARQ)"
+
+
+definition
+  is_fin :: "id \<Rightarrow> ('a::adr, 'b voip_msg) packet \<Rightarrow> bool" where
+  "is_fin i p = (id p = i \<and> content p = Fin)"
+
+definition
+  is_connect :: "id \<Rightarrow> port \<Rightarrow> ('a::adr, 'b voip_msg) packet \<Rightarrow> bool" where
+  "is_connect i port p = (id p = i \<and> content p = Connect port)"
+
+definition
+  is_setup :: "id \<Rightarrow> port \<Rightarrow> ('a::adr, 'b voip_msg) packet \<Rightarrow> bool" where
+  "is_setup i port p = (id p = i \<and> content p = Setup port)"
+
+
+definition 
+  ports_open :: "id \<Rightarrow> port \<times> port \<Rightarrow> (adr\<^sub>i\<^sub>p, 'a voip_msg) history \<Rightarrow> bool" where
+  "ports_open i p L = ((not_before (is_fin i) (is_setup i (fst p)) L) \<and> 
+                             not_before (is_fin i) (is_connect i (snd p)) L)"
+
+
+
+
+fun 
+  src_is_initiator :: "id \<Rightarrow> adr\<^sub>i\<^sub>p \<Rightarrow> (adr\<^sub>i\<^sub>p,'b voip_msg) history \<Rightarrow> bool" where
+ "src_is_initiator i a [] = False"
+|"src_is_initiator i a (p#S) =  (((id p = i) \<and> 
+                                            (\<exists> port. content p = Setup port) \<and> 
+                                            ((fst (src p) = fst a))) \<or>
+                                        (src_is_initiator i a S))"
+
+
+
+
+definition subnet_of_adr where
+ "subnet_of_adr x = {{(a,b). a = x}}"
+
+fun VOIP_STA ::
+  "((adr\<^sub>i\<^sub>p,address voip_msg) history, adr\<^sub>i\<^sub>p, address voip_msg) FWStateTransition"
+where
+ 
+ "VOIP_STA ((a,c,d,ARQ), (InL, policy)) =
+          Some (((a,c,d, ARQ)#InL, 
+  (allow_from_to_port (1719::port)(subnet_of d) (subnet_of c)) \<Oplus> policy))"
+|"VOIP_STA ((a,c,d,ARJ), (InL, policy)) = 
+                  (if (not_before (is_fin a) (is_arq a) InL)
+                            then Some (((a,c,d,ARJ)#InL, 
+                 deny_from_to_port (14::port) (subnet_of c) (subnet_of d) \<Oplus> policy))
+                            else Some (((a,c,d,ARJ)#InL,policy)))"
+
+|"VOIP_STA ((a,c,d,ACF callee), (InL, policy)) =
+              Some (((a,c,d,ACF callee)#InL,   
+  allow_from_to_port (1720::port) (subnet_of_adr callee) (subnet_of d) \<Oplus>
+  allow_from_to_port (1720::port) (subnet_of d) (subnet_of_adr callee) \<Oplus>
+  deny_from_to_port (1719::port) (subnet_of d) (subnet_of c) \<Oplus> 
+  policy))"
+
+
+|"VOIP_STA ((a,c,d, Setup port), (InL, policy)) =
+           Some (((a,c,d,Setup port)#InL,  
+ allow_from_to_port port (subnet_of d) (subnet_of c) \<Oplus> policy))"
+ 
+ |"VOIP_STA ((a,c,d, Connect port), (InL, policy)) =
+                 Some (((a,c,d,Connect port)#InL, 
+   allow_from_to_port port (subnet_of d) (subnet_of c)  \<Oplus> policy))"
+                
+|"VOIP_STA ((a,c,d,Fin), (InL,policy)) = 
+       (if \<exists> p1 p2. ports_open a (p1,p2) InL then (
+           (if src_is_initiator a c InL
+           then (Some (((a,c,d,Fin)#InL,  
+(deny_from_to_port (1720::int) (subnet_of c) (subnet_of d) ) \<Oplus>
+(deny_from_to_port (snd (SOME p. ports_open a p InL))
+                   (subnet_of c) (subnet_of d)) \<Oplus>
+(deny_from_to_port (fst (SOME p. ports_open a p InL))
+                    (subnet_of d) (subnet_of c)) \<Oplus> policy)))
+
+           else (Some (((a,c,d,Fin)#InL,  
+(deny_from_to_port (1720::int) (subnet_of c) (subnet_of d) ) \<Oplus>
+(deny_from_to_port (fst (SOME p. ports_open a p InL))
+                   (subnet_of c) (subnet_of d)) \<Oplus>
+(deny_from_to_port (snd (SOME p. ports_open a p InL))
+                    (subnet_of d) (subnet_of c)) \<Oplus> policy)))))
+
+       else
+           (Some (((a,c,d,Fin)#InL,policy))))"
+ 
+
+| "VOIP_STA (p, (InL, policy)) = 
+                          Some ((p#InL,policy)) "
+
+fun VOIP_STD  where
+ "VOIP_STD (p,s) = Some s"
+
+
+definition VOIP_TRPolicy where 
+ "VOIP_TRPolicy = policy2MON ( 
+   ((VOIP_STA,VOIP_STD) \<Otimes>\<^sub>\<nabla> applyPolicy) o (\<lambda> (x,(y,z)). ((x,z),(x,(y,z)))))"
+
+datatype voip_states = S0 | S1 | S2 | S3 | S4 | S5
+
+
+fun is_voip :: "voip_states \<Rightarrow> address \<Rightarrow> address \<Rightarrow> address \<Rightarrow> id \<Rightarrow> port \<Rightarrow>
+                port \<Rightarrow>  (adr\<^sub>i\<^sub>p, address voip_msg) history \<Rightarrow> bool"
+where
+ "is_voip H s d g i p1 p2 [] = (H = S5)"
+|"is_voip H s d g i p1 p2 (x#InL) = 
+  (((\<lambda> (id,sr,de,co). 
+ (((id = i \<and> 
+(H = S4 \<and> ((sr = (s,1719) \<and> de = (g,1719) \<and> co = ARQ \<and>
+    is_voip S5 s d g i p1 p2 InL))) \<or>
+(H = S0 \<and> sr = (g,1719) \<and> de = (s,1719) \<and> co = ARJ \<and>
+    is_voip S4 s d g i p1 p2 InL) \<or>
+(H = S3 \<and> sr = (g,1719) \<and> de = (s,1719) \<and> co = ACF d \<and>
+    is_voip S4 s d g i p1 p2 InL) \<or>
+(H = S2 \<and> sr = (s,1720) \<and> de = (d,1720) \<and> co = Setup p1 \<and>
+    is_voip S3 s d g i p1 p2 InL) \<or>
+(H = S1 \<and> sr = (d,1720) \<and> de = (s,1720) \<and> co = Connect p2 \<and>
+    is_voip S2 s d g i p1 p2 InL) \<or>
+(H = S1 \<and> sr = (s,p1) \<and> de = (d,p2) \<and> co = Stream \<and>
+    is_voip S1 s d g i p1 p2 InL) \<or>
+(H = S1 \<and> sr = (d,p2) \<and> de = (s,p1) \<and> co = Stream \<and>
+    is_voip S1 s d g i p1 p2 InL) \<or>
+(H = S0 \<and> sr = (d,1720) \<and> de = (s,1720) \<and> co = Fin \<and>
+    is_voip S1 s d g i p1 p2 InL) \<or>
+(H = S0 \<and> sr = (s,1720) \<and> de = (d,1720) \<and> co = Fin \<and>
+    is_voip S1 s d g i p1 p2 InL)))))) x)"
+ 
+
+definition 
+  NB_voip :: "address \<Rightarrow> address \<Rightarrow> address \<Rightarrow> id  \<Rightarrow> port \<Rightarrow> port \<Rightarrow>
+              (adr\<^sub>i\<^sub>p, address voip_msg) history set" where
+  "NB_voip s d g i p1 p2= {x. (is_voip S0 s d g i p1 p2 x)}"
+
+end

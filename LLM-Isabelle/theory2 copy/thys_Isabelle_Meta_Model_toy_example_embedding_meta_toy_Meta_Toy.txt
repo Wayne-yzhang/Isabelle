@@ -1,0 +1,186 @@
+theory  Meta_Toy
+imports "../../../meta_isabelle/Meta_Pure"
+        "../Init_rbt"
+begin
+
+
+datatype toy_collection = Set
+                        | Sequence
+                        | Union0
+
+datatype toy_multiplicity_single = Mult_nat nat
+                                 | Mult_star
+                                 | Mult_infinity
+
+record toy_multiplicity = TyMult :: "(toy_multiplicity_single \<times> toy_multiplicity_single option) list"
+                          TyRole :: "string option"
+
+record toy_ty_class_node =  TyObjN_ass_switch :: nat
+                            TyObjN_role_multip :: toy_multiplicity
+                            TyObjN_role_ty :: string
+record toy_ty_class =       TyObj_name :: string
+                            TyObj_ass_id :: nat
+                            TyObj_ass_arity :: nat
+                            TyObj_from :: toy_ty_class_node
+                            TyObj_to :: toy_ty_class_node
+datatype toy_ty_obj =       ToyTyObj  toy_ty_obj_core
+                          | ToyTy_base_boolean
+                          | ToyTy_base_integer
+                          | ToyTy_base_unlimitednatural
+                          | ToyTy_base_real
+                          | ToyTy_base_string
+                          | ToyTy_object toy_ty_obj
+                          | ToyTy_collection toy_multiplicity toy_ty
+                          | ToyTy_arrow toy_ty toy_ty
+                          | ToyTy_class_syn string
+                          | ToyTy_enum string
+
+
+datatype toy_association_type = ToyAssTy_native_attribute
+                              | ToyAssTy_association
+                              | ToyAssTy_composition
+                              | ToyAssTy_aggregation
+datatype toy_association_relation = ToyAssRel "(toy_ty_obj \<times> toy_multiplicity) list"
+record toy_association =        ToyAss_type     :: toy_association_type
+                                ToyAss_relation :: toy_association_relation
+
+datatype toy_ctxt_prefix = ToyCtxtPre | ToyCtxtPost
+
+datatype toy_ctxt_term = T_pure "term"
+                       | T_lambda string toy_ctxt_term
+datatype toy_ctxt_term_pp = T_pp toy_ctxt_prefix toy_prop
+                          | T_invariant toy_ctxt_term_inv
+
+                           Ctxt_fun_ty :: toy_ty
+                           Ctxt_expr :: "toy_ctxt_term_pp list"
+
+datatype toy_ctxt_clause = Ctxt_pp toy_ctxt_pre_post
+                         | Ctxt_inv toy_ctxt_term_inv
+                  Ctxt_ty :: toy_ty_obj
+                  Ctxt_clause :: "toy_ctxt_clause list"
+
+datatype toy_class =   ToyClass
+
+record toy_class_raw = ClassRaw_name :: toy_ty_obj
+                       ClassRaw_clause :: "toy_ctxt_clause list"
+
+datatype toy_ass_class = ToyAssClass toy_association
+                                     toy_class_raw
+
+
+
+
+definition "T_lambdas = List.fold T_lambda"
+definition "TyObjN_role_name = TyRole o TyObjN_role_multip"
+definition "ToyTy_class c = ToyTy_object (ToyTyObj (ToyTyCore c) [])"
+definition "ToyTy_class_pre c = ToyTy_object (ToyTyObj (ToyTyCore_pre c) [])"
+definition "ToyAss_relation' l = (case ToyAss_relation l of ToyAssRel l \<Rightarrow> l)"
+
+fun fold_pair_var where
+   "fold_pair_var f t accu = (case t of
+    ToyTy_pair t1 t2 \<Rightarrow> Option.bind (fold_pair_var f t1 accu) (fold_pair_var f t2)
+  | ToyTy_binding (Some v, t) \<Rightarrow> fold_pair_var f t (f (v, t) accu)
+  | ToyTy_binding (None, t) \<Rightarrow> fold_pair_var f t accu
+  | ToyTy_collection _ t \<Rightarrow> fold_pair_var f t accu
+  | ToyTy_arrow _ _ \<Rightarrow> None
+  | _ \<Rightarrow> Some accu)"
+
+definition "Ctxt_fun_ty_arg ctxt =
+ (case 
+    fold_pair_var
+      Cons
+      (case Ctxt_fun_ty ctxt of ToyTy_arrow t _ \<Rightarrow> t
+                              | t \<Rightarrow> t)
+      []
+  of Some l \<Rightarrow> rev l)"
+
+definition "Ctxt_fun_ty_out ctxt =
+ (case Ctxt_fun_ty ctxt of ToyTy_arrow _ t \<Rightarrow> Some t
+                         | _ \<Rightarrow> None)"
+
+definition "map_pre_post f = 
+             Ctxt_clause_update
+               (L.map 
+                  (\<lambda> Ctxt_pp ctxt \<Rightarrow>
+                     Ctxt_pp (Ctxt_expr_update
+                               (L.map
+                                  (\<lambda> T_pp pref (ToyProp_ctxt n e) \<Rightarrow>
+                                     T_pp pref (ToyProp_ctxt n (f pref ctxt e))
+                                   | x \<Rightarrow> x))
+                               ctxt)
+                   | x \<Rightarrow> x))"
+
+definition "map_invariant f_inv =
+             Ctxt_clause_update
+               (L.map 
+                  (\<lambda> Ctxt_pp ctxt \<Rightarrow>
+                     Ctxt_pp (Ctxt_expr_update
+                               (L.map
+                                 (\<lambda> T_invariant ctxt \<Rightarrow> T_invariant (f_inv ctxt)
+                                  | x \<Rightarrow> x))
+                               ctxt)
+                   | Ctxt_inv ctxt \<Rightarrow> Ctxt_inv (f_inv ctxt)))"
+
+fun remove_binding where
+   "remove_binding e = (\<lambda> ToyTy_collection m ty \<Rightarrow> ToyTy_collection m (remove_binding ty)
+                        | ToyTy_pair ty1 ty2 \<Rightarrow> ToyTy_pair (remove_binding ty1) (remove_binding ty2)
+                        | ToyTy_binding (_, ty) \<Rightarrow> remove_binding ty
+                        | ToyTy_arrow ty1 ty2 \<Rightarrow> ToyTy_arrow (remove_binding ty1) (remove_binding ty2)
+                        | x \<Rightarrow> x) e"
+
+
+
+definition "single_multip = 
+  List.list_all (\<lambda> (_, Some (Mult_nat n)) \<Rightarrow> n \<le> 1
+                 | (Mult_nat n, None) \<Rightarrow> n \<le> 1
+                 | _ \<Rightarrow> False) o TyMult"
+
+fun fold_max_aux where
+   "fold_max_aux f l l_acc accu = (case l of
+      [] \<Rightarrow> accu
+    | x # xs \<Rightarrow> fold_max_aux f xs (x # l_acc) (f x (L.flatten [rev l_acc, xs]) accu))"
+
+definition "fold_max f l = fold_max_aux f (L.mapi Pair l) []"
+
+locale RBTS
+begin
+definition "lookup m k = RBT.lookup m (String.to_list k)"
+definition insert where "insert k = RBT.insert (String.to_list k)"
+definition "map_entry k = RBT.map_entry (String.to_list k)"
+definition "modify_def v k = RBT.modify_def v (String.to_list k)"
+definition "keys m = L.map (\<lambda>s. \<lless>s\<ggreater>) (RBT.keys m)"
+definition "lookup2 m = (\<lambda>(k1, k2). RBT.lookup2 m (String.to_list k1, String.to_list k2))"
+definition "insert2 = (\<lambda>(k1, k2). RBT.insert2 (String.to_list k1, String.to_list k2))"
+definition fold where "fold f = RBT.fold (\<lambda>c. f \<lless>c\<ggreater>)"
+definition "entries m = L.map (map_prod (\<lambda>c. \<lless>c\<ggreater>) id) (RBT.entries m)"
+end
+lemmas [code] =
+  RBTS.lookup_def
+  RBTS.insert_def
+  RBTS.map_entry_def
+  RBTS.modify_def_def
+  RBTS.keys_def
+  RBTS.lookup2_def
+  RBTS.insert2_def
+  RBTS.fold_def
+  RBTS.entries_def
+
+syntax "_rbt_lookup" :: "_ \<Rightarrow> _" ("lookup") translations "lookup" \<rightleftharpoons> "CONST RBTS.lookup"
+syntax "_rbt_insert" :: "_ \<Rightarrow> _" ("insert") translations "insert" \<rightleftharpoons> "CONST RBTS.insert"
+syntax "_rbt_map_entry" :: "_ \<Rightarrow> _" ("map'_entry") translations "map_entry" \<rightleftharpoons> "CONST RBTS.map_entry"
+syntax "_rbt_modify_def" :: "_ \<Rightarrow> _" ("modify'_def") translations "modify_def" \<rightleftharpoons> "CONST RBTS.modify_def"
+syntax "_rbt_keys" :: "_ \<Rightarrow> _" ("keys") translations "keys" \<rightleftharpoons> "CONST RBTS.keys"
+syntax "_rbt_lookup2" :: "_ \<Rightarrow> _" ("lookup2") translations "lookup2" \<rightleftharpoons> "CONST RBTS.lookup2"
+syntax "_rbt_insert2" :: "_ \<Rightarrow> _" ("insert2") translations "insert2" \<rightleftharpoons> "CONST RBTS.insert2"
+syntax "_rbt_fold" :: "_ \<Rightarrow> _" ("fold") translations "fold" \<rightleftharpoons> "CONST RBTS.fold"
+syntax "_rbt_entries" :: "_ \<Rightarrow> _" ("entries") translations "entries" \<rightleftharpoons> "CONST RBTS.entries"
+
+function (sequential) class_unflat_aux where
+   "class_unflat_aux rbt rbt_inv rbt_cycle r =
+      ToyClass
+        r
+        (case lookup rbt r of Some l \<Rightarrow> l)
+        (L.map
+          (class_unflat_aux rbt rbt_inv (insert r () rbt_cycle))
+          (case lookup rbt_inv r of None \<Rightarrow> [] | Some l \<Rightarrow> l)))"
+*)

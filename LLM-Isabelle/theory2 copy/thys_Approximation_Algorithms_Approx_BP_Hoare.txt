@@ -1,0 +1,83 @@
+theory Approx_BP_Hoare
+  imports Complex_Main "HOL-Hoare.Hoare_Logic" "HOL-Library.Disjoint_Sets"
+begin
+
+
+
+definition wrap :: "'a set \<Rightarrow> 'a set set" where
+  "wrap B = (if B = {} then {} else {B})"
+
+lemma wrap_card:
+  "card (wrap B) \<le> 1"
+  unfolding wrap_def by auto
+
+lemma pairwise_disjnt_Un:
+  assumes "pairwise disjnt ({M} \<union> {N} \<union> V)" "M \<notin> V" "N \<notin> V"
+  shows "pairwise disjnt ({M \<union> N} \<union> V)"
+  using assms unfolding pairwise_def by auto
+
+locale BinPacking =
+  assumes weight: "\<forall>u \<in> U. 0 < w(u) \<and> w(u) \<le> c"
+      and U_Finite: "finite U"
+      and U_NE: "U \<noteq> {}"
+      and S_def: "S = {u \<in> U. w(u) \<le> c / 2}"
+      and L_def: "L = U - S"
+begin
+
+abbreviation W :: "'a set \<Rightarrow> real" where
+  "W B \<equiv> (\<Sum>u \<in> B. w(u))"
+
+      (as defined in @{thm [source] partition_on_def}) and the weights of
+definition bp :: "'a set set \<Rightarrow> bool" where
+  "bp P \<longleftrightarrow> partition_on U P \<and> (\<forall>B \<in> P. W(B) \<le> c)"
+
+lemma bpE:
+  assumes "bp P"
+  shows "pairwise disjnt P" "{} \<notin> P" "\<Union>P = U" "\<forall>B \<in> P. W(B) \<le> c"
+  using assms unfolding bp_def partition_on_def by blast+
+
+lemma bpI:
+  assumes "pairwise disjnt P" "{} \<notin> P" "\<Union>P = U" "\<forall>B \<in> P. W(B) \<le> c"
+  shows "bp P"
+  using assms unfolding bp_def partition_on_def by blast
+
+lemma S_L_set_generation:
+"VARS S L W u
+  {True}
+  S := {}; L := {}; W := U;
+  WHILE W \<noteq> {}
+  INV {W \<subseteq> U \<and> S = {v \<in> U - W. w(v) \<le> c / 2} \<and> L = {v \<in> U - W. w(v) > c / 2}} DO
+    u := (SOME u. u \<in> W);
+    IF 2 * w(u) \<le> c
+    THEN S := S \<union> {u}
+    ELSE L := L \<union> {u} FI;
+    W := W - {u}
+  OD
+  {S = {v \<in> U. w(v) \<le> c / 2} \<and> L = {v \<in> U. w(v) > c / 2}}"
+  by vcg (auto simp: some_in_eq)
+
+
+
+      assumptions made in the article seem to suggest that more information is demanded from this
+      invariant and, indeed, mere correctness (as defined in @{thm [source] bp_def}) does not appear to suffice.
+      To amend this, four additional conjuncts have been added to this invariant, whose necessity
+      will be explained in the following proofs. It should be noted that there may be other (shorter) ways to amend this invariant.
+      This approach, however, makes for rather straight-forward proofs, as these conjuncts can be utilized and proved in relatively few steps.\<close>
+  "inv\<^sub>1 P\<^sub>1 P\<^sub>2 B\<^sub>1 B\<^sub>2 V \<longleftrightarrow> bp (P\<^sub>1 \<union> wrap B\<^sub>1 \<union> P\<^sub>2 \<union> wrap B\<^sub>2 \<union> {{v} |v. v \<in> V}) \<comment> \<open>A correct solution to the bin packing problem\<close>
+                       \<and> \<Union>(P\<^sub>1 \<union> wrap B\<^sub>1 \<union> P\<^sub>2 \<union> wrap B\<^sub>2) = U - V \<comment> \<open>The partial solution does not contain objects that have not yet been assigned\<close>
+                       \<and> B\<^sub>1 \<notin> (P\<^sub>1 \<union> P\<^sub>2 \<union> wrap B\<^sub>2) \<comment> \<open>\<open>B\<^sub>1\<close> is distinct from all the other bins\<close>
+                       \<and> B\<^sub>2 \<notin> (P\<^sub>1 \<union> wrap B\<^sub>1 \<union> P\<^sub>2) \<comment> \<open>\<open>B\<^sub>2\<close> is distinct from all the other bins\<close>
+                       \<and> (P\<^sub>1 \<union> wrap B\<^sub>1) \<inter> (P\<^sub>2 \<union> wrap B\<^sub>2) = {} \<comment> \<open>The first and second partial solutions are disjoint from each other.\<close>"
+text \<open>If \<open>inv\<^sub>1\<close> holds for the current partial solution, and the weight of an object \<open>u \<in> V\<close> added to \<open>B\<^sub>1\<close> does
+      not exceed its capacity, then \<open>inv\<^sub>1\<close> also holds if \<open>B\<^sub>1\<close> and \<open>{u}\<close> are replaced by \<open>B\<^sub>1 \<union> {u}\<close>.\<close>
+  text \<open>In the proof for \<open>Theorem 3.2\<close> of the article it is erroneously argued that
+        if \<open>P\<^sub>1 \<union> wrap B\<^sub>1 \<union> P\<^sub>2 \<union> wrap B\<^sub>2 \<union> {{v} |v. v \<in> V}\<close> is a partition of \<open>U\<close>,
+        then the same holds if \<open>B\<^sub>1\<close> is replaced by \<open>B\<^sub>1 \<union> {u}\<close>.
+        This is, however, not necessarily the case if \<open>B\<^sub>1\<close> or \<open>{u}\<close> are already contained in the partial solution.
+        Suppose \<open>P\<^sub>1\<close> contains the non-empty bin \<open>B\<^sub>1\<close>, then \<open>P\<^sub>1 \<union> wrap B\<^sub>1\<close> would still be pairwise disjoint, provided \<open>P\<^sub>1\<close> was pairwise disjoint before, as the union simply ignores the duplicate \<open>B\<^sub>1\<close>. Now, if the algorithm modifies \<open>B\<^sub>1\<close> by adding an element from \<open>V\<close> such that \<open>B\<^sub>1\<close> becomes some non-empty \<open>B\<^sub>1'\<close> with \<open>B\<^sub>1 \<inter> B\<^sub>1' \<noteq> \<emptyset>\<close> and \<open>B\<^sub>1' \<notin> P\<^sub>1\<close>, one can see that this property would no longer be preserved.
+        To avoid such a situation, we will use the first additional conjunct in \<open>inv\<^sub>1\<close> to ensure that \<open>{u}\<close>
+        is not yet contained in the partial solution, and the second additional conjunct to ensure that \<open>B\<^sub>1\<close>
+      \<open>B\<^sub>1\<close> replaced with \<open>B\<^sub>2\<close> and using the first and third additional conjuncts of \<open>inv\<^sub>1\<close>
+      approximation factor, it does ensure that \<open>P\<close> is a correct solution of the bin packing problem.\<close>
+subsubsection \<open>Lower Bounds for the Bin Packing Problem\<close>
+text \<open>If \<open>P\<close> is a solution of the bin packing problem, then no bin in \<open>P\<close> may contain more than

@@ -1,0 +1,103 @@
+theory OneThirdRule_Defs
+imports Heard_Of.HOModel "../Consensus_Types"
+begin
+
+
+
+
+
+record 'val pstate =
+  last_vote :: "'val"
+  decision :: "'val option"
+
+
+definition OTR_initState where
+  "OTR_initState p st \<equiv> decision st = None"
+
+
+definition HOV :: "(process \<Rightarrow> 'val option) \<Rightarrow> 'val \<Rightarrow> process set" where
+  "HOV msgs v \<equiv> { q . msgs q = Some v }"
+
+
+definition MFR :: "(process \<Rightarrow> 'val option) \<Rightarrow> 'val \<Rightarrow> bool" where
+  "MFR msgs v \<equiv> \<forall>w. card (HOV msgs w) \<le> card (HOV msgs v)"
+
+lemma MFR_exists: "\<exists>v. MFR msgs v"
+proof -
+  let ?cards = "{ card (HOV msgs v) | v . True }"
+  let ?mfr = "Max ?cards"
+  have "\<forall>v. card (HOV msgs v) \<le> N" by (auto intro: card_mono)
+  hence "?cards \<subseteq> { 0 .. N }" by auto
+  hence fin: "finite ?cards" by (metis atLeast0AtMost finite_atMost finite_subset)
+  hence "?mfr \<in> ?cards" by (rule Max_in) auto
+  then obtain v where v: "?mfr = card (HOV msgs v)" by auto
+  have "MFR msgs v"
+  proof (auto simp: MFR_def)
+    fix w
+    from fin have "card (HOV msgs w) \<le> ?mfr" by (rule Max_ge) auto
+    thus "card (HOV msgs w) \<le> card (HOV msgs v)" by (unfold v)
+  qed
+  thus ?thesis ..
+qed
+
+
+lemma MFR_in_msgs:
+  assumes HO:"HOs m p \<noteq> {}"
+      and v: "MFR (HOrcvdMsgs OTR_M m p (HOs m p) (rho m)) v"
+             (is "MFR ?msgs v")
+  shows "\<exists>q \<in> HOs m p. v = the (?msgs q)"
+proof -
+  from HO obtain q where q: "q \<in> HOs m p"
+    by auto
+  with v have "HOV ?msgs (the (?msgs q)) \<noteq> {}"
+    by (auto simp: HOV_def HOrcvdMsgs_def)
+  hence HOp: "0 < card (HOV ?msgs (the (?msgs q)))"
+    by auto
+  also from v have "\<dots> \<le> card (HOV ?msgs v)"
+    by (simp add: MFR_def)
+  finally have "HOV ?msgs v \<noteq> {}"
+    by auto
+  thus ?thesis
+    by (auto simp: HOV_def HOrcvdMsgs_def)
+qed
+
+
+definition TwoThirds where
+  "TwoThirds msgs v \<equiv> (2*N) div 3 < card (HOV msgs v)"
+
+
+definition OTR_nextState where
+  "OTR_nextState r p (st::('val::linorder) pstate) msgs st' \<equiv> 
+   if (2*N) div 3 < card {q. msgs q \<noteq> None}
+   then st' = \<lparr> last_vote = Min {v . MFR msgs v},
+          decision = (if (\<exists>v. TwoThirds msgs v)
+                    then Some (\<some>v. TwoThirds msgs v)
+                    else decision st) \<rparr>
+   else st' = st"
+
+
+definition OTR_sendMsg where
+  "OTR_sendMsg r p q st \<equiv> last_vote st"
+
+
+
+definition OTR_commPerRd where
+  "OTR_commPerRd HOrs \<equiv> True"
+
+definition OTR_commGlobal where
+  "OTR_commGlobal HOs \<equiv>
+    \<forall>r. \<exists>r0 \<Pi>. r0 \<ge> r \<and> (\<forall>p. HOs r0 p = \<Pi>) \<and> card \<Pi> > (2*N) div 3"
+
+
+
+definition OTR_HOMachine where
+  "OTR_HOMachine =
+    \<lparr> CinitState =  (\<lambda> p st crd. OTR_initState p st),
+     sendMsg =  OTR_sendMsg,
+     CnextState = (\<lambda> r p st msgs crd st'. OTR_nextState r p st msgs st'),
+     HOcommPerRd = OTR_commPerRd,
+     HOcommGlobal = OTR_commGlobal \<rparr>"
+
+abbreviation "OTR_M \<equiv> OTR_HOMachine::(process, 'val::linorder pstate, 'val) HOMachine"
+
+end

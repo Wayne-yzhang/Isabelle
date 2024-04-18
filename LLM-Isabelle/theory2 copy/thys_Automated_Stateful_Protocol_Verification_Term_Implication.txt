@@ -1,0 +1,319 @@
+theory Term_Implication
+  imports Stateful_Protocol_Model Term_Variants
+begin
+
+definition timpl_apply_term ("\<langle>_ --\<guillemotright> _\<rangle>\<langle>_\<rangle>") where
+  "\<langle>a --\<guillemotright> b\<rangle>\<langle>t\<rangle> \<equiv> term_variants ((\<lambda>_. [])(Abs a := [Abs b])) t"
+
+definition timpl_apply_terms ("\<langle>_ --\<guillemotright> _\<rangle>\<langle>_\<rangle>\<^sub>s\<^sub>e\<^sub>t") where
+  "\<langle>a --\<guillemotright> b\<rangle>\<langle>M\<rangle>\<^sub>s\<^sub>e\<^sub>t \<equiv> \<Union>((set o timpl_apply_term a b) ` M)"
+
+lemma timpl_apply_Fun:
+  assumes "\<And>i. i < length T \<Longrightarrow> S ! i \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>T ! i\<rangle>"
+    and "length T = length S"
+  shows "Fun f S \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>Fun f T\<rangle>"
+using assms term_variants_Fun term_variants_pred_iff_in_term_variants
+by (metis timpl_apply_term_def)
+
+lemma timpl_apply_Abs:
+  assumes "\<And>i. i < length T \<Longrightarrow> S ! i \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>T ! i\<rangle>"
+    and "length T = length S"
+  shows "Fun (Abs b) S \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>Fun (Abs a) T\<rangle>"
+using assms(1) term_variants_P[OF assms(2), of "(\<lambda>_. [])(Abs a := [Abs b])" "Abs b" "Abs a"]
+unfolding timpl_apply_term_def term_variants_pred_iff_in_term_variants[symmetric]
+by fastforce
+
+lemma timpl_apply_refl: "t \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>t\<rangle>"
+unfolding timpl_apply_term_def
+by (metis term_variants_pred_refl term_variants_pred_iff_in_term_variants)
+
+lemma timpl_apply_const: "Fun (Abs b) [] \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>Fun (Abs a) []\<rangle>"
+using term_variants_pred_iff_in_term_variants term_variants_pred_const
+unfolding timpl_apply_term_def by auto
+
+lemma timpl_apply_const':
+  "c = a \<Longrightarrow> set \<langle>a --\<guillemotright> b\<rangle>\<langle>Fun (Abs c) []\<rangle> = {Fun (Abs b) [], Fun (Abs c) []}"
+  "c \<noteq> a \<Longrightarrow> set \<langle>a --\<guillemotright> b\<rangle>\<langle>Fun (Abs c) []\<rangle> = {Fun (Abs c) []}"
+using term_variants_pred_const_cases[of "(\<lambda>_. [])(Abs a := [Abs b])" "Abs c"]
+      term_variants_pred_iff_in_term_variants[of "(\<lambda>_. [])(Abs a := [Abs b])"]
+unfolding timpl_apply_term_def by auto
+
+lemma timpl_apply_term_subst:
+  "s \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>t\<rangle> \<Longrightarrow> s \<cdot> \<delta> \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>t \<cdot> \<delta>\<rangle>"
+by (metis term_variants_pred_iff_in_term_variants term_variants_pred_subst timpl_apply_term_def)
+
+lemma timpl_apply_inv:
+  assumes "Fun h S \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>Fun f T\<rangle>"
+  shows "length T = length S"
+    and "\<And>i. i < length T \<Longrightarrow> S ! i \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>T ! i\<rangle>"
+    and "f \<noteq> h \<Longrightarrow> f = Abs a \<and> h = Abs b"
+using assms term_variants_pred_iff_in_term_variants[of "(\<lambda>_. [])(Abs a := [Abs b])"]
+unfolding timpl_apply_term_def
+by (metis (full_types) term_variants_pred_inv(1),
+    metis (full_types) term_variants_pred_inv(2),
+    fastforce dest: term_variants_pred_inv(3))
+
+lemma timpl_apply_inv':
+  assumes "s \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>Fun f T\<rangle>"
+  shows "\<exists>g S. s = Fun g S"
+proof -
+  have *: "term_variants_pred ((\<lambda>_. [])(Abs a := [Abs b])) (Fun f T) s"
+    using assms term_variants_pred_iff_in_term_variants[of "(\<lambda>_. [])(Abs a := [Abs b])"]
+    unfolding timpl_apply_term_def by force
+  show ?thesis using term_variants_pred.cases[OF *, of ?thesis] by fastforce
+qed
+
+lemma timpl_apply_term_Var_iff:
+  "Var x \<in> set \<langle>a --\<guillemotright> b\<rangle>\<langle>t\<rangle> \<longleftrightarrow> t = Var x"
+using term_variants_pred_inv_Var term_variants_pred_iff_in_term_variants
+unfolding timpl_apply_term_def by metis
+
+
+
+inductive_set timpl_closure for t TI where
+  FP: "t \<in> timpl_closure t TI"
+| TI: "\<lbrakk>u \<in> timpl_closure t TI; (a,b) \<in> TI; term_variants_pred ((\<lambda>_. [])(Abs a := [Abs b])) u s\<rbrakk>
+       \<Longrightarrow> s \<in> timpl_closure t TI"
+
+definition "timpl_closure_set M TI \<equiv> (\<Union>t \<in> M. timpl_closure t TI)"
+
+inductive_set timpl_closure'_step for TI where
+  "\<lbrakk>(a,b) \<in> TI; term_variants_pred ((\<lambda>_. [])(Abs a := [Abs b])) t s\<rbrakk>
+    \<Longrightarrow> (t,s) \<in> timpl_closure'_step TI"
+
+definition "timpl_closure' TI \<equiv> (timpl_closure'_step TI)\<^sup>*"
+
+definition comp_timpl_closure where
+  "comp_timpl_closure FP TI \<equiv>
+    let f = \<lambda>X. FP \<union> (\<Union>x \<in> X. \<Union>(a,b) \<in> TI. set \<langle>a --\<guillemotright> b\<rangle>\<langle>x\<rangle>)
+    in while (\<lambda>X. f X \<noteq> X) f {}"
+
+definition comp_timpl_closure_list where
+  "comp_timpl_closure_list FP TI \<equiv>
+    let f = \<lambda>X. remdups (concat (map (\<lambda>x. concat (map (\<lambda>(a,b). \<langle>a --\<guillemotright> b\<rangle>\<langle>x\<rangle>) TI)) X)@X)
+    in while (\<lambda>X. set (f X) \<noteq> set X) f FP"
+
+lemma timpl_closure_setI:
+  "t \<in> M \<Longrightarrow> t \<in> timpl_closure_set M TI"
+unfolding timpl_closure_set_def by (auto intro: timpl_closure.FP)
+
+lemma timpl_closure_set_empty_timpls:
+  "timpl_closure t {} = {t}" (is "?A = ?B")
+proof (intro subset_antisym subsetI)
+  fix s show "s \<in> ?A \<Longrightarrow> s \<in> ?B"
+    by (induct s rule: timpl_closure.induct) auto
+qed (simp add: timpl_closure.FP)
+
+lemmas timpl_closure_set_is_timpl_closure_union = meta_eq_to_obj_eq[OF timpl_closure_set_def]
+
+lemma term_variants_pred_eq_case_Abs:
+  fixes a b
+  defines "P \<equiv> (\<lambda>_. [])(Abs a := [Abs b])"
+  assumes "term_variants_pred P t s" "\<forall>f \<in> funs_term s. \<not>is_Abs f"
+  shows "t = s"
+using assms(2,3)
+proof (induction t s rule: term_variants_pred.induct)
+  case (term_variants_Fun T S f)
+  have "\<not>is_Abs h" when i: "i < length S" and h: "h \<in> funs_term (S ! i)" for i h
+    using i h term_variants_Fun.prems by auto
+  hence "T ! i = S ! i" when i: "i < length T" for i
+    using i term_variants_Fun.hyps(1) term_variants_Fun.IH by auto
+  hence "T = S" using term_variants_Fun.hyps(1) nth_equalityI[of T S] by fast
+  thus ?case using term_variants_Fun.hyps(1) by blast
+qed (simp_all add: term_variants_pred_refl P_def)
+
+lemma timpl_closure'_step_inv:
+  assumes "(t,s) \<in> timpl_closure'_step TI"
+  obtains a b where "(a,b) \<in> TI" "term_variants_pred ((\<lambda>_. [])(Abs a := [Abs b])) t s"
+using assms by (auto elim: timpl_closure'_step.cases)
+
+lemma timpl_closure_mono:
+  assumes "TI \<subseteq> TI'"
+  shows "timpl_closure t TI \<subseteq> timpl_closure t TI'"
+proof
+  fix s show "s \<in> timpl_closure t TI \<Longrightarrow> s \<in> timpl_closure t TI'"
+    apply (induct rule: timpl_closure.induct)
+    using assms by (auto intro: timpl_closure.intros)
+qed
+
+lemma timpl_closure_set_mono:
+  assumes "M \<subseteq> M'" "TI \<subseteq> TI'"
+  shows "timpl_closure_set M TI \<subseteq> timpl_closure_set M' TI'"
+using assms(1) timpl_closure_mono[OF assms(2)] unfolding timpl_closure_set_def by fast
+
+lemma timpl_closure_idem:
+  "timpl_closure_set (timpl_closure t TI) TI = timpl_closure t TI" (is "?A = ?B")
+proof
+  have "s \<in> timpl_closure t TI"
+    when "s \<in> timpl_closure u TI" "u \<in> timpl_closure t TI"
+    for s u
+    using that
+    by (induction rule: timpl_closure.induct)
+       (auto intro: timpl_closure.intros)
+  thus "?A \<subseteq> ?B" unfolding timpl_closure_set_def by blast
+
+  show "?B \<subseteq> ?A"
+    unfolding timpl_closure_set_def
+    by (blast intro: timpl_closure.FP)
+qed
+
+lemma timpl_closure_set_idem:
+  "timpl_closure_set (timpl_closure_set M TI) TI = timpl_closure_set M TI"
+using timpl_closure_idem[of _ TI]unfolding timpl_closure_set_def by auto
+
+lemma timpl_closure_set_mono_timpl_closure_set:
+  assumes N: "N \<subseteq> timpl_closure_set M TI"
+  shows "timpl_closure_set N TI \<subseteq> timpl_closure_set M TI"
+using timpl_closure_set_mono[OF N, of TI TI] timpl_closure_set_idem[of M TI]
+by simp
+
+lemma timpl_closure_is_timpl_closure':
+  "s \<in> timpl_closure t TI \<longleftrightarrow> (t,s) \<in> timpl_closure' TI"
+proof
+  show "s \<in> timpl_closure t TI \<Longrightarrow> (t,s) \<in> timpl_closure' TI"
+    unfolding timpl_closure'_def
+    by (induct rule: timpl_closure.induct)
+       (auto intro: rtrancl_into_rtrancl timpl_closure'_step.intros)
+
+  show "(t,s) \<in> timpl_closure' TI \<Longrightarrow> s \<in> timpl_closure t TI"
+    unfolding timpl_closure'_def
+    by (induct rule: rtrancl_induct)
+       (auto dest: timpl_closure'_step_inv
+             intro: timpl_closure.FP timpl_closure.TI)
+qed
+
+lemma timpl_closure'_mono:
+  assumes "TI \<subseteq> TI'"
+  shows "timpl_closure' TI \<subseteq> timpl_closure' TI'"
+using timpl_closure_mono[OF assms]
+      timpl_closure_is_timpl_closure'[of _ _ TI]
+      timpl_closure_is_timpl_closure'[of _ _ TI']
+by fast
+
+lemma timpl_closureton_is_timpl_closure:
+  "timpl_closure_set {t} TI = timpl_closure t TI"
+by (simp add: timpl_closure_set_is_timpl_closure_union)
+
+lemma timpl_closure'_timpls_trancl_subset:
+  "timpl_closure' (c\<^sup>+) \<subseteq> timpl_closure' c"
+unfolding timpl_closure'_def
+proof
+  fix s t::"(('a,'b,'c,'d) prot_fun,'e) term"
+  show "(s,t) \<in> (timpl_closure'_step (c\<^sup>+))\<^sup>* \<Longrightarrow> (s,t) \<in> (timpl_closure'_step c)\<^sup>*"
+  proof (induction rule: rtrancl_induct)
+    case (step u t)
+    obtain a b where ab:
+        "(a,b) \<in> c\<^sup>+" "term_variants_pred ((\<lambda>_. [])(Abs a := [Abs b])) u t"
+      using step.hyps(2) timpl_closure'_step_inv by blast
+    hence "(u,t) \<in> (timpl_closure'_step c)\<^sup>*"
+    proof (induction arbitrary: t rule: trancl_induct)
+      case (step d e)
+      obtain s where s:
+          "term_variants_pred ((\<lambda>_. [])(Abs a := [Abs d])) u s"
+          "term_variants_pred ((\<lambda>_. [])(Abs d := [Abs e])) s t"
+        using term_variants_pred_dense'[OF step.prems, of "Abs d"] by blast
+
+      have "(u,s) \<in> (timpl_closure'_step c)\<^sup>*"
+           "(s,t) \<in> timpl_closure'_step c"
+        using step.hyps(2) s(2) step.IH[OF s(1)]
+        by (auto intro: timpl_closure'_step.intros)
+      thus ?case by simp
+    qed (auto intro: timpl_closure'_step.intros)
+    thus ?case using step.IH by simp
+  qed simp
+qed
+
+lemma timpl_closure'_timpls_trancl_subset':
+  "timpl_closure' {(a,b) \<in> c\<^sup>+. a \<noteq> b} \<subseteq> timpl_closure' c"
+using timpl_closure'_timpls_trancl_subset
+      timpl_closure'_mono[of "{(a,b) \<in> c\<^sup>+. a \<noteq> b}" "c\<^sup>+"]
+by fast
+
+lemma timpl_closure_set_timpls_trancl_subset:
+  "timpl_closure_set M (c\<^sup>+) \<subseteq> timpl_closure_set M c"
+using timpl_closure'_timpls_trancl_subset[of c]
+      timpl_closure_is_timpl_closure'[of _ _ c]
+      timpl_closure_is_timpl_closure'[of _ _ "c\<^sup>+"]
+      timpl_closure_set_is_timpl_closure_union[of M c]
+      timpl_closure_set_is_timpl_closure_union[of M "c\<^sup>+"]
+by fastforce
+
+lemma timpl_closure_set_timpls_trancl_subset':
+  "timpl_closure_set M {(a,b) \<in> c\<^sup>+. a \<noteq> b} \<subseteq> timpl_closure_set M c"
+using timpl_closure'_timpls_trancl_subset'[of c]
+      timpl_closure_is_timpl_closure'[of _ _ c]
+      timpl_closure_is_timpl_closure'[of _ _ "{(a,b) \<in> c\<^sup>+. a \<noteq> b}"]
+      timpl_closure_set_is_timpl_closure_union[of M c]
+      timpl_closure_set_is_timpl_closure_union[of M "{(a,b) \<in> c\<^sup>+. a \<noteq> b}"]
+by fastforce
+
+lemma timpl_closure'_timpls_trancl_supset':
+  "timpl_closure' c \<subseteq> timpl_closure' {(a,b) \<in> c\<^sup>+. a \<noteq> b}"
+unfolding timpl_closure'_def
+proof
+  let ?cl = "{(a,b) \<in> c\<^sup>+. a \<noteq> b}"
+
+  fix s t::"(('a,'b,'c,'d) prot_fun,'e) term"
+  show "(s,t) \<in> (timpl_closure'_step c)\<^sup>* \<Longrightarrow> (s,t) \<in> (timpl_closure'_step ?cl)\<^sup>*"
+  proof (induction rule: rtrancl_induct)
+    case (step u t)
+    obtain a b where ab:
+        "(a,b) \<in> c" "term_variants_pred ((\<lambda>_. [])(Abs a := [Abs b])) u t"
+      using step.hyps(2) timpl_closure'_step_inv by blast
+    hence "(a,b) \<in> c\<^sup>+" by simp
+    hence "(u,t) \<in> (timpl_closure'_step ?cl)\<^sup>*" using ab(2)
+    proof (induction arbitrary: t rule: trancl_induct)
+      case (base d) show ?case
+      proof (cases "a = d")
+        case True thus ?thesis
+          using base term_variants_pred_refl_inv[of _ u t]
+          by force
+      next
+        case False thus ?thesis
+          using base timpl_closure'_step.intros[of a d ?cl]
+          by fast
+      qed
+    next
+      case (step d e)
+      obtain s where s:
+          "term_variants_pred ((\<lambda>_. [])(Abs a := [Abs d])) u s"
+          "term_variants_pred ((\<lambda>_. [])(Abs d := [Abs e])) s t"
+        using term_variants_pred_dense'[OF step.prems, of "Abs d"] by blast
+
+      show ?case
+      proof (cases "d = e")
+        case True
+        thus ?thesis
+          using step.prems step.IH[of t]
+          by blast
+      next
+        case False
+        hence "(u,s) \<in> (timpl_closure'_step ?cl)\<^sup>*"
+              "(s,t) \<in> timpl_closure'_step ?cl"
+          using step.hyps(2) s(2) step.IH[OF s(1)]
+          by (auto intro: timpl_closure'_step.intros)
+        thus ?thesis by simp
+      qed
+    qed
+    thus ?case using step.IH by simp
+  qed simp
+qed
+
+lemma timpl_closure'_timpls_trancl_supset:
+  "timpl_closure' c \<subseteq> timpl_closure' (c\<^sup>+)"
+using timpl_closure'_timpls_trancl_supset'[of c]
+      timpl_closure'_mono[of "{(a,b) \<in> c\<^sup>+. a \<noteq> b}" "c\<^sup>+"]
+by fast
+
+lemma timpl_closure'_timpls_trancl_eq:
+  "timpl_closure' (c\<^sup>+) = timpl_closure' c"
+using timpl_closure'_timpls_trancl_subset timpl_closure'_timpls_trancl_supset
+by blast
+
+lemma timpl_closure'_timpls_trancl_eq':
+  "timpl_closure' {(a,b) \<in> c\<^sup>+. a \<noteq> b} = timpl_closure' c"
+using timpl_closure'_timpls_trancl_subset' timpl_closure'_timpls_trancl_supset'
+by blast
+
+lemma timpl_closure'_timpls_rtrancl_subset:
+  "timpl_closure' (c\<^sup>*) \<subseteq> timpl_closure' c"

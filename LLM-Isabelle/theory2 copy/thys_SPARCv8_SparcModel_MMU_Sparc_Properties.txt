@@ -1,0 +1,3742 @@
+theory Sparc_Properties
+
+imports Main Sparc_Execution
+
+begin
+
+
+
+
+
+method save_restore_proof =
+((simp add: save_restore_instr_def),
+ (simp add: Let_def simpler_gets_def bind_def h1_def h2_def),
+ (simp add: case_prod_unfold),
+ (simp add: raise_trap_def simpler_modify_def),
+ (simp add: simpler_gets_def bind_def h1_def h2_def),
+ (simp add: save_retore_sub1_def),
+ (simp add: write_cpu_def simpler_modify_def),
+ (simp add: write_reg_def simpler_modify_def),
+ (simp add: get_curr_win_def),
+ (simp add: simpler_gets_def bind_def h1_def h2_def))
+
+method select_trap_proof0 = 
+((simp add: select_trap_def exec_gets return_def),
+ (simp add: DetMonad.bind_def h1_def h2_def simpler_modify_def),
+ (simp add: write_cpu_tt_def write_cpu_def),
+ (simp add: DetMonad.bind_def h1_def h2_def simpler_modify_def),
+ (simp add: return_def simpler_gets_def))
+
+method select_trap_proof1 =
+((simp add: select_trap_def exec_gets return_def),
+ (simp add: DetMonad.bind_def h1_def h2_def simpler_modify_def),
+ (simp add: write_cpu_tt_def write_cpu_def),
+ (simp add: DetMonad.bind_def h1_def h2_def simpler_modify_def),
+ (simp add: return_def simpler_gets_def),
+ (simp add: emp_trap_set_def err_mode_val_def cpu_reg_mod_def))
+
+method dispatch_instr_proof1 =
+((simp add: dispatch_instruction_def),
+ (simp add: simpler_gets_def bind_def h1_def h2_def),
+ (simp add: Let_def))
+
+method exe_proof_to_decode =
+((simp add: execute_instruction_def),
+ (simp add: exec_gets bind_def h1_def h2_def Let_def return_def),
+ clarsimp,
+ (simp add: simpler_gets_def bind_def h1_def h2_def Let_def simpler_modify_def),
+ (simp add: return_def))
+
+method exe_proof_dispatch_rett =
+((simp add: dispatch_instruction_def),
+ (simp add: simpler_gets_def bind_def h1_def h2_def Let_def),
+ (simp add: rett_instr_def),
+ (simp add: simpler_gets_def bind_def h1_def h2_def Let_def))
+
+lemma write_cpu_result: "snd (write_cpu w r s) = False"
+by (simp add: write_cpu_def simpler_modify_def)
+
+lemma set_annul_result: "snd (set_annul b s) = False"
+by (simp add: set_annul_def simpler_modify_def)
+
+lemma raise_trap_result : "snd (raise_trap t s) = False"
+by (simp add: raise_trap_def simpler_modify_def)
+
+context
+  includes bit_operations_syntax
+begin
+
+lemma rett_instr_result: "(fst i) = ctrl_type RETT \<and> 
+  (get_ET (cpu_reg_val PSR s) \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) \<noteq> 0 \<and>
+  (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s))) + 1) mod NWINDOWS)) 
+    (cpu_reg_val WIM s)) = 0 \<and>
+  ((AND) (get_addr (snd i) s) (0b00000000000000000000000000000011::word32)) = 0) \<Longrightarrow>
+  snd (rett_instr i s) = False"
+apply (simp add: rett_instr_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: write_cpu_def simpler_modify_def)
+  apply (auto simp add: Let_def return_def)
+  done
+
+lemma call_instr_result: "(fst i) = call_type CALL \<Longrightarrow>
+  snd (call_instr i s) = False"
+apply (simp add: call_instr_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def case_prod_unfold)
+apply (simp add: write_cpu_def write_reg_def)
+apply (simp add: get_curr_win_def get_CWP_def)
+by (simp add: simpler_modify_def simpler_gets_def)
+
+lemma branch_instr_result: "(fst i) \<in> {bicc_type BE,bicc_type BNE,bicc_type BGU,
+ bicc_type BLE,bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+ bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,bicc_type BN}  \<Longrightarrow>
+  snd (branch_instr i s) = False" 
+proof (cases "eval_icc (fst i) (get_icc_N ((cpu_reg s) PSR)) (get_icc_Z ((cpu_reg s) PSR))
+                           (get_icc_V ((cpu_reg s) PSR)) (get_icc_C ((cpu_reg s) PSR)) = 1")
+  case True
+  then have f1: "eval_icc (fst i) (get_icc_N ((cpu_reg s) PSR)) (get_icc_Z ((cpu_reg s) PSR))
+                           (get_icc_V ((cpu_reg s) PSR)) (get_icc_C ((cpu_reg s) PSR)) = 1" 
+    by auto
+  then show ?thesis
+  proof (cases "(fst i) = bicc_type BA \<and> get_operand_flag ((snd i)!0) = 1")
+    case True
+    then show ?thesis using f1
+    apply (simp add: branch_instr_def)
+    apply (simp add: Let_def simpler_gets_def bind_def h1_def h2_def)    
+    apply (simp add: set_annul_def case_prod_unfold)
+    apply (simp add: write_cpu_def simpler_modify_def)
+    by (simp add: return_def)   
+  next
+    case False
+    then have f2: "\<not> (fst i = bicc_type BA \<and> get_operand_flag (snd i ! 0) = 1)" by auto
+    then show ?thesis using f1
+    apply (simp add: branch_instr_def)
+    apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+    apply (simp add: write_cpu_def simpler_modify_def)
+    apply (simp add: branch_instr_sub1_def)
+    apply (simp add: Let_def)
+    apply auto
+    apply (simp add: write_cpu_def simpler_modify_def)    
+    by (simp add: write_cpu_def simpler_modify_def)
+  qed
+next
+  case False
+  then show ?thesis
+  apply (simp add: branch_instr_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: write_cpu_def simpler_modify_def)
+  apply (simp add: branch_instr_sub1_def)
+  apply (simp add: Let_def)
+  apply auto
+   apply (simp add: Let_def bind_def h1_def h2_def)
+   apply (simp add: write_cpu_def simpler_modify_def)
+   apply (simp add: cpu_reg_mod_def set_annul_def simpler_modify_def)
+  by (simp add: write_cpu_def simpler_modify_def)
+qed
+
+lemma nop_instr_result: "(fst i) = nop_type NOP \<Longrightarrow>
+  snd (nop_instr i s) = False"
+apply (simp add: nop_instr_def)
+by (simp add: returnOk_def return_def)
+
+lemma sethi_instr_result: "(fst i) = sethi_type SETHI \<Longrightarrow>
+  snd (sethi_instr i s) = False"
+apply (simp add: sethi_instr_def)
+apply (simp add: Let_def)
+apply (simp add: get_curr_win_def get_CWP_def cpu_reg_val_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: write_reg_def simpler_modify_def)
+by (simp add: return_def)
+
+lemma jmpl_instr_result: "(fst i) = ctrl_type JMPL \<Longrightarrow>
+  snd (jmpl_instr i s) = False"
+apply (simp add: jmpl_instr_def)
+apply (simp add: get_curr_win_def get_CWP_def cpu_reg_val_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: write_reg_def simpler_modify_def)
+apply (simp add: write_cpu_def simpler_modify_def)
+by (simp add: raise_trap_def simpler_modify_def)
+
+lemma save_restore_instr_result: "(fst i) \<in> {ctrl_type SAVE,ctrl_type RESTORE} \<Longrightarrow>
+  snd (save_restore_instr i s) = False"
+proof (cases "(fst i) = ctrl_type SAVE")
+  case True
+  then show ?thesis
+  by save_restore_proof
+next
+  case False
+  then show ?thesis
+  by save_restore_proof
+qed
+
+lemma flush_instr_result: "(fst i) = load_store_type FLUSH  \<Longrightarrow>
+  snd (flush_instr i s) = False" 
+apply (simp add: flush_instr_def)
+by (simp add: simpler_gets_def bind_def h1_def h2_def simpler_modify_def)
+
+lemma read_state_reg_instr_result: "(fst i) \<in> {sreg_type RDY,sreg_type RDPSR,
+  sreg_type RDWIM,sreg_type RDTBR} \<Longrightarrow>
+  snd (read_state_reg_instr i s) = False"
+apply (simp add: read_state_reg_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: simpler_gets_def bind_def)
+apply (simp add: write_reg_def simpler_modify_def)
+apply (simp add: raise_trap_def simpler_modify_def return_def)
+apply (simp add: bind_def h1_def h2_def)
+by (simp add: get_curr_win_def simpler_gets_def)
+
+lemma write_state_reg_instr_result: "(fst i) \<in> {sreg_type WRY,sreg_type WRPSR,
+  sreg_type WRWIM,sreg_type WRTBR} \<Longrightarrow>
+  snd (write_state_reg_instr i s) = False" 
+apply (simp add: write_state_reg_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: simpler_modify_def)
+apply (simp add: raise_trap_def simpler_modify_def return_def)
+apply (simp add: bind_def h1_def h2_def)
+apply (simp add: simpler_gets_def)
+apply (simp add: write_cpu_def simpler_modify_def)
+by (simp add: get_curr_win_def simpler_gets_def)
+
+lemma logical_instr_result: "(fst i) \<in> {logic_type ANDs,logic_type ANDcc,
+  logic_type ANDN,logic_type ANDNcc,logic_type ORs,logic_type ORcc,
+  logic_type ORN,logic_type XORs,logic_type XNOR} \<Longrightarrow>
+  snd (logical_instr i s) = False"
+apply (simp add: logical_instr_def)
+apply (simp add: Let_def simpler_gets_def)
+apply (simp add: write_reg_def simpler_modify_def)
+apply (simp add: bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: logical_instr_sub1_def)
+apply (simp add: return_def)
+apply (simp add: write_cpu_def simpler_modify_def)
+apply (simp add: bind_def h1_def h2_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: simpler_gets_def)
+by (simp add: get_curr_win_def simpler_gets_def)
+
+lemma shift_instr_result: "(fst i) \<in> {shift_type SLL,shift_type 
+  SRL,shift_type SRA} \<Longrightarrow>
+  snd (shift_instr i s) = False"
+apply (simp add: shift_instr_def)
+apply (simp add: Let_def)
+apply (simp add: get_curr_win_def simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: return_def)
+apply (simp add: bind_def h1_def h2_def)
+by (simp add: write_reg_def simpler_modify_def)
+
+method add_sub_instr_proof =
+((simp add: Let_def),
+ auto,
+ (simp add: write_reg_def simpler_modify_def),
+ (simp add: simpler_gets_def bind_def),
+ (simp add: get_curr_win_def simpler_gets_def),
+ (simp add: write_reg_def write_cpu_def simpler_modify_def),
+ (simp add: bind_def),
+ (simp add: case_prod_unfold),
+ (simp add: simpler_gets_def),
+ (simp add: get_curr_win_def simpler_gets_def),
+ (simp add: write_reg_def simpler_modify_def),
+ (simp add: simpler_gets_def bind_def),
+ (simp add: get_curr_win_def simpler_gets_def))
+
+lemma add_instr_result: "(fst i) \<in> {arith_type ADD,arith_type 
+  ADDcc,arith_type ADDX} \<Longrightarrow>
+  snd (add_instr i s) = False"
+apply (simp add: add_instr_def)
+apply (simp add: Let_def)
+apply auto
+  apply (simp add: add_instr_sub1_def)
+  apply (simp add: write_reg_def simpler_modify_def)
+  apply (simp add: bind_def h1_def h2_def Let_def)
+  apply (simp add: case_prod_unfold)
+  apply (simp add: simpler_gets_def)
+  apply (simp add: get_curr_win_def simpler_gets_def)
+ apply (simp add: add_instr_sub1_def)
+ apply (simp add: write_reg_def simpler_modify_def)
+ apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+ apply (simp add: get_curr_win_def simpler_gets_def)
+ apply (simp add: write_cpu_def simpler_modify_def)
+apply (simp add: add_instr_sub1_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: get_curr_win_def simpler_gets_def)
+by (simp add: write_reg_def simpler_modify_def)
+
+lemma sub_instr_result: "(fst i) \<in> {arith_type SUB,arith_type SUBcc,
+  arith_type SUBX} \<Longrightarrow>
+  snd (sub_instr i s) = False"
+apply (simp add: sub_instr_def)
+apply (simp add: Let_def)
+apply auto
+  apply (simp add: sub_instr_sub1_def)
+  apply (simp add: write_reg_def simpler_modify_def)
+  apply (simp add: bind_def h1_def h2_def Let_def)
+  apply (simp add: case_prod_unfold)
+  apply (simp add: simpler_gets_def)
+  apply (simp add: get_curr_win_def simpler_gets_def)
+ apply (simp add: sub_instr_sub1_def)
+ apply (simp add: write_reg_def simpler_modify_def)
+ apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+ apply (simp add: get_curr_win_def simpler_gets_def)
+ apply (simp add: write_cpu_def simpler_modify_def)
+apply (simp add: sub_instr_sub1_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: get_curr_win_def simpler_gets_def)
+by (simp add: write_reg_def simpler_modify_def)
+
+lemma mul_instr_result: "(fst i) \<in> {arith_type UMUL,arith_type SMUL,
+  arith_type SMULcc} \<Longrightarrow>
+  snd (mul_instr i s) = False"
+apply (simp add: mul_instr_def)
+apply (simp add: Let_def)
+apply auto
+  apply (simp add: mul_instr_sub1_def)
+  apply (simp add: write_reg_def simpler_modify_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: get_curr_win_def simpler_gets_def)
+  apply (simp add: write_reg_def write_cpu_def simpler_modify_def)
+ apply (simp add: mul_instr_sub1_def)
+ apply (simp add: simpler_gets_def)
+ apply (simp add: write_cpu_def write_reg_def simpler_modify_def)
+ apply (simp add: bind_def h1_def h2_def Let_def)
+ apply (simp add: get_curr_win_def simpler_gets_def)
+apply (simp add: mul_instr_sub1_def)
+apply (simp add: simpler_gets_def)
+apply (simp add: write_cpu_def write_reg_def simpler_modify_def)
+apply (simp add: bind_def h1_def h2_def)
+by (simp add: get_curr_win_def simpler_gets_def)
+
+lemma div_write_new_val_result: "snd (div_write_new_val i result temp_V s) = False"
+apply (simp add: div_write_new_val_def)
+apply (simp add: return_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+by (simp add: write_cpu_def simpler_modify_def)
+
+lemma div_result: "snd (div_comp instr rs1 rd operand2 s) = False"
+apply (simp add: div_comp_def)
+apply (simp add: simpler_gets_def)
+apply (simp add: bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: write_reg_def simpler_modify_def)
+apply (simp add: get_curr_win_def simpler_gets_def)
+by (simp add: div_write_new_val_result)
+
+lemma div_instr_result: "(fst i) \<in> {arith_type UDIV,arith_type UDIVcc,
+  arith_type SDIV} \<Longrightarrow>
+  snd (div_instr i s) = False"
+apply (simp add: div_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: raise_trap_def simpler_modify_def)
+apply (simp add: return_def bind_def)
+by (simp add: div_result)
+
+lemma load_sub2_result: "snd (load_sub2 address asi rd curr_win word0 s) = False"
+apply (simp add: load_sub2_def)
+apply (simp add: write_reg_def simpler_modify_def)
+apply (simp add: bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: raise_trap_def simpler_modify_def)
+apply (simp add: bind_def h1_def h2_def)
+apply (simp add: write_reg_def simpler_modify_def)
+by (simp add: simpler_gets_def)
+
+lemma load_sub3_result: "snd (load_sub3 instr curr_win rd asi address s) = False"
+apply (simp add: load_sub3_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: simpler_modify_def bind_def h1_def h2_def Let_def)
+apply (simp add: write_reg_def simpler_modify_def)
+apply (simp add: load_sub2_result)
+by (simp add: raise_trap_def simpler_modify_def)
+
+lemma load_sub1_result: "snd (load_sub1 i rd s_val s) = False"
+apply (simp add: load_sub1_def)
+apply (simp add: bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: raise_trap_def simpler_modify_def)
+apply (simp add: get_curr_win_def simpler_gets_def)
+by (simp add: load_sub3_result)
+
+lemma load_instr_result: "(fst i) \<in> {load_store_type LDSB,load_store_type LDUB,
+  load_store_type LDUBA,load_store_type LDUH,load_store_type LD,
+  load_store_type LDA,load_store_type LDD} \<Longrightarrow>
+  snd (load_instr i s) = False"
+apply (simp add: load_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: raise_trap_def simpler_modify_def)
+apply (simp add: return_def)
+by (simp add: load_sub1_result)
+
+lemma store_sub2_result: "snd (store_sub2 instr curr_win rd asi address s) = False"
+apply (simp add: store_sub2_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: raise_trap_def simpler_modify_def)
+apply (simp add: return_def)
+apply (simp add: raise_trap_def simpler_modify_def)
+by (simp add: bind_def h1_def h2_def)
+
+lemma store_sub1_result: "snd (store_sub1 instr rd s_val s) = False"
+apply (simp add: store_sub1_def)
+apply (simp add: bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: raise_trap_def simpler_modify_def)
+apply (simp add: get_curr_win_def)
+apply (simp add: simpler_gets_def)
+by (simp add: store_sub2_result)
+
+lemma store_instr_result: "(fst i) \<in> {load_store_type STB,load_store_type STH,
+  load_store_type ST,load_store_type STA,load_store_type STD} \<Longrightarrow>
+  snd (store_instr i s) = False"
+apply (simp add: store_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: raise_trap_def simpler_modify_def)
+apply (simp add: return_def)
+by (simp add: store_sub1_result)
+
+lemma supported_instr_set: "supported_instruction i = True \<Longrightarrow> 
+  i \<in> {load_store_type LDSB,load_store_type LDUB,load_store_type LDUBA,
+              load_store_type LDUH,load_store_type LD,load_store_type LDA,
+              load_store_type LDD,
+              load_store_type STB,load_store_type STH,load_store_type ST,
+              load_store_type STA,load_store_type STD,
+              sethi_type SETHI,
+              nop_type NOP,
+              logic_type ANDs,logic_type ANDcc,logic_type ANDN,logic_type ANDNcc,
+              logic_type ORs,logic_type ORcc,logic_type ORN,logic_type XORs,
+              logic_type XNOR,
+              shift_type SLL,shift_type SRL,shift_type SRA,
+              arith_type ADD,arith_type ADDcc,arith_type ADDX,
+              arith_type SUB,arith_type SUBcc,arith_type SUBX,
+              arith_type UMUL,arith_type SMUL,arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              ctrl_type RETT,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+apply (simp add: supported_instruction_def)
+by presburger
+
+lemma dispatch_instr_result: 
+assumes a1: "supported_instruction (fst i) = True \<and> (fst i) \<noteq> ctrl_type RETT"
+shows "snd (dispatch_instruction i s) = False"
+proof (cases "get_trap_set s = {}")
+  case True
+  then have f1: "get_trap_set s = {}" by auto
+  then show ?thesis 
+  proof (cases "(fst i) \<in> {load_store_type LDSB,load_store_type LDUB,
+    load_store_type LDUBA,load_store_type LDUH,load_store_type LD,
+    load_store_type LDA,load_store_type LDD}")
+    case True
+    then show ?thesis using f1 
+    apply dispatch_instr_proof1
+    by (simp add: load_instr_result)
+  next
+    case False
+    then have f2: "(fst i) \<in> {load_store_type STB,load_store_type STH,load_store_type ST,
+              load_store_type STA,load_store_type STD,
+              sethi_type SETHI,
+              nop_type NOP,
+              logic_type ANDs,logic_type ANDcc,logic_type ANDN,logic_type ANDNcc,
+              logic_type ORs,logic_type ORcc,logic_type ORN,logic_type XORs,
+              logic_type XNOR,
+              shift_type SLL,shift_type SRL,shift_type SRA,
+              arith_type ADD,arith_type ADDcc,arith_type ADDX,
+              arith_type SUB,arith_type SUBcc,arith_type SUBX,
+              arith_type UMUL,arith_type SMUL,arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+     using a1 
+     apply (simp add: supported_instruction_def)
+     by presburger
+     then show ?thesis 
+     proof (cases "(fst i) \<in> {load_store_type STB,load_store_type STH,
+       load_store_type ST,
+       load_store_type STA,load_store_type STD}")
+      case True
+      then show ?thesis using f1
+      apply dispatch_instr_proof1      
+      by (auto simp add: store_instr_result)
+     next
+      case False
+      then have f3: "(fst i) \<in> {sethi_type SETHI,
+              nop_type NOP,
+              logic_type ANDs,logic_type ANDcc,logic_type ANDN,logic_type ANDNcc,
+              logic_type ORs,logic_type ORcc,logic_type ORN,logic_type XORs,
+              logic_type XNOR,
+              shift_type SLL,shift_type SRL,shift_type SRA,
+              arith_type ADD,arith_type ADDcc,arith_type ADDX,
+              arith_type SUB,arith_type SUBcc,arith_type SUBX,
+              arith_type UMUL,arith_type SMUL,arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+      using f2 by auto
+      then show ?thesis 
+      proof (cases "(fst i) = sethi_type SETHI")
+        case True
+        then show ?thesis using f1
+        apply dispatch_instr_proof1
+        by (simp add: sethi_instr_result)
+      next
+        case False
+        then have f4: "(fst i) \<in> {nop_type NOP,
+              logic_type ANDs,logic_type ANDcc,logic_type ANDN,logic_type ANDNcc,
+              logic_type ORs,logic_type ORcc,logic_type ORN,logic_type XORs,
+              logic_type XNOR,
+              shift_type SLL,shift_type SRL,shift_type SRA,
+              arith_type ADD,arith_type ADDcc,arith_type ADDX,
+              arith_type SUB,arith_type SUBcc,arith_type SUBX,
+              arith_type UMUL,arith_type SMUL,arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+        using f3 by auto         
+        then show ?thesis 
+        proof (cases "fst i = nop_type NOP")
+          case True
+          then show ?thesis using f1
+          apply dispatch_instr_proof1
+          by (simp add: nop_instr_result)
+        next
+          case False
+          then have f5: "(fst i) \<in> {logic_type ANDs,logic_type ANDcc,
+              logic_type ANDN,logic_type ANDNcc,
+              logic_type ORs,logic_type ORcc,logic_type ORN,logic_type XORs,
+              logic_type XNOR,
+              shift_type SLL,shift_type SRL,shift_type SRA,
+              arith_type ADD,arith_type ADDcc,arith_type ADDX,
+              arith_type SUB,arith_type SUBcc,arith_type SUBX,
+              arith_type UMUL,arith_type SMUL,arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+          using f4 by auto
+          then show ?thesis 
+          proof (cases "(fst i) \<in> {logic_type ANDs,logic_type ANDcc,
+              logic_type ANDN,logic_type ANDNcc,
+              logic_type ORs,logic_type ORcc,logic_type ORN,logic_type XORs,
+              logic_type XNOR}")
+            case True
+            then show ?thesis using f1
+            apply dispatch_instr_proof1
+            by (auto simp add: logical_instr_result)
+          next
+            case False
+            then have f6: "(fst i) \<in> {shift_type SLL,shift_type SRL,
+              shift_type SRA,
+              arith_type ADD,arith_type ADDcc,arith_type ADDX,
+              arith_type SUB,arith_type SUBcc,arith_type SUBX,
+              arith_type UMUL,arith_type SMUL,arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+            using f5 by auto
+            then show ?thesis 
+            proof (cases "(fst i) \<in> {shift_type SLL,shift_type SRL,
+              shift_type SRA}")
+              case True
+              then show ?thesis using f1
+              apply dispatch_instr_proof1
+              by (auto simp add: shift_instr_result)
+            next 
+              case False
+              then have f7: "(fst i) \<in> {arith_type ADD,arith_type ADDcc,
+              arith_type ADDX,
+              arith_type SUB,arith_type SUBcc,arith_type SUBX,
+              arith_type UMUL,arith_type SMUL,arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}" 
+              using f6 by auto
+              then show ?thesis 
+              proof (cases "(fst i) \<in> {arith_type ADD,arith_type ADDcc,
+              arith_type ADDX}")
+                case True
+                then show ?thesis using f1
+                apply dispatch_instr_proof1
+                by (auto simp add: add_instr_result)
+              next
+                case False
+                then have f8: "(fst i) \<in> {arith_type SUB,arith_type SUBcc,
+                arith_type SUBX,
+              arith_type UMUL,arith_type SMUL,arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                using f7 by auto
+                then show ?thesis 
+                proof (cases "(fst i) \<in> {arith_type SUB,arith_type SUBcc,
+                arith_type SUBX}")
+                  case True
+                  then show ?thesis using f1
+                  apply dispatch_instr_proof1
+                  by (auto simp add: sub_instr_result)
+                next
+                  case False
+                  then have f9: "(fst i) \<in> {arith_type UMUL,arith_type SMUL,
+                  arith_type SMULcc,
+              arith_type UDIV,arith_type UDIVcc,arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                  using f8 by auto
+                  then show ?thesis 
+                  proof (cases "(fst i) \<in> {arith_type UMUL,arith_type SMUL,
+                  arith_type SMULcc}")
+                    case True
+                    then show ?thesis using f1
+                    apply dispatch_instr_proof1
+                    by (auto simp add: mul_instr_result)
+                  next
+                    case False
+                    then have f10: "(fst i) \<in> {arith_type UDIV,arith_type UDIVcc,
+                    arith_type SDIV,
+              ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                    using f9 by auto
+                    then show ?thesis 
+                    proof (cases "(fst i) \<in> {arith_type UDIV,arith_type UDIVcc,
+                    arith_type SDIV}")
+                      case True
+                      then show ?thesis 
+                      apply dispatch_instr_proof1 using f1
+                      by (auto simp add: div_instr_result)
+                    next
+                      case False
+                      then have f11: "(fst i) \<in> {ctrl_type SAVE,ctrl_type RESTORE,
+              call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                      using f10 by auto
+                      then show ?thesis 
+                      proof (cases "(fst i) \<in> {ctrl_type SAVE,ctrl_type RESTORE}")
+                        case True
+                        then show ?thesis using f1
+                        apply dispatch_instr_proof1 
+                        by (auto simp add: save_restore_instr_result)
+                      next
+                        case False
+                        then have f12: "(fst i) \<in> {call_type CALL,
+              ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                        using f11 by auto
+                        then show ?thesis 
+                        proof (cases "(fst i) = call_type CALL")
+                          case True
+                          then show ?thesis using f1
+                          apply dispatch_instr_proof1
+                          by (auto simp add: call_instr_result)
+                        next
+                          case False
+                          then have f13: "(fst i) \<in> {ctrl_type JMPL,
+              sreg_type RDY,sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                          using f12 by auto
+                          then show ?thesis 
+                          proof (cases "(fst i) = ctrl_type JMPL")
+                            case True
+                            then show ?thesis using f1
+                            apply dispatch_instr_proof1
+                            by (auto simp add: jmpl_instr_result)
+                          next
+                            case False
+                            then have f14: "(fst i) \<in> {
+                            sreg_type RDY,
+                            sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR,
+              sreg_type WRY,sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                            using f13 by auto
+                            then show ?thesis 
+                            proof (cases "(fst i) \<in> {sreg_type RDY,
+                            sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR}")
+                              case True
+                              then show ?thesis using f1
+                              apply dispatch_instr_proof1
+                              by (auto simp add: read_state_reg_instr_result)
+                            next
+                              case False
+                              then have f15: "(fst i) \<in> {
+                              sreg_type WRY,
+                              sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR,
+              load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                              using f14 by auto
+                              then show ?thesis 
+                              proof (cases "(fst i) \<in> {sreg_type WRY,
+                              sreg_type WRPSR,sreg_type WRWIM,sreg_type WRTBR}")
+                                case True
+                                then show ?thesis using f1
+                                apply dispatch_instr_proof1
+                                by (auto simp add: write_state_reg_instr_result)
+                              next
+                                case False
+                                then have f16: "(fst i) \<in> {
+                                load_store_type FLUSH,
+              bicc_type BE,bicc_type BNE,bicc_type BGU,bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                                using f15 by auto
+                                then show ?thesis 
+                                proof (cases "(fst i) = load_store_type FLUSH")
+                                  case True
+                                  then show ?thesis using f1
+                                  apply dispatch_instr_proof1
+                                  by (auto simp add: flush_instr_result)
+                                next
+                                  case False
+                                  then have f17: "(fst i) \<in>
+                                  {
+                                  bicc_type BE,bicc_type BNE,bicc_type BGU,
+                                  bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA,
+              bicc_type BN}"
+                                  using f16 by auto
+                                  then show ?thesis using f1
+                                  proof (cases "(fst i) \<in> {bicc_type BE,
+                                    bicc_type BNE,bicc_type BGU,
+                                  bicc_type BLE,
+              bicc_type BL,bicc_type BGE,bicc_type BNEG,bicc_type BG,
+              bicc_type BCS,bicc_type BLEU,bicc_type BCC,bicc_type BA
+              }")
+                                    case True
+                                    then show ?thesis using f1
+                                    apply dispatch_instr_proof1
+                                    apply auto
+                                               by (auto simp add: branch_instr_result)
+                                  next
+                                    case False
+                                    then have f18: "(fst i) \<in> {bicc_type BN}" 
+                                    using f17 by auto
+                                    then show ?thesis using f1
+                                    apply dispatch_instr_proof1
+                                    apply auto
+                                    by (auto simp add: branch_instr_result)
+                                  qed
+                                qed
+                              qed
+                            qed
+                          qed
+                        qed
+                      qed
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+     qed
+  qed
+next
+  case False
+  then show ?thesis
+  apply (simp add: dispatch_instruction_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: Let_def)
+  by (simp add: returnOk_def return_def)
+qed
+
+lemma dispatch_instr_result_rett: 
+assumes a1: "(fst i) = ctrl_type RETT \<and> (get_ET (cpu_reg_val PSR s) \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) \<noteq> 0 \<and>
+  (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s))) + 1) mod NWINDOWS)) 
+    (cpu_reg_val WIM s)) = 0 \<and>
+  ((AND) (get_addr (snd i) s) (0b00000000000000000000000000000011::word32)) = 0)"
+shows "snd (dispatch_instruction i s) = False"
+proof (cases "get_trap_set s = {}")
+  case True
+  then show ?thesis using a1
+  apply (simp add: dispatch_instruction_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  by (simp add: rett_instr_result)
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: dispatch_instruction_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  by (simp add: return_def)
+qed
+
+lemma execute_instr_sub1_result: "snd (execute_instr_sub1 i s) = False"
+proof (cases "get_trap_set s = {} \<and> (fst i) \<in> {call_type CALL,ctrl_type RETT,
+  ctrl_type JMPL}")
+  case True
+  then show ?thesis 
+  apply (simp add: execute_instr_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: write_cpu_def simpler_modify_def)
+  apply auto
+     by (auto simp add: return_def)
+next
+  case False
+  then show ?thesis
+  apply (simp add: execute_instr_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: write_cpu_def simpler_modify_def)
+  by (auto simp add: return_def)
+qed
+
+lemma next_match : "snd (execute_instruction () s) = False \<Longrightarrow>
+  NEXT s = Some (snd (fst (execute_instruction () s)))"
+apply (simp add: NEXT_def)
+by (simp add: case_prod_unfold)
+
+lemma exec_ss1 : "\<exists>s'. (execute_instruction () s = (s', False)) \<Longrightarrow> 
+  \<exists>s''. (execute_instruction() s = (s'', False))"
+proof -
+  assume "\<exists>s'. (execute_instruction () s = (s', False))"
+  hence "(snd (execute_instruction() s)) = False" 
+         by (auto simp add: execute_instruction_def case_prod_unfold)         
+  hence "(execute_instruction() s) = 
+        ((fst (execute_instruction() s)),False)"
+         by (metis (full_types) prod.collapse) 
+  hence "\<exists>s''. (execute_instruction() s = (s'', False))" 
+        by blast
+  thus ?thesis by assumption
+qed
+
+lemma exec_ss2 : "snd (execute_instruction() s) = False \<Longrightarrow>
+  snd (execute_instruction () s) = False"
+proof -
+  assume "snd (execute_instruction() s) = False"
+  hence "snd (execute_instruction () s) = False" 
+    by (auto simp add:execute_instruction_def)
+  thus ?thesis by assumption
+qed
+
+lemma good_context_1 : "good_context s \<and> s' = s \<and>
+  (get_trap_set s') \<noteq> {} \<and> (reset_trap_val s') = False \<and> get_ET (cpu_reg_val PSR s') = 0 
+  \<Longrightarrow> False"
+proof -
+  assume asm: "good_context s \<and> s' = s \<and>
+    (get_trap_set s') \<noteq> {} \<and> (reset_trap_val s') = False \<and> get_ET (cpu_reg_val PSR s') = 0"
+  then have  "(get_trap_set s') \<noteq> {} \<and> (reset_trap_val s') = False \<and> 
+  get_ET (cpu_reg_val PSR s') = 0 \<Longrightarrow> False" 
+    by (simp add: good_context_def get_ET_def cpu_reg_val_def) 
+  then show ?thesis using asm by auto 
+qed
+
+lemma fetch_instr_result_1 : "\<not> (\<exists>e. fetch_instruction s' = Inl e) \<Longrightarrow>
+  (\<exists>v. fetch_instruction s' = Inr v)"
+by (meson sumE)
+
+lemma fetch_instr_result_2 : "(\<exists>v. fetch_instruction s' = Inr v) \<Longrightarrow>
+  \<not> (\<exists>e. fetch_instruction s' = Inl e)"
+by force
+
+lemma fetch_instr_result_3 : "(\<exists>e. fetch_instruction s' = Inl e) \<Longrightarrow>
+  \<not> (\<exists>v. fetch_instruction s' = Inr v)"
+by auto
+
+lemma decode_instr_result_1 : 
+"\<not>(\<exists>v2. ((decode_instruction v1)::(Exception list + instruction)) = Inr v2) \<Longrightarrow>
+  (\<exists>e. ((decode_instruction v1)::(Exception list + instruction)) = Inl e)"
+by (meson sumE)
+
+lemma decode_instr_result_2 : 
+"(\<exists>e. ((decode_instruction v1)::(Exception list + instruction)) = Inl e) \<Longrightarrow>
+  \<not>(\<exists>v2. ((decode_instruction v1)::(Exception list + instruction)) = Inr v2)"
+by force
+
+lemma decode_instr_result_3 : "x = decode_instruction v1 \<and> y = decode_instruction v2 
+  \<and> v1 = v2 \<Longrightarrow> x = y"
+by auto
+
+lemma decode_instr_result_4 : 
+"\<not> (\<exists>e. ((decode_instruction v1)::(Exception list + instruction)) = Inl e) \<Longrightarrow>
+  (\<exists>v2. ((decode_instruction v1)::(Exception list + instruction)) = Inr v2)"
+by (meson sumE)
+
+lemma good_context_2 : 
+"good_context (s::(('a::len) sparc_state)) \<and> 
+ fetch_instruction (delayed_pool_write s) = Inr v1  \<and> 
+ \<not>(\<exists>v2. (decode_instruction v1::(Exception list + instruction)) = Inr v2) 
+ \<Longrightarrow> False"
+proof -
+  assume "good_context s \<and> 
+    fetch_instruction (delayed_pool_write s) = Inr v1 \<and> 
+    \<not>(\<exists>v2. ((decode_instruction v1)::(Exception list + instruction)) = Inr v2)"
+  hence fact1: "good_context s \<and> 
+    fetch_instruction (delayed_pool_write s) = Inr v1 \<and> 
+    (\<exists>e. ((decode_instruction v1)::(Exception list + instruction)) = Inl e)" 
+    using decode_instr_result_1 by auto
+  hence fact2: "\<not>(\<exists>e. fetch_instruction (delayed_pool_write s) = Inl e)" 
+    using fetch_instr_result_2 by auto
+  then have "fetch_instruction (delayed_pool_write s) = Inr v1 \<and> 
+            (\<exists>e. ((decode_instruction v1)::(Exception list + instruction)) = Inl e) 
+            \<Longrightarrow> False"
+    proof (cases "(get_trap_set s) \<noteq> {} \<and> (reset_trap_val s) = False \<and> 
+      get_ET (cpu_reg_val PSR s) = 0") 
+      case True 
+      from this fact1 show ?thesis using good_context_1 by blast
+    next
+      case False
+        then have fact3: "(get_trap_set s) = {} \<or> (reset_trap_val s) \<noteq> False 
+        \<or> get_ET (cpu_reg_val PSR s) \<noteq> 0"
+          by auto
+        then show ?thesis 
+          using fact1 decode_instr_result_3
+          by (metis (no_types, lifting) good_context_def sum.case(1) sum.case(2))        
+    qed
+  thus ?thesis using fact1 by auto
+qed
+
+lemma good_context_3 : 
+"good_context (s::(('a::len) sparc_state)) \<and> 
+ s'' = delayed_pool_write s \<and>
+ fetch_instruction s'' = Inr v1  \<and> 
+ (decode_instruction v1::(Exception list + instruction)) = Inr v2 \<and>
+ annul_val s'' = False \<and> supported_instruction (fst v2) = False
+ \<Longrightarrow> False"
+proof -
+  assume asm: "good_context (s::(('a::len) sparc_state)) \<and> 
+  s'' = delayed_pool_write s \<and>
+  fetch_instruction s'' = Inr v1  \<and> 
+  (decode_instruction v1::(Exception list + instruction)) = Inr v2 \<and>
+  annul_val s'' = False \<and> supported_instruction (fst v2) = False"
+  then have "annul_val s'' = False \<and> supported_instruction (fst v2) = False
+    \<Longrightarrow> False"
+    proof (cases "(get_trap_set s) \<noteq> {} \<and> (reset_trap_val s) = False \<and> 
+      get_ET (cpu_reg_val PSR s) = 0")
+      case True
+      from this asm show ?thesis using good_context_1 by blast
+    next 
+      case False
+      then have fact3: "(get_trap_set s) = {} \<or> (reset_trap_val s) \<noteq> False \<or> 
+      get_ET (cpu_reg_val PSR s) \<noteq> 0"
+        by auto
+      thus ?thesis using asm by (auto simp add: good_context_def)
+    qed
+  thus ?thesis using asm by auto
+qed
+
+lemma good_context_4 : 
+"good_context (s::(('a::len) sparc_state)) \<and> 
+ s'' = delayed_pool_write s \<and>
+ fetch_instruction s'' = Inr v1 \<and> 
+ ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+ annul_val s'' = False \<and> 
+ (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+ (((get_S (cpu_reg_val PSR s'')))::word1) = 0
+ \<Longrightarrow> False"
+proof -
+  assume asm: "good_context (s::(('a::len) sparc_state)) \<and> 
+  s'' = delayed_pool_write s \<and>
+  fetch_instruction s'' = Inr v1 \<and> 
+  ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+  annul_val s'' = False \<and> 
+  (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) = 0"
+  then have "(fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) = 0 \<Longrightarrow> False"
+    proof (cases "(get_trap_set s) \<noteq> {} \<and> (reset_trap_val s) = False \<and> 
+      get_ET (cpu_reg_val PSR s) = 0")
+      case True
+      from this asm show ?thesis using good_context_1 by blast
+    next 
+      case False
+      then have fact3: "(get_trap_set s) = {} \<or> (reset_trap_val s) \<noteq> False \<or> 
+      get_ET (cpu_reg_val PSR s) \<noteq> 0"
+        by auto
+      thus ?thesis using asm by (auto simp add: good_context_def)
+    qed
+  thus ?thesis using asm by auto
+qed
+
+lemma good_context_5 : 
+"good_context (s::(('a::len) sparc_state)) \<and> 
+ s'' = delayed_pool_write s \<and>
+ fetch_instruction s'' = Inr v1 \<and> 
+ ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+ annul_val s'' = False \<and> 
+ (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+ (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+ (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+  (cpu_reg_val WIM s'')) \<noteq> 0
+ \<Longrightarrow> False"
+proof -
+  assume asm: "good_context (s::(('a::len) sparc_state)) \<and> 
+  s'' = delayed_pool_write s \<and>
+  fetch_instruction s'' = Inr v1 \<and> 
+  ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+  annul_val s'' = False \<and> 
+  (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+  (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+    (cpu_reg_val WIM s'')) \<noteq> 0"
+  then have "(fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+  (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+    (cpu_reg_val WIM s'')) \<noteq> 0
+  \<Longrightarrow> False"
+    proof (cases "(get_trap_set s) \<noteq> {} \<and> (reset_trap_val s) = False \<and> 
+      get_ET (cpu_reg_val PSR s) = 0")
+      case True
+      from this asm show ?thesis using good_context_1 by blast
+    next 
+      case False
+      then have fact3: "(get_trap_set s) = {} \<or> (reset_trap_val s) \<noteq> False \<or>
+      get_ET (cpu_reg_val PSR s) \<noteq> 0"
+        by auto
+      thus ?thesis using asm by (auto simp add: good_context_def)
+    qed
+  thus ?thesis using asm by auto
+qed
+
+lemma good_context_6 : 
+"good_context (s::(('a::len) sparc_state)) \<and> 
+ s'' = delayed_pool_write s \<and>
+ fetch_instruction s'' = Inr v1 \<and> 
+ ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+ annul_val s'' = False \<and> 
+ (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+ (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+ (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+  (cpu_reg_val WIM s'')) = 0 \<and>
+ ((AND) (get_addr (snd v2) s'') (0b00000000000000000000000000000011::word32)) \<noteq> 0
+ \<Longrightarrow> False"
+proof -
+  assume asm: "good_context (s::(('a::len) sparc_state)) \<and> 
+  s'' = delayed_pool_write s \<and>
+  fetch_instruction s'' = Inr v1 \<and> 
+  ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+  annul_val s'' = False \<and> 
+  (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+  (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+    (cpu_reg_val WIM s'')) = 0 \<and>
+  ((AND) (get_addr (snd v2) s'') (0b00000000000000000000000000000011::word32)) \<noteq> 0"
+  then have "(fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+  (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+    (cpu_reg_val WIM s'')) = 0 \<and>
+  ((AND) (get_addr (snd v2) s'') (0b00000000000000000000000000000011::word32)) \<noteq> 0
+  \<Longrightarrow> False"
+    proof (cases "(get_trap_set s) \<noteq> {} \<and> (reset_trap_val s) = False \<and> 
+      get_ET (cpu_reg_val PSR s) = 0")
+      case True
+      from this asm show ?thesis using good_context_1 by blast
+    next 
+      case False
+      then have fact3: "(get_trap_set s) = {} \<or> (reset_trap_val s) \<noteq> False \<or>
+      get_ET (cpu_reg_val PSR s) \<noteq> 0"
+        by auto
+      thus ?thesis using asm by (auto simp add: good_context_def)
+    qed
+  thus ?thesis using asm by auto
+qed
+
+lemma good_context_all : 
+"good_context (s::(('a::len) sparc_state)) \<and> 
+ s'' = delayed_pool_write s \<Longrightarrow>
+ (get_trap_set s = {} \<or> (reset_trap_val s) \<noteq> False \<or> get_ET (cpu_reg_val PSR s) \<noteq> 0) \<and>
+ ((\<exists>e. fetch_instruction s'' = Inl e) \<or> 
+  (\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+   ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+   (annul_val s'' = True \<or>
+    (annul_val s'' = False \<and> 
+     (\<forall>v1' v2'. fetch_instruction s'' = Inr v1' \<and> 
+      ((decode_instruction v1')::(Exception list + instruction)) = Inr v2' \<longrightarrow>
+      supported_instruction (fst v2') = True) \<and>
+     ((fst v2) \<noteq> ctrl_type RETT \<or>
+      ((fst v2) = ctrl_type RETT \<and> 
+       (get_ET (cpu_reg_val PSR s'') = 1 \<or>
+        (get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+        (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+        (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+          (cpu_reg_val WIM s'')) = 0 \<and>
+        ((AND) (get_addr (snd v2) s'') (0b00000000000000000000000000000011::word32)) = 0))))))))"
+proof -
+ assume asm: "good_context s \<and> s'' = delayed_pool_write s"
+ from asm have "(get_trap_set s) \<noteq> {} \<and> (reset_trap_val s) = False \<and> 
+ get_ET (cpu_reg_val PSR s) = 0 \<Longrightarrow> False"
+  using good_context_1 by blast  
+ hence fact1: "(get_trap_set s = {} \<or> (reset_trap_val s) \<noteq> False \<or> 
+ get_ET (cpu_reg_val PSR s) \<noteq> 0)" by auto
+ have fact2: "\<not>(\<exists>e. fetch_instruction s'' = Inl e) \<and> \<not> (\<exists>v1. fetch_instruction s'' = Inr v1) 
+  \<Longrightarrow> False" using fetch_instr_result_1 by blast
+ from asm have fact3: "\<exists>v1. fetch_instruction s'' = Inr v1 \<and>
+  \<not>(\<exists>v2.((decode_instruction v1)::(Exception list + instruction)) = Inr v2)
+  \<Longrightarrow> False"
+  using good_context_2 by blast
+ from asm have fact4: "\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+  ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+  annul_val s'' = False \<and> supported_instruction (fst v2) = False
+  \<Longrightarrow> False"
+  using good_context_3 by blast
+ from asm have fact5: "\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+  ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+  annul_val s'' = False \<and> supported_instruction (fst v2) = True \<and>
+  (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) = 0
+  \<Longrightarrow> False"
+  using good_context_4 by blast
+ from asm have fact6: "\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+  ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+  annul_val s'' = False \<and> supported_instruction (fst v2) = True \<and>
+  (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+  (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+    (cpu_reg_val WIM s'')) \<noteq> 0
+  \<Longrightarrow> False" 
+  using good_context_5 by blast
+ from asm have fact7: "\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+  ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+  annul_val s'' = False \<and> supported_instruction (fst v2) = True \<and>
+  (fst v2) = ctrl_type RETT \<and> get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and>
+  (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0 \<and>
+  (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) mod NWINDOWS)) 
+    (cpu_reg_val WIM s'')) = 0 \<and>
+  ((AND) (get_addr (snd v2) s'') (0b00000000000000000000000000000011::word32)) \<noteq> 0
+  \<Longrightarrow> False"
+    using good_context_6 by blast
+ from asm show ?thesis 
+  proof (cases "(\<exists>e. fetch_instruction s'' = Inl e)")
+    case True
+    then show ?thesis using fact1 by auto
+  next 
+    case False
+    then have fact8: "\<exists>v1. fetch_instruction s'' = Inr v1 \<and> 
+    (\<exists>v2.((decode_instruction v1)::(Exception list + instruction)) = Inr v2)"
+      using fact2 fact3 by auto
+    then show ?thesis 
+      proof (cases "annul_val s'' = True")
+        case True
+        then show ?thesis using fact1 fact8 by auto
+      next 
+        case False
+        then have fact9: "\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+        ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+        annul_val s'' = False \<and> supported_instruction (fst v2) = True"
+          using fact4 fact8 by blast
+        then show ?thesis 
+          proof (cases "\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+            ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+            (fst v2) \<noteq> ctrl_type RETT")
+            case True
+            then show ?thesis using fact1 fact9 by auto  
+          next
+            case False
+            then have fact10: "\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+            ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+            annul_val s'' = False \<and> supported_instruction (fst v2) = True \<and> 
+              (fst v2) = ctrl_type RETT"
+              using fact9 by auto
+            then show ?thesis 
+              proof (cases "get_ET (cpu_reg_val PSR s'') = 1")
+                case True
+                then show ?thesis using fact1 fact9 by auto
+              next
+                case False
+                then have fact11: "get_ET (cpu_reg_val PSR s'') \<noteq> 1 \<and> 
+                (((get_S (cpu_reg_val PSR s'')))::word1) \<noteq> 0"
+                  using fact10 fact5 by auto
+                then have fact12: "(get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR s''))) + 1) 
+                  mod NWINDOWS)) (cpu_reg_val WIM s'')) = 0" 
+                  using fact10 fact6 by auto
+                then have fact13: "\<exists>v1 v2. fetch_instruction s'' = Inr v1 \<and> 
+                ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+                ((AND) (get_addr (snd v2) s'') (0b00000000000000000000000000000011::word32)) = 0"
+                  using fact10 fact11 fact7 by blast
+                thus ?thesis using fact1 fact10 fact11 fact12 by auto
+              qed
+          qed
+      qed
+  qed
+qed
+
+lemma select_trap_result1 : "(reset_trap_val s) = True \<Longrightarrow>
+  snd (select_trap() s) = False"   
+apply (simp add: select_trap_def exec_gets return_def)
+by (simp add: bind_def  h1_def h2_def simpler_modify_def)
+
+lemma select_trap_result2 : 
+assumes a1: "\<not>(reset_trap_val s = False \<and> get_ET (cpu_reg_val PSR s) = 0)"
+shows  "snd (select_trap() s) = False"
+proof (cases "reset_trap_val s = True") 
+  case True
+  then show ?thesis using select_trap_result1 
+  by blast
+next
+  case False
+  then have f1: "reset_trap_val s = False \<and> get_ET (cpu_reg_val PSR s) \<noteq> 0"
+    using a1 by auto
+    then show ?thesis
+    proof (cases "data_store_error \<in> get_trap_set s")
+      case True
+      then show ?thesis using f1
+      by select_trap_proof0
+    next
+      case False
+      then have f2: "data_store_error \<notin> get_trap_set s" by auto
+      then show ?thesis 
+      proof (cases "instruction_access_error \<in> get_trap_set s")
+        case True
+        then show ?thesis using f1 f2
+        by select_trap_proof0
+      next
+        case False
+        then have f3: "instruction_access_error \<notin> get_trap_set s" by auto
+        then show ?thesis 
+        proof (cases "r_register_access_error \<in> get_trap_set s")
+          case True
+          then show ?thesis using f1 f2 f3
+          by select_trap_proof0
+        next
+          case False
+          then have f4: "r_register_access_error \<notin> get_trap_set s" by auto
+          then show ?thesis 
+          proof (cases "instruction_access_exception \<in> get_trap_set s")
+            case True
+            then show ?thesis using f1 f2 f3 f4
+            by select_trap_proof0
+          next
+            case False
+            then have f5: "instruction_access_exception \<notin> get_trap_set s" by auto
+            then show ?thesis 
+            proof (cases "privileged_instruction \<in> get_trap_set s")
+              case True
+              then show ?thesis using f1 f2 f3 f4 f5
+              by select_trap_proof0
+            next  
+              case False
+              then have f6: "privileged_instruction \<notin> get_trap_set s" by auto
+              then show ?thesis 
+              proof (cases "illegal_instruction \<in> get_trap_set s")
+                case True
+                then show ?thesis using f1 f2 f3 f4 f5 f6
+                by select_trap_proof0
+              next
+                case False
+                then have f7: "illegal_instruction \<notin> get_trap_set s" by auto
+                then show ?thesis
+                proof (cases "fp_disabled \<in> get_trap_set s")
+                  case True
+                  then show ?thesis using f1 f2 f3 f4 f5 f6 f7
+                  by select_trap_proof0
+                next
+                  case False
+                  then have f8: "fp_disabled \<notin> get_trap_set s" by auto
+                  then show ?thesis 
+                  proof (cases "cp_disabled \<in> get_trap_set s")
+                    case True
+                    then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8
+                    by select_trap_proof0
+                  next
+                    case False
+                    then have f9: "cp_disabled \<notin> get_trap_set s" by auto
+                    then show ?thesis 
+                    proof (cases "unimplemented_FLUSH \<in> get_trap_set s")
+                      case True
+                      then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9
+                      by select_trap_proof0
+                    next
+                      case False
+                      then have f10: "unimplemented_FLUSH \<notin> get_trap_set s" by auto
+                      then show ?thesis 
+                      proof (cases "window_overflow \<in> get_trap_set s")
+                        case True
+                        then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10
+                        by select_trap_proof0
+                      next 
+                        case False
+                        then have f11: "window_overflow \<notin> get_trap_set s" by auto
+                        then show ?thesis 
+                        proof (cases "window_underflow \<in> get_trap_set s")
+                          case True
+                          then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11
+                          by select_trap_proof0
+                        next
+                          case False
+                          then have f12: "window_underflow \<notin> get_trap_set s" by auto
+                          then show ?thesis 
+                          proof (cases "mem_address_not_aligned \<in> get_trap_set s")
+                            case True
+                            then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12
+                            by select_trap_proof0
+                          next
+                            case False
+                            then have f13: "mem_address_not_aligned \<notin> get_trap_set s" by auto
+                            then show ?thesis 
+                            proof (cases "fp_exception \<in> get_trap_set s")
+                              case True
+                              then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13
+                              by select_trap_proof0
+                            next
+                              case False
+                              then have f14: "fp_exception \<notin> get_trap_set s" by auto
+                              then show ?thesis 
+                              proof (cases "cp_exception \<in> get_trap_set s")
+                                case True
+                                then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13
+                                f14 
+                                by select_trap_proof0
+                              next
+                                case False
+                                then have f15: "cp_exception \<notin> get_trap_set s" by auto
+                                then show ?thesis 
+                                proof (cases "data_access_error \<in> get_trap_set s")
+                                  case True
+                                  then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13
+                                f14 f15 
+                                by select_trap_proof0
+                                next
+                                  case False
+                                  then have f16: "data_access_error \<notin> get_trap_set s" by auto
+                                  then show ?thesis 
+                                  proof (cases "data_access_exception \<in> get_trap_set s")
+                                    case True
+                                    then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 
+                                    f13 f14 f15 f16
+                                    by select_trap_proof0
+                                  next
+                                    case False
+                                    then have f17: "data_access_exception \<notin> get_trap_set s" by auto
+                                    then show ?thesis 
+                                    proof (cases "tag_overflow \<in> get_trap_set s")
+                                      case True
+                                      then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 
+                                      f13 f14 f15 f16 f17
+                                      by select_trap_proof0
+                                    next
+                                      case False
+                                      then have f18: "tag_overflow \<notin> get_trap_set s" by auto
+                                      then show ?thesis 
+                                      proof (cases "division_by_zero \<in> get_trap_set s")
+                                        case True
+                                        then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 
+                                        f12 f13 f14 f15 f16 f17 f18 
+                                        by select_trap_proof0
+                                      next
+                                        case False
+                                        then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 
+                                        f12 f13 f14 f15 f16 f17 f18
+                                        apply (simp add: select_trap_def exec_gets return_def)
+                                        apply (simp add: DetMonad.bind_def h1_def h2_def simpler_modify_def)
+                                        apply (simp add: return_def simpler_gets_def)
+                                        apply (simp add: case_prod_unfold)
+                                        apply (simp add: return_def)
+                                        apply (simp add: write_cpu_tt_def write_cpu_def)
+                                        by (simp add: simpler_gets_def bind_def h1_def h2_def simpler_modify_def)
+                                      qed
+                                    qed
+                                  qed
+                                qed
+                              qed
+                            qed
+                          qed
+                        qed
+                      qed
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+qed
+
+lemma emp_trap_set_err_mode : "err_mode_val s = err_mode_val (emp_trap_set s)"
+by (auto simp add: emp_trap_set_def err_mode_val_def)
+
+lemma write_cpu_tt_err_mode : "err_mode_val s = err_mode_val (snd (fst (write_cpu_tt w s)))"
+apply (simp add: write_cpu_tt_def err_mode_val_def write_cpu_def)  
+apply (simp add: exec_gets return_def)
+apply (simp add: bind_def simpler_modify_def)
+by (simp add: cpu_reg_mod_def)
+
+lemma select_trap_monad : "snd (select_trap() s) = False \<Longrightarrow> 
+  err_mode_val s = err_mode_val (snd (fst (select_trap () s)))"
+proof -
+  assume a1: "snd (select_trap() s) = False"
+  then have f0: "reset_trap_val s = False \<and> get_ET (cpu_reg_val PSR s) = 0 \<Longrightarrow> False" 
+    apply (simp add: select_trap_def exec_gets return_def)
+    apply (simp add: bind_def h1_def h2_def simpler_modify_def)
+    by (simp add: fail_def split_def)  
+  then show ?thesis
+    proof (cases "reset_trap_val s = True")
+      case True
+      from a1 f0 this show ?thesis 
+      apply (simp add: select_trap_def exec_gets return_def)
+      apply (simp add: bind_def h1_def h2_def simpler_modify_def)
+      by (simp add: emp_trap_set_def err_mode_val_def)
+    next
+      case False
+      then have f1: "reset_trap_val s = False \<and> get_ET (cpu_reg_val PSR s) \<noteq> 0" using f0 by auto
+      then show ?thesis using f1 a1
+      proof (cases "data_store_error \<in> get_trap_set s")
+        case True
+        then show ?thesis using f1 a1
+        by select_trap_proof1
+      next 
+        case False
+        then have f2: "data_store_error \<notin> get_trap_set s" by auto
+        then show ?thesis 
+        proof (cases "instruction_access_error \<in> get_trap_set s")
+          case True
+          then show ?thesis using f1 f2 a1
+          by select_trap_proof1
+        next
+          case False
+          then have f3: "instruction_access_error \<notin> get_trap_set s" by auto
+          then show ?thesis 
+          proof (cases "r_register_access_error \<in> get_trap_set s")
+            case True
+            then show ?thesis using f1 f2 f3 a1
+            by select_trap_proof1
+          next
+            case False
+            then have f4: "r_register_access_error \<notin> get_trap_set s" by auto
+            then show ?thesis 
+            proof (cases "instruction_access_exception \<in> get_trap_set s")
+              case True
+              then show ?thesis using f1 f2 f3 f4 a1
+              by select_trap_proof1
+            next
+              case False
+              then have f5: "instruction_access_exception \<notin> get_trap_set s" by auto
+              then show ?thesis 
+              proof (cases "privileged_instruction \<in> get_trap_set s")
+                case True
+                then show ?thesis using f1 f2 f3 f4 f5 a1
+                by select_trap_proof1
+              next  
+                case False
+                then have f6: "privileged_instruction \<notin> get_trap_set s" by auto
+                then show ?thesis 
+                proof (cases "illegal_instruction \<in> get_trap_set s")
+                  case True
+                  then show ?thesis using f1 f2 f3 f4 f5 f6 a1
+                  by select_trap_proof1
+                next
+                  case False
+                  then have f7: "illegal_instruction \<notin> get_trap_set s" by auto
+                  then show ?thesis
+                  proof (cases "fp_disabled \<in> get_trap_set s")
+                    case True
+                    then show ?thesis using f1 f2 f3 f4 f5 f6 f7 a1
+                    by select_trap_proof1
+                  next
+                    case False
+                    then have f8: "fp_disabled \<notin> get_trap_set s" by auto
+                    then show ?thesis 
+                    proof (cases "cp_disabled \<in> get_trap_set s")
+                      case True
+                      then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 a1
+                      by select_trap_proof1
+                    next
+                      case False
+                      then have f9: "cp_disabled \<notin> get_trap_set s" by auto
+                      then show ?thesis 
+                      proof (cases "unimplemented_FLUSH \<in> get_trap_set s")
+                        case True
+                        then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 a1
+                        by select_trap_proof1
+                      next
+                        case False
+                        then have f10: "unimplemented_FLUSH \<notin> get_trap_set s" by auto
+                        then show ?thesis 
+                        proof (cases "window_overflow \<in> get_trap_set s")
+                          case True
+                          then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 a1
+                          by select_trap_proof1
+                        next 
+                          case False
+                          then have f11: "window_overflow \<notin> get_trap_set s" by auto
+                          then show ?thesis 
+                          proof (cases "window_underflow \<in> get_trap_set s")
+                            case True
+                            then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 a1
+                            by select_trap_proof1
+                          next
+                            case False
+                            then have f12: "window_underflow \<notin> get_trap_set s" by auto
+                            then show ?thesis 
+                            proof (cases "mem_address_not_aligned \<in> get_trap_set s")
+                              case True
+                              then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 a1
+                              by select_trap_proof1
+                            next
+                              case False
+                              then have f13: "mem_address_not_aligned \<notin> get_trap_set s" by auto
+                              then show ?thesis 
+                              proof (cases "fp_exception \<in> get_trap_set s")
+                                case True
+                                then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13
+                                a1
+                                by select_trap_proof1
+                              next
+                                case False
+                                then have f14: "fp_exception \<notin> get_trap_set s" by auto
+                                then show ?thesis 
+                                proof (cases "cp_exception \<in> get_trap_set s")
+                                  case True
+                                  then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13
+                                  f14 a1
+                                  by select_trap_proof1
+                                next
+                                  case False
+                                  then have f15: "cp_exception \<notin> get_trap_set s" by auto
+                                  then show ?thesis 
+                                  proof (cases "data_access_error \<in> get_trap_set s")
+                                    case True
+                                    then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13
+                                    f14 f15 a1
+                                    by select_trap_proof1
+                                  next
+                                    case False
+                                    then have f16: "data_access_error \<notin> get_trap_set s" by auto
+                                    then show ?thesis 
+                                    proof (cases "data_access_exception \<in> get_trap_set s")
+                                      case True
+                                      then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 
+                                      f13 f14 f15 f16 a1
+                                      by select_trap_proof1
+                                    next
+                                      case False
+                                      then have f17: "data_access_exception \<notin> get_trap_set s" by auto
+                                      then show ?thesis 
+                                      proof (cases "tag_overflow \<in> get_trap_set s")
+                                        case True
+                                        then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 
+                                        f13 f14 f15 f16 f17 a1
+                                        by select_trap_proof1
+                                      next
+                                        case False
+                                        then have f18: "tag_overflow \<notin> get_trap_set s" by auto
+                                        then show ?thesis 
+                                        proof (cases "division_by_zero \<in> get_trap_set s")
+                                          case True
+                                          then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 
+                                          f12 f13 f14 f15 f16 f17 f18 a1
+                                          by select_trap_proof1
+                                        next
+                                          case False
+                                          then show ?thesis using f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 
+                                          f12 f13 f14 f15 f16 f17 f18 a1
+                                          apply (simp add: select_trap_def exec_gets return_def)
+                                          apply (simp add: bind_def h1_def h2_def simpler_modify_def)
+                                          apply (simp add: return_def simpler_gets_def)
+                                          apply (simp add: emp_trap_set_def err_mode_val_def
+                                            cpu_reg_mod_def)
+                                          apply (simp add: case_prod_unfold)
+                                          apply (simp add: return_def)
+                                          apply clarsimp                                          
+                                          apply (simp add: write_cpu_tt_def write_cpu_def write_tt_def)
+                                          apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+                                          apply (simp add: simpler_modify_def)
+                                          by (simp add: cpu_reg_val_def cpu_reg_mod_def)
+                                        qed
+                                      qed
+                                    qed
+                                  qed
+                                qed
+                              qed
+                            qed
+                          qed
+                        qed
+                      qed
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+qed
+
+lemma exe_trap_st_pc_result : "snd (exe_trap_st_pc() s) = False"
+proof (cases "annul_val s = True")
+  case True
+  then show ?thesis 
+  apply (simp add: exe_trap_st_pc_def get_curr_win_def)
+  apply (simp add: exec_gets return_def)
+  apply (simp add: DetMonad.bind_def h1_def h2_def)
+  by (simp add: set_annul_def write_reg_def simpler_modify_def)
+next
+  case False
+  then show ?thesis
+  apply (simp add: exe_trap_st_pc_def get_curr_win_def)
+  apply (simp add: exec_gets return_def)
+  apply (simp add: DetMonad.bind_def h1_def h2_def)
+  by (simp add: write_reg_def simpler_modify_def)
+qed
+
+lemma exe_trap_wr_pc_result : "snd (exe_trap_wr_pc() s) = False"
+proof (cases "reset_trap_val s = True")
+  case True
+  then show ?thesis 
+  apply (simp add: exe_trap_wr_pc_def get_curr_win_def)
+  apply (simp add: exec_gets return_def)
+  apply (simp add: DetMonad.bind_def h1_def h2_def)
+  apply (simp add: write_cpu_def simpler_modify_def)
+  apply (simp add: simpler_gets_def)
+  apply (simp add: cpu_reg_val_def update_S_def cpu_reg_mod_def reset_trap_val_def)
+  apply (simp add: write_cpu_def simpler_modify_def DetMonad.bind_def h1_def h2_def)
+  apply (simp add: return_def)
+  by (simp add: set_reset_trap_def simpler_modify_def DetMonad.bind_def h1_def h2_def return_def)
+next
+  case False
+  then show ?thesis
+  apply (simp add: exe_trap_wr_pc_def get_curr_win_def)
+  apply (simp add: exec_gets return_def)
+  apply (simp add: DetMonad.bind_def h1_def h2_def)
+  apply (simp add: write_cpu_def simpler_modify_def)
+  apply (simp add: simpler_gets_def)
+  apply (simp add: cpu_reg_val_def update_S_def cpu_reg_mod_def reset_trap_val_def)
+  apply (simp add: write_cpu_def simpler_modify_def DetMonad.bind_def h1_def h2_def)
+  by (simp add: return_def)
+qed
+
+lemma execute_trap_result : "\<not>(reset_trap_val s = False \<and> get_ET (cpu_reg_val PSR s) = 0) \<Longrightarrow>
+  snd (execute_trap() s) = False"
+proof -
+  assume "\<not>(reset_trap_val s = False \<and> get_ET (cpu_reg_val PSR s) = 0)"
+  then have fact1: "snd (select_trap() s) = False" using select_trap_result2 by blast
+  then show ?thesis 
+    proof (cases "err_mode_val s = True")
+      case True
+      then show ?thesis using fact1 
+        apply (simp add: execute_trap_def exec_gets return_def)
+        apply (simp add: DetMonad.bind_def h1_def h2_def Let_def)
+        apply (simp add: case_prod_unfold)
+        by (simp add: in_gets return_def select_trap_monad simpler_gets_def)
+    next 
+      case False
+      then show ?thesis using fact1 select_trap_monad
+      apply (simp add: execute_trap_def exec_gets return_def)
+      apply (simp add: DetMonad.bind_def h1_def h2_def)
+      apply (simp add: case_prod_unfold)
+      apply (simp add: simpler_gets_def)
+      apply (auto simp add: select_trap_monad)
+      apply (simp add: DetMonad.bind_def h1_def h2_def get_curr_win_def)
+      apply (simp add: get_CWP_def cpu_reg_val_def)
+      apply (simp add: simpler_gets_def return_def write_cpu_def)
+      apply (simp add: simpler_modify_def DetMonad.bind_def h1_def h2_def)
+      apply (simp add: exe_trap_st_pc_result)
+      by (simp add: case_prod_unfold exe_trap_wr_pc_result)
+    qed
+qed
+
+lemma execute_trap_result2 : "\<not>(reset_trap_val s = False \<and> get_ET (cpu_reg_val PSR s) = 0) \<Longrightarrow>
+  snd (execute_trap() s) = False"
+using execute_trap_result
+by blast
+
+lemma exe_instr_all : 
+"good_context (s::(('a::len) sparc_state)) \<Longrightarrow> 
+  snd (execute_instruction() s) = False"
+proof -
+  assume asm1: "good_context s"
+  let ?s' = "delayed_pool_write s"
+  from asm1 have f1 : "(get_trap_set s = {} \<or> (reset_trap_val s) \<noteq> False \<or> 
+  get_ET (cpu_reg_val PSR s) \<noteq> 0) \<and>
+  ((\<exists>e. fetch_instruction ?s' = Inl e) \<or> 
+  (\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+   ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+   (annul_val ?s' = True \<or>
+    (annul_val ?s' = False \<and> 
+     (\<forall>v1' v2'. fetch_instruction ?s' = Inr v1' \<and> 
+      ((decode_instruction v1')::(Exception list + instruction)) = Inr v2' \<longrightarrow>
+      supported_instruction (fst v2') = True) \<and>
+     ((fst v2) \<noteq> ctrl_type RETT \<or>
+      ((fst v2) = ctrl_type RETT \<and> 
+       (get_ET (cpu_reg_val PSR ?s') = 1 \<or>
+        (get_ET (cpu_reg_val PSR ?s') \<noteq> 1 \<and>
+        (((get_S (cpu_reg_val PSR ?s')))::word1) \<noteq> 0 \<and>
+        (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR ?s'))) + 1) mod NWINDOWS)) 
+          (cpu_reg_val WIM ?s')) = 0 \<and>
+        ((AND) (get_addr (snd v2) ?s') (0b00000000000000000000000000000011::word32)) = 0))))))))"
+       using good_context_all by blast
+   from f1 have f2: "get_trap_set s \<noteq> {} \<Longrightarrow> 
+   (reset_trap_val s) \<noteq> False \<or> get_ET (cpu_reg_val PSR s) \<noteq> 0" 
+    by auto
+   show ?thesis 
+   proof (cases "get_trap_set s = {}")
+    case True
+    then have f3: "get_trap_set s = {}" by auto
+    then show ?thesis
+    proof (cases "exe_mode_val s = True")
+      case True
+      then have f4: "exe_mode_val s = True" by auto
+      then show ?thesis 
+      proof (cases "\<exists>e1. fetch_instruction ?s' = Inl e1")
+        case True
+        then show ?thesis using f3
+        apply exe_proof_to_decode
+        apply (simp add: raise_trap_def simpler_modify_def)
+        by (simp add: bind_def h1_def h2_def return_def)
+      next
+        case False
+        then have f5: "\<exists> v1. fetch_instruction ?s' = Inr v1" using fetch_instr_result_1 by blast
+        then have f6: "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+          ((decode_instruction v1)::(Exception list + instruction)) = Inr v2"
+        using f1 fetch_instr_result_2 by blast
+        then show ?thesis 
+        proof (cases "annul_val ?s' = True")
+          case True
+          then show ?thesis using f3 f4 f6
+          apply exe_proof_to_decode
+          apply (simp add: set_annul_def annul_mod_def simpler_modify_def bind_def h1_def h2_def)
+          apply (simp add: return_def simpler_gets_def)
+          by (simp add: write_cpu_def simpler_modify_def)
+        next
+          case False
+          then have f7: "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+          ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and> 
+          (\<forall>v1' v2'. fetch_instruction ?s' = Inr v1' \<and> 
+          ((decode_instruction v1')::(Exception list +  instruction)) = Inr v2' \<longrightarrow>
+          supported_instruction (fst v2') = True) \<and> annul_val ?s' = False"
+          using f1 f6 fetch_instr_result_2 by auto
+          then have f7': "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+          ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and> 
+          supported_instruction (fst v2) = True \<and> annul_val ?s' = False"
+          by auto
+          then show ?thesis 
+          proof (cases "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+          ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and> 
+          (fst v2) = ctrl_type RETT")
+            case True
+            then have f8: "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+            ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and> 
+            (fst v2) = ctrl_type RETT" by auto
+            then show ?thesis 
+            proof (cases "get_trap_set ?s' = {}")
+              case True
+              then have f9: "get_trap_set ?s' = {}" by auto
+              then show ?thesis 
+              proof (cases "get_ET (cpu_reg_val PSR ?s') = 1")
+                case True
+                then have f10: "get_ET (cpu_reg_val PSR ?s') = 1" by auto
+                then show ?thesis 
+                proof (cases "(((get_S (cpu_reg_val PSR ?s')))::word1) = 0")
+                  case True
+                  then show ?thesis using f3 f4 f7 f8 f9 f10
+                  apply exe_proof_to_decode              
+                  apply exe_proof_dispatch_rett
+                  apply (simp add: raise_trap_def simpler_modify_def)
+                  apply (auto simp add: execute_instr_sub1_result return_def)
+                  by (simp add: case_prod_unfold)
+                next
+                  case False
+                  then show ?thesis using f3 f4 f7 f8 f9 f10
+                  apply exe_proof_to_decode
+                  apply exe_proof_dispatch_rett
+                  apply (simp add: raise_trap_def simpler_modify_def)
+                  apply (auto simp add: execute_instr_sub1_result return_def)
+                  by (simp add: case_prod_unfold)
+                qed
+              next
+                case False
+                then have f11: "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+                ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+                annul_val ?s' = False \<and>
+                (fst v2) = ctrl_type RETT \<and>
+                (get_ET (cpu_reg_val PSR ?s') \<noteq> 1 \<and>
+                (((get_S (cpu_reg_val PSR ?s')))::word1) \<noteq> 0 \<and>
+                (get_WIM_bit (nat (((uint (get_CWP (cpu_reg_val PSR ?s'))) + 1) mod NWINDOWS)) 
+                  (cpu_reg_val WIM ?s')) = 0 \<and>
+                ((AND) (get_addr (snd v2) ?s') (0b00000000000000000000000000000011::word32)) = 0)"
+                using f1 fetch_instr_result_2 f7' f8 by auto
+                then show ?thesis using f3 f4
+                proof (cases "get_trap_set ?s' = {}")
+                  case True
+                  then show ?thesis using f3 f4 f11
+                  apply (simp add: execute_instruction_def)
+                  apply (simp add: simpler_gets_def bind_def h1_def h2_def simpler_modify_def)
+                  apply clarsimp
+                  apply (simp add: return_def)
+                  apply (simp add: bind_def h1_def h2_def Let_def)
+                  apply (simp add: case_prod_unfold)   
+                  apply auto
+                   apply (simp add: execute_instr_sub1_result)                
+                  apply (simp add: dispatch_instruction_def)
+                  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)  
+                  by (simp add: rett_instr_result)
+                next
+                  case False
+                  then show ?thesis using f3 f4 f11
+                  apply (simp add: execute_instruction_def)
+                  apply (simp add: simpler_gets_def bind_def h1_def h2_def simpler_modify_def)
+                  apply clarsimp
+                  apply (simp add: return_def)
+                  apply (simp add: bind_def h1_def h2_def)
+                  apply (simp add: case_prod_unfold)   
+                  apply (simp add: execute_instr_sub1_result)
+                  apply (simp add: dispatch_instruction_def)
+                  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+                  by (simp add: return_def)
+                qed             
+              qed
+            next
+              case False
+              then show ?thesis using f3 f4 f7 f8
+              apply exe_proof_to_decode
+              apply (simp add: dispatch_instruction_def)
+              apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+              apply (simp add: case_prod_unfold)
+              by (auto simp add: execute_instr_sub1_result return_def Let_def)
+            qed
+          next
+            then have "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+            ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and> 
+            (fst v2) \<noteq> ctrl_type RETT" using f7 by auto
+            then have "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+            ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+            (fst v2) \<noteq> ctrl_type RETT \<and>
+            supported_instruction (fst v2) = True \<and> annul_val ?s' = False"
+            using f7 by auto            
+            then have "\<exists>v1 v2. fetch_instruction ?s' = Inr v1 \<and> 
+            ((decode_instruction v1)::(Exception list + instruction)) = Inr v2 \<and>
+            (fst v2) \<noteq> ctrl_type RETT \<and>
+            supported_instruction (fst v2) = True \<and> annul_val ?s' = False \<and>
+            snd (dispatch_instruction v2 ?s') = False"
+            by (auto simp add: dispatch_instr_result)                   
+            then show ?thesis using f3 f4
+              apply exe_proof_to_decode
+              apply (simp add: bind_def h1_def h2_def)
+              apply (simp add: case_prod_unfold)
+              by (simp add: execute_instr_sub1_result)            
+          qed
+        qed
+      qed
+    next
+      case False
+      then show ?thesis using f3
+      apply (simp add: execute_instruction_def)
+      by (simp add: exec_gets return_def)
+    qed
+   next
+    case False
+    then have "get_trap_set s \<noteq> {} \<and> 
+    ((reset_trap_val s) \<noteq> False \<or> get_ET (cpu_reg_val PSR s) \<noteq> 0)" 
+      using f2 by auto
+    then show ?thesis
+    apply (simp add: execute_instruction_def exec_gets)
+    by (simp add: execute_trap_result2)
+   qed
+qed
+
+lemma dispatch_fail: 
+"snd (execute_instruction() (s::(('a::len) sparc_state))) = False \<and>
+  get_trap_set s = {} \<and>
+  exe_mode_val s \<and>
+  fetch_instruction (delayed_pool_write s) = Inr v  \<and> 
+  ((decode_instruction v)::(Exception list + instruction)) = Inl e
+ \<Longrightarrow> False"
+using decode_instr_result_2
+apply (simp add: execute_instruction_def)
+apply (simp add: exec_gets bind_def)
+apply clarsimp
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: simpler_modify_def return_def)
+by (simp add: fail_def)
+
+lemma no_error : "good_context s \<Longrightarrow> snd (execute_instruction () s) = False"
+proof -
+  assume "good_context s"
+  hence "snd (execute_instruction() s) = False" 
+    using exe_instr_all by auto
+  hence "snd (execute_instruction () s) = False" by (simp add: exec_ss2)
+  thus ?thesis by assumption
+qed
+
+theorem single_step : "good_context s \<Longrightarrow> NEXT s = Some (snd (fst (execute_instruction () s)))"
+by (simp add: no_error next_match)
+
+
+
+
+
+lemma write_cpu_pc_privilege: "s' = snd (fst (write_cpu w PC s)) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: write_cpu_def simpler_modify_def)
+apply (simp add: cpu_reg_mod_def)
+by (simp add: cpu_reg_val_def)
+
+lemma write_cpu_npc_privilege: "s' = snd (fst (write_cpu w nPC s)) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: write_cpu_def simpler_modify_def)
+apply (simp add: cpu_reg_mod_def)
+by (simp add: cpu_reg_val_def)
+
+lemma write_cpu_y_privilege: "s' = snd (fst (write_cpu w Y s)) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: write_cpu_def simpler_modify_def)
+apply (simp add: cpu_reg_mod_def)
+by (simp add: cpu_reg_val_def)
+
+lemma cpu_reg_mod_y_privilege: "s' = cpu_reg_mod w Y s \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+by (simp add: cpu_reg_mod_def cpu_reg_val_def)
+
+lemma cpu_reg_mod_asr_privilege: "s' = cpu_reg_mod w (ASR r) s \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+by (simp add: cpu_reg_mod_def cpu_reg_val_def)
+
+lemma global_reg_mod_privilege: "s' = global_reg_mod w1 n w2 s \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (induction n arbitrary:s)
+ apply (clarsimp)
+apply (auto)
+apply (simp add: Let_def)
+by (simp add: cpu_reg_val_def)
+
+lemma out_reg_mod_privilege: "s' = out_reg_mod a w r s \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: out_reg_mod_def Let_def)
+by (simp add: cpu_reg_val_def)
+
+lemma in_reg_mod_privilege: "s' = in_reg_mod a w r s \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: in_reg_mod_def Let_def)
+by (simp add: cpu_reg_val_def)
+
+lemma user_reg_mod_privilege: 
+assumes a1: " s' = user_reg_mod d (w::(('a::len) window_size)) r 
+  (s::(('a::len) sparc_state)) \<and> 
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "r = 0")
+  case True
+  then show ?thesis using a1
+  by (simp add: user_reg_mod_def)  
+next
+  case False
+  then have f1: "r \<noteq> 0" by auto
+  then show ?thesis
+  proof (cases "0 < r \<and> r < 8")
+    case True
+    then show ?thesis using a1 f1
+    apply (simp add: user_reg_mod_def)
+    by (auto intro: global_reg_mod_privilege)
+  next
+    case False
+    then have f2: "\<not>(0 < r \<and> r < 8)" by auto
+    then show ?thesis 
+    proof (cases "7 < r \<and> r < 16")
+      case True
+      then show ?thesis using a1 f1 f2
+      apply (simp add: user_reg_mod_def)
+      by (auto intro: out_reg_mod_privilege)
+    next
+      case False
+      then have f3: "\<not> (7 < r \<and> r < 16)" by auto
+      then show ?thesis
+      proof (cases "15 < r \<and> r < 24")
+        case True
+        then show ?thesis using a1 f1 f2 f3
+        apply (simp add: user_reg_mod_def)
+        by (simp add: cpu_reg_val_def)
+      next
+        case False
+        then show ?thesis using a1 f1 f2 f3
+        apply (simp add: user_reg_mod_def)
+        by (auto intro: in_reg_mod_privilege)
+      qed
+    qed
+  qed
+qed
+
+lemma write_reg_privilege: "s' = snd (fst (write_reg w1 w2 w3 
+  (s::(('a::len) sparc_state)))) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: write_reg_def simpler_modify_def)
+by (auto intro: user_reg_mod_privilege)
+
+lemma set_annul_privilege: "s' = snd (fst (set_annul b s)) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: set_annul_def simpler_modify_def)
+apply (simp add: annul_mod_def write_annul_def)
+by (simp add: cpu_reg_val_def)
+
+lemma set_reset_trap_privilege: "s' = snd (fst (set_reset_trap b s)) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: set_reset_trap_def simpler_modify_def)
+apply (simp add: reset_trap_mod_def write_annul_def)
+by (simp add: cpu_reg_val_def)
+
+lemma empty_delayed_pool_write_privilege: "get_delayed_pool s = [] \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0 \<and>
+  s' = delayed_pool_write s \<Longrightarrow> 
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: delayed_pool_write_def)
+by (simp add: get_delayed_write_def delayed_write_all_def delayed_pool_rm_list_def)
+
+lemma raise_trap_privilege: 
+"(((get_S (cpu_reg_val PSR s)))::word1) = 0 \<and>
+  s' = snd (fst (raise_trap t s)) \<Longrightarrow> 
+  (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: raise_trap_def)
+apply (simp add: simpler_modify_def add_trap_set_def)
+by (simp add: cpu_reg_val_def)
+
+lemma write_cpu_tt_privilege: "s' = snd (fst (write_cpu_tt w s)) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: write_cpu_tt_def)
+apply (simp add: exec_gets)
+apply (simp add: write_cpu_def cpu_reg_mod_def write_tt_def)
+apply (simp add: simpler_modify_def)
+by (simp add: cpu_reg_val_def)
+
+lemma emp_trap_set_privilege: "s' = emp_trap_set s \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: emp_trap_set_def)
+by (simp add: cpu_reg_val_def)
+
+lemma sys_reg_mod_privilege: "s' = sys_reg_mod w r s 
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: sys_reg_mod_def)
+by (simp add: cpu_reg_val_def)
+
+lemma mem_mod_privilege: 
+assumes a1: "s' = mem_mod a1 a2 v s \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "(uint a1) = 8 \<or> (uint a1) = 10")
+  case True
+  then show ?thesis using a1
+  apply (simp add: mem_mod_def)
+  apply (simp add: Let_def)
+  by (simp add: cpu_reg_val_def)
+next
+  case False
+  then have f1: "\<not>((uint a1) = 8 \<or> (uint a1) = 10)" by auto
+  then show ?thesis 
+  proof (cases "(uint a1) = 9 \<or> (uint a1) = 11")
+    case True
+    then show ?thesis using a1 f1
+    apply (simp add: mem_mod_def)
+    apply (simp add: Let_def)
+    by (simp add: cpu_reg_val_def)
+  next
+    case False
+    then show ?thesis using a1 f1
+    apply (simp add: mem_mod_def)
+    by (simp add: cpu_reg_val_def)
+  qed
+qed
+
+lemma mem_mod_w32_privilege: "s' = mem_mod_w32 a1 a2 b d s \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: mem_mod_w32_def)
+apply (simp add: Let_def)
+by (auto intro: mem_mod_privilege)
+
+lemma add_instr_cache_privilege: "s' = add_instr_cache s addr y m \<Longrightarrow>
+(((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: add_instr_cache_def)
+apply (simp add: Let_def)
+by (simp add: icache_mod_def cpu_reg_val_def)
+
+lemma add_data_cache_privilege: "s' = add_data_cache s addr y m \<Longrightarrow>
+(((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: add_data_cache_def)
+apply (simp add: Let_def)
+by (simp add: dcache_mod_def cpu_reg_val_def)
+
+lemma memory_read_privilege: 
+assumes a1: "s' = snd (memory_read asi addr s) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "uint asi = 1")
+  case True
+  then show ?thesis using a1 
+  apply (simp add: memory_read_def)
+  by (simp add: Let_def)
+next
+  case False
+  then have f1: "uint asi \<noteq> 1" by auto
+  then show ?thesis  
+  proof (cases "uint asi = 2")
+    case True 
+    then show ?thesis using a1 f1
+    by (simp add: memory_read_def)    
+  next
+    case False
+    then have f2: "uint asi \<noteq> 2" by auto
+    then show ?thesis 
+    proof (cases "uint asi \<in> {8,9}")
+      case True
+      then have f3: "uint asi \<in> {8,9}" by auto
+      then show ?thesis
+      proof (cases "load_word_mem s addr asi = None")
+        case True
+        then have f4: "load_word_mem s addr asi = None" by auto
+        then show ?thesis 
+        using a1 f1 f2 f3 f4
+        by (simp add: memory_read_def)
+      next
+        case False
+        then show ?thesis using a1 f1 f2 f3
+        apply (simp add: memory_read_def)      
+        apply auto
+         apply (simp add: add_instr_cache_privilege)
+        by (simp add: add_instr_cache_privilege)
+      qed
+    next
+      case False
+      then have f5: "uint asi \<notin> {8, 9}" by auto
+      then show ?thesis 
+        proof (cases "uint asi \<in> {10,11}")
+          case True
+          then have f6: "uint asi \<in> {10,11}" by auto
+          then show ?thesis
+          proof (cases "load_word_mem s addr asi = None")
+            case True
+            then have f7: "load_word_mem s addr asi = None" by auto
+            then show ?thesis 
+            using a1 f1 f2 f5 f6 f7
+            by (simp add: memory_read_def)
+          next
+            case False
+            then show ?thesis using a1 f1 f2 f5 f6
+            apply (simp add: memory_read_def)      
+            apply auto
+             apply (simp add: add_data_cache_privilege)
+            by (simp add: add_data_cache_privilege)
+          qed
+      next
+        case False
+        then have f8: "uint asi \<notin> {10,11}" by auto
+        then show ?thesis
+        proof (cases "uint asi = 13")
+          case True
+          then have f9: "uint asi = 13" by auto
+          then show ?thesis 
+          proof (cases "read_instr_cache s addr = None")
+            case True
+            then show ?thesis using a1 f1 f2 f5 f8 f9
+            by (simp add: memory_read_def) 
+          next
+            case False
+            then show ?thesis using a1 f1 f2 f5 f8 f9
+            apply (simp add: memory_read_def)
+            by auto
+          qed
+        next
+          case False
+          then have f10: "uint asi \<noteq> 13" by auto
+          then show ?thesis 
+          proof (cases "uint asi = 15")
+            case True
+            then show ?thesis using a1 f1 f2 f5 f8 f10
+            apply (simp add: memory_read_def)
+            apply (cases "read_data_cache s addr = None")
+             by auto
+          next
+            case False
+            then show ?thesis using a1 f1 f2 f5 f8 f10
+            by (simp add: Let_def)
+          qed
+        qed
+      qed      
+    qed
+  qed
+qed
+
+lemma get_curr_win_privilege: "s' = snd (fst (get_curr_win() s)) \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: get_curr_win_def)
+by (simp add: simpler_gets_def)
+
+lemma load_sub2_privilege: 
+assumes a1: "s' = snd (fst (load_sub2 addr asi r win w s))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "fst (memory_read asi (addr + 4)
+                        (snd (fst (write_reg w win (r AND 30) s)))) =
+                  None")
+  case True
+  then show ?thesis using a1
+  apply (simp add: load_sub2_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  apply (simp add: case_prod_unfold)
+  by (auto intro: raise_trap_privilege write_reg_privilege)
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: load_sub2_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: case_prod_unfold)
+  apply clarsimp
+  apply (simp add: simpler_modify_def bind_def h1_def h2_def Let_def)
+  by (auto intro: write_reg_privilege memory_read_privilege)
+qed
+
+lemma load_sub3_privilege: 
+assumes a1: "s' = snd (fst (load_sub3 instr curr_win rd asi address s))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "fst (memory_read asi address s) = None")
+  case True
+  then show ?thesis using a1
+  apply (simp add: load_sub3_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: case_prod_unfold)
+  by (auto intro: raise_trap_privilege)
+next
+  case False
+  then have f1: "fst (memory_read asi address s) \<noteq> None " by auto
+  then show ?thesis 
+  proof (cases "rd \<noteq> 0 \<and>
+                          (fst instr = load_store_type LD \<or>
+                           fst instr = load_store_type LDA \<or>
+                           fst instr = load_store_type LDUH \<or>
+                           fst instr = load_store_type LDSB \<or>
+                           fst instr = load_store_type LDUB \<or>
+                           fst instr = load_store_type LDUBA \<or>
+                           fst instr = load_store_type LDSH \<or>
+                           fst instr = load_store_type LDSHA \<or>
+                           fst instr = load_store_type LDUHA \<or>
+                           fst instr = load_store_type LDSBA)")
+    case True
+    then show ?thesis using a1 f1
+    apply (simp add: load_sub3_def)
+    apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+    apply (simp add: case_prod_unfold)
+    apply clarsimp
+    apply (simp add: simpler_modify_def bind_def h1_def h2_def Let_def)
+    by (auto intro: write_reg_privilege memory_read_privilege)
+  next 
+    case False
+    then show ?thesis using a1 f1
+    apply (simp add: load_sub3_def)
+    apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+    apply (simp add: case_prod_unfold)
+    apply auto
+     apply (simp add: simpler_modify_def bind_def h1_def h2_def)
+     apply (auto intro: load_sub2_privilege memory_read_privilege)
+    apply (simp add: simpler_modify_def bind_def h1_def h2_def)
+    by (auto intro: load_sub2_privilege memory_read_privilege)
+  qed
+qed
+
+lemma load_sub1_privilege: 
+assumes a1: "s' = snd (fst (load_sub1 instr rd s_val s))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: load_sub1_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply auto
+               by (auto intro: get_curr_win_privilege raise_trap_privilege load_sub3_privilege)
+
+lemma load_instr_privilege: "s' = snd (fst (load_instr i s))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: load_instr_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: Let_def)
+apply clarsimp
+by (auto intro: get_curr_win_privilege raise_trap_privilege load_sub1_privilege)
+
+lemma store_barrier_pending_mod_privilege: "s' = store_barrier_pending_mod b s
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0
+  \<Longrightarrow> (((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: store_barrier_pending_mod_def)
+apply (simp add: write_store_barrier_pending_def)
+by (simp add: cpu_reg_val_def)
+
+lemma store_word_mem_privilege: 
+assumes a1: "store_word_mem s addr data byte_mask asi = Some s' \<and> 
+(((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1 apply (simp add: store_word_mem_def)
+apply (case_tac "virt_to_phys addr (mmu s) (mem s) = None")
+apply auto
+apply (case_tac "mmu_writable (get_acc_flag b) asi")
+apply auto
+by (simp add: mem_mod_w32_privilege)
+
+lemma flush_instr_cache_privilege: "(((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+s' = flush_instr_cache s \<Longrightarrow>
+(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: flush_instr_cache_def)
+by (simp add: cpu_reg_val_def)
+
+lemma flush_data_cache_privilege: "(((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+s' = flush_data_cache s \<Longrightarrow>
+(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: flush_data_cache_def)
+by (simp add: cpu_reg_val_def)
+
+lemma flush_cache_all_privilege: "(((get_S (cpu_reg_val PSR s)))::word1) = 0 \<Longrightarrow>
+s' = flush_cache_all s \<Longrightarrow>
+(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+apply (simp add: flush_cache_all_def)
+by (simp add: cpu_reg_val_def)
+
+lemma memory_write_asi_privilege: 
+assumes a1: "r = memory_write_asi asi addr byte_mask data s \<and>
+  r = Some s' \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "uint asi = 1")
+  case True
+  then show ?thesis using a1
+  apply (simp add: memory_write_asi_def)
+  by (auto intro: store_word_mem_privilege)
+next
+  case False
+  then have f1: "uint asi \<noteq> 1" by auto
+  then show ?thesis
+  proof (cases "uint asi = 2")
+    case True
+    then have f01: "uint asi = 2" by auto 
+    then show ?thesis 
+    proof (cases "uint addr = 0")
+      case True
+      then show ?thesis using a1 f1 f01      
+      apply (simp add: memory_write_asi_def)
+      apply (simp add: ccr_flush_def)
+      apply (simp add: Let_def)
+      apply auto
+         apply (metis flush_data_cache_privilege flush_instr_cache_privilege sys_reg_mod_privilege)
+        apply (metis flush_instr_cache_privilege sys_reg_mod_privilege)
+       apply (metis flush_data_cache_privilege sys_reg_mod_privilege)
+      by (simp add: sys_reg_mod_privilege)
+    next
+      case False
+      then show ?thesis using a1 f1 f01
+      apply (simp add: memory_write_asi_def)
+      apply clarsimp
+      by (metis option.distinct(1) option.sel sys_reg_mod_privilege)      
+    qed      
+  next
+    case False
+    then have f2: "uint asi \<noteq> 2" by auto
+    then show ?thesis
+    proof (cases "uint asi \<in> {8,9}")
+      case True
+      then show ?thesis using a1 f1 f2
+      apply (simp add: memory_write_asi_def)
+      using store_word_mem_privilege add_instr_cache_privilege
+      by blast    
+    next
+      case False
+      then have f3: "uint asi \<notin> {8,9}" by auto
+      then show ?thesis 
+      proof (cases "uint asi \<in> {10,11}")
+        case True
+        then show ?thesis using a1 f1 f2 f3
+        apply (simp add: memory_write_asi_def)
+        using store_word_mem_privilege add_data_cache_privilege
+        by blast 
+      next
+        case False
+        then have f4: "uint asi \<notin> {10,11}" by auto
+        then show ?thesis 
+        proof (cases "uint asi = 13")
+          case True
+          then show ?thesis using a1 f1 f2 f3 f4
+          apply (simp add: memory_write_asi_def)
+          by (auto simp add: add_instr_cache_privilege)
+        next
+          case False
+          then have f5: "uint asi \<noteq> 13" by auto
+          then show ?thesis
+          proof (cases "uint asi = 15")
+            case True
+            then show ?thesis using a1 f1 f2 f3 f4 f5
+            apply (simp add: memory_write_asi_def)
+            by (auto simp add: add_data_cache_privilege)
+          next
+            case False
+            then have f6: "uint asi \<noteq> 15" by auto
+            then show ?thesis
+            proof (cases "uint asi = 16")
+              case True
+              then show ?thesis using a1
+              apply (simp add: memory_write_asi_def)
+              by (auto simp add: flush_instr_cache_privilege)
+            next
+              case False
+              then have f7: "uint asi \<noteq> 16" by auto
+              then show ?thesis
+              proof (cases "uint asi = 17")
+                case True
+                then show ?thesis using a1
+                apply (simp add: memory_write_asi_def)
+                by (auto simp add: flush_data_cache_privilege)
+              next
+                case False
+                then have f8: "uint asi \<noteq> 17" by auto
+                then show ?thesis
+                proof (cases "uint asi = 24")
+                  case True
+                  then show ?thesis using a1
+                  apply (simp add: memory_write_asi_def)
+                  by (auto simp add: flush_cache_all_privilege)
+                next
+                  case False
+                  then have f9: "uint asi \<noteq> 24" by auto
+                  then show ?thesis
+                  proof (cases "uint asi = 25")
+                    case True
+                    then show ?thesis using a1
+                    apply (simp add: memory_write_asi_def)
+                    apply (case_tac "mmu_reg_mod (mmu s) addr data = None")
+                     apply auto
+                    by (simp add: cpu_reg_val_def)
+                  next
+                    case False
+                    then have f10: "uint asi \<noteq> 25" by auto
+                    then show ?thesis
+                    proof (cases "uint asi = 28")
+                      case True
+                      then show ?thesis using a1
+                      apply (simp add: memory_write_asi_def)
+                      by (auto simp add: mem_mod_w32_privilege)
+                    next
+                      then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10
+                      apply (simp add: memory_write_asi_def)
+                      apply (auto simp add: Let_def)
+                      apply (case_tac "uint asi = 20 \<or> uint asi = 21")
+                       by auto                  
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma memory_write_privilege: 
+assumes a1: "r = memory_write asi addr byte_mask data 
+  (s::(('a::len) sparc_state)) \<and>
+  r = Some s' \<and>
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR 
+  (s'::(('a::len) sparc_state)))))::word1) = 0"
+proof -
+  have "\<forall>x. Some x \<noteq> None" by auto
+  then have "r \<noteq> None" using a1
+  then have "\<exists>s''. r = Some (store_barrier_pending_mod False s'')" using a1
+    by (metis (no_types, lifting) memory_write_def option.case_eq_if) 
+  then have "\<exists>s''. s' = store_barrier_pending_mod False s''" using a1
+    by blast    
+  then have "\<exists>s''. memory_write_asi asi addr byte_mask data s = Some s'' \<and> 
+             s' = store_barrier_pending_mod False s''"
+    by (metis (no_types, lifting) assms memory_write_def not_None_eq option.case_eq_if option.sel)
+  then show ?thesis using a1
+    using memory_write_asi_privilege store_barrier_pending_mod_privilege by blast   
+qed
+
+lemma store_sub2_privilege: 
+assumes a1: "s' = snd (fst (store_sub2 instr curr_win rd asi address s))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "memory_write asi address (st_byte_mask instr address)
+                        (st_data0 instr curr_win rd address s) s =
+                       None")
+  case True
+  then show ?thesis using a1
+  apply (simp add: store_sub2_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  apply (simp add: case_prod_unfold)
+  by (metis fst_conv raise_trap_privilege return_def snd_conv)
+next
+  case False
+  then have f1: "\<not>(memory_write asi address (st_byte_mask instr address)
+                        (st_data0 instr curr_win rd address s) s =
+                       None)" 
+    by auto
+  then show ?thesis  
+  proof (cases "(fst instr) \<in> {load_store_type STD,load_store_type STDA}")
+    case True
+    then have f2: "(fst instr) \<in> {load_store_type STD,load_store_type STDA}" by auto
+    then show ?thesis using a1 f1
+    apply (simp add: store_sub2_def)
+    apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+    apply (simp add: simpler_modify_def bind_def h1_def h2_def Let_def)
+    apply (simp add: return_def)
+    apply (simp add: bind_def case_prod_unfold)
+    apply (simp add: simpler_modify_def)
+    apply clarsimp
+    apply (simp add: case_prod_unfold bind_def h1_def h2_def Let_def simpler_modify_def)
+    apply (simp add: simpler_gets_def)
+    apply auto
+       using memory_write_privilege raise_trap_privilege apply blast
+      apply (simp add: simpler_modify_def simpler_gets_def bind_def)
+      apply (meson memory_write_privilege)
+     using memory_write_privilege raise_trap_privilege apply blast
+    by (meson memory_write_privilege)    
+  next
+    case False
+    then show ?thesis using a1 f1
+    apply (simp add: store_sub2_def)
+    apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+    apply clarsimp
+    apply (simp add: simpler_modify_def return_def)
+    by (auto intro: memory_write_privilege)
+  qed
+qed
+
+lemma store_sub1_privilege: 
+assumes a1: "s' = snd (fst (store_sub1 instr rd s_val 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR 
+  (s'::(('a::len) sparc_state)))))::word1) = 0"
+proof (cases "(fst instr = load_store_type STH \<or> fst instr = load_store_type STHA) \<and>
+              ((ucast (get_addr (snd instr) (snd (fst (get_curr_win () s)))))::word1) \<noteq> 0")
+  case True
+  then show ?thesis using a1
+  apply (simp add: store_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  apply (simp add: case_prod_unfold)
+  using get_curr_win_privilege raise_trap_privilege by blast                
+next
+  case False
+  then have f1: "\<not>((fst instr = load_store_type STH \<or> fst instr = load_store_type STHA) \<and>
+              ((ucast (get_addr (snd instr) (snd (fst (get_curr_win () s)))))::word1) \<noteq> 0)"
+    by auto
+  then show ?thesis 
+  proof (cases "(fst instr \<in> {load_store_type ST,load_store_type STA}) \<and>
+              ((ucast (get_addr (snd instr) (snd (fst (get_curr_win () s)))))::word2) \<noteq> 0")
+    case True
+    then show ?thesis using a1 f1
+    apply (simp add: store_sub1_def)
+    apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+    apply (simp add: case_prod_unfold)    
+    using get_curr_win_privilege raise_trap_privilege by blast
+  next
+    case False
+    then have f2: "\<not>((fst instr \<in> {load_store_type ST,load_store_type STA}) \<and>
+              ((ucast (get_addr (snd instr) (snd (fst (get_curr_win () s)))))::word2) \<noteq> 0)"
+      by auto
+    then show ?thesis
+    proof (cases "(fst instr \<in> {load_store_type STD,load_store_type STDA}) \<and>
+              ((ucast (get_addr (snd instr) (snd (fst (get_curr_win () s)))))::word3) \<noteq> 0")
+      case True
+      then show ?thesis using a1 f1 f2
+      apply (simp add: store_sub1_def)
+      apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+      apply (simp add: case_prod_unfold) 
+      using get_curr_win_privilege raise_trap_privilege by blast
+    next
+      case False
+      then show ?thesis using a1 f1 f2
+      apply (simp add: store_sub1_def)
+      apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+      apply (simp add: case_prod_unfold)
+      by (meson get_curr_win_privilege store_sub2_privilege)       
+    qed
+  qed
+qed
+
+lemma store_instr_privilege: 
+assumes a1: "s' = snd (fst (store_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR 
+  (s'::(('a::len) sparc_state)))))::word1) = 0"
+using a1
+apply (simp add: store_instr_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: Let_def)
+using raise_trap_privilege store_sub1_privilege by blast
+
+lemma sethi_instr_privilege: 
+assumes a1: "s' = snd (fst (sethi_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: sethi_instr_def)
+apply (simp add: Let_def)
+apply auto
+ apply (simp add: bind_def h1_def h2_def Let_def)
+ apply (simp add: case_prod_unfold)
+ using get_curr_win_privilege write_reg_privilege apply blast
+by (simp add: return_def)
+
+lemma nop_instr_privilege: 
+assumes a1: "s' = snd (fst (nop_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: nop_instr_def)
+by (simp add: return_def)
+
+lemma ucast_0: "(((get_S w))::word1) = 0 \<Longrightarrow> get_S w = 0"
+by simp
+
+lemma ucast_02: "get_S w = 0 \<Longrightarrow> (((get_S w))::word1) = 0"
+by simp
+
+lemma ucast_s: "(((get_S w))::word1) = 0 \<Longrightarrow> 
+  (AND) w (0b00000000000000000000000010000000::word32) = 0"
+  by (simp add: get_S_def split: if_splits)
+
+lemma ucast_s2: "(AND) w 0b00000000000000000000000010000000 = 0
+  \<Longrightarrow> (((get_S w))::word1) = 0"
+by (simp add: get_S_def)
+
+lemma update_PSR_icc_1: "w' = (AND) w (0b11111111000011111111111111111111::word32)
+  \<and> (((get_S w))::word1) = 0
+  \<Longrightarrow> (((get_S w'))::word1) = 0"
+by (simp add: get_S_def word_bw_assocs(1))
+
+lemma and_num_1048576_128: "(AND) (0b00000000000100000000000000000000::word32)
+  (0b00000000000000000000000010000000::word32) = 0"
+by simp
+
+lemma and_num_2097152_128: "(AND) (0b00000000001000000000000000000000::word32)
+  (0b00000000000000000000000010000000::word32) = 0"
+by simp
+
+lemma and_num_4194304_128: "(AND) (0b00000000010000000000000000000000::word32)
+  (0b00000000000000000000000010000000::word32) = 0"
+by simp
+
+lemma and_num_8388608_128: "(AND) (0b00000000100000000000000000000000::word32)
+  (0b00000000000000000000000010000000::word32) = 0"
+by simp
+
+lemma or_and_s: "(AND) w1 (0b00000000000000000000000010000000::word32) = 0
+  \<and> (AND) w2 (0b00000000000000000000000010000000::word32) = 0
+  \<Longrightarrow> (AND) ((OR) w1 w2) (0b00000000000000000000000010000000::word32) = 0"
+by (simp add: word_ao_dist)
+
+lemma and_or_s: 
+assumes "(((get_S w1))::word1) = 0 \<and> 
+  (AND) w2 (0b00000000000000000000000010000000::word32) = 0"
+shows "(((get_S ((OR) ((AND) w1 
+  (0b11111111000011111111111111111111::word32)) w2)))::word1) = 0"
+proof -
+  from assms have "w1 AND 128 = 0"
+    using ucast_s by blast
+  then have "(w1 AND 4279238655 OR w2) AND 128 = 0"
+    using assms by (metis word_ao_absorbs(6) word_ao_dist word_bw_comms(2))
+  then show ?thesis
+    using ucast_s2 by blast
+qed 
+
+lemma and_or_or_s:
+assumes a1: "(((get_S w1))::word1) = 0 \<and> 
+  (AND) w2 (0b00000000000000000000000010000000::word32) = 0 \<and>  
+  (AND) w3 (0b00000000000000000000000010000000::word32) = 0"
+shows "(((get_S ((OR) ((OR) ((AND) w1 
+  (0b11111111000011111111111111111111::word32)) w2) w3)))::word1) = 0"
+using and_or_s assms or_and_s ucast_s ucast_s2 by blast 
+
+lemma and_or_or_or_s:
+assumes a1: "(((get_S w1))::word1) = 0 \<and> 
+  (AND) w2 (0b00000000000000000000000010000000::word32) = 0 \<and>  
+  (AND) w3 (0b00000000000000000000000010000000::word32) = 0 \<and>
+  (AND) w4 (0b00000000000000000000000010000000::word32) = 0"
+shows "(((get_S ((OR) ((OR) ((OR) ((AND) w1 
+  (0b11111111000011111111111111111111::word32)) w2) w3) w4)))::word1) = 0"
+  using and_or_or_s assms or_and_s ucast_s ucast_s2
+  by (simp add: and_or_or_s assms or_and_s ucast_s ucast_s2) 
+
+lemma and_or_or_or_or_s:
+assumes a1: "(((get_S w1))::word1) = 0 \<and> 
+  (AND) w2 (0b00000000000000000000000010000000::word32) = 0 \<and>  
+  (AND) w3 (0b00000000000000000000000010000000::word32) = 0 \<and>
+  (AND) w4 (0b00000000000000000000000010000000::word32) = 0 \<and> 
+  (AND) w5 (0b00000000000000000000000010000000::word32) = 0"
+shows "(((get_S ((OR) ((OR) ((OR) ((OR) ((AND) w1 
+  (0b11111111000011111111111111111111::word32)) w2) w3) w4) w5)))::word1) = 0"
+  using and_or_or_or_s assms or_and_s ucast_s ucast_s2
+  by (simp add: and_or_or_or_s assms or_and_s ucast_s ucast_s2)
+
+lemma write_cpu_PSR_icc_privilege: 
+assumes a1: "s' = snd (fst (write_cpu (update_PSR_icc n_val z_val v_val c_val 
+                                        (cpu_reg_val PSR s)) 
+                                      PSR 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: write_cpu_def)
+apply (simp add: simpler_modify_def)
+apply (simp add: cpu_reg_mod_def update_PSR_icc_def)
+apply (simp add: cpu_reg_val_def)
+apply auto
+               using update_PSR_icc_1 apply blast
+              using update_PSR_icc_1 and_num_1048576_128 and_or_s apply blast
+             using update_PSR_icc_1 and_num_2097152_128 and_or_s apply blast
+            using update_PSR_icc_1 and_num_1048576_128 and_num_2097152_128 
+            and_or_or_s apply blast
+           using update_PSR_icc_1 and_num_4194304_128 and_or_s apply blast
+          using update_PSR_icc_1 and_num_1048576_128 and_num_4194304_128 
+          and_or_or_s apply blast
+         using update_PSR_icc_1 and_num_2097152_128 and_num_4194304_128 
+         and_or_or_s apply blast
+        using update_PSR_icc_1 and_num_1048576_128 and_num_2097152_128 and_num_4194304_128
+        and_or_or_or_s apply blast 
+       using update_PSR_icc_1 and_num_8388608_128 and_or_s apply blast
+      using update_PSR_icc_1 and_num_1048576_128 and_num_8388608_128 
+      and_or_or_s apply blast
+     using update_PSR_icc_1 and_num_2097152_128 and_num_8388608_128 
+     and_or_or_s apply blast
+    using update_PSR_icc_1 and_num_1048576_128 and_num_2097152_128 and_num_8388608_128
+    and_or_or_or_s apply blast 
+   using update_PSR_icc_1 and_num_4194304_128 and_num_8388608_128 
+   and_or_or_s apply blast
+  using update_PSR_icc_1 and_num_1048576_128 and_num_4194304_128 and_num_8388608_128
+  and_or_or_or_s apply blast 
+ using update_PSR_icc_1 and_num_2097152_128 and_num_4194304_128 and_num_8388608_128
+ and_or_or_or_s apply blast 
+using update_PSR_icc_1 and_num_1048576_128 and_num_2097152_128 and_num_4194304_128 
+and_num_8388608_128 and_or_or_or_or_s by blast 
+
+lemma and_num_4294967167_128: "(AND) (0b11111111111111111111111101111111::word32)
+  (0b00000000000000000000000010000000::word32) = 0"
+by simp
+
+lemma s_0_word: "(((get_S ((AND) w 
+  (0b11111111111111111111111101111111::word32))))::word1) = 0"
+apply (simp add: get_S_def)
+  using and_num_4294967167_128
+  by (simp add: ac_simps)
+
+lemma update_PSR_CWP_1: "w' = (AND) w (0b11111111111111111111111111100000::word32)
+  \<and> (((get_S w))::word1) = 0
+  \<Longrightarrow> (((get_S w'))::word1) = 0"
+by (simp add: get_S_def word_bw_assocs(1))
+
+lemma write_cpu_PSR_CWP_privilege: 
+assumes a1: "s' = snd (fst (write_cpu (update_CWP cwp_val 
+                                        (cpu_reg_val PSR s)) 
+                                      PSR 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: write_cpu_def)
+apply (simp add: simpler_modify_def)
+apply (simp add: cpu_reg_mod_def)
+apply (simp add: update_CWP_def)
+apply (simp add: Let_def)
+apply auto
+apply (simp add: cpu_reg_val_def)
+using s_0_word by blast
+
+lemma logical_instr_sub1_privilege: 
+assumes a1: "s' = snd (fst (logical_instr_sub1 instr_name result 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "instr_name = logic_type ANDcc \<or>
+              instr_name = logic_type ANDNcc \<or>
+              instr_name = logic_type ORcc \<or>
+              instr_name = logic_type ORNcc \<or>
+              instr_name = logic_type XORcc \<or> instr_name = logic_type XNORcc")
+  case True
+  then show ?thesis using a1
+  apply (simp add: logical_instr_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  apply (simp add: logical_new_psr_val_def)
+  using write_cpu_PSR_icc_privilege by blast
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: logical_instr_sub1_def)
+  by (simp add: return_def)
+qed
+
+lemma logical_instr_privilege: 
+assumes a1: "s' = snd (fst (logical_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: logical_instr_def)
+apply (simp add: Let_def simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: case_prod_unfold)
+apply auto
+ apply (meson get_curr_win_privilege logical_instr_sub1_privilege write_reg_privilege)
+by (meson get_curr_win_privilege logical_instr_sub1_privilege write_reg_privilege)
+
+method shift_instr_privilege_proof = (
+(simp add: shift_instr_def),
+(simp add: Let_def), 
+(simp add: simpler_gets_def),
+(simp add: bind_def h1_def h2_def Let_def case_prod_unfold),
+auto,
+(blast intro: get_curr_win_privilege write_reg_privilege),
+(blast intro: get_curr_win_privilege write_reg_privilege)
+)
+
+lemma shift_instr_privilege: 
+assumes a1: "s' = snd (fst (shift_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "(fst instr = shift_type SLL) \<and> (get_operand_w5 ((snd instr)!3) \<noteq> 0)")
+  case True
+  then show ?thesis using a1
+  by shift_instr_privilege_proof
+next
+  case False
+  then have f1: "\<not>((fst instr = shift_type SLL) \<and> (get_operand_w5 ((snd instr)!3) \<noteq> 0))"
+    by auto
+  then show ?thesis
+  proof (cases "(fst instr = shift_type SRL) \<and> (get_operand_w5 ((snd instr)!3) \<noteq> 0)")
+    case True
+    then show ?thesis using a1 f1
+    by shift_instr_privilege_proof
+  next
+    case False
+    then have f2: "\<not>((fst instr = shift_type SRL) \<and> (get_operand_w5 ((snd instr)!3) \<noteq> 0))"
+      by auto
+    then show ?thesis 
+    proof (cases "(fst instr = shift_type SRA) \<and> (get_operand_w5 ((snd instr)!3) \<noteq> 0)")
+      case True
+      then show ?thesis using a1 f1 f2
+      by shift_instr_privilege_proof
+    next
+      case False
+      then show ?thesis using a1 f1 f2
+      apply (simp add: shift_instr_def)
+      apply (simp add: Let_def) 
+      apply (simp add: simpler_gets_def)
+      apply (simp add: bind_def h1_def h2_def Let_def case_prod_unfold)
+      apply (simp add: return_def)
+      using get_curr_win_privilege by blast
+    qed
+  qed
+qed
+
+lemma add_instr_sub1_privilege: 
+assumes a1: "s' = snd (fst (add_instr_sub1 instr_name result rs1_val operand2 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "instr_name = arith_type ADDcc \<or> instr_name = arith_type ADDXcc")
+  case True
+  then show ?thesis using a1
+  apply (simp add: add_instr_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  by (blast intro: write_cpu_PSR_icc_privilege)
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: add_instr_sub1_def)
+  by (simp add: return_def)
+qed
+
+lemma add_instr_privilege: 
+assumes a1: "s' = snd (fst (add_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: add_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+by (meson add_instr_sub1_privilege get_curr_win_privilege write_reg_privilege)
+
+lemma sub_instr_sub1_privilege: 
+assumes a1: "s' = snd (fst (sub_instr_sub1 instr_name result rs1_val operand2 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "instr_name = arith_type SUBcc \<or> instr_name = arith_type SUBXcc")
+  case True
+  then show ?thesis using a1
+  apply (simp add: sub_instr_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  by (blast intro: write_cpu_PSR_icc_privilege)
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: sub_instr_sub1_def)
+  by (simp add: return_def)
+qed
+
+lemma sub_instr_privilege: 
+assumes a1: "s' = snd (fst (sub_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: sub_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+by (meson sub_instr_sub1_privilege get_curr_win_privilege write_reg_privilege)
+
+lemma mul_instr_sub1_privilege: 
+assumes a1: "s' = snd (fst (mul_instr_sub1 instr_name result  
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "instr_name \<in> {arith_type SMULcc,arith_type UMULcc}")
+  case True
+  then show ?thesis using a1
+  apply (simp add: mul_instr_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  by (blast intro: write_cpu_PSR_icc_privilege)
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: mul_instr_sub1_def)
+  by (simp add: return_def)
+qed
+
+lemma mul_instr_privilege: 
+assumes a1: "s' = snd (fst (mul_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: mul_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+by (meson get_curr_win_privilege mul_instr_sub1_privilege write_cpu_y_privilege write_reg_privilege)
+
+lemma div_write_new_val_privilege: 
+assumes a1: "s' = snd (fst (div_write_new_val i result temp_V  
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "(fst i) \<in> {arith_type UDIVcc,arith_type SDIVcc}")
+  case True
+  then show ?thesis using a1
+  apply (simp add: div_write_new_val_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  by (blast intro: write_cpu_PSR_icc_privilege)
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: div_write_new_val_def)
+  by (simp add: return_def)
+qed
+
+lemma div_comp_privilege: 
+assumes a1: "s' = snd (fst (div_comp instr rs1 rd operand2  
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: div_comp_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+by (meson get_curr_win_privilege div_write_new_val_privilege write_reg_privilege)
+
+lemma div_instr_privilege: 
+assumes a1: "s' = snd (fst (div_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: div_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply (simp add: return_def)
+apply auto
+ using raise_trap_privilege apply blast
+using div_comp_privilege by blast
+
+lemma save_retore_sub1_privilege: 
+assumes a1: "s' = snd (fst (save_retore_sub1 result new_cwp rd 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: save_retore_sub1_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+using write_cpu_PSR_CWP_privilege write_reg_privilege by blast
+
+method save_restore_instr_privilege_proof = (
+(simp add: save_restore_instr_def),
+(simp add: Let_def),
+(simp add: simpler_gets_def bind_def h1_def h2_def Let_def),
+(simp add: case_prod_unfold),
+auto,
+(blast intro: get_curr_win_privilege raise_trap_privilege),
+(simp add: simpler_gets_def bind_def h1_def h2_def Let_def case_prod_unfold),
+(blast intro: get_curr_win_privilege save_retore_sub1_privilege)
+)
+
+lemma save_restore_instr_privilege: 
+assumes a1: "s' = snd (fst (save_restore_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "fst instr = ctrl_type SAVE")
+  case True
+  then have f1: "fst instr = ctrl_type SAVE" by auto
+  then show ?thesis using a1
+  by save_restore_instr_privilege_proof
+next
+  case False
+  then show ?thesis using a1
+  by save_restore_instr_privilege_proof
+qed
+
+lemma call_instr_privilege: 
+assumes a1: "s' = snd (fst (call_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: call_instr_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+by (meson get_curr_win_privilege write_cpu_npc_privilege write_cpu_pc_privilege write_reg_privilege)
+
+lemma jmpl_instr_privilege: 
+assumes a1: "s' = snd (fst (jmpl_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: jmpl_instr_def)
+apply (simp add: Let_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+apply auto
+ using get_curr_win_privilege raise_trap_privilege apply blast
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply (simp add: case_prod_unfold)
+by (meson get_curr_win_privilege write_cpu_npc_privilege write_cpu_pc_privilege write_reg_privilege)
+
+lemma rett_instr_privilege: 
+assumes a1: "snd (rett_instr i s) = False \<and>
+  s' = snd (fst (rett_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: rett_instr_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+apply auto
+ apply (simp add: case_prod_unfold)
+ apply (simp add: return_def)
+ apply (blast intro: raise_trap_privilege)
+apply (simp add: bind_def h1_def h2_def Let_def)
+by (simp add: case_prod_unfold fail_def)
+
+method read_state_reg_instr_privilege_proof = (
+(simp add: read_state_reg_instr_def),
+(simp add: Let_def),
+(simp add: simpler_gets_def bind_def h1_def h2_def Let_def),
+(simp add: case_prod_unfold)
+)
+
+lemma read_state_reg_instr_privilege: 
+assumes a1: "s' = snd (fst (read_state_reg_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "(fst instr \<in> {sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR} \<or> 
+        (fst instr = sreg_type RDASR \<and> privileged_ASR (get_operand_w5 ((snd instr)!0))))")
+  case True
+  then have "(fst instr \<in> {sreg_type RDPSR,sreg_type RDWIM,sreg_type RDTBR} \<or> 
+        (fst instr = sreg_type RDASR \<and> privileged_ASR (get_operand_w5 ((snd instr)!0))))
+        \<and> (((get_S (cpu_reg_val PSR (snd (fst (get_curr_win () s))))))::word1) = 0"
+    by (metis assms get_curr_win_privilege)    
+  then show ?thesis using a1
+  apply read_state_reg_instr_privilege_proof
+  by (blast intro: raise_trap_privilege get_curr_win_privilege)
+next
+  case False
+  then have f1: "\<not>((fst instr = sreg_type RDPSR \<or>
+                    fst instr = sreg_type RDWIM \<or>
+                    fst instr = sreg_type RDTBR \<or>
+                    fst instr = sreg_type RDASR \<and> privileged_ASR (get_operand_w5 (snd instr ! 0))) \<and>
+                   (get_S (cpu_reg_val PSR (snd (fst (get_curr_win () s))))) = 0)"
+    by blast 
+  then show ?thesis 
+  proof (cases "illegal_instruction_ASR (get_operand_w5 ((snd instr)!0))")
+    case True
+    then show ?thesis using a1 f1
+    apply read_state_reg_instr_privilege_proof
+    by (simp add: illegal_instruction_ASR_def)    
+  next
+    case False
+    then have f2: "\<not>(illegal_instruction_ASR (get_operand_w5 ((snd instr)!0)))" 
+      by auto
+    then show ?thesis 
+    proof (cases "(get_operand_w5 ((snd instr)!1)) \<noteq> 0")
+      case True
+      then have f3: "(get_operand_w5 ((snd instr)!1)) \<noteq> 0" 
+        by auto
+      then show ?thesis 
+      proof (cases "fst instr = sreg_type RDY")
+        case True
+        then show ?thesis using a1 f1 f2 f3
+        apply (simp add: read_state_reg_instr_def)
+        apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+        apply (simp add: case_prod_unfold)
+        by (blast intro: get_curr_win_privilege write_reg_privilege)        
+      next
+        case False
+        then have f4: "\<not>(fst instr = sreg_type RDY)" by auto
+        then show ?thesis 
+        proof (cases "fst instr = sreg_type RDASR")
+          case True
+          then show ?thesis using a1 f1 f2 f3 f4
+          apply read_state_reg_instr_privilege_proof
+          apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+          by (blast intro: get_curr_win_privilege write_reg_privilege) 
+        next
+          case False
+          then have f5: "\<not>(fst instr = sreg_type RDASR)" by auto
+          then show ?thesis 
+          proof (cases "fst instr = sreg_type RDPSR")
+            case True
+            then show ?thesis using a1 f1 f2 f3 f4 f5
+            apply read_state_reg_instr_privilege_proof
+            by (blast intro: get_curr_win_privilege write_reg_privilege) 
+          next
+            case False
+            then show ?thesis using a1 f1 f2 f3 f4 f5
+            apply read_state_reg_instr_privilege_proof
+            apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+            by (blast intro: get_curr_win_privilege write_reg_privilege) 
+          qed
+        qed
+      qed
+    next
+      case False
+      then show ?thesis using a1 
+      apply read_state_reg_instr_privilege_proof
+      apply (simp add: return_def) 
+      using f1 f2 get_curr_win_privilege by blast     
+    qed
+  qed
+qed
+
+method write_state_reg_instr_privilege_proof = (
+(simp add: write_state_reg_instr_def),
+(simp add: Let_def),
+(simp add: simpler_gets_def bind_def h1_def h2_def Let_def),
+(simp add: case_prod_unfold)
+)
+
+lemma write_state_reg_instr_privilege: 
+assumes a1: "s' = snd (fst (write_state_reg_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "fst instr = sreg_type WRY")
+  case True
+  then show ?thesis using a1
+  apply write_state_reg_instr_privilege_proof
+  apply (simp add: simpler_modify_def)
+  apply (simp add: delayed_pool_add_def DELAYNUM_def)
+  by (blast intro: cpu_reg_mod_y_privilege get_curr_win_privilege)
+next
+  case False
+  then have f1: "\<not>(fst instr = sreg_type WRY)" by auto
+  then show ?thesis
+  proof (cases "fst instr = sreg_type WRASR")
+    case True
+    then show ?thesis
+     using a1 f1
+    apply write_state_reg_instr_privilege_proof
+    apply (simp add: simpler_modify_def)
+    apply auto
+         using illegal_instruction_ASR_def apply blast
+        using illegal_instruction_ASR_def apply blast
+       using illegal_instruction_ASR_def apply blast
+      using raise_trap_privilege get_curr_win_privilege apply blast
+     apply (simp add: simpler_modify_def delayed_pool_add_def DELAYNUM_def)
+     using cpu_reg_mod_asr_privilege get_curr_win_privilege apply blast
+    apply (simp add: simpler_modify_def delayed_pool_add_def DELAYNUM_def)
+    using cpu_reg_mod_asr_privilege get_curr_win_privilege by blast
+  next
+    case False
+    then have f2: "\<not>(fst instr = sreg_type WRASR)" by auto
+    have f3: "get_S (cpu_reg_val PSR (snd (fst (get_curr_win () s)))) = 0"
+      using get_curr_win_privilege a1 by (metis ucast_id)
+    then show ?thesis 
+    proof (cases "fst instr = sreg_type WRPSR")
+      case True
+      then show ?thesis using a1 f1 f2 f3
+      apply write_state_reg_instr_privilege_proof
+      by (metis raise_trap_privilege ucast_0)      
+    next
+      case False
+      then have f4: "\<not>(fst instr = sreg_type WRPSR)" by auto
+      then show ?thesis 
+      proof (cases "fst instr = sreg_type WRWIM")  
+        case True
+        then show ?thesis using a1 f1 f2 f3 f4
+        apply write_state_reg_instr_privilege_proof
+        by (metis raise_trap_privilege ucast_0)  
+      next
+        case False
+        then have f5: "\<not>(fst instr = sreg_type WRWIM)" by auto
+        then show ?thesis using a1 f1 f2 f3 f4 f5
+        apply write_state_reg_instr_privilege_proof
+        by (metis raise_trap_privilege ucast_0)        
+      qed
+    qed
+  qed
+qed
+
+lemma flush_instr_privilege: 
+assumes a1: "s' = snd (fst (flush_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: flush_instr_def)
+apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def simpler_modify_def)
+by (auto simp add: flush_cache_all_privilege)
+
+lemma branch_instr_privilege: 
+assumes a1: "s' = snd (fst (branch_instr instr 
+  (s::(('a::len) sparc_state))))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+using a1
+apply (simp add: branch_instr_def)
+apply (simp add: Let_def simpler_gets_def bind_def h1_def h2_def)
+apply (simp add: case_prod_unfold return_def)
+by (meson set_annul_privilege write_cpu_npc_privilege write_cpu_pc_privilege)
+
+method dispath_instr_privilege_proof = (
+(simp add: dispatch_instruction_def),
+(simp add: simpler_gets_def bind_def h1_def h2_def Let_def),
+(simp add: Let_def)
+)
+
+lemma dispath_instr_privilege: 
+assumes a1: "snd (dispatch_instruction instr s) = False \<and>
+  s' = snd (fst (dispatch_instruction instr s))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "get_trap_set s = {}")
+  case True
+  then have f1: "get_trap_set s = {}" by auto
+  show ?thesis
+  proof (cases "fst instr \<in> {load_store_type LDSB,load_store_type LDUB,
+        load_store_type LDUBA,load_store_type LDUH,load_store_type LD,
+        load_store_type LDA,load_store_type LDD}")
+    case True
+    then show ?thesis using a1 f1
+    apply dispath_instr_privilege_proof
+    by (blast intro: load_instr_privilege)    
+  next
+    case False
+    then have f2: "\<not>(fst instr \<in> {load_store_type LDSB,load_store_type LDUB,
+        load_store_type LDUBA,load_store_type LDUH,load_store_type LD,
+        load_store_type LDA,load_store_type LDD})"
+      by auto
+    then show ?thesis 
+    proof (cases "fst instr \<in> {load_store_type STB,load_store_type STH,
+        load_store_type ST,load_store_type STA,load_store_type STD}")
+      case True
+      then show ?thesis using a1 f1 f2
+      apply dispath_instr_privilege_proof
+      by (blast intro: store_instr_privilege) 
+    next
+      case False
+      then have f3: "\<not>(fst instr \<in> {load_store_type STB,load_store_type STH,
+        load_store_type ST,load_store_type STA,load_store_type STD})"
+        by auto
+      then show ?thesis 
+      proof (cases "fst instr \<in> {sethi_type SETHI}")
+        case True
+        then show ?thesis using a1 f1 f2 f3
+        apply dispath_instr_privilege_proof
+        by (blast intro: sethi_instr_privilege) 
+      next
+        case False
+        then have f4: "\<not>(fst instr \<in> {sethi_type SETHI})"
+          by auto
+        then show ?thesis
+        proof (cases "fst instr \<in> {nop_type NOP}")
+          case True
+          then show ?thesis using a1 f1 f2 f3 f4
+          apply dispath_instr_privilege_proof
+          by (blast intro: nop_instr_privilege)
+        next
+          case False
+          then have f5: "\<not>(fst instr \<in> {nop_type NOP})" 
+            by auto
+          then show ?thesis
+          proof (cases "fst instr \<in> {logic_type ANDs,logic_type ANDcc,logic_type ANDN,
+            logic_type ANDNcc,logic_type ORs,logic_type ORcc,logic_type ORN,
+            logic_type XORs,logic_type XNOR}")
+            case True
+            then show ?thesis using a1 f1 f2 f3 f4 f5
+            apply dispath_instr_privilege_proof
+            by (blast intro: logical_instr_privilege)
+          next
+            case False
+            then have f6: "\<not>(fst instr \<in> {logic_type ANDs,logic_type ANDcc,logic_type ANDN,
+            logic_type ANDNcc,logic_type ORs,logic_type ORcc,logic_type ORN,
+            logic_type XORs,logic_type XNOR})"
+              by auto
+            show ?thesis
+            proof (cases "fst instr \<in> {shift_type SLL,shift_type SRL,shift_type SRA}")
+              case True
+              then show ?thesis using a1 f1 f2 f3 f4 f5 f6
+              apply dispath_instr_privilege_proof
+              by (blast intro: shift_instr_privilege)
+            next
+              case False
+              then have f7: "\<not>(fst instr \<in> {shift_type SLL,shift_type SRL,shift_type SRA})"
+                by auto
+              then show ?thesis 
+              proof (cases "fst instr \<in> {arith_type ADD,arith_type ADDcc,arith_type ADDX}")
+                case True
+                then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7
+                apply dispath_instr_privilege_proof
+                by (blast intro: add_instr_privilege)
+              next
+                case False
+                then have f8: "\<not>(fst instr \<in> {arith_type ADD,arith_type ADDcc,arith_type ADDX})"
+                  by auto
+                then show ?thesis
+                proof (cases "fst instr \<in> {arith_type SUB,arith_type SUBcc,arith_type SUBX}")
+                  case True
+                  then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8
+                  apply dispath_instr_privilege_proof
+                  by (blast intro: sub_instr_privilege)
+                next
+                  case False
+                  then have f9: "\<not>(fst instr \<in> {arith_type SUB,arith_type SUBcc,arith_type SUBX})"
+                    by auto
+                  then show ?thesis
+                  proof (cases "fst instr \<in> {arith_type UMUL,arith_type SMUL,arith_type SMULcc}")
+                    case True
+                    then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9
+                    apply dispath_instr_privilege_proof
+                    by (blast intro: mul_instr_privilege)
+                  next
+                    case False
+                    then have f10: "\<not>(fst instr \<in> {arith_type UMUL,arith_type SMUL,
+                      arith_type SMULcc})"
+                      by auto
+                    then show ?thesis 
+                    proof (cases "fst instr \<in> {arith_type UDIV,arith_type UDIVcc,arith_type SDIV}")
+                      case True
+                      then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10
+                      apply dispath_instr_privilege_proof
+                      by (blast intro: div_instr_privilege)
+                    next
+                      case False
+                      then have f11: "\<not>(fst instr \<in> {arith_type UDIV,
+                        arith_type UDIVcc,arith_type SDIV})"
+                        by auto
+                      then show ?thesis 
+                      proof (cases "fst instr \<in> {ctrl_type SAVE,ctrl_type RESTORE}")
+                        case True
+                        then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11
+                        apply dispath_instr_privilege_proof
+                        by (blast intro: save_restore_instr_privilege)
+                      next
+                        case False
+                        then have f12: "\<not>(fst instr \<in> {ctrl_type SAVE,ctrl_type RESTORE})"
+                          by auto
+                        then show ?thesis 
+                        proof (cases "fst instr \<in> {call_type CALL}")
+                          case True
+                          then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12
+                          apply dispath_instr_privilege_proof
+                          by (blast intro: call_instr_privilege)
+                        next
+                          case False
+                          then have f13: "\<not>(fst instr \<in> {call_type CALL})" by auto
+                          then show ?thesis
+                          proof (cases "fst instr \<in> {ctrl_type JMPL}")
+                            case True
+                            then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13
+                            apply dispath_instr_privilege_proof
+                            by (blast intro: jmpl_instr_privilege)
+                          next
+                            case False
+                            then have f14: "\<not>(fst instr \<in> {ctrl_type JMPL})" by auto
+                            then show ?thesis 
+                            proof (cases "fst instr \<in> {ctrl_type RETT}")
+                              case True
+                              then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13
+                                f14
+                              apply dispath_instr_privilege_proof
+                              by (blast intro: rett_instr_privilege)
+                            next
+                              case False
+                              then have f15: "\<not>(fst instr \<in> {ctrl_type RETT})" by auto
+                              then show ?thesis 
+                              proof (cases "fst instr \<in> {sreg_type RDY,sreg_type RDPSR,
+                                sreg_type RDWIM, sreg_type RDTBR}")
+                                case True
+                                then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 
+                                f13 f14 f15
+                                apply dispath_instr_privilege_proof
+                                by (blast intro: read_state_reg_instr_privilege)
+                              next
+                                case False
+                                then have f16: "\<not>(fst instr \<in> {sreg_type RDY,sreg_type RDPSR,
+                                sreg_type RDWIM, sreg_type RDTBR})" by auto
+                                then show ?thesis
+                                proof (cases "fst instr \<in> {sreg_type WRY,sreg_type WRPSR,
+                                  sreg_type WRWIM, sreg_type WRTBR}")
+                                  case True
+                                  then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 
+                                  f13 f14 f15 f16
+                                  apply dispath_instr_privilege_proof
+                                  by (blast intro: write_state_reg_instr_privilege)
+                                next
+                                  case False
+                                  then have f17: "\<not>(fst instr \<in> {sreg_type WRY,sreg_type WRPSR,
+                                  sreg_type WRWIM, sreg_type WRTBR})" by auto
+                                  then show ?thesis
+                                  proof (cases "fst instr \<in> {load_store_type FLUSH}")
+                                    case True
+                                    then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 
+                                    f12 f13 f14 f15 f16 f17
+                                    apply dispath_instr_privilege_proof
+                                    by (blast intro: flush_instr_privilege)
+                                  next
+                                    case False
+                                    then have f18: "\<not>(fst instr \<in> {load_store_type FLUSH})" by auto
+                                    then show ?thesis 
+                                    proof (cases "fst instr \<in> {bicc_type BE,bicc_type BNE,
+                                      bicc_type BGU,bicc_type BLE,bicc_type BL,bicc_type BGE,
+                                      bicc_type BNEG,bicc_type BG,bicc_type BCS,bicc_type BLEU,
+                                      bicc_type BCC,bicc_type BA,bicc_type BN}")
+                                      case True
+                                      then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 
+                                      f12 f13 f14 f15 f16 f17 f18
+                                      apply dispath_instr_privilege_proof
+                                      by (blast intro: branch_instr_privilege)
+                                    next
+                                      case False
+                                      then show ?thesis using a1 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 
+                                      f12 f13 f14 f15 f16 f17 f18
+                                      apply dispath_instr_privilege_proof
+                                      by (simp add: fail_def)
+                                    qed
+                                  qed
+                                qed
+                              qed
+                            qed
+                          qed
+                        qed
+                      qed
+                    qed
+                  qed
+                qed
+              qed
+            qed
+          qed
+        qed
+      qed
+    qed
+  qed
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: dispatch_instruction_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def)
+  apply (simp add: Let_def)
+  by (simp add: return_def)
+qed
+
+lemma execute_instr_sub1_privilege: 
+assumes a1: "snd (execute_instr_sub1 i s) = False \<and>
+  s' = snd (fst (execute_instr_sub1 i s))
+  \<and> (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "get_trap_set s = {} \<and> fst i \<notin> {call_type CALL,ctrl_type RETT,ctrl_type JMPL,
+                                   bicc_type BE,bicc_type BNE,bicc_type BGU,
+                                   bicc_type BLE,bicc_type BL,bicc_type BGE,
+                                   bicc_type BNEG,bicc_type BG,
+                                   bicc_type BCS,bicc_type BLEU,bicc_type BCC,
+                                   bicc_type BA,bicc_type BN}")
+  case True
+  then show ?thesis using a1
+  apply (simp add: execute_instr_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  apply (simp add: case_prod_unfold return_def)
+  by (auto intro: write_cpu_pc_privilege write_cpu_npc_privilege)
+next
+  case False
+  then show ?thesis using a1
+  apply (simp add: execute_instr_sub1_def)
+  apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+  apply (simp add: case_prod_unfold return_def)
+  by auto
+qed
+
+theorem safe_privilege : 
+assumes a1: "get_delayed_pool s = [] \<and> get_trap_set s = {} \<and>
+  snd (execute_instruction() s) = False \<and>
+  s' = snd (fst (execute_instruction() s)) \<and> 
+  (((get_S (cpu_reg_val PSR s)))::word1) = 0"
+shows "(((get_S (cpu_reg_val PSR s')))::word1) = 0"
+proof (cases "exe_mode_val s")
+  case True   
+  then have f2: "exe_mode_val s = True" by auto
+  then show ?thesis
+  proof (cases "\<exists>e. fetch_instruction (delayed_pool_write s) = Inl e")
+    case True
+    then have f3: "\<exists>e. fetch_instruction (delayed_pool_write s) = Inl e"
+      by auto
+    then have f4: "\<not> (\<exists>v. fetch_instruction (delayed_pool_write s) = Inr v)" 
+      using fetch_instr_result_3 by auto
+    then show ?thesis using a1 f2 f3 raise_trap_result empty_delayed_pool_write_privilege raise_trap_privilege        
+    apply (simp add: execute_instruction_def)
+    apply (simp add: exec_gets return_def)
+    apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+    apply (simp add: simpler_modify_def)
+    apply clarsimp
+    apply (simp add: case_prod_unfold)
+    by (blast intro: empty_delayed_pool_write_privilege raise_trap_privilege)      
+  next
+    case False
+    then have f5: "\<exists>v. fetch_instruction (delayed_pool_write s) = Inr v"
+      using fetch_instr_result_1 by blast
+    then have f6: "\<exists>v. fetch_instruction (delayed_pool_write s) = Inr v \<and>
+    \<not> (\<exists>e. ((decode_instruction v)::(Exception list + instruction)) = Inl e)"
+      using a1 f2 dispatch_fail by blast 
+    then have f7: "\<exists>v. fetch_instruction (delayed_pool_write s) = Inr v \<and>
+    (\<exists>v1. ((decode_instruction v)::(Exception list + instruction)) = Inr v1)"
+      using decode_instr_result_4 by auto 
+    then show ?thesis
+    proof (cases "annul_val (delayed_pool_write s)")
+      case True
+      then show ?thesis using  a1 f2 f7           
+      apply (simp add: execute_instruction_def)
+      apply (simp add: exec_gets return_def)
+      apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+      apply (simp add: simpler_modify_def)
+      apply clarsimp
+      apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+      apply (simp add: case_prod_unfold)
+      by (auto intro: empty_delayed_pool_write_privilege 
+      set_annul_privilege write_cpu_npc_privilege write_cpu_pc_privilege)
+    next 
+      case False
+      then show ?thesis using  a1 f2 f7 
+      apply (simp add: execute_instruction_def)
+      apply (simp add: exec_gets return_def)
+      apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+      apply (simp add: simpler_modify_def)
+      apply clarsimp
+      apply (simp add: bind_def h1_def h2_def Let_def)
+      apply (simp add: case_prod_unfold)
+      apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+      apply (simp add: simpler_modify_def return_def)
+      apply (simp add: simpler_gets_def bind_def h1_def h2_def Let_def)
+      apply (simp add: case_prod_unfold)
+      by (auto intro: empty_delayed_pool_write_privilege dispath_instr_privilege 
+         execute_instr_sub1_privilege)        
+    qed
+  qed    
+next
+  case False
+  then show ?thesis using a1 
+  apply (simp add: execute_instruction_def)
+  by (simp add: simpler_gets_def bind_def h1_def h2_def Let_def return_def) 
+qed
+
+
+
+
+definition user_accessible:: "('a::len) sparc_state \<Rightarrow> phys_address \<Rightarrow> bool" where
+"user_accessible s pa \<equiv> \<exists>va p. (virt_to_phys va (mmu s) (mem s)) = Some p \<and>
+  mmu_readable (get_acc_flag (snd p)) 10 \<and>
+
+lemma user_accessible_8: 
+assumes a1: "mmu_readable (get_acc_flag (snd p)) 8"
+shows "mmu_readable (get_acc_flag (snd p)) 10"
+using a1 by (simp add: mmu_readable_def)
+
+definition mem_equal:: "('a) sparc_state \<Rightarrow> ('a) sparc_state \<Rightarrow> 
+  phys_address \<Rightarrow> bool" where
+"mem_equal s1 s2 pa \<equiv>
+  (mem s1) 8 (pa AND 68719476732) = (mem s2) 8 (pa AND 68719476732) \<and>
+  (mem s1) 8 ((pa AND 68719476732) + 1) = (mem s2) 8 ((pa AND 68719476732) + 1) \<and>
+  (mem s1) 8 ((pa AND 68719476732) + 2) = (mem s2) 8 ((pa AND 68719476732) + 2) \<and>
+  (mem s1) 8 ((pa AND 68719476732) + 3) = (mem s2) 8 ((pa AND 68719476732) + 3) \<and>
+  (mem s1) 9 (pa AND 68719476732) = (mem s2) 9 (pa AND 68719476732) \<and>
+  (mem s1) 9 ((pa AND 68719476732) + 1) = (mem s2) 9 ((pa AND 68719476732) + 1) \<and>
+  (mem s1) 9 ((pa AND 68719476732) + 2) = (mem s2) 9 ((pa AND 68719476732) + 2) \<and>
+  (mem s1) 9 ((pa AND 68719476732) + 3) = (mem s2) 9 ((pa AND 68719476732) + 3) \<and>
+  (mem s1) 10 (pa AND 68719476732) = (mem s2) 10 (pa AND 68719476732) \<and>
+  (mem s1) 10 ((pa AND 68719476732) + 1) = (mem s2) 10 ((pa AND 68719476732) + 1) \<and>
+  (mem s1) 10 ((pa AND 68719476732) + 2) = (mem s2) 10 ((pa AND 68719476732) + 2) \<and>
+  (mem s1) 10 ((pa AND 68719476732) + 3) = (mem s2) 10 ((pa AND 68719476732) + 3) \<and>
+  (mem s1) 11 (pa AND 68719476732) = (mem s2) 11 (pa AND 68719476732) \<and>
+  (mem s1) 11 ((pa AND 68719476732) + 1) = (mem s2) 11 ((pa AND 68719476732) + 1) \<and>
+  (mem s1) 11 ((pa AND 68719476732) + 2) = (mem s2) 11 ((pa AND 68719476732) + 2) \<and>
+  (mem s1) 11 ((pa AND 68719476732) + 3) = (mem s2) 11 ((pa AND 68719476732) + 3)"
+
+in the traditional non-interference theorem.\<close>
+          using \<open>(case Some (pp (virt_to_phys addr (mmu (add_data_cache s2 addr data bm)) (mem (add_data_cache s2 addr data bm)))) of None \<Rightarrow> if mmu_writable (get_acc_flag (snd (pp (virt_to_phys addr (mmu (add_data_cache s2 addr data bm)) (mem (add_data_cache s2 addr data bm)))))) 10 then Some (mem_mod_w32 10 (fst (pp (virt_to_phys addr (mmu (add_data_cache s2 addr data bm)) (mem (add_data_cache s2 addr data bm))))) bm data (add_data_cache s1 addr data bm)) else None | Some p \<Rightarrow> if mmu_writable (get_acc_flag (snd p)) 10 then Some (mem_mod_w32 10 (fst p) bm data (add_data_cache s2 addr data bm)) else None) \<noteq> (case virt_to_phys addr (mmu (add_data_cache s2 addr data bm)) (mem (add_data_cache s2 addr data bm)) of None \<Rightarrow> None | Some p \<Rightarrow> if mmu_writable (get_acc_flag (snd p)) 10 then Some (mem_mod_w32 10 (fst p) bm data (add_data_cache s2 addr data bm)) else None)\<close> by force
+        by (metis (no_types) \<open>\<And>val va s1 ptp addr. ptd_lookup va ptp (mem s1) 1 = ptd_lookup va ptp ((mem s1) (10 := (mem s1 10)(addr \<mapsto> val), 11 := (mem s1 11)(addr := None))) 1\<close> option.case(2) option.simps(4))
+        by (metis (no_types) \<open>(case mem_context_val_w32 (word_of_int 9) (ucast ((v1 >> 11 << 11) OR (v2 AND 511 << 2))) ((mem s1) (10 := (mem s1 10)(addr \<mapsto> val), 11 := (mem s1 11)(addr := None))) of None \<Rightarrow> None | Some lvl1_page_table \<Rightarrow> ptd_lookup va lvl1_page_table (mem s1) 1) = (case mem_context_val_w32 (word_of_int 9) (ucast ((v1 >> 11 << 11) OR (v2 AND 511 << 2))) ((mem s2) (10 := (mem s2 10)(addr \<mapsto> val), 11 := (mem s2 11)(addr := None))) of None \<Rightarrow> None | Some lvl1_page_table \<Rightarrow> ptd_lookup va lvl1_page_table (mem s2) 1)\<close> \<open>\<And>val va s1 ptp addr. ptd_lookup va ptp (mem s1) 1 = ptd_lookup va ptp ((mem s1) (10 := (mem s1 10)(addr \<mapsto> val), 11 := (mem s1 11)(addr := None))) 1\<close> option.case(2))
+            by (metis (no_types) \<open>(case mem_context_val_w32 (word_of_int 9) (ucast ((v1 >> 11 << 11) OR (v2 AND 511 << 2))) ((mem s1) (10 := (mem s1 10)(addr \<mapsto> val), 11 := (mem s1 11)(addr := None))) of None \<Rightarrow> None | Some lvl1_page_table \<Rightarrow> ptd_lookup va lvl1_page_table (mem s1) 1) = (case mem_context_val_w32 (word_of_int 9) (ucast ((v1 >> 11 << 11) OR (v2 AND 511 << 2))) ((mem s2) (10 := (mem s2 10)(addr \<mapsto> val), 11 := (mem s2 11)(addr := None))) of None \<Rightarrow> None | Some lvl1_page_table \<Rightarrow> ptd_lookup va lvl1_page_table (mem s2) 1)\<close> option.simps(4))
+          using f5 f3 by (metis (no_types) \<open>(case mem_context_val_w32 (word_of_int 9) (ucast ((v1 >> 11 << 11) OR (v2 AND 511 << 2))) ((mem s1) (10 := (mem s1 10)(addr \<mapsto> val), 11 := (mem s1 11)(addr := None))) of None \<Rightarrow> None | Some lvl1_page_table \<Rightarrow> ptd_lookup va lvl1_page_table (mem s1) 1) = (case mem_context_val_w32 (word_of_int 9) (ucast ((v1 >> 11 << 11) OR (v2 AND 511 << 2))) ((mem s2) (10 := (mem s2 10)(addr \<mapsto> val), 11 := (mem s2 11)(addr := None))) of None \<Rightarrow> None | Some lvl1_page_table \<Rightarrow> ptd_lookup va lvl1_page_table (mem s2) 1)\<close> \<open>\<And>val va s1 ptp addr. ptd_lookup va ptp (mem s1) 1 = ptd_lookup va ptp ((mem s1) (10 := (mem s1 10)(addr \<mapsto> val), 11 := (mem s1 11)(addr := None))) 1\<close> option.case(2) option.simps(4)) }
+      using \<open>\<And>wa w. user_reg_val w wa (snd (fst (get_curr_win () s2))) = user_reg_val w wa (snd (fst (get_curr_win () s1)))\<close> by presburger
+  \<open>low_equal t1 t2\<close>
+  if \<open>low_equal s1 s2 \<and> t1 = snd (fst (mul_instr instr s1)) \<and> t2 = snd (fst (mul_instr instr s2))\<close>
+  from that have \<open>low_equal s1 s2\<close>
+    and t1: \<open>t1 = snd (fst (mul_instr instr s1))\<close>
+    and t2: \<open>t2 = snd (fst (mul_instr instr s2))\<close>
+    using \<open>low_equal s1 s2\<close> by (meson get_curr_win_low_equal)
+    using f6 \<open>low_equal s1 s2\<close> by (metis (no_types) prod.collapse prod.simps(1))
+    \<open>t1 = snd (fst (mul_instr_sub1 (fst instr) (ucast (if fst instr = arith_type UMUL \<or> fst instr = arith_type UMULcc then word_of_int (uint (user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s1)))) * uint (get_operand2 (snd instr) s1))::word64 else word_of_int (sint (user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s1)))) * sint (get_operand2 (snd instr) s1)))) (snd (fst (write_reg (if get_operand_w5 (snd instr ! 3) \<noteq> 0 then ucast (if fst instr = arith_type UMUL \<or> fst instr = arith_type UMULcc then word_of_int (uint (user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s1)))) * uint (get_operand2 (snd instr) s1))::word64 else word_of_int (sint (user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s1)))) * sint (get_operand2 (snd instr) s1))) else user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! 3)) (snd (fst (write_cpu (ucast ((if fst instr = arith_type UMUL \<or> fst instr = arith_type UMULcc then word_of_int (uint (user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s1)))) * uint (get_operand2 (snd instr) s1))::word64 else word_of_int (sint (user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s1)))) * sint (get_operand2 (snd instr) s1))) >> 32)) Y (snd (fst (get_curr_win () s1))))))) (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! 3)) (snd (fst (write_cpu (ucast ((if fst instr = arith_type UMUL \<or> fst instr = arith_type UMULcc then word_of_int (uint (user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s1)))) * uint (get_operand2 (snd instr) s1))::word64 else word_of_int (sint (user_reg_val (fst (fst (get_curr_win () s1))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s1)))) * sint (get_operand2 (snd instr) s1))) >> 32)) Y (snd (fst (get_curr_win () s1)))))))))))\<close>
+    \<open>t2 = snd (fst (mul_instr_sub1 (fst instr) (ucast (if fst instr = arith_type UMUL \<or> fst instr = arith_type UMULcc then word_of_int (uint (user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s2)))) * uint (get_operand2 (snd instr) s2))::word64 else word_of_int (sint (user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s2)))) * sint (get_operand2 (snd instr) s2)))) (snd (fst (write_reg (if get_operand_w5 (snd instr ! 3) \<noteq> 0 then ucast (if fst instr = arith_type UMUL \<or> fst instr = arith_type UMULcc then word_of_int (uint (user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s2)))) * uint (get_operand2 (snd instr) s2))::word64 else word_of_int (sint (user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s2)))) * sint (get_operand2 (snd instr) s2))) else user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! 3)) (snd (fst (write_cpu (ucast ((if fst instr = arith_type UMUL \<or> fst instr = arith_type UMULcc then word_of_int (uint (user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s2)))) * uint (get_operand2 (snd instr) s2))::word64 else word_of_int (sint (user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s2)))) * sint (get_operand2 (snd instr) s2))) >> 32)) Y (snd (fst (get_curr_win () s2))))))) (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! 3)) (snd (fst (write_cpu (ucast ((if fst instr = arith_type UMUL \<or> fst instr = arith_type UMULcc then word_of_int (uint (user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s2)))) * uint (get_operand2 (snd instr) s2))::word64 else word_of_int (sint (user_reg_val (fst (fst (get_curr_win () s2))) (get_operand_w5 (snd instr ! Suc 0)) (snd (fst (get_curr_win () s2)))) * sint (get_operand2 (snd instr) s2))) >> 32)) Y (snd (fst (get_curr_win () s2)))))))))))\<close>
+  \<open>get_WIM_bit (nat ((uint (fst (fst (get_curr_win () s1))) - 1) mod NWINDOWS))
+     (cpu_reg_val WIM (snd (fst (get_curr_win () s1)))) =
+    get_WIM_bit (nat ((uint (fst (fst (get_curr_win () s2))) - 1) mod NWINDOWS))
+     (cpu_reg_val WIM (snd (fst (get_curr_win () s2))))\<close>
+  if \<open>low_equal s1 s2\<close>
+  \<open>get_WIM_bit (nat ((uint (fst (fst (get_curr_win () s1))) + 1) mod NWINDOWS))
+    (cpu_reg_val WIM (snd (fst (get_curr_win () s1)))) =
+    get_WIM_bit (nat ((uint (fst (fst (get_curr_win () s2))) + 1) mod NWINDOWS))
+      (cpu_reg_val WIM (snd (fst (get_curr_win () s2))))\<close>
+  if \<open>low_equal s1 s2\<close>
+  \<open>take_bit 5 (k mod NWINDOWS) = k mod NWINDOWS\<close>
+text \<open>NIA is short for non-interference assumption.\<close>
+text \<open>NIC is short for non-interference conclusion.\<close>

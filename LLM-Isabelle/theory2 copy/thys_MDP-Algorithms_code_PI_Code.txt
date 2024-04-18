@@ -1,0 +1,50 @@
+theory PI_Code
+  imports
+    "../Policy_Iteration_Fin" 
+    "HOL-Library.Code_Target_Numeral"
+    "Jordan_Normal_Form.Matrix_Impl"
+    Code_Setup
+begin
+context MDP_Code begin
+
+definition "policy_eval_code d = 
+  inverse_mat (1\<^sub>m states - 
+  l \<cdot>\<^sub>m (Matrix.mat states states (\<lambda>(s, s'). pmf (MDP_K (s, d_lookup' d s)) s'))) *\<^sub>v 
+  (vec states (\<lambda>i. MDP_r (i, d_lookup' d i)))"
+
+lemma d_lookup'_eq_map_to_fun: "D_Map.invar d \<Longrightarrow> s \<in> D_Map.keys d \<Longrightarrow> d_lookup' d s = D_Map.map_to_fun d s"
+  using D_Map.lookup_None_set_inorder
+  by (auto simp: D_Map.map_to_fun_def d_lookup'_def split: option.splits)
+
+lemma policy_eval_correct: 
+  assumes "D_Map.keys d = {0..<states}" "D_Map.invar d" "s < states"
+  shows "policy_eval_code d $v s = MDP.\<nu>\<^sub>b (MDP.mk_stationary_det (D_Map.map_to_fun d)) s"
+  unfolding policy_eval_code_def MDP.vec_\<nu>\<^sub>b''[OF assms(3)]
+  using assms d_lookup'_eq_map_to_fun
+  by (auto cong: vec_cong MDP.mat_cong)
+
+definition "transition_vecs =
+  Matrix.vec states (\<lambda>s. M.from_list (map (\<lambda>(a, _, ps). (a, 
+    Matrix.vec states (\<lambda>s'. \<Sum>x \<leftarrow> ps. if fst x = s' then snd x else 0))) (a_inorder (s_lookup mdp s))))"
+
+lemma transition_vecs_correct:
+  assumes "s < states" "a \<in> MDP_A s" "s' < states"
+  shows "M.lookup' (transition_vecs $v s) a $v s' = pmf (MDP_K (s,a)) s'"
+proof -
+  have *: "Matrix.vec states (\<lambda>s'. \<Sum>x\<leftarrow>snd (a_lookup' (s_lookup mdp s) a). if fst x = s' then snd x else 0) $v s' = pmf (pmf_of_list (snd (a_lookup' (s_lookup mdp s) a))) s'"
+    by (auto simp: pmf_pmf_of_list assms pmf_of_list_wf_mdp sum_list_map_filter')
+  have **: "
+  M.lookup' (M.from_list (map (\<lambda>(a, _, ps). (a, Matrix.vec states (\<lambda>s'. \<Sum>x\<leftarrow>ps. if fst x = s' then snd x else 0))) (a_inorder (s_lookup mdp s)))) a $v s' = 
+  pmf (pmf_of_list (snd (a_lookup' (s_lookup mdp s) a))) s'"
+    unfolding *[symmetric]
+    using a_map_entries_lookup[OF assms(1,2)] A_Map.distinct_inorder invar_s_lookup[OF assms(1)]
+    by (subst M.lookup'_from_list_distinct) (force simp: comp_def case_prod_beta A_Map.entries_def[symmetric] intro!: imageI)+
+  show ?thesis
+    unfolding transition_vecs_def MDP_K_def
+    using assms a_lookup_None_notin_A sa_lookup_eq(2) snd_sa_lookup'_eq 
+    by (auto split: option.splits simp: **)
+(* todo, just never go downwards when choosing new actions in case of draw *)
+(* state map (transition system) *)
+(* action map *)
+(* value map *)
+(* decision rule map *)

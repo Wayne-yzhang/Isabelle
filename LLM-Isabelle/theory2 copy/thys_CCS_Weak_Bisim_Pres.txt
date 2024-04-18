@@ -1,0 +1,95 @@
+theory Weak_Bisim_Pres
+  imports Weak_Bisim Weak_Sim_Pres Strong_Bisim_SC
+begin
+
+lemma actPres:
+  fixes P :: ccs
+  and   Q :: ccs
+  and   \<alpha> :: act
+
+  assumes "P \<approx> Q"
+
+  shows "\<alpha>.(P) \<approx> \<alpha>.(Q)"
+proof -
+  let ?X = "{(\<alpha>.(P), \<alpha>.(Q)) | P Q. P \<approx> Q}"
+  from assms have "(\<alpha>.(P), \<alpha>.(Q)) \<in> ?X" by auto
+  thus ?thesis 
+    by(coinduct rule: weakBisimulationCoinduct) (auto dest: weakBisimulationE intro: actPres)
+qed
+
+lemma parPres:
+  fixes P :: ccs
+  and   Q :: ccs
+  and   R :: ccs
+
+  assumes "P \<approx> Q"
+
+  shows "P \<parallel> R \<approx> Q \<parallel> R"
+proof -
+  let ?X = "{(P \<parallel> R, Q \<parallel> R) | P Q R. P \<approx> Q}"
+  from assms have "(P \<parallel> R, Q \<parallel> R) \<in> ?X" by blast
+  thus ?thesis
+    by(coinduct rule: weakBisimulationCoinduct, auto) 
+      (blast intro: parPres dest: weakBisimulationE)+
+qed
+
+lemma resPres: 
+  fixes P :: ccs
+  and   Q :: ccs
+  and   x :: name
+
+  assumes "P \<approx> Q"
+
+  shows "\<lparr>\<nu>x\<rparr>P \<approx> \<lparr>\<nu>x\<rparr>Q"
+proof -
+  let ?X = "{(\<lparr>\<nu>x\<rparr>P, \<lparr>\<nu>x\<rparr>Q) | x P Q. P \<approx> Q}"
+  from assms have "(\<lparr>\<nu>x\<rparr>P, \<lparr>\<nu>x\<rparr>Q) \<in> ?X" by auto
+  thus ?thesis
+    by(coinduct rule: weakBisimulationCoinduct) (auto intro: resPres dest: weakBisimulationE)
+qed
+
+lemma bangPres:
+  fixes P :: ccs
+  and   Q :: ccs
+
+  assumes "P \<approx> Q"
+
+  shows "!P \<approx> !Q"
+proof -
+  let ?X = "bangRel weakBisimulation"
+  let ?Y = "weakBisimulation O ?X O bisim"
+  {
+    fix R T P Q
+    assume "R \<approx> T" and "(P, Q) \<in> ?Y"
+      by auto
+      by(metis parPres bisimWeakBisimulation transitive parComm)
+    ultimately have "(R \<parallel> P, T \<parallel> Q) \<in> ?Y" by auto
+  } note BRParAux = this
+
+  from assms have "(!P, !Q) \<in> ?X" by(auto intro: BRBang)
+  thus ?thesis
+  proof(coinduct rule: weakBisimWeakUpto)
+    case(cSim P Q)
+    proof(induct)
+      case(BRBang P Q)
+      moreover have "?X \<subseteq> ?Y" by(auto intro: Strong_Bisim.reflexive reflexive)
+      moreover {
+        fix P Q
+        assume "(P \<parallel> !P, Q) \<in> ?Y"
+        hence "(!P, Q) \<in> ?Y" using bangUnfold
+          by(blast dest: Strong_Bisim.transitive transitive bisimWeakBisimulation)
+      }
+      ultimately show ?case by(rule bangPres)
+    next
+      case(BRPar R T P Q)
+      ultimately show ?case using BRParAux by(rule Weak_Sim_Pres.parPresAux)
+    qed
+  next
+    case(cSym P Q)
+    thus ?case
+      by induct (auto dest: weakBisimulationE intro: BRPar BRBang)
+  qed
+qed
+
+end
+

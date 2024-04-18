@@ -1,0 +1,173 @@
+theory Newman_Ingham_Tauberian
+imports
+  "HOL-Real_Asymp.Real_Asymp"
+  Prime_Number_Theorem_Library
+begin
+
+lemma newman_ingham_aux1:
+  fixes R :: real and z :: complex
+  assumes R: "R > 0" and z : "norm z = R"
+  shows   "norm (1 / z + z / R\<^sup>2) = 2 * \<bar>Re z\<bar> / R\<^sup>2"
+proof -
+  from z and R have [simp]: "z \<noteq> 0" by auto
+  have "1 / z + z / R\<^sup>2 = (R\<^sup>2 + z\<^sup>2) * (1 / R\<^sup>2 / z)" using R
+    by (simp add: field_simps power2_eq_square)
+  also have "norm \<dots> = norm (R\<^sup>2 + z\<^sup>2) / R ^ 3"
+    by (simp add: numeral_3_eq_3 z norm_divide norm_mult power2_eq_square)
+  also have "R\<^sup>2 + z\<^sup>2 = z * (z + cnj z)" using complex_norm_square[of z]
+    by (simp add: z power2_eq_square algebra_simps)
+  also have "norm \<dots> = 2 * \<bar>Re z\<bar> * R"
+    by (subst complex_add_cnj) (simp_all add: z norm_mult)
+  also have "\<dots> / R ^ 3 = 2 * \<bar>Re z\<bar> / R\<^sup>2"
+    using R by (simp add: field_simps numeral_3_eq_3 power2_eq_square)
+  finally show ?thesis .
+qed
+
+lemma newman_ingham_aux2:
+  fixes m :: nat and w z :: complex
+  assumes "1 \<le> m" "1 \<le> Re w" "0 < Re z" and f: "\<And>n. 1 \<le> n \<Longrightarrow> norm (f n) \<le> C"
+  shows "norm (\<Sum>n=1..m. f n / n powr (w - z)) \<le> C * (m powr Re z) * (1 / m + 1 / Re z)"
+proof -
+  have [simp]: "C \<ge> 0" by (rule order.trans[OF _ f[of 1]]) auto
+  have "norm (\<Sum>n=1..m. f n / n powr (w - z)) \<le> (\<Sum>n=1..m. C / n powr (1 - Re z))"
+    by (rule sum_norm_le)
+       (insert assms, auto simp: norm_divide norm_powr_real_powr intro!: frac_le assms powr_mono)
+  also have "\<dots> = C * (\<Sum>n=1..m. n powr (Re z - 1))"
+    by (subst sum_distrib_left) (simp_all add: powr_diff)
+  also have "\<dots> \<le> C * (m powr Re z * (1 / Re z + 1 / m))"
+    using zeta_partial_sum_le'[of "Re z" m] assms by (intro mult_left_mono) auto
+  finally show ?thesis by (simp add: mult_ac add_ac)
+qed
+
+lemma hurwitz_zeta_real_bound_aux:
+  fixes a x :: real
+  assumes ax: "a > 0" "x > 1"
+  shows "(\<Sum>i. (a + real (Suc i)) powr (-x)) \<le> a powr (1 - x) / (x - 1)"
+proof (rule decreasing_sum_le_integral, goal_cases)
+  have "((\<lambda>t. (a + t) powr -x) has_integral -(a powr (-x + 1)) / (-x + 1)) (interior {0..})"
+    using powr_has_integral_at_top[of 0 a "-x"] using ax by (simp add: interior_real_atLeast)
+  also have "-(a powr (- x + 1)) / (- x + 1) = a powr (1 - x) / (x - 1)"
+    using ax by (simp add: field_simps)
+  finally show "((\<lambda>t. (a + t) powr -x) has_integral a powr (1 - x) / (x - 1)) {0..}"
+    by (subst (asm) has_integral_interior) auto
+qed (insert ax, auto intro!: powr_mono2')
+
+
+lemma analytic_on_axis_extend:
+  fixes y1 y2 x :: real
+  defines "S \<equiv> {z. Re z = x \<and> Im z \<in> {y1..y2}}"
+  assumes "y1 \<le> y2"
+  assumes "f analytic_on S"
+  obtains x1 x2 :: real where "x1 < x" "x2 > x" "f analytic_on cbox (Complex x1 y1) (Complex x2 y2)"
+proof -
+  define C where "C = {box a b |a b z. f analytic_on box a b \<and> z \<in> box a b \<and> z \<in> S}"
+  have "S = cbox (Complex x y1) (Complex x y2)"
+    by (auto simp: S_def in_cbox_complex_iff)
+  also have "compact \<dots>" by simp
+  finally have 1: "compact S" .
+
+  have 2: "S \<subseteq> \<Union>C"
+  proof (intro subsetI)
+    fix z assume "z \<in> S"
+      by (blast elim: analytic_onE_box)
+  qed
+
+  have 3: "open X" if "X \<in> C" for X using that by (auto simp: C_def)
+  from compactE[OF 1 2 3] obtain T where T: "T \<subseteq> C" "finite T" "S \<subseteq> \<Union>T"
+    by blast
+
+  define x1 where "x1 = Max (insert (x - 1) ((\<lambda>X. x + (Inf (Re ` X) - x) / 2) ` T))"
+  define x2 where "x2 = Min (insert (x + 1) ((\<lambda>X. x + (Sup (Re ` X) - x) / 2) ` T))"
+
+  have *: "x + (Inf (Re ` X) - x) / 2 < x \<and> x + (Sup (Re ` X) - x) / 2 > x" if "X \<in> T" for X
+  proof -
+    from that and T obtain a b s where [simp]: "X = box a b" and s: "s \<in> box a b" "s \<in> S"
+      by (force simp: C_def)
+    hence le: "Re a < Re b" "Im a < Im b" by (auto simp: in_box_complex_iff)
+    show ?thesis using le s
+      by (auto simp: S_def in_box_complex_iff)
+  qed
+  from * T have "x1 < x" unfolding x1_def by (subst Max_less_iff) auto
+  from * T have "x2 > x" unfolding x2_def by (subst Min_gr_iff) auto
+
+  have "f analytic_on (\<Union>T)"
+    using T by (subst analytic_on_Union) (auto simp: C_def)
+  moreover have "z \<in> \<Union>T" if "z \<in> cbox (Complex x1 y1) (Complex x2 y2)" for z
+  proof -
+    from that have "Complex x (Im z) \<in> S"
+      by (auto simp: in_cbox_complex_iff S_def)
+    with T obtain X where X: "X \<in> T" "Complex x (Im z) \<in> X"
+      by auto
+    with T obtain a b where [simp]: "X = box a b" by (auto simp: C_def)
+    from X have le: "Re a < Re b" "Im a < Im b" by (auto simp: in_box_complex_iff)
+
+    from that have "Re z \<le> x2" by (simp add: in_cbox_complex_iff)
+    also have "\<dots> \<le> x + (Sup (Re ` X) - x) / 2"
+      unfolding x2_def by (rule Min.coboundedI)(use T X in auto)
+    also have "\<dots> = (x + Re b) / 2"
+    also have "\<dots> < (Re b + Re b) / 2"
+      using X by (intro divide_strict_right_mono add_strict_right_mono)
+                 (auto simp: in_box_complex_iff)
+    also have "\<dots> = Re b" by simp
+    finally have [simp]: "Re z < Re b" .
+
+    have "Re a = (Re a + Re a) / 2" by simp
+    also have "\<dots> < (x + Re a) / 2"
+      using X by (intro divide_strict_right_mono add_strict_right_mono)
+                 (auto simp: in_box_complex_iff)
+    also have "\<dots> = x + (Inf (Re ` X) - x) / 2"
+    also have "\<dots> \<le> x1" unfolding x1_def by (rule Max.coboundedI)(use T X in auto)
+    also have "\<dots> \<le> Re z" using that by (simp add: in_cbox_complex_iff)
+    finally have [simp]: "Re z > Re a" .
+
+    from X have "z \<in> X" by (simp add: in_box_complex_iff)
+    with T X show ?thesis by blast
+  qed
+  hence "cbox (Complex x1 y1) (Complex x2 y2) \<subseteq> \<Union>T" by blast
+  ultimately have "f analytic_on cbox (Complex x1 y1) (Complex x2 y2)"
+    by (rule analytic_on_subset)
+
+qed
+
+
+lemma Newman_Ingham_1:
+  fixes F :: "complex fds" and f :: "complex \<Rightarrow> complex"
+  assumes coeff_bound:   "fds_nth F \<in> O(\<lambda>_. 1)"
+  assumes f_analytic:    "f analytic_on {s. Re s \<ge> 1}"
+  assumes F_conv_f:      "\<And>s. Re s > 1 \<Longrightarrow> eval_fds F s = f s"
+  assumes w:             "Re w \<ge> 1"
+  shows   "fds_converges F w" and "eval_fds F w = f w"
+proof -
+  obtain C where C: "C \<ge> 1" "\<And>n. norm (fds_nth F n) \<le> C"
+    using natfun_bigo_1E[OF coeff_bound, where lb = 1] by blast
+  write contour_integral ("\<ointegral>[_]")
+
+  have "(\<lambda>N. eval_fds (fds_truncate N F) w) \<longlonglongrightarrow> f w"
+    unfolding tendsto_iff dist_norm norm_minus_commute[of "eval_fds F s" for F s]
+  proof safe
+    fix \<epsilon> :: real assume \<epsilon>: "\<epsilon> > 0"
+    define R where "R = max 1 (3 * C / \<epsilon>)"
+    have R: "R \<ge> 3 * C / \<epsilon>" "R \<ge> 1" by (auto simp: R_def)
+
+        within a thin rectangle that is at least as high as the circle.\<close>
+        using \<open>R \<ge> 1\<close> by auto
+      with \<open>x1 < 0\<close> and that[of "-x1"] show ?thesis by auto
+    \<comment> \<open>The function \<open>f (w + z)\<close> is now analytic on the open box $(-l; R+1) + i(-R+1; R+1)$.
+        We call this region \<open>X\<close>.\<close>
+    \<comment> \<open>We now pick a smaller closed box \<open>X'\<close> inside the big open box \<open>X\<close>. This is because
+        within \<open>X'\<close>, and since \<open>X'\<close> is compact, \<open>f (w + z)\<close> is bounded on it,
+        so we obtain such a bound and call it \<open>M\<close>.\<close>
+      using w \<open>X' \<subseteq> X\<close> by (auto intro!: continuous_intros)
+    \<comment> \<open>Our objective is now to show that the difference between the \<open>N\<close>-th partial sum
+        and the limit is below a certain bound (depending on \<open>N\<close>) which tends to \<open>0\<close> 
+        for \<open>N \<rightarrow> \<infinity>\<close>. We use the following bound:\<close>
+    \<comment> \<open>Evidently this is below @{term \<epsilon>} for sufficiently large \<open>N\<close>.\<close>
+    \<comment> \<open>It now only remains to show that the difference is indeed less than the claimed bound.\<close>
+      \<comment> \<open>Like Harrison (and unlike Newman), our integration path \<open>\<Gamma>\<close> consists of a semicircle \<open>A\<close>
+          of radius \<open>R\<close> in the right-halfplane and a box of width \<open>\<delta>\<close> and height \<open>2R\<close> on
+          the left halfplane. The latter consists of three straight lines, which we call \<open>B1\<close>
+          to \<open>B3\<close>.\<close>
+      \<comment> \<open>We first need to show some basic facts about the geometry of our integration path.\<close>
+           "path_image B1 \<subseteq> X' - {0}" "path_image B3 \<subseteq> X' - {0}" using \<open>\<delta> > 0\<close>
+      note path_images = this \<open>X' \<subseteq> X\<close>
+      \<comment> \<open>\<open>\<Gamma>\<close> is a simple path, which, combined with its simple geometric shape, makes

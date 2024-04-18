@@ -1,0 +1,124 @@
+theory Sotomayor
+imports
+  Main
+begin
+
+
+
+type_synonym ('m, 'w) match = "('m \<times> 'w) set"
+
+locale StableMarriage =
+  fixes Pm :: "'m::finite \<Rightarrow> 'w::finite rel"
+  fixes Pw :: "'w \<Rightarrow> 'm rel"
+  assumes Pm_pref: "\<forall>m. Preorder (Pm m) \<and> Total (Pm m)"
+  assumes Pw_pref: "\<forall>w. Preorder (Pw w) \<and> Total (Pw w)"
+begin
+
+
+definition match :: "('m, 'w) match \<Rightarrow> bool" where
+  "match \<mu> \<longleftrightarrow> inj_on fst \<mu> \<and> inj_on snd \<mu> \<and> \<mu> \<subseteq> (\<Union>m. {m} \<times> Field (Pm m)) \<inter> (\<Union>w. Field (Pw w) \<times> {w})"
+
+
+
+abbreviation (input) "m_for w \<mu> \<equiv> {m. (m, w) \<in> \<mu>}"
+abbreviation (input) "w_for m \<mu> \<equiv> {w. (m, w) \<in> \<mu>}"
+
+definition m_prefers :: "'m \<Rightarrow> ('m, 'w) match \<Rightarrow> 'w set" where
+  "m_prefers m \<mu> = {w' \<in> Field (Pm m). \<forall>w\<in>w_for m \<mu>. (w, w') \<in> Pm m}"
+
+definition w_prefers :: "'w \<Rightarrow> ('m, 'w) match \<Rightarrow> 'm set" where
+  "w_prefers w \<mu> = {m' \<in> Field (Pw w). \<forall>m\<in>m_for w \<mu>. (m, m') \<in> Pw w}"
+
+definition m_strictly_prefers :: "'m \<Rightarrow> ('m, 'w) match \<Rightarrow> 'w set" where
+  "m_strictly_prefers m \<mu> = {w' \<in> Field (Pm m). \<forall>w\<in>w_for m \<mu>. (w, w') \<in> Pm m \<and> (w', w) \<notin> Pm m}"
+
+definition w_strictly_prefers :: "'w \<Rightarrow> ('m, 'w) match \<Rightarrow> 'm set" where
+  "w_strictly_prefers w \<mu> = {m' \<in> Field (Pw w). \<forall>m\<in>m_for w \<mu>. (m, m') \<in> Pw w \<and> (m', m) \<notin> Pw w}"
+
+
+definition blocks :: "'m \<Rightarrow> 'w \<Rightarrow> ('m, 'w) match \<Rightarrow> bool" where
+  "blocks m w \<mu> \<longleftrightarrow> w \<in> m_strictly_prefers m \<mu> \<and> m \<in> w_strictly_prefers w \<mu>"
+
+
+definition stable :: "('m, 'w) match \<Rightarrow> bool" where
+  "stable \<mu> \<longleftrightarrow> match \<mu> \<and> (\<forall>m w. \<not> blocks m w \<mu>)"
+
+lemma stable_match:
+  assumes "stable \<mu>"
+  shows "match \<mu>"
+using assms unfolding stable_def by blast
+
+
+definition simple :: "('m, 'w) match \<Rightarrow> bool" where
+  "simple \<mu> \<longleftrightarrow> match \<mu> \<and> (\<forall>m w. blocks m w \<mu> \<longrightarrow> w \<notin> Range \<mu>)"
+
+lemma simple_match:
+  assumes "simple \<mu>"
+  shows "match \<mu>"
+using assms unfolding simple_def by blast
+
+lemma simple_ex:
+  "\<exists>\<mu>. simple \<mu>"
+unfolding simple_def blocks_def match_def by auto
+
+
+lemma simple_no_single_women_stable:
+  assumes "simple \<mu>"
+  shows "stable \<mu>"
+using assms unfolding simple_def stable_def by blast
+
+lemma stable_simple:
+  assumes "stable \<mu>"
+  shows "simple \<mu>"
+using assms unfolding simple_def stable_def by blast
+
+
+definition m_weakly_prefers :: "'m \<Rightarrow> ('m, 'w) match \<Rightarrow> 'w set" where
+  "m_weakly_prefers m \<mu> = {w' \<in> Field (Pm m). \<forall>w\<in>w_for m \<mu>. (w, w') \<in> Pm m}"
+
+definition weakly_preferred_by_men :: "('m, 'w) match \<Rightarrow> ('m, 'w) match \<Rightarrow> bool" where
+  "weakly_preferred_by_men \<mu> \<mu>'
+     \<longleftrightarrow> (\<forall>m. \<forall>w\<in>w_for m \<mu>. \<exists>w'\<in>w_for m \<mu>'. w' \<in> m_weakly_prefers m \<mu>)"
+
+definition strictly_preferred_by_a_man  :: "('m, 'w) match \<Rightarrow> ('m, 'w) match \<Rightarrow> bool" where
+  "strictly_preferred_by_a_man \<mu> \<mu>'
+     \<longleftrightarrow> (\<exists>m. \<exists>w\<in>w_for m \<mu>'. w \<in> m_strictly_prefers m \<mu>)"
+
+definition weakly_Pareto_optimal_for_men :: "('m, 'w) match \<Rightarrow> bool" where
+  "weakly_Pareto_optimal_for_men \<mu>
+     \<longleftrightarrow> simple \<mu> \<and> \<not>(\<exists>\<mu>'. simple \<mu>' \<and> weakly_preferred_by_men \<mu> \<mu>' \<and> strictly_preferred_by_a_man \<mu> \<mu>')"
+
+
+lemma weakly_preferred_by_menI:
+  assumes "\<And>m w. (m, w) \<in> \<mu> \<Longrightarrow> \<exists>w'. (m, w') \<in> \<mu>' \<and> w' \<in> m_weakly_prefers m \<mu>"
+  shows "weakly_preferred_by_men \<mu> \<mu>'"
+using assms unfolding weakly_preferred_by_men_def by blast
+
+lemmas simpleI = iffD2[OF simple_def, unfolded conj_imp_eq_imp_imp, rule_format]
+
+lemma weakly_Pareto_optimal_for_men_simple:
+  assumes "weakly_Pareto_optimal_for_men \<mu>"
+  shows "simple \<mu>"
+using assms unfolding weakly_Pareto_optimal_for_men_def by simp
+
+
+lemma m_weakly_prefers_Pm:
+  assumes "match \<mu>"
+  assumes "(m, w) \<in> \<mu>"
+  shows "w' \<in> m_weakly_prefers m \<mu> \<longleftrightarrow> (w, w') \<in> Pm m"
+using spec[OF Pm_pref, where x=m] assms unfolding m_weakly_prefers_def match_def preorder_on_def
+by simp (metis (no_types, opaque_lifting) FieldI2 fst_conv inj_on_contraD snd_conv)
+
+lemma match_Field:
+  assumes "match \<mu>"
+  assumes "(m, w) \<in> \<mu>"
+  shows "w \<in> Field (Pm m)"
+    and "m \<in> Field (Pw w)"
+using assms unfolding match_def by blast+
+
+lemma weakly_preferred_by_men_refl:
+  assumes "match \<mu>"
+  shows "weakly_preferred_by_men \<mu> \<mu>"
+using assms unfolding weakly_preferred_by_men_def m_weakly_prefers_def
+by clarsimp (meson Pm_pref m_weakly_prefers_Pm match_Field(1) preorder_on_def refl_onD)
+

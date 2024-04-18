@@ -1,0 +1,401 @@
+theory Reverse_Symmetry
+  imports Main
+begin
+
+chapter "Reverse symmetry"
+
+
+
+
+lemma all_surj_conv: assumes "surj f" shows "(\<And>x. PROP P (f x)) \<equiv> (\<And>y. PROP P y)"
+proof
+  fix y assume "\<And>x. PROP P (f x)"
+  then have "PROP P (f (inv f y))".
+  then show "PROP P y" unfolding surj_f_inv_f[OF assms].
+qed
+
+lemma All_surj_conv: assumes "surj f" shows "(\<forall>x. P (f x)) \<longleftrightarrow> (\<forall>y. P y)"
+proof (intro iffI allI)
+  fix y assume "\<forall>x. P (f x)"
+  then have "P (f (inv f y))"..
+  then show "P y" unfolding surj_f_inv_f[OF assms].
+qed simp
+
+lemma Ex_surj_conv: assumes "surj f" shows "(\<exists>x. P (f x)) \<longleftrightarrow> (\<exists>y. P y)"
+proof
+  assume "\<exists>x. P (f x)"
+  then obtain x where "P (f x)"..
+  then show "\<exists>x. P x"..
+next
+  assume "\<exists>y. P y"
+  then obtain y where "P y"..
+  then have "P (f (inv f y))" unfolding surj_f_inv_f[OF assms].
+  then show "\<exists>x. P (f x)"..
+qed
+
+lemma Ex1_bij_conv: assumes "bij f" shows "(\<exists>!x. P (f x)) \<longleftrightarrow> (\<exists>!y. P y)"
+proof
+  have imp: "\<exists>!y. Q y" if bij: "bij g" and ex1: "\<exists>!x. Q (g x)" for g Q
+  proof -
+    from ex1E[OF ex1, rule_format]
+    obtain x where ex: "Q (g x)" and uniq: "\<And>x'. Q (g x') \<Longrightarrow> x' = x" by blast
+    {
+      fix y assume "Q y"
+      then have "Q (g (inv g y))" unfolding surj_f_inv_f[OF bij_is_surj[OF bij]].
+      from uniq[OF this] have "x = inv g y"..
+      then have "y = g x" unfolding bij_inv_eq_iff[OF bij]..
+    }
+    with ex show "\<exists>!y. Q y"..
+  qed
+  show "\<exists>!x. P (f x) \<Longrightarrow> \<exists>!y. P y" using imp[OF assms].
+  assume "\<exists>!y. P y"
+  then have "\<exists>!y. P (f (inv f y))" unfolding surj_f_inv_f[OF bij_is_surj[OF assms]].
+  from imp[OF bij_imp_bij_inv[OF assms] this]
+  show "\<exists>!x. P (f x)".
+qed
+
+lemma Ball_inj_conv: assumes "inj f" shows "(\<forall>y\<in>f ` A. P (inv f y)) \<longleftrightarrow> (\<forall>x\<in>A. P x)"
+  using ball_simps(9)[of f A "\<lambda>y. P (inv f y)"] unfolding inv_f_f[OF assms].
+
+lemma Bex_inj_conv: assumes "inj f" shows "(\<exists>y\<in>f ` A. P (inv f y)) \<longleftrightarrow> (\<exists>x\<in>A. P x)"
+  using bex_simps(7)[of f A "\<lambda>y. P (inv f y)"] unfolding inv_f_f[OF assms].
+
+
+lemma rev_involution': "rev \<circ> rev = id"
+  by auto
+
+lemma rev_inv: "inv rev = rev"
+  using inv_unique_comp[OF rev_involution' rev_involution'].
+
+
+context
+begin
+
+
+definition snocs :: "'a list \<Rightarrow> 'a list \<Rightarrow> 'a list"
+  where "snocs xs ys  = xs @ ys"
+
+
+lemma snocs_snocs: "snocs (snocs xs (y # ys)) zs = snocs xs (y # snocs ys zs)"
+  unfolding snocs_def by simp
+
+lemma snocs_Nil: "snocs [] xs = xs"
+  unfolding snocs_def by simp
+
+lemma snocs_is_append: "snocs xs ys = xs @ ys"
+  unfolding snocs_def..
+
+private lemmas final_correct1 =
+  snocs_snocs
+
+private lemmas final_correct2 =
+  snocs_Nil
+
+private lemmas final_correct3 =
+  snocs_is_append
+
+
+
+attribute_setup reversal_rule =
+  "maintaining a list of reversal rules"
+
+
+
+attribute_setup reversed_trace = tracing_parser "reversed trace configuration"
+
+
+private lemma rev_Nil: "rev [] \<equiv> []"
+  by simp
+
+private lemma map_Nil: "map f [] \<equiv> []"
+  by simp
+
+private lemma image_empty: "f ` Set.empty \<equiv> Set.empty"
+  by simp
+
+definition COMP :: "('b \<Rightarrow> prop) \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> 'a \<Rightarrow> prop" (infixl "oo" 55)
+  where "F oo g \<equiv> (\<lambda>x. F (g x))"
+
+lemma COMP_assoc: "F oo (f o g) \<equiv> (F oo f) oo g"
+  unfolding COMP_def o_def.
+
+private lemma image_comp_image: "(`) f \<circ> (`) g \<equiv> (`) (f \<circ> g)"
+  unfolding comp_def image_comp.
+
+private lemma rev_involution: "rev \<circ> rev \<equiv> id"
+  unfolding comp_def rev_rev_ident id_def.
+
+private lemma map_involution: assumes "f \<circ> f \<equiv> id" shows "(map f) \<circ> (map f) \<equiv> id"
+
+private lemma image_involution: assumes "f \<circ> f \<equiv> id" shows "(image f) \<circ> (image f) \<equiv> id"
+
+private lemma rev_map_comm: "rev \<circ> map f \<equiv> map f \<circ> rev"
+  unfolding comp_def rev_map.
+
+private lemma involut_comm_comp: assumes "f o f \<equiv> id" and "g o g \<equiv> id" and "f o g \<equiv> g o f"
+  shows "(f \<circ> g) \<circ> (f \<circ> g) \<equiv> id"
+  by (simp add: comp_assoc comp_assoc[symmetric] assms)
+
+private lemma rev_map_involution: assumes "g o g \<equiv> id"
+  shows "(rev \<circ> map g) \<circ> (rev \<circ> map g) \<equiv> id"
+
+private lemma prop_abs_subst: assumes "f o f \<equiv> id" shows "(\<lambda>x. F (f x)) oo f \<equiv> (\<lambda>x. F x)"
+
+private lemma prop_abs_subst_comm: assumes "f o f \<equiv> id" and "g o g \<equiv> id" and "f o g \<equiv> g o f"
+  shows "(\<lambda>x. F (f (g x))) oo (f o g) \<equiv> (\<lambda>x. F x)"
+
+private lemma prop_abs_subst_rev_map: assumes "g o g \<equiv> id"
+  shows "(\<lambda>x. F (rev (map g x))) oo (rev o map g) \<equiv> (\<lambda>x. F x)"
+
+private lemma obj_abs_subst: assumes "f o f \<equiv> id" shows "(\<lambda>x. F (f x)) o f \<equiv> (\<lambda>x. F x)"
+
+private lemma obj_abs_subst_comm: assumes "f o f \<equiv> id" and "g o g \<equiv> id" and "f o g \<equiv> g o f"
+  shows "(\<lambda>x. F (f (g x))) o (f o g) \<equiv> (\<lambda>x. F x)"
+
+private lemma obj_abs_subst_rev_map: assumes "g o g \<equiv> id"
+  shows "(\<lambda>x. F (rev (map g x))) o (rev o map g) \<equiv> (\<lambda>x. F x)"
+
+
+
+attribute_setup reversed =
+  "Transforms the theorem on lists to reverse-symmetric version"
+
+end
+
+
+
+lemma all_surj_conv' [reversal_rule]: assumes "surj f" shows "Pure.all (P oo f) \<equiv> Pure.all P"
+  unfolding COMP_def using all_surj_conv[OF assms].
+
+
+lemmas [reversal_rule] = rev_is_rev_conv inj_eq
+
+lemma All_surj_conv' [reversal_rule]: assumes "surj f" shows "All (P o f) = All P"
+  unfolding comp_def using All_surj_conv[OF assms].
+
+lemma Ex_surj_conv' [reversal_rule]: assumes "surj f" shows "Ex (P o f) \<longleftrightarrow> Ex P"
+  unfolding comp_def using Ex_surj_conv[OF assms].
+
+lemma Ex1_bij_conv' [reversal_rule]: assumes "bij f" shows "Ex1 (P o f) \<longleftrightarrow> Ex1 P"
+  unfolding comp_def using Ex1_bij_conv[OF assms].
+
+lemma if_image [reversal_rule]: "(if P then f u else f v) = f (if P then u else v)"
+  by simp
+
+
+lemma collect_image: "Collect (P \<circ> f) = f -` (Collect P)"
+  by fastforce
+
+lemma collect_image' [reversal_rule]: assumes "f \<circ> f = id" shows "Collect (P \<circ> f) = f ` (Collect P)"
+  unfolding collect_image
+  unfolding bij_vimage_eq_inv_image[OF o_bij[OF assms assms]]
+  unfolding inv_unique_comp[OF assms assms]..
+
+lemma Ball_image [reversal_rule]: assumes "(g \<circ> f) ` A = A" shows "Ball (f ` A) (P \<circ> g) = Ball A P"
+
+lemma Bex_image_comp: "Bex (f ` A) g = Bex A (g \<circ> f)"
+  by simp
+
+lemma Bex_image [reversal_rule]: assumes "(g \<circ> f) ` A = A" shows "Bex (f ` A) (P \<circ> g) = Bex A P"
+
+lemma insert_image [reversal_rule]: "insert (f x) (f ` X) = f ` (insert x X)"
+  by blast
+
+lemmas [reversal_rule] = inj_image_mem_iff
+
+lemmas [reversal_rule] = inj_image_subset_iff
+
+
+lemmas [reversal_rule] = set_rev set_map
+
+lemma Cons_rev: "a # rev u = rev (snocs u [a])"
+  unfolding snocs_def by simp
+
+lemma Cons_map: "(f x) # (map f xs) = map f (x # xs)"
+  using list.simps(9)[symmetric].
+
+lemmas [reversal_rule] = Cons_rev Cons_map
+
+lemmas [reversal_rule] = hd_rev hd_map
+
+lemma tl_rev: "tl (rev xs) = rev (butlast xs)"
+  using butlast_rev[of "rev xs", symmetric] unfolding rev_swap rev_rev_ident.
+
+lemmas [reversal_rule] = tl_rev map_tl[symmetric]
+
+lemmas [reversal_rule] = last_rev last_map
+
+lemmas [reversal_rule] = butlast_rev map_butlast[symmetric]
+
+lemma coset_rev: "List.coset (rev xs) = List.coset xs"
+  by simp
+
+lemma coset_map: assumes "bij f" shows "List.coset (map f xs) =  f ` List.coset xs"
+
+lemmas [reversal_rule] = coset_rev coset_map
+
+lemmas [reversal_rule] = rev_append[symmetric] map_append[symmetric]
+
+lemma concat_rev_map_rev: "concat (rev (map rev xs)) = rev (concat xs)"
+  using rev_concat[symmetric] unfolding rev_map.
+
+lemma concat_rev_map_rev': "concat (rev (map (rev \<circ> f) xs)) = rev (concat (map f xs))"
+  unfolding map_comp_map[symmetric] o_apply using concat_rev_map_rev.
+
+lemmas [reversal_rule] = concat_rev_map_rev concat_rev_map_rev'
+
+lemmas [reversal_rule] = drop_rev drop_map
+
+lemmas [reversal_rule] = take_rev take_map
+
+lemmas [reversal_rule] = rev_nth nth_map
+
+lemma list_insert_map [reversal_rule]:
+  assumes "inj f" shows "List.insert (f  x) (map f xs) = map f (List.insert x xs)"
+
+lemma list_union_map [reversal_rule]:
+  assumes "inj f" shows "List.union (map f xs) (map f ys) = map f (List.union xs ys)"
+proof (induction xs arbitrary: ys)
+  case (Cons a xs)
+  show ?case using Cons.IH unfolding List.union_def Cons_map[symmetric] fold.simps(2) o_apply
+qed (simp add: List.union_def)
+
+lemmas [reversal_rule] = length_rev length_map
+
+lemmas [reversal_rule] = rotate_rev rotate_map
+
+lemma rev_in_lists: "rev u \<in> lists A \<longleftrightarrow> u \<in> lists A"
+  by auto
+
+lemma map_in_lists: "inj f \<Longrightarrow> map f u \<in> lists (f ` A) \<longleftrightarrow> u \<in> lists A"
+  by (simp add: lists_image inj_image_mem_iff inj_mapI)
+
+lemmas [reversal_rule] = rev_in_lists map_in_lists
+
+lemmas [reversal_rule] = list_all_rev
+
+lemmas [reversal_rule] = list_ex_rev
+
+
+lemma snocs_map [reversal_rule]: "snocs (map f u) [f a] = map f (snocs u [a])"
+  unfolding snocs_def by simp
+
+
+lemma bij_rev: "bij rev"
+  using o_bij[OF rev_involution' rev_involution'].
+
+lemma bij_map: "bij f \<Longrightarrow> bij (map f)"
+  using bij_betw_def inj_mapI lists_UNIV lists_image by metis
+
+lemma surj_map: "surj f \<Longrightarrow> surj (map f)"
+  using lists_UNIV lists_image by metis
+
+lemma bij_image: "bij f \<Longrightarrow> bij (image f)"
+  using bij_betw_Pow by force
+
+lemma inj_image: "inj f \<Longrightarrow> inj (image f)"
+  by (simp add: inj_on_image)
+
+lemma surj_image: "surj f \<Longrightarrow> surj (image f)"
+  using Pow_UNIV image_Pow_surj by metis
+
+lemmas [simp] =
+  bij_rev
+  bij_is_inj
+  bij_is_surj
+  bij_comp
+  inj_compose
+  comp_surj
+  bij_map
+  inj_mapI
+  surj_map
+  bij_image
+  inj_image
+  surj_image
+
+
+context
+begin
+
+
+private lemma example_Cons_append:
+  assumes "xs = [a, b]" and "ys = [b, a, b]"
+  shows "xs @ xs @ xs = a # b # a # ys"
+using assms by simp
+
+thm
+  example_Cons_append
+  example_Cons_append[reversed]
+  example_Cons_append[reversed, reversed]
+
+thm
+  not_Cons_self
+  not_Cons_self[reversed]
+
+thm
+  neq_Nil_conv
+  neq_Nil_conv[reversed]
+
+
+thm
+  list_nonempty_induct
+  list_nonempty_induct[reversed]   list_nonempty_induct[reversed, where P="\<lambda>x. P (rev x)" for P, unfolded rev_rev_ident]
+
+thm
+  list_induct2
+  list_induct2[reversed]   list_induct2[reversed, where P="\<lambda>x y. P (rev x) (rev y)" for P, unfolded rev_rev_ident]
+
+
+thm
+  hd_append
+  hd_append[reversed]
+  last_append
+
+thm
+  length_tl
+  length_tl[reversed]
+  length_butlast
+
+thm
+  hd_Cons_tl
+  hd_Cons_tl[reversed]
+  append_butlast_last_id
+  append_butlast_last_id[reversed]
+
+
+thm
+  hd_in_set
+  hd_in_set[reversed]
+  last_in_set
+
+thm
+  set_ConsD
+  set_ConsD[reversed]
+
+thm
+  split_list_first
+  split_list_first[reversed]
+
+thm
+  split_list_first_prop
+  split_list_first_prop[reversed]
+  split_list_first_prop[reversed, unfolded append_assoc append_Cons append_Nil]
+  split_list_last_prop
+
+thm
+  split_list_first_propE
+  split_list_first_propE[reversed]
+  split_list_first_propE[reversed, unfolded append_assoc append_Cons append_Nil]
+  split_list_last_propE
+
+
+private lemma rotate1_hd_tl: "xs \<noteq> [] \<Longrightarrow> rotate 1 xs = tl xs @ [hd xs]"
+  by (cases xs) simp_all
+
+thm
+  rotate1_hd_tl
+  rotate1_hd_tl[reversed]
+
+end
+
+end

@@ -1,0 +1,112 @@
+theory Relative_Rewriting
+imports Abstract_Rewriting
+begin
+
+abbreviation (input) relto :: "'a rel \<Rightarrow> 'a rel \<Rightarrow> 'a rel" where
+  "relto R S \<equiv> S^* O R O S^*"
+
+definition SN_rel_on :: "'a rel \<Rightarrow> 'a rel \<Rightarrow> 'a set \<Rightarrow> bool" where
+  "SN_rel_on R S \<equiv> SN_on (relto R S)"
+
+definition SN_rel_on_alt :: "'a rel \<Rightarrow> 'a rel \<Rightarrow> 'a set \<Rightarrow> bool" where
+  "SN_rel_on_alt R S T = (\<forall>f. chain (R \<union> S) f \<and> f 0 \<in> T \<longrightarrow> \<not> (INFM j. (f j, f (Suc j)) \<in> R))"
+
+abbreviation SN_rel :: "'a rel \<Rightarrow> 'a rel \<Rightarrow> bool" where
+  "SN_rel R S \<equiv> SN_rel_on R S UNIV"
+
+abbreviation SN_rel_alt :: "'a rel \<Rightarrow> 'a rel \<Rightarrow> bool" where
+  "SN_rel_alt R S \<equiv> SN_rel_on_alt R S UNIV"
+
+lemma relto_absorb [simp]: "relto R E O E\<^sup>* = relto R E" "E\<^sup>* O relto R E = relto R E"
+  using O_assoc and rtrancl_idemp_self_comp by (metis)+
+
+lemma steps_preserve_SN_on_relto:
+  assumes steps: "(a, b) \<in> (R \<union> S)^*"
+    and SN: "SN_on (relto R S) {a}"
+  shows "SN_on (relto R S) {b}"
+proof -
+  let ?RS = "relto R S"
+  have "(R \<union> S)^* \<subseteq> S^* \<union> ?RS^*" by regexp
+  with steps have "(a,b) \<in> S^* \<or> (a,b) \<in> ?RS^*" by auto
+  thus ?thesis
+  proof
+    assume "(a,b) \<in> ?RS^*"
+    from steps_preserve_SN_on[OF this SN] show ?thesis .
+  next
+    assume Ssteps: "(a,b) \<in> S^*"
+    show ?thesis
+    proof
+      fix f
+      assume "f 0 \<in> {b}" and "chain ?RS f"
+      hence f0: "f 0 = b" and steps: "\<And>i. (f i, f (Suc i)) \<in> ?RS" by auto
+      let ?g = "\<lambda> i. if i = 0 then a else f i"
+      have "\<not> SN_on ?RS {a}" unfolding SN_on_def not_not
+      proof (rule exI[of _ ?g], intro conjI allI)
+        fix i
+        show "(?g i, ?g (Suc i)) \<in> ?RS"
+        proof (cases i)
+          case (Suc j)
+          show ?thesis using steps[of i] unfolding Suc by simp
+        next
+          case 0
+          from steps[of 0, unfolded f0] Ssteps have steps: "(a,f (Suc 0)) \<in> S^* O ?RS" by blast
+          have "(a,f (Suc 0)) \<in> ?RS" 
+            by (rule subsetD[OF _ steps], regexp)
+          thus ?thesis unfolding 0 by simp
+        qed
+      qed simp
+      with SN show False by simp
+    qed
+  qed
+qed
+
+lemma step_preserves_SN_on_relto: assumes st: "(s,t) \<in> R \<union> E"
+  and SN: "SN_on (relto R E) {s}"
+  shows "SN_on (relto R E) {t}"
+  by (rule steps_preserve_SN_on_relto[OF _ SN], insert st, auto)
+
+lemma SN_rel_on_imp_SN_rel_on_alt: "SN_rel_on R S T \<Longrightarrow> SN_rel_on_alt R S T"
+proof (unfold SN_rel_on_def)
+  assume SN: "SN_on (relto R S) T"
+  show ?thesis
+  proof (unfold SN_rel_on_alt_def, intro allI impI)
+    fix f
+    assume steps: "chain (R \<union> S) f \<and> f 0 \<in> T"
+    with SN have SN: "SN_on (relto R S) {f 0}" 
+      and steps: "\<And> i. (f i, f (Suc i)) \<in> R \<union> S" unfolding SN_defs by auto
+    obtain r where  r: "\<And> j. r j \<equiv>  (f j, f (Suc j)) \<in> R" by auto
+    show "\<not> (INFM j. (f j, f (Suc j)) \<in> R)"
+    proof (rule ccontr)
+      assume "\<not> ?thesis"
+      hence ih: "infinitely_many r" unfolding infinitely_many_def r by blast
+      obtain r_index where "r_index = infinitely_many.index r" by simp
+      with infinitely_many.index_p[OF ih] infinitely_many.index_ordered[OF ih] infinitely_many.index_not_p_between[OF ih] 
+      have r_index: "\<And> i. r (r_index i) \<and> r_index i < r_index (Suc i) \<and> (\<forall> j. r_index i < j \<and> j < r_index (Suc i) \<longrightarrow> \<not> r j)" by auto
+      obtain g where g: "\<And> i. g i \<equiv> f (r_index i)" ..
+      {
+        fix i
+        let ?ri = "r_index i"
+        let ?rsi = "r_index (Suc i)"
+        from r_index have isi: "?ri < ?rsi" by auto
+        obtain ri rsi where ri: "ri = ?ri" and rsi: "rsi = ?rsi" by auto
+        with r_index[of i] steps have inter: "\<And> j. ri < j \<and> j < rsi \<Longrightarrow> (f j, f (Suc j)) \<in> S" unfolding r by auto
+        from ri isi rsi have risi: "ri < rsi" by simp                      
+        {
+          fix n
+          assume "Suc n \<le> rsi - ri"
+          hence "(f (Suc ri), f (Suc (n + ri))) \<in> S^*"
+          proof (induct n, simp)
+            case (Suc n)
+            hence stepps: "(f (Suc ri), f (Suc (n+ri))) \<in> S^*" by simp
+            have "(f (Suc (n+ri)), f (Suc (Suc n + ri))) \<in> S"
+              using inter[of "Suc n + ri"] Suc(2) by auto
+            with stepps show ?case by simp
+          qed
+        }
+        from this[of "rsi - ri - 1"] risi have 
+          "(f (Suc ri), f rsi) \<in> S^*" by simp
+        with ri rsi have ssteps: "(f (Suc ?ri), f ?rsi) \<in> S^*" by simp
+        with r_index[of i] have "(f ?ri, f ?rsi) \<in> R O S^*" unfolding r by auto
+        hence "(g i, g (Suc i)) \<in> S^* O R O S^*" using rtrancl_refl unfolding g by auto        
+      } 
+      hence nSN: "\<not> SN_on (S^* O R O S^*) {g 0}" unfolding SN_defs by blast

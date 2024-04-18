@@ -1,0 +1,563 @@
+In Chapter~\ref{s:TC} we introduce some basic concepts of complexity theory,
+such as $\mathcal{P}$, $\NP$, and polynomial-time many-one reduction.  Following
+Arora and Barak the complexity class $\NP$ is defined via verifier Turing
+machines rather than nondeterministic machines, and so the deterministic TMs
+introduced in the previous chapter suffice for all definitions. To flesh out the
+chapter a little we formalize obvious proofs of $\mathcal{P} \subseteq \NP$ and
+the transitivity of the reducibility relation, although neither result is needed
+for proving the Cook-Levin theorem.
+
+Chapter~\ref{s:Sat} introduces the problem \SAT{} as a language over bit
+strings. Boolean formulas in conjunctive normal form (CNF) are represented as
+lists of clauses, each consisting of a list of literals encoded in binary numbers.
+The list of lists of numbers ``data type'' defined in Chapter~\ref{s:TM} will
+come in handy at this point.
+
+The proof of the Cook-Levin theorem has two parts: Showing that \SAT{} is in
+$\NP$ and showing that \SAT{} is $\NP$-hard, that is, that every language in
+$\NP$ can be reduced to \SAT{} in polynomial time. The first part, also proved
+in Chapter~\ref{s:Sat}, is fairly easy: For a satisfiable CNF formula, a
+satisfying assignment can be given in roughly the size of the formula, because
+only the variables in the formula need be assigned a truth value.  Moreover
+whether an assignment satisfies a CNF formula can be verified easily.
+
+The hard part is showing the $\NP$-hardness of \SAT{}. The first step
+(Chapter~\ref{s:oblivious}) is to show that every polynomial-time computation on
+a multi-tape TM can be performed in polynomial time on a two-tape
+\emph{oblivious} TM.  Oblivious means that the sequence of positions of the
+Turing machine's tape heads depends only on the \emph{length} of the input.
+Thus any language in $\NP$ has a polynomial-time two-tape oblivious verifier TM.
+In Chapter~\ref{s:Reducing} the proof goes on to show how the computations of
+such a machine can be mapped to CNF formulas such that a CNF formula is
+satisfiable if and only if the underlying computation was for a string in the
+language \SAT{} paired with a certificate. Finally in Chapter~\ref{s:Aux_TM} and
+Chapter~\ref{s:Red_TM} we construct a Turing machine that carries out the
+reduction in polynomial time.
+\<close>
+section \<open>Related work\<close>
+text \<open>
+The Cook-Levin theorem has been formalized before. Gamboa and
+Cowles~\cite{Gamboa2004AMP} present a formalization in ACL2~\cite{acl2}.  They
+formalize $\NP$ and reducibility in terms of Turing machines, but analyze the
+running time of the reduction from $\NP$-languages to \SAT{} in a
+different, somewhat ad-hoc, model of computation that they call ``the major
+weakness'' of their formalization.
+
+Employing Coq~\cite{coq}, Gäher and Kunze~\cite{Gher2021MechanisingCT} define
+$\NP$ and reducibility in the computational model ``call-by-value
+$\lambda$-calculus L'' introduced by Forster and
+Smolka~\cite{Forster2017WeakCL}. They show the $\NP$-completeness of \SAT{} in
+this framework. Turing machines appear in an intermediate problem in the chain
+of reductions from $\NP$ languages to \SAT{}, but are not used to show the
+polynomiality of the reduction. Nevertheless, this is likely the first
+formalization of the Cook-Levin theorem where both the complexity theoretic
+concepts and the proof of the polynomiality of the reduction use the same model
+of computation.
+
+With regards to Isabelle, Xu~et al.~\cite{Universal_Turing_Machine-AFP} provide
+a formalization of single-tape Turing machines with a fixed binary alphabet in
+the computability theory setting and construct a universal TM.  While I was
+putting the finishing touches on this article, Dalvit and
+Thiemann~\cite{Multitape_To_Singletape_TM-AFP} published a formalization of
+(deterministic and nondeterministic) multi-tape and single-tape Turing machines
+and showed how to simulate the former on the latter with quadratic slowdown.
+Moreover, Thiemann and Schmidinger~\cite{Multiset_Ordering_NPC-AFP} prove the
+$\NP$-completeness of the Multiset Ordering problem, without, however, proving
+the polynomial-time computability of the reduction.
+
+This article uses Turing machines as model of computation for both the
+complexity theoretic concepts and the running time analysis of the reduction. It
+is thus most similar to Gäher and Kunze's work, but has a more elementary, if
+not brute-force, flavor to it.
+\<close>
+section \<open>The core concepts\<close>
+text \<open>
+The proof of the Cook-Levin theorem awaits us in Section~\ref{s:complete} on the
+very last page of this article. The way there is filled with definitions of
+Turing machines, correctness proofs for Turing machines, and running time-bound
+proofs for Turing machines, all of which can easily drown out the more relevant
+concepts. For instance, for verifying that the theorem on the last page really
+is the Cook-Levin theorem, only a small fraction of this article is relevant,
+namely the definitions of $\NP$-completeness and of \SAT{}. Recursively breaking
+down these definitions yields:
+
+\begin{itemize}
+  \item $\NP$-completeness: Section~\ref{s:TC-NP}
+  \begin{itemize}
+    \item languages: Section~\ref{s:TC-NP}
+    \item $\NP$-hard: Section~\ref{s:TC-NP}
+    \begin{itemize}
+      \item $\NP$: Section~\ref{s:TC-NP}
+      \begin{itemize}
+        \item Turing machines: Section~\ref{s:tm-basic-tm}
+        \item computing a function: Section~\ref{s:tm-basic-comp}
+        \item pairing strings: Section~\ref{s:tm-basic-pair}
+        \item Big-Oh, polynomial: Section~\ref{s:tm-basic-bigoh}
+      \end{itemize}
+      \item polynomial-time many-one reduction: Section~\ref{s:TC-NP}
+    \end{itemize}
+  \end{itemize}
+
+  \item \SAT{}: Section~\ref{s:sat-sat-repr}
+  \begin{itemize}
+    \item literal, clause, CNF formula, assignment, satisfiability: Section~\ref{s:CNF}
+    \item representing CNF formulas as strings: Section~\ref{s:sat-sat-repr}
+    \begin{itemize}
+      \item string: Section~\ref{s:tm-basic-tm}
+      \item CNF formula: Section~\ref{s:CNF}
+      \item mapping between symbols and strings: Section~\ref{s:tm-basic-comp}
+      \item mapping between binary and quaternary alphabets: Section~\ref{s:tm-quaternary-encoding}
+      \item lists of lists of natural numbers: Section~\ref{s:tm-numlistlist-repr}
+      \begin{itemize}
+        \item binary representation of natural numbers: Section~\ref{s:tm-arithmetic-binary}
+        \item lists of natural numbers: Section~\ref{s:tm-numlist-repr}
+      \end{itemize}
+    \end{itemize}
+  \end{itemize}
+\end{itemize}
+
+In other words the Sections~\ref{s:tm-basic}, \ref{s:tm-arithmetic-binary},
+\ref{s:tm-numlist-repr}, \ref{s:tm-numlistlist-repr}, \ref{s:tm-quaternary-encoding},
+\ref{s:TC-NP}, \ref{s:CNF}, and \ref{s:sat-sat-repr} cover all definitions for
+formalizing the statement ``\SAT{} is $\NP$-complete''.
+\<close>
+chapter \<open>Turing machines\label{s:TM}\<close>
+text \<open>
+This chapter introduces Turing machines as a model of computing functions within
+a running-time bound. Despite being quite intuitive, Turing machines are
+notoriously tedious to work with. And so most of the rest of the chapter is
+devoted to making this a little easier by providing means of combining TMs and a
+library of reusable TMs for common tasks.
+
+The basic idea (Sections~\ref{s:tm-basic} and~\ref{s:tm-trans}) is to treat
+Turing machines as a kind of GOTO programming language. A state of a TM
+corresponds to a line of code executing a rather complex command that, depending
+on the symbols read, can write symbols, move tape heads, and jump to another
+state (that is, line of code). States are identified by line numbers. This makes
+it easy to execute TMs in sequence by concatenating two TM ``programs''. On top
+of the GOTO implicit in all commands, we then define IF and WHILE in the
+traditional way (Section~\ref{s:tm-combining}). This makes TMs more composable.
+
+The interpretation of states as line numbers deprives TMs of the ability to
+memorize values ``in states'', for example, the carry bit during a binary
+addition. In Section~\ref{s:tm-memorizing} we recover some of this flexibility.
+
+Being able to combine TMs is helpful, but we also need TMs to combine. This
+takes up most of the remainder of the chapter. We start with simple operations,
+such as moving a tape head to the next blank symbol or copying symbols between
+tapes (Section~\ref{s:tm-elementary}). Extending our programming language
+analogy for more complex TMs, we identify tapes with variables, so that a tape
+contains a value of a specific type, such as a number or a list of numbers. In
+the remaining Sections~\ref{s:tm-arithmetic} to~\ref{s:tm-wellformed} we define
+these ``data types'' and devise TMs for operations over them.
+
+It would be an exaggeration to say all this makes working with Turing machines
+easy or fun. But at least it makes TMs somewhat more feasible to use for
+complexity theory, as witnessed by the subsequent chapters.
+\<close>
+section \<open>Basic definitions\label{s:tm-basic}\<close>
+text \<open>
+While Turing machines are fairly simple, there are still a few parts to define,
+especially if one allows multiple tapes and an arbitrary alphabet: states, tapes
+(read-only or read-write), cells, tape heads, head movements, symbols, and
+configurations. Beyond these are more semantic aspects like executing one or
+many steps of a Turing machine, its running time, and what it means for a TM to
+``compute a function''. Our approach at formalizing all this must look rather
+crude compared to Dalvit and Thiemann's~\cite{Multitape_To_Singletape_TM-AFP},
+but still it does get the job done.
+
+For lack of a better place, this section also introduces a minimal version of
+Big-Oh, polynomials, and a pairing function for strings.
+\<close>
+subsection \<open>Multi-tape Turing machines\label{s:tm-basic-tm}\<close>
+text \<open>
+Arora and Barak~\cite[p.~11]{ccama} define multi-tape Turing machines with these
+features:
+
+\begin{itemize}
+\item There are $k \geq 2$ infinite one-directional tapes, and each has one head.
+\item The first tape is the input tape and read-only; the other $k - 1$ tapes
+  can be written to.
+\item The tape alphabet is a finite set $\Gamma$ containing at least the blank
+  symbol $\Box$, the start symbol $\triangleright$, and the symbols \textbf{0}
+  and \textbf{1}.
+\item There is a finite set $Q$ of states with start state and halting state
+  $q_\mathit{start}, q_\mathit{halt} \in Q$.
+\item The behavior is described by a transition function $\delta\colon\ Q
+  \times \Gamma^k \to Q \times \Gamma^{k-1} \times \{L, S, R\}^k$.  If the TM is
+  in a state $q$ and the symbols $g_1,\dots,g_k$ are under the $k$ tape heads
+  and $\delta(q, (g_1, \dots, g_k)) = (q', (g'_2, \dots, g'_k), (d_1, \dots,
+  d_k))$, then the TM writes $g'_2, \dots, g'_k$ to the writable tapes, moves
+  the tape heads in the direction (Left, Stay, or Right) indicated by the $d_1,
+  \dots, d_k$ and switches to state $q'$.
+\end{itemize}
+\<close>
+subsubsection \<open>Syntax\<close>
+text \<open>
+An obvious data type for the direction a tape head can move:
+\<close>
+text \<open>
+We simplify the definition a bit in that we identify both symbols and states
+with natural numbers:
+\begin{itemize}
+\item We set $\Gamma = \{0, 1, \dots, G - 1\}$ for some $G \geq 4$ and represent
+  the symbols $\Box$, $\triangleright$, \textbf{0}, and \textbf{1} by the
+  numbers 0, 1, 2, and~3, respectively. We represent an alphabet $\Gamma$ by its
+  size $G$.
+\item We let the set of states be of the form $\{0, 1, \dots, Q\}$ for some
+  $Q\in\nat$ and set the start state $q_\mathit{start} = 0$ and halting state
+  $q_\mathit{halt} = Q$.
+\end{itemize}
+
+The last item presents a fundamental difference to the textbook definition,
+because it requires that Turing machines with $q_\mathit{start} =
+q_\mathit{halt}$ have exactly one state, whereas the textbook definition allows
+them arbitrarily many states.  However, if $q_\mathit{start} = q_\mathit{halt}$
+then the TM starts in the halting state and thus does not actually do anything.
+But then it does not matter if there are other states besides that one
+start/halting state.  Our simplified definition therefore does not restrict the
+expressive power of TMs. It does, however, simplify composing them.
+\<close>
+text \<open>
+The type @{type nat} is used for symbols and for states.
+\<close>
+text \<open>
+It is confusing to have the numbers 2 and 3 represent the symbols \textbf{0} and
+\textbf{1}. The next abbreviations try to hide this somewhat. The glyphs for
+symbols number~4 and~5 are chosen arbitrarily. While we will encounter Turing
+machines with huge alphabets, only the following symbols will be used literally:
+\<close>
+text \<open>
+Tapes are infinite in one direction, so each cell can be addressed by a natural
+number. Likewise the position of a tape head is a natural number. The contents
+of a tape are represented by a mapping from cell numbers to symbols. A
+\emph{tape} is a pair of tape contents and head position:
+\<close>
+text \<open>
+Our formalization of Turing machines begins with a data type representing a more
+general concept, which we call \emph{machine}, and later adds a predicate to
+define which machines are \emph{Turing} machines. In this generalization the
+number $k$ of tapes is arbitrary, although machines with zero tapes are of
+little interest. Also, all tapes are writable and the alphabet is not limited,
+that is, $\Gamma = \nat$. The transition function becomes
+$
+  \delta\colon\ \{0, \dots, Q\} \times \nat^k \to \{0, \dots, Q\} \times \nat^k \times \{L,S,R\}^k
+$
+or, saving us one occurrence of~$k$,
+$
+  \delta\colon\ \{0, \dots, Q\} \times \nat^k \to \{0, \dots, Q\} \times (\nat \times \{L,S,R\})^k\;.
+$
+
+The transition function $\delta$ has a fixed behavior in the state $q_{halt} =
+Q$ (namely making the machine do nothing). Hence $\delta$ needs to be specified
+only for the $Q$ states $0, \dots, Q - 1$ and thus can be given as a sequence
+$\delta_0, \dots, \delta_{Q-1}$ where each $\delta_q$ is a function
+\begin{equation} \label{eq:wf}
+  \delta_q\colon \nat^k \to \{0, \dots, Q\} \times (\nat \times \{L,S,R\})^k.
+\end{equation}
+Going one step further we allow the machine to jump to any state in $\nat$, and
+we will treat any state $q \geq Q$ as a halting state. The $\delta_q$ are then
+\begin{equation} \label{eq:proper}
+  \delta_q\colon \nat^k \to \nat \times (\nat \times \{L,S,R\})^k.
+\end{equation}
+Finally we allow inputs and outputs of arbitrary length, turning the $\delta_q$
+into
+\[
+  \delta_q\colon \nat^* \to \nat \times (\nat \times \{L,S,R\})^*.
+\]
+Such a $\delta_q$ will be called a \emph{command}, and the elements of $\nat
+\times \{L,S,R\}$ will be called \emph{actions}. An action consists of writing a
+symbol to a tape at the current tape head position and then moving the tape
+head.
+\<close>
+text \<open>
+A command maps the list of symbols read from the tapes to a follow-up state and
+a list of actions. It represents the machine's behavior in one state.
+\<close>
+text \<open>
+Machines are then simply lists of commands. The $q$-th element of the list
+represents the machine's behavior in state $q$. The halting state of a machine
+$M$ is @{term "length M"}, but there is obviously no such element in the list.
+\<close>
+text \<open>
+Commands in this general form are too amorphous. We call a command
+\emph{well-formed} for $k$ tapes and the state space $Q$ if on reading $k$
+symbols it performs $k$ actions and jumps to a state in $\{0, \dots, Q\}$. A
+well-formed command corresponds to (\ref{eq:wf}).
+\<close>
+text \<open>
+A well-formed command is a \emph{Turing command} for $k$ tapes and alphabet $G$
+if it writes only symbols from $G$ when reading symbols from $G$ and does not
+write to tape $0$; that is, it writes to tape $0$ the symbol it read from
+tape~$0$.
+\<close>
+text \<open>
+A \emph{Turing machine} is a machine with at least two tapes and four symbols
+and only Turing commands.
+\<close>
+subsubsection \<open>Semantics\<close>
+text \<open>
+Next we define the semantics of machines. The state and the list of tapes make
+up the \emph{configuration} of a machine. The semantics are given as functions
+mapping configurations to follow-up configurations.
+\<close>
+text \<open>
+We start with the semantics of a single command. An action affects a tape in the
+following way. For the head movements we imagine the tapes having cell~0 at the
+left and the cell indices growing rightward.
+\<close>
+text \<open>
+Reading symbols from one tape, from all tapes, and from configurations:
+\<close>
+text \<open>
+The semantics of a command:
+\<close>
+text \<open>
+The semantics of one step of a machine consist in the semantics of the command
+corresponding to the state the machine is in. The following definition ensures
+that the configuration does not change when it is in a halting state.
+\<close>
+text \<open>
+Executing a machine $M$ for multiple steps:
+\<close>
+text \<open>
+We have defined the semantics for arbitrary machines, but most lemmas we are
+going to prove about @{const exe}, @{const execute}, etc.\ will require the
+commands to be somewhat well-behaved, more precisely to map lists of $k$ symbols
+to lists of $k$ actions, as shown in (\ref{eq:proper}). We will call such
+commands \emph{proper}.  \<close>
+text \<open>
+Being proper is a weaker condition than being well-formed. Since @{const exe}
+treats the state $Q$ and the states $q > Q$ the same, we do not need the
+$Q$-closure property of well-formedness for most lemmas about semantics.
+\<close>
+text \<open>
+Next we introduce a number of abbreviations for components of a machine and
+aspects of its behavior. In general, symbols between bars $|\cdot|$ represent
+operations on tapes, inside angle brackets $<\cdot>$ operations on
+configurations, between colons $:\!\cdot\!:$ operations on lists of tapes, and
+inside brackets $[\cdot]$ operations on state/action-list pairs. As for the
+symbol inside the delimiters, a dot ($.$) refers to a tape symbol, a colon ($:$)
+to the entire tape contents, and a hash ($\#$) to a head position; an equals
+sign ($=$) means some component of the left-hand side is changed. An exclamation
+mark ($!$) accesses an element in a list on the left-hand side term.
+
+\null
+\<close>
+text \<open>
+Symbol sequences consisting of symbols from an alphabet $G$:
+\<close>
+text \<open>
+We will frequently have to show that commands are proper or Turing commands.
+\<close>
+text \<open>
+The empty Turing machine $[]$ is the one Turing machine where the start state is
+the halting state, that is, $q_\mathit{start} = q_\mathit{halt} = Q = 0$. It is
+a Turing machine for every $k \geq 2$ and $G \geq 4$:
+\<close>
+text \<open>
+A few lemmas about @{const act}, @{const read}, and @{const sem}:
+
+\null
+\<close>
+text \<open>
+Commands ignore the state element of the configuration they are applied to.
+\<close>
+text \<open>
+A few lemmas about @{const exe} and @{const execute}:
+\<close>
+text \<open>
+While running times are important, usually upper bounds for them suffice. The
+next predicate expresses that a machine \emph{transits} from one configuration
+to another one in at most a certain number of steps.
+\<close>
+text \<open>
+In the vast majority of cases we are only interested in transitions from the
+start state to the halting state. One way to look at it is the machine
+\emph{transforms} a list of tapes to another list of tapes within a certain
+number of steps.
+\<close>
+text \<open>
+The previous predicate will be the standard way in which we express the
+behavior of a (Turing) machine. Consider, for example, the empty machine:
+\<close>
+text \<open>
+Most often the tapes will have a start symbol in the first cell followed by
+a finite sequence of symbols.
+\<close>
+text \<open>
+When Turing machines are used to compute functions, they are started in a
+specific configuration where all tapes have the format just defined and the
+first tape contains the input. This is called the \emph{start
+configuration}~\cite[p.~13]{ccama}.
+\<close>
+text \<open>
+We call a symbol \emph{proper} if it is neither the blank symbol nor the
+start symbol.
+\<close>
+text \<open>
+We call the symbols \textbf{0} and \textbf{1} \emph{bit symbols}.
+\<close>
+subsubsection \<open>Basic facts about Turing machines\<close>
+text \<open>
+A Turing machine with alphabet $G$ started on a symbol sequence over $G$ will
+only ever have symbols from $G$ on any of its tapes.
+\<close>
+text \<open>
+The contents of the input tape never change.
+\<close>
+text \<open>
+A head position cannot be greater than the number of steps the machine has been
+running.
+\<close>
+text \<open>
+A tape cannot contain non-blank symbols at a position larger than the number of
+steps the Turing machine has been running, except on the input tape.
+\<close>
+subsection \<open>Computing a function\label{s:tm-basic-comp}\<close>
+text \<open>
+Turing machines are supposed to compute functions. The functions in question map
+bit strings to bit strings. We model such strings as lists of Booleans and
+denote the bits by @{text \<bbbO>} and @{text \<bbbI>}.
+\<close>
+text \<open>
+This keeps the more abstract level of computable functions separate from the
+level of concrete implementations as Turing machines, which can use an arbitrary
+alphabet. We use the term ``string'' only for bit strings, on which functions
+operate, and the terms ``symbol sequence'' or ``symbols'' for the things written
+on the tapes of Turing machines. We translate between the two levels in a
+straightforward way:
+\<close>
+text \<open>
+Definition~1.3 in the textbook~\cite{ccama} says that for a Turing machine $M$
+to compute a function $f\colon\bbOI^*\to\bbOI^*$ on input $x$, ``it halts with
+$f(x)$ written on its output tape.'' My initial interpretation of this phrase,
+and the one formalized below, was that the output is written \emph{after} the
+start symbol $\triangleright$ in the same fashion as the input is given on the
+input tape. However after inspecting the Turing machine in Example~1.1, I now
+believe the more likely meaning is that the output \emph{overwrites} the start
+symbol, although Example~1.1 precedes Definition~1.3 and might not be subject to
+it.
+
+One advantage of the interpretation with start symbol intact is that the output
+tape can then be used unchanged as the input of another Turing machine, a
+property we exploit in Section~\ref{s:tm-composing}. Otherwise one would have to
+find the start cell of the output tape and either copy the contents to another
+tape with start symbol or shift the string to the right and restore the start
+symbol.  One way to find the start cell is to move the tape head left while
+``marking'' the cells until one reaches an already marked cell, which can only
+happen when the head is in the start cell, where ``moving left'' does not
+actually move the head. This process will take time linear in the length of the
+output and thus will not change the asymptotic running time of the machine.
+Therefore the choice of interpretation is purely one of convenience.
+
+\null
+\<close>
+text \<open>
+Another, inconsequential, difference to the textbook definition is that we
+designate the second tape, rather than the last tape, as the output tape. This
+means that the indices for the input and output tape are fixed at~0 and~1,
+respectively, regardless of the total number of tapes. Next is our definition of
+a $k$-tape Turing machine $M$ computing a function $f$ in $T$-time:
+\<close>
+text \<open>
+The definition of @{const computes_in_time} can be expressed with @{const
+transforms} as well, which will be more convenient for us.
+\<close>
+text \<open>
+This is the alternative characterization of @{const computes_in_time}:
+\<close>
+text \<open>
+As an example, the function mapping every string to the empty string is
+computable within any time bound by the empty Turing machine.
+\<close>
+subsection \<open>Pairing strings\label{s:tm-basic-pair}\<close>
+text \<open>
+In order to define the computability of functions with two arguments, we need a
+way to encode a pair of strings as one string. The idea is to write the two
+strings with a separator, for example,
+$\bbbO\bbbI\bbbO\bbbO\#\bbbI\bbbI\bbbI\bbbO$ and then encode every symbol
+$\bbbO, \bbbI, \#$ by two bits from $\bbOI$. We slightly deviate from Arora and
+Barak's encoding~\cite[p.~2]{ccama} and map $\bbbO$ to $\bbbO\bbbO$, $\bbbI$ to
+$\bbbO\bbbI$, and \# to $\bbbI\bbbI$, the idea being that the first bit
+signals whether the second bit is to be taken literally or as a special
+character. Our example turns into
+$\bbbO\bbbO\bbbO\bbbI\bbbO\bbbO\bbbO\bbbO\bbbI\bbbI\bbbO\bbbI\bbbO\bbbI\bbbO\bbbI\bbbO\bbbO$.
+
+\null
+\<close>
+text \<open>
+Our example:
+\<close>
+text \<open>
+Turing machines have to deal with pairs of symbol sequences rather than strings.
+\<close>
+subsection \<open>Big-Oh and polynomials\label{s:tm-basic-bigoh}\<close>
+text \<open>
+The Big-Oh notation is standard~\cite[Definition~0.2]{ccama}. It can be defined
+with $c$ ranging over real or natural numbers. We choose natural numbers for
+simplicity.
+\<close>
+text \<open>
+Some examples:
+\<close>
+text \<open>
+Some lemmas helping with polynomial upper bounds.
+\<close>
+text \<open>
+The next definition formalizes the phrase ``polynomially bounded'' and the term
+``polynomial'' in ``polynomial running-time''. This is often written ``$f(n) =
+n^{O(1)}$'' (for example, Arora and Barak~\cite[Example 0.3]{ccama}).
+\<close>
+text \<open>
+The textbook does not give an explicit definition of polynomials. It treats them
+as functions between natural numbers. So assuming the coefficients are natural
+numbers too, seems natural. We justify this choice when defining $\NP$ in
+Section~\ref{s:TC-NP}.
+
+\null
+\<close>
+section \<open>Increasing the alphabet or the number of tapes\label{s:tm-trans}\<close>
+text \<open>
+For technical reasons it is sometimes necessary to add tapes to a machine or to
+formally enlarge its alphabet such that it matches another machine's tape number
+or alphabet size without changing the behavior of the machine. The primary use
+of this is when composing machines with unequal alphabets or tape numbers (see
+Section~\ref{s:tm-composing}).
+\<close>
+subsection \<open>Enlarging the alphabet\<close>
+text \<open>
+A Turing machine over alphabet $G$ is not necessarily a Turing machine over a
+larger alphabet $G' > G$ because reading a symbol in $\{G, \dots, G'-1\}$ the TM
+may write a symbol $\geq G'$. This is easy to remedy by modifying the TM to do
+nothing when it reads a symbol $\geq G$. It then formally satisfies the alphabet
+restriction property of Turing commands. This is rather crude, because the new
+TM loops infinitely on encountering a ``forbidden'' symbol, but it is good
+enough for our purposes.
+
+The next function performs this transformation on a TM $M$ over alphabet $G$.
+The resulting machine is a Turing machine for every alphabet size $G' \ge G$.
+\<close>
+text \<open>
+The enlarged machine has the same behavior as the original machine when started
+on symbols over the original alphabet $G$.
+\<close>
+subsection \<open>Increasing the number of tapes\<close>
+text \<open>
+We can add tapes to a Turing machine in such a way that on the additional tapes
+the machine does nothing. While the new tapes could go anywhere, we only
+consider appending them at the end or inserting them at the beginning.
+\<close>
+subsubsection \<open>Appending tapes at the end\<close>
+text \<open>
+The next function turns a $k$-tape Turing machine into a $k'$-tape Turing
+machine (for $k' \geq k$) by appending $k' - k$ tapes at the end.
+\<close>
+        by (metis False \<open>k \<le> j\<close> add_diff_inverse_nat diff_less_mono length_upt nth_map nth_upt that(1,3))
+        using 1 len \<open>0 < k\<close> by simp
+        using turing_commandD[OF turing_command] \<open>i < length M\<close> assms(1) turing_machine_def by blast
+subsubsection \<open>Inserting tapes at the beginning\<close>
+text \<open>
+The next function turns a $k$-tape Turing machine into a $(k + d)$-tape Turing
+machine by inserting $d$ tapes at the beginning.
+\<close>

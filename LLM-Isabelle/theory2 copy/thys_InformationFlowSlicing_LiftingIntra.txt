@@ -1,0 +1,183 @@
+theory LiftingIntra 
+  imports NonInterferenceIntra Slicing.CDepInstantiations 
+begin
+
+
+
+
+datatype 'node LDCFG_node = Node 'node
+  | NewEntry
+  | NewExit
+
+
+type_synonym ('edge,'node,'state) LDCFG_edge = 
+  "'node LDCFG_node \<times> ('state edge_kind) \<times> 'node LDCFG_node"
+
+
+
+inductive lift_valid_edge :: "('edge \<Rightarrow> bool) \<Rightarrow> ('edge \<Rightarrow> 'node) \<Rightarrow> ('edge \<Rightarrow> 'node) \<Rightarrow>
+  ('edge \<Rightarrow> 'state edge_kind) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> ('edge,'node,'state) LDCFG_edge \<Rightarrow> 
+  bool"
+for valid_edge::"'edge \<Rightarrow> bool" and src::"'edge \<Rightarrow> 'node" and trg::"'edge \<Rightarrow> 'node" 
+  and knd::"'edge \<Rightarrow> 'state edge_kind" and E::'node and X::'node
+
+where lve_edge:
+  "\<lbrakk>valid_edge a; src a \<noteq> E \<or> trg a \<noteq> X; 
+    e = (Node (src a),knd a,Node (trg a))\<rbrakk>
+  \<Longrightarrow> lift_valid_edge valid_edge src trg knd E X e"
+
+  | lve_Entry_edge:
+  "e = (NewEntry,(\<lambda>s. True)\<^sub>\<surd>,Node E) 
+  \<Longrightarrow> lift_valid_edge valid_edge src trg knd E X e"
+
+  | lve_Exit_edge:
+  "e = (Node X,(\<lambda>s. True)\<^sub>\<surd>,NewExit) 
+  \<Longrightarrow> lift_valid_edge valid_edge src trg knd E X e"
+
+  | lve_Entry_Exit_edge:
+  "e = (NewEntry,(\<lambda>s. False)\<^sub>\<surd>,NewExit) 
+  \<Longrightarrow> lift_valid_edge valid_edge src trg knd E X e"
+
+
+lemma [simp]:"\<not> lift_valid_edge valid_edge src trg knd E X (Node E,et,Node X)"
+by(auto elim:lift_valid_edge.cases)
+
+
+
+inductive_set lift_Def_set :: "('node \<Rightarrow> 'var set) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+                       'var set \<Rightarrow> 'var set \<Rightarrow> ('node LDCFG_node \<times> 'var) set"
+for Def::"('node \<Rightarrow> 'var set)" and E::'node and X::'node 
+  and H::"'var set" and L::"'var set"
+
+where lift_Def_node: 
+  "V \<in> Def n \<Longrightarrow> (Node n,V) \<in> lift_Def_set Def E X H L"
+
+  | lift_Def_High:
+  "V \<in> H \<Longrightarrow> (Node E,V) \<in> lift_Def_set Def E X H L"
+
+abbreviation lift_Def :: "('node \<Rightarrow> 'var set) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+                       'var set \<Rightarrow> 'var set \<Rightarrow> 'node LDCFG_node \<Rightarrow> 'var set"
+  where "lift_Def Def E X H L n \<equiv> {V. (n,V) \<in> lift_Def_set Def E X H L}"
+
+
+inductive_set lift_Use_set :: "('node \<Rightarrow> 'var set) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+                       'var set \<Rightarrow> 'var set \<Rightarrow> ('node LDCFG_node \<times> 'var) set"
+for Use::"'node \<Rightarrow> 'var set" and E::'node and X::'node 
+  and H::"'var set" and L::"'var set"
+
+where 
+  lift_Use_node: 
+  "V \<in> Use n \<Longrightarrow> (Node n,V) \<in> lift_Use_set Use E X H L"
+
+  | lift_Use_High:
+  "V \<in> H \<Longrightarrow> (Node E,V) \<in> lift_Use_set Use E X H L"
+
+  | lift_Use_Low:
+  "V \<in> L \<Longrightarrow> (Node X,V) \<in> lift_Use_set Use E X H L"
+
+
+abbreviation lift_Use :: "('node \<Rightarrow> 'var set) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+                       'var set \<Rightarrow> 'var set \<Rightarrow> 'node LDCFG_node \<Rightarrow> 'var set"
+  where "lift_Use Use E X H L n \<equiv> {V. (n,V) \<in> lift_Use_set Use E X H L}"
+
+
+
+
+
+
+abbreviation src :: "('edge,'node,'state) LDCFG_edge \<Rightarrow> 'node LDCFG_node"
+  where "src a \<equiv> fst a"
+
+abbreviation trg :: "('edge,'node,'state) LDCFG_edge \<Rightarrow> 'node LDCFG_node"
+  where "trg a \<equiv> snd(snd a)"
+
+definition knd :: "('edge,'node,'state) LDCFG_edge \<Rightarrow> 'state edge_kind"
+  where "knd a \<equiv> fst(snd a)"
+
+
+lemma lift_CFG:
+  assumes wf:"CFGExit_wf sourcenode targetnode kind valid_edge Entry Def Use
+                         state_val Exit"
+  shows "CFG src trg
+    (lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit) NewEntry"
+proof -
+  interpret CFGExit_wf sourcenode targetnode kind valid_edge Entry Def Use
+                       state_val Exit
+    by(rule wf)
+  show ?thesis 
+  proof
+    fix a assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "trg a = NewEntry"
+    thus False by(fastforce elim:lift_valid_edge.cases)
+  next
+    fix a a' 
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a'"
+      and "src a = src a'" and "trg a = trg a'"
+    thus "a = a'"
+    proof(induct rule:lift_valid_edge.induct)
+      case lve_edge thus ?case by -(erule lift_valid_edge.cases,auto dest:edge_det)
+    qed(auto elim:lift_valid_edge.cases)
+  qed
+qed
+
+
+lemma lift_CFG_wf:
+  assumes wf:"CFGExit_wf sourcenode targetnode kind valid_edge Entry Def Use
+                         state_val Exit"
+  shows "CFG_wf src trg knd 
+         (lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit) NewEntry
+         (lift_Def Def Entry Exit H L) (lift_Use Use Entry Exit H L) state_val"
+proof -
+  interpret CFGExit_wf sourcenode targetnode kind valid_edge Entry Def Use
+                       state_val Exit
+    by(rule wf)
+  interpret CFG:CFG src trg knd
+    "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit" NewEntry
+    by(fastforce intro:lift_CFG wf)
+  show ?thesis
+  proof
+    show "lift_Def Def Entry Exit H L NewEntry = {} \<and>
+          lift_Use Use Entry Exit H L NewEntry = {}"
+      by(fastforce elim:lift_Use_set.cases lift_Def_set.cases)
+  next
+    fix a V s 
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "V \<notin> lift_Def Def Entry Exit H L (src a)" and "pred (knd a) s"
+    thus "state_val (transfer (knd a) s) V = state_val s V"
+    proof(induct rule:lift_valid_edge.induct)
+      case lve_edge
+      thus ?case by(fastforce intro:CFG_edge_no_Def_equal dest:lift_Def_node[of _ Def]
+        simp:knd_def)
+    qed(auto simp:knd_def)
+  next
+    fix a s s'
+    assume assms:"lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      "\<forall>V\<in>lift_Use Use Entry Exit H L (src a). state_val s V = state_val s' V"
+      "pred (knd a) s" "pred (knd a) s'"
+    show "\<forall>V\<in>lift_Def Def Entry Exit H L (src a).
+             state_val (transfer (knd a) s) V = state_val (transfer (knd a) s') V"
+    proof
+      fix V assume "V \<in> lift_Def Def Entry Exit H L (src a)"
+      with assms
+      show "state_val (transfer (knd a) s) V = state_val (transfer (knd a) s') V"
+      proof(induct rule:lift_valid_edge.induct)
+        case (lve_edge a e)
+        show ?case
+        proof (cases "Node (sourcenode a) = Node Entry")
+          case True
+          hence "sourcenode a = Entry" by simp
+          from Entry_Exit_edge obtain a' where "valid_edge a'"
+            and "sourcenode a' = Entry" and "targetnode a' = Exit"
+            and "kind a' = (\<lambda>s. False)\<^sub>\<surd>" by blast
+          have "\<exists>Q. kind a = (Q)\<^sub>\<surd>"
+          proof(cases "targetnode a = Exit")
+            case True
+            have "a = a'" by(fastforce dest:edge_det)
+          next
+            case False
+            show ?thesis by(auto dest:deterministic)
+          qed
+          have "V \<in> H" by(fastforce elim:lift_Def_set.cases)
+          have "\<forall>V\<in>H. V \<in> lift_Use Use Entry Exit H L (src e)"
+            by(fastforce intro:lift_Use_High)

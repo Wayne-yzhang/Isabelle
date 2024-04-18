@@ -1,0 +1,577 @@
+theory LastVotingProof
+imports LastVotingDefs "../Majorities" "../Reduction"
+begin
+
+
+
+
+lemma timeStampsRcvdFinite:
+  "finite {ts . \<exists>q v. (msgs::Proc \<rightharpoonup> 'val msg) q = Some (ValStamp v ts)}"
+  (is "finite ?ts")
+proof -
+  have "?ts = stamp ` the ` msgs ` (valStampsRcvd msgs)"
+    by (force simp add: valStampsRcvd_def image_def)
+  thus ?thesis by auto
+qed
+
+lemma highestStampRcvd_exists:
+  assumes nempty: "valStampsRcvd msgs \<noteq> {}"
+  obtains p v where "msgs p = Some (ValStamp v (highestStampRcvd msgs))"
+proof -
+  let ?ts = "{ts . \<exists>q v. msgs q = Some (ValStamp v ts)}"
+  from nempty have "?ts \<noteq> {}" by (auto simp add: valStampsRcvd_def)
+  with timeStampsRcvdFinite
+  have "highestStampRcvd msgs \<in> ?ts"
+    unfolding highestStampRcvd_def by (rule Max_in)
+  then obtain p v where "msgs p = Some (ValStamp v (highestStampRcvd msgs))"
+    by (auto simp add: highestStampRcvd_def)
+  with that show thesis .
+qed
+
+lemma highestStampRcvd_max:
+  assumes "msgs p = Some (ValStamp v ts)"
+  shows "ts \<le> highestStampRcvd msgs"
+  using assms unfolding highestStampRcvd_def
+  by (blast intro: Max_ge timeStampsRcvdFinite)
+
+lemma phase_Suc:
+  "phase (Suc r) = (if step r = 3 then Suc (phase r)
+                   else phase r)"
+  unfolding step_def phase_def by presburger
+
+
+lemma LV_induct:
+  assumes run: "CHORun LV_M rho HOs coords"
+  and init: "\<forall>p. CinitState LV_M p (rho 0 p) (coords 0 p) \<Longrightarrow> P 0"
+  and step0: "\<And>r.
+                  \<lbrakk> step r = 0; P r; phase (Suc r) = phase r; step (Suc r) = 1;
+                    \<forall>p. next0 r p (rho r p)
+                              (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                              (coords (Suc r) p)
+                              (rho (Suc r) p) \<rbrakk>
+                  \<Longrightarrow> P (Suc r)"
+  and step1: "\<And>r.
+                  \<lbrakk> step r = 1; P r; phase (Suc r) = phase r; step (Suc r) = 2;
+                    \<forall>p. next1 r p (rho r p)
+                              (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                              (coords (Suc r) p)
+                              (rho (Suc r) p) \<rbrakk>
+                  \<Longrightarrow> P (Suc r)"
+  and step2: "\<And>r.
+                  \<lbrakk> step r = 2; P r; phase (Suc r) = phase r; step (Suc r) = 3;
+                    \<forall>p. next2 r p (rho r p)
+                              (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                              (coords (Suc r) p)
+                              (rho (Suc r) p) \<rbrakk>
+                  \<Longrightarrow> P (Suc r)"
+  and step3: "\<And>r.
+                  \<lbrakk> step r = 3; P r; phase (Suc r) = Suc (phase r); step (Suc r) = 0;
+                    \<forall>p. next3 r p (rho r p)
+                              (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                              (coords (Suc r) p)
+                              (rho (Suc r) p) \<rbrakk>
+                  \<Longrightarrow> P (Suc r)"
+  shows "P n"
+proof (rule CHORun_induct[OF run])
+  assume "CHOinitConfig LV_M (rho 0) (coords 0)"
+  thus "P 0" by (auto simp add: CHOinitConfig_def init)
+next
+  fix r
+  assume ih: "P r" 
+    and nxt: "CHOnextConfig LV_M r (rho r) (HOs r) 
+                                 (coords (Suc r)) (rho (Suc r))"
+  have "step r \<in> {0,1,2,3}" by (auto simp add: step_def)
+  thus "P (Suc r)"
+  proof auto
+    assume stp: "step r = 0"
+    hence "step (Suc r) = 1" 
+      by (auto simp add: step_def mod_Suc)
+    with ih nxt stp show ?thesis
+      by (intro step0)
+         (auto simp: LV_CHOMachine_def CHOnextConfig_eq 
+                     LV_nextState_def LV_sendMsg_def phase_Suc)
+  next
+    assume stp: "step r = Suc 0"
+    hence "step (Suc r) = 2" 
+      by (auto simp add: step_def mod_Suc)
+    with ih nxt stp show ?thesis
+      by (intro step1)
+         (auto simp: LV_CHOMachine_def CHOnextConfig_eq 
+                     LV_nextState_def LV_sendMsg_def phase_Suc)
+  next
+    assume stp: "step r = 2"
+    hence "step (Suc r) = 3"
+      by (auto simp add: step_def mod_Suc)
+    with ih nxt stp show ?thesis
+      by (intro step2)
+         (auto simp: LV_CHOMachine_def CHOnextConfig_eq 
+                     LV_nextState_def LV_sendMsg_def phase_Suc)
+  next
+    assume stp: "step r = 3"
+    hence "step (Suc r) = 0"
+      by (auto simp add: step_def mod_Suc)
+    with ih nxt stp show ?thesis
+      by (intro step3)
+         (auto simp: LV_CHOMachine_def CHOnextConfig_eq 
+                     LV_nextState_def LV_sendMsg_def phase_Suc)
+  qed
+qed
+
+
+lemma LV_Suc:
+  assumes run: "CHORun LV_M rho HOs coords"
+  and step0: "\<lbrakk> step r = 0; step (Suc r) = 1; phase (Suc r) = phase r;
+                \<forall>p. next0 r p (rho r p)
+                          (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                          (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+              \<Longrightarrow> P r"
+  and step1: "\<lbrakk> step r = 1; step (Suc r) = 2; phase (Suc r) = phase r;
+                \<forall>p. next1 r p (rho r p)
+                          (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                          (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+              \<Longrightarrow> P r"
+  and step2: "\<lbrakk> step r = 2; step (Suc r) = 3; phase (Suc r) = phase r;
+                \<forall>p. next2 r p (rho r p)
+                          (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                          (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+              \<Longrightarrow> P r"
+  and step3: "\<lbrakk> step r = 3; step (Suc r) = 0; phase (Suc r) = Suc (phase r);
+                \<forall>p. next3 r p (rho r p)
+                          (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                          (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+              \<Longrightarrow> P r"
+  shows "P r"
+proof -
+  from run 
+  have nxt: "CHOnextConfig LV_M r (rho r) (HOs r) 
+                                  (coords (Suc r)) (rho (Suc r))"
+    by (auto simp add: CHORun_eq)
+  have "step r \<in> {0,1,2,3}" by (auto simp add: step_def)
+  thus "P r"
+  proof (auto)
+    assume stp: "step r = 0"
+    hence "step (Suc r) = 1" 
+      by (auto simp add: step_def mod_Suc)
+    with nxt stp show ?thesis
+      by (intro step0)
+         (auto simp: LV_CHOMachine_def CHOnextConfig_eq 
+                     LV_nextState_def LV_sendMsg_def phase_Suc)
+  next
+    assume stp: "step r = Suc 0"
+    hence "step (Suc r) = 2" 
+      by (auto simp add: step_def mod_Suc)
+    with nxt stp show ?thesis
+      by (intro step1)
+         (auto simp: LV_CHOMachine_def CHOnextConfig_eq 
+                     LV_nextState_def LV_sendMsg_def phase_Suc)
+  next
+    assume stp: "step r = 2"
+    hence "step (Suc r) = 3"
+      by (auto simp add: step_def mod_Suc)
+    with nxt stp show ?thesis
+      by (intro step2)
+         (auto simp: LV_CHOMachine_def CHOnextConfig_eq 
+                     LV_nextState_def LV_sendMsg_def phase_Suc)
+  next
+    assume stp: "step r = 3"
+    hence "step (Suc r) = 0"
+      by (auto simp add: step_def mod_Suc)
+    with nxt stp show ?thesis
+      by (intro step3)
+         (auto simp: LV_CHOMachine_def CHOnextConfig_eq 
+                     LV_nextState_def LV_sendMsg_def phase_Suc)
+  qed
+qed
+
+
+lemma LV_induct':
+  assumes run: "CHORun LV_M rho HOs coords"
+  and init: "CinitState LV_M p (rho 0 p) (coords 0 p) \<Longrightarrow> P p 0"
+  and step0: "\<And>r. \<lbrakk> step r = 0; P p r; phase (Suc r) = phase r; step (Suc r) = 1;
+                     next0 r p (rho r p)
+                           (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                           (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+                  \<Longrightarrow> P p (Suc r)"
+  and step1: "\<And>r. \<lbrakk> step r = 1; P p r; phase (Suc r) = phase r; step (Suc r) = 2;
+                     next1 r p (rho r p)
+                           (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                           (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+                  \<Longrightarrow> P p (Suc r)"
+  and step2: "\<And>r. \<lbrakk> step r = 2; P p r; phase (Suc r) = phase r; step (Suc r) = 3;
+                     next2 r p (rho r p)
+                           (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                           (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+                  \<Longrightarrow> P p (Suc r)"
+  and step3: "\<And>r. \<lbrakk> step r = 3; P p r; phase (Suc r) = Suc (phase r); step (Suc r) = 0;
+                     next3 r p (rho r p)
+                           (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                           (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+                  \<Longrightarrow> P p (Suc r)"
+  shows "P p n"
+  by (rule LV_induct[OF run])
+     (auto intro: init step0 step1 step2 step3)
+
+lemma LV_Suc':
+  assumes run: "CHORun LV_M rho HOs coords"
+  and step0: "\<lbrakk> step r = 0; step (Suc r) = 1; phase (Suc r) = phase r;
+                next0 r p (rho r p)
+                      (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                      (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+              \<Longrightarrow> P p r"
+  and step1: "\<lbrakk> step r = 1; step (Suc r) = 2; phase (Suc r) = phase r;
+                next1 r p (rho r p)
+                      (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                      (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+              \<Longrightarrow> P p r"
+  and step2: "\<lbrakk> step r = 2; step (Suc r) = 3; phase (Suc r) = phase r;
+                next2 r p (rho r p)
+                      (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                      (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+              \<Longrightarrow> P p r"
+  and step3: "\<lbrakk> step r = 3; step (Suc r) = 0; phase (Suc r) = Suc (phase r);
+                next3 r p (rho r p)
+                      (HOrcvdMsgs LV_M r p (HOs r p) (rho r))
+                      (coords (Suc r) p) (rho (Suc r) p) \<rbrakk>
+              \<Longrightarrow> P p r"
+  shows "P p r"
+  by (rule LV_Suc[OF run])
+     (auto intro: step0 step1 step2 step3)
+
+
+
+
+lemma LV_timestamp_bounded:
+  assumes run: "CHORun LV_M rho HOs coords"
+  shows "timestamp (rho n p) \<le> (if step n < 2 then phase n else Suc (phase n))"
+        (is "?P p n")
+  by (rule LV_induct' [OF run, where P="?P"])
+     (auto simp: LV_CHOMachine_def LV_initState_def 
+                 next0_def next1_def next2_def next3_def)
+
+
+lemma LV_timestamp_increasing:
+  assumes run: "CHORun LV_M rho HOs coords"
+  shows "timestamp (rho n p) \<le> timestamp (rho (Suc n) p)"
+    (is "?P p n" is "?ts \<le> _")
+proof (rule LV_Suc'[OF run, where P="?P"])
+    timestamp may change: here we use the previously established fact that
+    the timestamp is bounded by the phase number.\<close>
+text \<open>
+  The following definition collects the set of processes whose timestamp
+  is beyond a given bound at a system state.
+\<close>
+text \<open>
+  Since timestamps grow monotonically, so does the set of processes
+  that are beyond a certain bound.
+\<close>
+subsection \<open>Obvious Facts About the Algorithm\<close>
+text \<open>
+  The following lemmas state some very obvious facts that follow
+  ``immediately'' from the definition of the algorithm. We could
+  prove them in one fell swoop by defining a big invariant, but it
+  appears more readable to prove them separately.
+\<close>
+text \<open>
+  Coordinators change only at step 3.
+\<close>
+text \<open>
+  Votes only change at step 0.
+\<close>
+text \<open>
+  Commit status only changes at steps 0 and 3.
+\<close>
+text \<open>
+  Timestamps only change at step 1.
+\<close>
+text \<open>
+\<close>
+text \<open>
+  \begin{itemize}
+  \item the step number is at least $1$,
+  \item $p$ considers itself to be the coordinator,
+  \item a majority of processes consider $p$ as their coordinator.
+  \end{itemize}
+\<close>
+    \<comment> \<open>the only interesting step is step 0\<close>
+  \<comment> \<open>the remaining cases are all solved by expanding the definitions\<close>
+text \<open>
+  A process has a current timestamp only if:
+  \begin{itemize}
+  \item it is at step 2 or beyond,
+  \item its coordinator has committed,
+  \end{itemize}
+\<close>
+    \<comment> \<open>The assertion is trivially true initially because the timestamp is 0.\<close>
+    txt \<open>The assertion is trivially preserved by step 0 because the timestamp in the
+    fix n
+    assume stp': "step (Suc n) = 1"
+    with run LV_timestamp_bounded[where n="Suc n"] 
+    have "?ts (Suc n) \<le> phase (Suc n)" by auto
+    thus "?Q p (Suc n)" by simp
+  next
+    fix n
+    assume stp: "step n = 1" and stp':"step (Suc n) = 2"
+       and ph: "phase (Suc n) = phase n"
+       and nxt: "next1 n p (rho n p) (HOrcvdMsgs LV_M n p (HOs n p) (rho n)) 
+                           (coords (Suc n) p) (rho (Suc n) p)"
+    show "?Q p (Suc n)"
+    proof
+      assume ts: "?ts (Suc n) = Suc (phase (Suc n))"
+      from run stp LV_timestamp_bounded[where n=n] 
+      have "?ts n \<le> phase n" by auto
+      moreover
+      from run stp
+      have "vote (rho (Suc n) (?crd (Suc n))) = vote (rho n (?crd n))"
+        by (auto simp: notStep3EqualCoord notStep0EqualVote)
+      moreover
+      from run stp
+      have "commt (rho (Suc n) (?crd (Suc n))) = commt (rho n (?crd n))"
+        by (auto simp: notStep3EqualCoord notStep03EqualCommit)
+      moreover
+      note ts nxt stp stp' ph
+      ultimately
+      show "?R (Suc n)"
+        by (auto simp: LV_CHOMachine_def HOrcvdMsgs_def LV_sendMsg_def
+                       next1_def send1_def isVote_def)
+    qed
+  next
+    fix n
+    assume stp: "step n = 2" and stp': "step (Suc n) = 3"
+       and ph: "phase (Suc n) = phase n"
+       and ih: "?Q p n"
+       and nxt: "next2 n p (rho n p) (HOrcvdMsgs LV_M n p (HOs n p) (rho n))
+                           (coords (Suc n) p) (rho (Suc n) p)"
+    show "?Q p (Suc n)"
+    proof
+      assume ts: "?ts (Suc n) = Suc (phase (Suc n))"
+      from run stp
+      have vt: "vote (rho (Suc n) (?crd (Suc n))) = vote (rho n (?crd n))"
+        by (auto simp add: notStep3EqualCoord notStep0EqualVote)
+      from run stp
+      have cmt: "commt (rho (Suc n) (?crd (Suc n))) = commt (rho n (?crd n))"
+        by (auto simp add: notStep3EqualCoord notStep03EqualCommit)
+      with vt ts ph stp stp' ih nxt
+      show "?R (Suc n)"
+        by (auto simp add: next2_def)
+    qed
+  next
+  have 1: "step r = 3
+           \<and> ?dec' = Some (the (vote (?cfg (?crd p))))
+           \<and> ready (?cfg (?crd p))"
+    (is "?Q p r")
+    proof (rule LV_Suc'[OF run, where P="?Q"])
+    assume "next3 r p (?cfg p) (HOrcvdMsgs LV_M r p (HOs r p) ?cfg) 
+                      (coords (Suc r) p) (?cfg' p)"
+       and "step r = 3"
+    with dec show ?thesis
+      by (auto simp: next3_def send3_def isVote_def LV_CHOMachine_def 
+                     HOrcvdMsgs_def LV_sendMsg_def)
+  next
+    assume "next0 r p (?cfg p) (HOrcvdMsgs LV_M r p (HOs r p) ?cfg)
+                      (coords (Suc r) p) (?cfg' p)"
+    with dec show ?thesis by (auto simp: next0_def)
+  next
+    assume "next1 r p (?cfg p) (HOrcvdMsgs LV_M r p (HOs r p) ?cfg)
+                      (coords (Suc r) p) (?cfg' p)"
+    with dec show ?thesis by (auto simp: next1_def)
+  next
+    assume "next2 r p (?cfg p) (HOrcvdMsgs LV_M r p (HOs r p) ?cfg)
+                      (coords (Suc r) p) (?cfg' p)"
+    with dec show ?thesis by (auto simp: next2_def)
+  qed
+  hence "ready (?cfg (?crd p))" by blast
+  with run
+  have "card {q . ?crd q = ?crd p \<and> timestamp (?cfg q) = Suc (phase r)} 
+          > N div 2" by (rule readyE)
+  hence "card {q . ?crd q = ?crd p \<and> timestamp (?cfg q) = Suc (phase r)} \<noteq> 0"
+  then obtain q where "?crd q = ?crd p" and "timestamp (?cfg q) = Suc (phase r)"
+    by auto
+  with run have "commt (?cfg (?crd p))"
+    by (auto elim: currentTimestampE)
+  with 1 show ?thesis by (blast intro: conds)
+qed
+
+
+
+
+
+lemma lv_integrityInvariant:
+  assumes run: "CHORun LV_M rho HOs coords"
+  and inv: "\<lbrakk> range (x \<circ> (rho n)) \<subseteq> range (x \<circ> (rho 0));
+              range (vote \<circ> (rho n)) \<subseteq> {None} \<union> Some ` range (x \<circ> (rho 0));
+              range (decide \<circ> (rho n)) \<subseteq> {None} \<union> Some ` range (x \<circ> (rho 0))
+       \<rbrakk> \<Longrightarrow> A"
+  shows "A"
+proof -
+  let ?x0 = "range (x \<circ> rho 0)"
+  let ?x0opt = "{None} \<union> Some ` ?x0"
+  have "range (x \<circ> rho n) \<subseteq> ?x0
+        \<and> range (vote \<circ> rho n) \<subseteq> ?x0opt
+        \<and> range (decide \<circ> rho n) \<subseteq> ?x0opt"
+    (is "?Inv n" is "?X n \<and> ?Vote n \<and> ?Decide n")
+  proof (induct n)
+    from run show "?Inv 0" 
+      by (auto simp: CHORun_eq CHOinitConfig_def LV_CHOMachine_def
+                     LV_initState_def)
+  next
+    fix n
+    assume ih: "?Inv n" thus "?Inv (Suc n)"
+    proof (clarify)
+      assume x: "?X n" and vt: "?Vote n" and dec: "?Decide n"
+
+      have x': "?X (Suc n)"
+      proof (clarsimp)
+        fix p
+        from run
+        show "x (rho (Suc n) p) \<in> range (\<lambda>q. x (rho 0 q))" (is "?P p n")
+        proof (rule LV_Suc'[where P="?P"])
+          assume stp: "step n = 1"
+             and nxt: "next1 n p (rho n p)
+                             (HOrcvdMsgs LV_M n p (HOs n p) (rho n))
+                             (coords (Suc n) p) (rho (Suc n) p)"
+          show ?thesis
+          proof (cases "rho (Suc n) p = rho n p")
+            case True
+            with x show ?thesis by auto
+          next
+            case False
+            with stp nxt have cmt: "commt (rho n (coord\<Phi> (rho n p)))"
+              and xp: "x (rho (Suc n) p) = the (vote (rho n (coord\<Phi> (rho n p))))"
+            by (auto simp: next1_def LV_CHOMachine_def HOrcvdMsgs_def 
+                           LV_sendMsg_def send1_def isVote_def)
+            from run cmt have "vote (rho n (coord\<Phi> (rho n p))) \<noteq> None"
+              by (rule commitE)
+            moreover
+            from vt have "vote (rho n (coord\<Phi> (rho n p))) \<in> ?x0opt"
+              by (auto simp add: image_def)
+            moreover
+            note xp
+            ultimately
+            show ?thesis by (force simp add: image_def)
+          qed
+        next
+          assume "step n = 0"
+          with run have "x (rho (Suc n) p) = x (rho n p)"
+            by (simp add: notStep1EqualX)
+          with x show ?thesis by auto
+        next
+          assume "step n = 2"
+          with run have "x (rho (Suc n) p) = x (rho n p)"
+            by (simp add: notStep1EqualX)
+          with x show ?thesis by auto
+        next
+          assume "step n = 3"
+          with run have "x (rho (Suc n) p) = x (rho n p)" 
+            by (simp add: notStep1EqualX)
+          with x show ?thesis by auto
+        qed
+      qed
+
+      have vt': "?Vote (Suc n)"
+      proof (clarsimp simp: image_def)
+        fix p v
+        assume v: "vote (rho (Suc n) p) = Some v"
+        from run
+        have "vote (rho (Suc n) p) = Some v \<longrightarrow> v \<in> ?x0" (is "?P p n")
+        proof (rule LV_Suc'[where P="?P"])
+          assume stp: "step n = 0"
+             and nxt: "next0 n p (rho n p)
+                             (HOrcvdMsgs LV_M n p (HOs n p) (rho n))
+                             (coords (Suc n) p) (rho (Suc n) p)"
+          show ?thesis
+          proof  (cases "rho (Suc n) p = rho n p")
+            case True
+            from vt have "vote (rho n p) \<in> ?x0opt" 
+              by (auto simp: image_def)
+            with True show ?thesis by auto
+          next
+            case False
+            from nxt stp False v obtain q where "v = x (rho n q)"
+              by (auto simp: next0_def send0_def LV_CHOMachine_def 
+                             HOrcvdMsgs_def LV_sendMsg_def)
+            with x show ?thesis by (auto simp: image_def)
+          qed
+        next
+          assume "step n = 1"
+          with run have "vote (rho (Suc n) p) = vote (rho n p)"
+            by (simp add: notStep0EqualVote)
+          moreover
+          from vt have "vote (rho n p) \<in> ?x0opt"
+            by (auto simp: image_def)
+          ultimately
+          show ?thesis by auto
+        next
+          assume "step n = 2"
+          with run have "vote (rho (Suc n) p) = vote (rho n p)"
+            by (simp add: notStep0EqualVote)
+          moreover
+          from vt have "vote (rho n p) \<in> ?x0opt"
+            by (auto simp: image_def)
+          ultimately
+          show ?thesis by auto
+        next
+          assume "step n = 3"
+          with run have "vote (rho (Suc n) p) = vote (rho n p)"
+            by (simp add: notStep0EqualVote)
+          moreover
+          from vt have "vote (rho n p) \<in> ?x0opt"
+            by (auto simp: image_def)
+          ultimately
+          show ?thesis by auto
+        qed
+        with v show "\<exists>q. v = x (rho 0 q)" by auto
+      qed
+
+      have dec': "?Decide (Suc n)"
+      proof (clarsimp simp: image_def)
+        fix p v
+        assume v: "decide (rho (Suc n) p) = Some v"
+        show "\<exists>q. v = x (rho 0 q)"
+        proof (cases "decide (rho (Suc n) p) = decide (rho n p)")
+          case True
+          with dec True v show ?thesis by (auto simp: image_def)
+        next
+          case False
+          let ?crd = "coord\<Phi> (rho n p)"
+          from False run 
+          have d': "decide (rho (Suc n) p) = Some (the (vote (rho n ?crd)))" 
+            and cmt: "commt (rho n ?crd)"
+            by (auto elim: decisionE)
+          from vt have vtc: "vote (rho n ?crd) \<in> ?x0opt"
+            by (auto simp: image_def)
+          from run cmt have "vote (rho n ?crd) \<noteq> None" 
+            by (rule commitE)
+          with d' v vtc show ?thesis by auto
+        qed
+      qed
+      from x' vt' dec' show ?thesis by simp
+    qed
+  qed
+  with inv show ?thesis by simp
+qed
+
+
+theorem lv_integrity:
+  assumes run: "CHORun LV_M rho HOs coords"
+      and dec: "decide (rho n p) = Some v"
+  shows "\<exists>q. v = x (rho 0 q)"
+proof -
+  from run have "decide (rho n p) \<in> {None} \<union> Some ` (range (x \<circ> (rho 0)))"
+    by (rule lv_integrityInvariant) (auto simp: image_def)
+  with dec show ?thesis by (auto simp: image_def)
+qed
+
+
+
+
+lemma decisionThenMajorityBeyondTS:
+  assumes run: "CHORun LV_M rho HOs coords"
+  and dec: "decide (rho (Suc r) p) \<noteq> decide (rho r p)"
+  shows "card (procsBeyondTS (Suc (phase r)) (rho r)) > N div 2"
+  using run dec proof (rule decisionE)
+    that the coordinator is ready.\<close>
+  txt \<open>Now, lemma \<open>readyE\<close> implies that a majority of processes
+  The following lemma asserts that whenever a process \<open>p\<close> commits
+  at a state where a majority of processes have a timestamp beyond \<open>ts\<close>,
+  then \<open>p\<close> votes for a value held by some process whose timestamp is
+  beyond \<open>ts\<close>.

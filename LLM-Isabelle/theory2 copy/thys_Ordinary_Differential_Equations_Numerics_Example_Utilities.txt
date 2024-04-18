@@ -1,0 +1,409 @@
+theory Example_Utilities
+imports
+  Init_ODE_Solver
+begin
+
+definition "true_form = Less (floatarith.Num 0) (floatarith.Num 1)"
+
+lemma open_true_form[intro, simp]: "open_form true_form"
+  by (auto simp: true_form_def)
+
+lemma max_Var_form_true_form[simp]: "max_Var_form true_form = 0"
+  by (auto simp: true_form_def)
+
+lemma interpret_form_true_form[simp]: "interpret_form true_form = (\<lambda>_. True)"
+  by (auto simp: true_form_def)
+
+lemmas [simp] = length_aforms_of_ivls
+
+declare INF_cong_simp [cong] SUP_cong_simp [cong] image_cong_simp [cong del]
+
+declare [[ cd_patterns "_ = interpret_floatariths ?fas _" "_ = interpret_floatarith ?fa _"]]
+
+concrete_definition reify_example for i j k uses reify_example
+
+hide_const (open) Print.file_output
+definition "file_output s f =
+  (if s = STR ''''      then f (\<lambda>_. ())
+  else if s = STR ''-'' then f print
+  else                                  Print.file_output s f)"
+
+definition "aforms_of_point xs = aforms_of_ivls xs xs"
+
+definition "unit_matrix_list D = concat (map (\<lambda>i. map (\<lambda>j. if i = j then 1 else 0::real) [0..<D]) [0..<D])"
+
+definition "with_unit_matrix D X = (fst X @ unit_matrix_list D, snd X @ unit_matrix_list D)"
+
+definition "list_interval l u = {x. list_all2 (\<le>) l x \<and> list_all2 (\<le>) x u}"
+
+context includes lifting_syntax begin
+lemma list_interval_transfer[transfer_rule]:
+  "((list_all2 A) ===> (list_all2 A) ===> rel_set (list_all2 A))
+    list_interval list_interval"
+  if [transfer_rule]: "(A ===> A ===> (=)) (\<le>) (\<le>)" "bi_total A"
+  unfolding list_interval_def
+  by transfer_prover
+end
+
+lemma in_list_interval_lengthD: "x \<in> list_interval a b \<Longrightarrow> length x = length a"
+  by (auto simp: list_interval_def list_all2_lengthD)
+
+context includes floatarith_notation begin
+
+definition "varvec_fas' D C = ((map Var [0..<D]) @
+      concat (map (\<lambda>b.
+        (map (\<lambda>i. (Num (C i)) +
+          Var (D + D * D) * (mvmult_fa D D (map Var [D..<D + D * D]) (map Num ((replicate D 0)[i:=1])) ! b)) [0..<D])) [0..<D]))"
+
+definition "varvec_fas D C = ((map Var [0..<D]) @
+      concat (map (\<lambda>i. (map (\<lambda>j. (Num (C i)) + Var (D + D * D) * Var (D + D * i + j)) [0..<D])) [0..<D]))"
+
+  assumes[simp]: "D=3" "rf = real_of_float"
+  shows "interpret_floatariths (varvec_fas D (\<lambda>i. [a, b, c] ! i))
+  [a, b, c, d11, d12, d13,
+            d21, d22, d23,
+            d31, d32, d33, 2] =
+  [rf a, rf b, rf c,
+  rf a + 2 * rf d11, rf a + 2 * rf d12, rf a + 2 * rf d13,
+  rf b + 2 * rf d21, rf b + 2 * rf d22, rf b + 2 * rf d23,
+  rf c + 2 * rf d31, rf c + 2 * rf d32, rf c + 2 * rf d33]"
+  by (simp add: varvec_fas_def mvmult_fa_def eval_nat_numeral)
+
+definition "vareq_projections
+  =
+  [(i + n * (x + 1)::nat, i + n * (y + 1), c). (i, c) \<leftarrow> zip ds cs, (x, y) \<leftarrow> ps]"
+
+definition "varvec_aforms_line D X line =
+  approx_floatariths
+    30
+    (varvec_fas D (\<lambda>i. float_of (fst (X ! i))))
+    (take (D + D*D) X @ line)"
+
+definition "varvec_aforms_head D X s = varvec_aforms_line D X (aforms_of_point [s])"
+definition "varvec_aforms_vec D X s = varvec_aforms_line D (map (\<lambda>x. (fst x, zero_pdevs)) X) [aform_of_ivl 0 s]"
+
+definition
+  "shows_aforms_vareq
+   =
+    (case (varvec_aforms_head n X s, varvec_aforms_vec n X s) of (Some X, Some Y) \<Rightarrow>
+        shows_sep (\<lambda>(x, y, c). shows_segments_of_aform x y X c) shows_nl (vareq_projections n ps ds csl) o shows_nl
+      o shows_sep (\<lambda>(x, y, c). shows_segments_of_aform x y Y c) shows_nl (vareq_projections n ps ds csh) o shows_nl
+    | _ \<Rightarrow> shows_string no_str o shows_nl)"
+
+abbreviation "print_string s \<equiv> print (String.implode s)"
+abbreviation "print_show s \<equiv> print_string (s '''')"
+
+value [code] "print_show (shows_aforms_vareq 3 [(x, y). x \<leftarrow> [0..<3], y \<leftarrow> [0..<3], x < y]
+  [0..<3] [''0x0000ff'', ''0x00ff00'', ''0xff0000''] [''0x0000ff'', ''0x00ff00'', ''0xff0000'']
+  (FloatR 1 (-1)) ''# no C1 info''
+    ((((\<lambda>(a, b). aforms_of_ivls a b) (with_unit_matrix 3 ([10, 20, 30], [12, 22, 32]))))))"
+
+
+lemma length_aforms_of_point[simp]: "length (aforms_of_point xs) = length xs"
+  by (auto simp: aforms_of_point_def)
+
+definition "aform2d_plot_segments x y a = shows_segments_of_aform x y a ''0x000000''"
+
+lemma list_of_eucl_prod[simp]: "list_of_eucl (x, y) = list_of_eucl x @ list_of_eucl y"
+  by (auto simp: list_of_eucl_def Basis_list_prod_def intro!: nth_equalityI)
+
+lemma list_of_eucl_real[simp]: "list_of_eucl (x::real) = [x]"
+  by (auto simp: list_of_eucl_def Basis_list_real_def)
+
+lemma Joints_aforms_of_ivls_self[simp]: "xs \<in> Joints (aforms_of_ivls xs xs)"
+  by (auto intro!: aforms_of_ivls)
+
+lemma Joints_aforms_of_ivls_self_eq[simp]: "Joints (aforms_of_ivls xs xs) = {xs}"
+  apply (auto )
+  by (auto simp: aforms_of_ivls_def Joints_def valuate_def aform_val_def
+      intro!: nth_equalityI)
+
+lemma local_lipschitz_c1_euclideanI:
+  fixes T::"real set" and X::"'a::euclidean_space set"
+    and f::"real \<Rightarrow> 'a \<Rightarrow> 'a"
+  assumes f': "\<And>t x. t \<in> T \<Longrightarrow> x \<in> X \<Longrightarrow> (f t has_derivative f' t x) (at x)"
+  assumes cont_f': "\<And>i. i \<in> Basis \<Longrightarrow> continuous_on (T \<times> X) (\<lambda>(t, x). f' t x i)"
+  assumes "open T"
+  assumes "open X"
+  shows "local_lipschitz T X f"
+  using assms
+  apply (intro c1_implies_local_lipschitz[where f'="\<lambda>(t, x). Blinfun (f' t x)"])
+     apply (auto simp: bounded_linear_Blinfun_apply has_derivative_bounded_linear split_beta'
+      intro!: has_derivative_Blinfun continuous_on_blinfun_componentwise)
+  apply (subst continuous_on_cong[OF refl]) defer apply assumption
+  apply auto
+  apply (subst bounded_linear_Blinfun_apply)
+   apply (rule has_derivative_bounded_linear)
+  by auto
+
+definition "list_aform_of_aform (x::real aform) = (fst x, list_of_pdevs (snd x))"
+primrec split_aforms_list:: "(real aform) list list
+   \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> (real aform) list list" where
+  "split_aforms_list Xs i 0 = Xs"
+| "split_aforms_list Xs i (Suc n) = split_aforms_list (concat (map (\<lambda>x. (let (a, b) = split_aforms x i in [a, b])) Xs)) i n"
+
+definition "shows_aforms x y c X = shows_lines (map (\<lambda>b. (shows_segments_of_aform x y b c ''\<newline>'')) X)"
+
+end
+
+definition "the_odo ode_fas safe_form = the(mk_ode_ops ode_fas safe_form)"
+
+locale ode_interpretation =
+  fixes safe_form::form and safe_set::"'a::executable_euclidean_space set"
+    and ode_fas::"floatarith list"
+    and ode::"'a \<Rightarrow> 'a"
+    and finite::"'n::enum"
+  assumes dims: "DIM('a) = CARD('n)"
+  assumes len: "length ode_fas = CARD('n)"
+  assumes safe_set_form: "safe_set = {x. interpret_form safe_form (list_of_eucl x)}"
+  assumes interpret_fas: "\<And>x. x \<in> safe_set \<Longrightarrow> einterpret ode_fas (list_of_eucl x) = ode x"
+  assumes odo: "mk_ode_ops ode_fas safe_form \<noteq> None"
+  assumes isFDERIV: "\<And>xs. interpret_form safe_form xs \<Longrightarrow>
+    isFDERIV (length ode_fas) [0..<length ode_fas] ode_fas xs"
+begin
+
+abbreviation "odo \<equiv> the_odo ode_fas safe_form"
+lemmas odo_def = the_odo_def
+
+lemma odo_simps[simp]: "ode_expression odo = ode_fas" "safe_form_expr odo = safe_form"
+  using odo
+  by (auto simp: odo_def ode_expression_mk_ode_ops safe_form_expr_mk_ode_ops)
+
+lemma safe_set: "safe_set = aform.Csafe odo"
+  using odo dims safe_set_form isFDERIV
+  unfolding aform.Csafe_def aform.safe_def aform.safe_form_def aform.ode_e_def
+  by (auto simp: mk_ode_ops_def safe_set_form len split: if_splits)
+
+lemma ode: "\<And>x. x \<in> safe_set \<Longrightarrow> ode x = aform.ode odo x"
+  by (auto simp: aform.ode_def aform.ode_e_def interpret_fas)
+
+sublocale auto_ll_on_open ode safe_set
+  by (rule aform.auto_ll_on_open_congI[OF safe_set[symmetric] ode[symmetric]])
+
+lemma ode_has_derivative_ode_d1: "(ode has_derivative blinfun_apply (aform.ode_d1 odo x)) (at x)"
+  if "x \<in> safe_set" for x
+proof -
+  from aform.fderiv[OF that[unfolded safe_set]]
+  have "(aform.ode odo has_derivative blinfun_apply (aform.ode_d1 odo x)) (at x)"
+    by simp
+  moreover
+  from topological_tendstoD[OF tendsto_ident_at open_domain(2) that]
+  have "\<forall>\<^sub>F x' in at x. x' \<in> safe_set" .
+  then have "\<forall>\<^sub>F x' in at x. aform.ode odo x' = ode x'"
+    by eventually_elim (auto simp: ode)
+  ultimately show ?thesis
+    by (rule has_derivative_transform_eventually) (auto simp: ode that)
+qed
+
+sublocale c1_on_open_euclidean ode "aform.ode_d1 odo" safe_set
+  apply unfold_locales
+  subgoal by simp
+  subgoal by (simp add: ode_has_derivative_ode_d1)
+  subgoal by (rule aform.cont_fderiv') (auto intro!: continuous_intros simp: safe_set)
+  done
+
+sublocale transfer_eucl_vec for a::'a and n::'n
+  by unfold_locales (simp add: dims)
+
+lemma flow_eq: "t \<in> existence_ivl0 x \<Longrightarrow> aform.flow0 odo x t = flow0 x t"
+  and Dflow_eq: "t \<in> existence_ivl0 x \<Longrightarrow> aform.Dflow odo x t = Dflow x t"
+  and ex_ivl_eq: "t \<in> aform.existence_ivl0 odo x \<Longrightarrow> aform.existence_ivl0 odo x = existence_ivl0 x"
+  and poincare_mapsto_eq: "closed a \<Longrightarrow> aform.poincare_mapsto odo a b c d e = poincare_mapsto a b c d e"
+  and flowsto_eq: "aform.flowsto odo = flowsto"
+      apply -
+  subgoal by (rule flow0_cong[symmetric]) (auto simp: safe_set ode)
+  subgoal by (rule Dflow_cong[symmetric]) (auto simp: safe_set ode)
+  subgoal by (rule existence_ivl0_cong[symmetric]) (auto simp: safe_set ode)
+  subgoal
+    apply (subst aform.poincare_mapsto_cong[OF safe_set[symmetric]])
+    by (auto simp: ode)
+  subgoal
+    apply (intro ext)
+    apply (subst flowsto_congI[OF safe_set ode])
+    by (auto simp: safe_set)
+  done
+
+definition "avf \<equiv> \<lambda>x::'n rvec. cast (aform.ode odo (cast x)::'a)::'n rvec"
+
+context includes lifting_syntax begin
+lemma aform_ode_transfer[transfer_rule]: "((=) ===> rel_ve ===> rel_ve) aform.ode aform.ode"
+  unfolding aform.ode_def
+  by transfer_prover
+lemma cast_aform_ode: "cast (aform.ode odo (cast (x::'n rvec))::'a) = aform.ode odo x"
+  by transfer simp
+
+lemma aform_safe_transfer[transfer_rule]: "((=) ===> rel_ve ===> (=)) aform.safe aform.safe"
+  unfolding aform.safe_def
+  by transfer_prover
+
+lemma aform_Csafe_transfer[transfer_rule]: "((=) ===> rel_set rel_ve) aform.Csafe aform.Csafe"
+  unfolding aform.Csafe_def
+  by transfer_prover
+
+lemma cast_safe_set: "(cast ` safe_set::'n rvec set) = aform.Csafe odo"
+  unfolding safe_set
+  by transfer simp
+
+lemma aform_ode_d_raw_transfer[transfer_rule]:
+  "((=) ===> (=) ===> rel_ve ===> rel_ve ===> rel_ve ===> rel_ve) aform.ode_d_raw aform.ode_d_raw"
+  unfolding aform.ode_d_raw_def
+  by transfer_prover
+
+lemma
+  aform_ode_d_raw_aux_transfer:
+  "((=) ===> rel_ve ===> rel_ve ===> rel_ve)
+    (\<lambda>x xb xa. if xb \<in> aform.Csafe x then aform.ode_d_raw x 0 xb 0 xa else 0)
+    (\<lambda>x xb xa. if xb \<in> aform.Csafe x then aform.ode_d_raw x 0 xb 0 xa else 0)"
+  by transfer_prover
+
+lemma aform_ode_d1_transfer[transfer_rule]:
+  "((=) ===> rel_ve ===> rel_blinfun rel_ve rel_ve) aform.ode_d1 aform.ode_d1"
+  apply (auto simp: rel_blinfun_def aform.ode_d1_def intro!: rel_funI)
+  unfolding aform.ode_d.rep_eq
+  using aform_ode_d_raw_aux_transfer
+  apply -
+  apply (drule rel_funD, rule refl)
+  apply (drule rel_funD, assumption)
+  apply (drule rel_funD; assumption)
+  done
+
+lemma cast_bl_transfer[transfer_rule]:
+  "(rel_blinfun (=) (=) ===> rel_blinfun rel_ve rel_ve) id_blinfun cast_bl"
+  by (auto simp: rel_ve_cast rel_blinfun_def intro!: rel_funI dest!: rel_funD)
+lemma cast_bl_transfer'[transfer_rule]:
+  "(rel_blinfun rel_ve rel_ve ===> rel_blinfun (=) (=)) id_blinfun cast_bl"
+  apply (auto simp: rel_ve_cast rel_blinfun_def cast_cast intro!: rel_funI dest!: rel_funD)
+  by (subst cast_cast) auto
+
+lemma rel_blinfun_eq[relator_eq]: "rel_blinfun (=) (=) = (=)"
+  by (auto simp: Rel_def rel_blinfun_def blinfun_ext rel_fun_eq intro!: rel_funI ext)
+
+lemma cast_aform_ode_D1:
+  "cast_bl (aform.ode_d1 odo (cast (x::'n rvec))::'a\<Rightarrow>\<^sub>L'a) =
+    (aform.ode_d1 odo x::'n rvec \<Rightarrow>\<^sub>L 'n rvec)"
+  by transfer simp
+
+end
+
+definition "vf \<equiv> \<lambda>x. cast (ode (cast x))"
+definition "vf' \<equiv> \<lambda>x::'n rvec. cast_bl (aform.ode_d1 odo (cast x::'a))
+  ::'n rvec \<Rightarrow>\<^sub>L 'n rvec"
+definition "vX \<equiv> cast ` safe_set"
+sublocale a?: transfer_c1_on_open_euclidean a n ode "aform.ode_d1 odo" safe_set vf vf' vX
+  for a::'a and n::'n
+  by unfold_locales
+    (simp_all add: dims vf_def vf'_def vX_def)
+
+sublocale av: transfer_c1_on_open_euclidean a n "aform.ode odo" "aform.ode_d1 odo"
+  "(aform.Csafe odo)" avf vf' vX
+  for a::'a and n::'n
+     apply unfold_locales
+  unfolding vX_def
+  by (simp_all add: dims avf_def  safe_set)
+
+lemma vflow_eq: "t \<in> v.existence_ivl0 x \<Longrightarrow> aform.flow0 odo x t = v.flow0 x t"
+  thm flow_eq[of t "cast x"] flow_eq[of t "cast x", untransferred]
+  apply (subst flow_eq[of t "cast x", untransferred, symmetric])
+   apply simp
+  unfolding avf_def vX_def cast_aform_ode cast_safe_set
+  ..
+
+lemma vf'_eq: "vf' = aform.ode_d1 odo"
+  unfolding vf'_def cast_aform_ode_D1 ..
+
+lemma vDflow_eq: "t \<in> v.existence_ivl0 x \<Longrightarrow> aform.Dflow odo x t = v.Dflow x t"
+  apply (subst Dflow_eq[of t "cast x", untransferred, symmetric])
+   apply simp
+  unfolding avf_def vX_def cast_aform_ode cast_safe_set vf'_eq
+  ..
+
+lemma vex_ivl_eq: "t \<in> aform.existence_ivl0 odo x \<Longrightarrow> aform.existence_ivl0 odo x = v.existence_ivl0 x"
+  apply (subst ex_ivl_eq[of t "cast x", untransferred, symmetric])
+  unfolding avf_def vX_def cast_aform_ode cast_safe_set vf'_eq
+  by auto
+
+context includes lifting_syntax begin
+lemma id_cast_eucl1_transfer_eq: "(\<lambda>x. x) = (\<lambda>x. (fst x, 1\<^sub>L o\<^sub>L snd x o\<^sub>L 1\<^sub>L))"
+  by auto
+lemma cast_eucl1_transfer[transfer_rule]:
+  "(rel_prod (=) (rel_blinfun (=) (=)) ===> rel_prod rel_ve (rel_blinfun rel_ve rel_ve)) (\<lambda>x. x) cast_eucl1"
+  unfolding cast_eucl1_def id_cast_eucl1_transfer_eq
+  apply transfer_prover_start
+       apply (transfer_step)
+      apply (transfer_step)
+     apply (transfer_step)
+    apply (transfer_step)
+   apply (transfer_step)
+  apply simp
+  done
+
+end
+
+lemma avpoincare_mapsto_eq:
+  "aform.poincare_mapsto odo a (b::'n eucl1 set) c d e = av.v.poincare_mapsto a b c d e"
+  if "closed a"
+  unfolding avf_def vX_def cast_aform_ode cast_safe_set vf'_eq
+  by auto
+
+lemma vpoincare_mapsto_eq:
+  "aform.poincare_mapsto odo a (b::'n eucl1 set) c d e = v.poincare_mapsto a b c d e"
+  if "closed a"
+proof -
+  have "closed (cast ` a::'a set)" using that
+    by transfer auto
+  from poincare_mapsto_eq[of "cast ` a::'a set"
+      "cast_eucl1 ` b::('a \<times> 'a \<Rightarrow>\<^sub>L 'a) set"
+      "cast ` c::'a set" "cast ` d::'a set" "cast_eucl1 ` e::('a \<times> 'a \<Rightarrow>\<^sub>L 'a) set", OF this, untransferred]
+  have "v.poincare_mapsto a b c d e = av.v.poincare_mapsto a b c d e"
+    by auto
+  also have "\<dots> = aform.poincare_mapsto odo a (b::'n eucl1 set) c d e"
+    unfolding avf_def vX_def cast_aform_ode cast_safe_set vf'_eq
+    by auto
+  finally show ?thesis by simp
+qed
+
+lemma avflowsto_eq: "aform.flowsto odo = (av.v.flowsto::'n eucl1 set \<Rightarrow> _)"
+proof (intro ext, goal_cases)
+  case (1 a b c d)
+  have "av.v.flowsto a b c d = aform.flowsto odo a b c d"
+    unfolding avf_def vX_def cast_aform_ode cast_safe_set vf'_eq
+    by auto
+  then show ?case by simp
+qed
+
+lemma vflowsto_eq: "aform.flowsto odo = (v.flowsto::'n eucl1 set \<Rightarrow> _)"
+proof (intro ext, goal_cases)
+  case (1 a b c d)
+  have "aform.flowsto odo (cast_eucl1 ` a::'a c1_info set) b
+    (cast_eucl1 ` c)  (cast_eucl1 ` d) =
+    flowsto (cast_eucl1 ` a::'a c1_info set) b (cast_eucl1 ` c)  (cast_eucl1 ` d)"
+    by (subst flowsto_eq) auto
+  from this[untransferred] have "v.flowsto a b c d = av.v.flowsto a b c d" by auto
+  also have "\<dots> = aform.flowsto odo a b c d"
+    unfolding avf_def vX_def cast_aform_ode cast_safe_set vf'_eq
+    by auto
+  finally show ?case by simp
+qed
+
+context includes lifting_syntax begin
+lemma flow1_of_list_transfer[transfer_rule]:
+  "(list_all2 (=) ===> rel_prod rel_ve (rel_blinfun rel_ve rel_ve))
+   flow1_of_list flow1_of_list"
+  unfolding flow1_of_list_def blinfun_of_list_def o_def flow1_of_vec1_def
+  by transfer_prover
+
+lemma c1_info_of_appr_transfer[transfer_rule]:
+  "(rel_prod (list_all2 (=)) (rel_option (list_all2 (=))) ===> rel_set (rel_prod rel_ve (rel_blinfun rel_ve rel_ve)))
+    aform.c1_info_of_appr
+    aform.c1_info_of_appr"
+  unfolding aform.c1_info_of_appr_def
+  by transfer_prover
+
+lemma c0_info_of_appr_transfer[transfer_rule]:
+  "((list_all2 (=)) ===> rel_set rel_ve) aform.c0_info_of_appr aform.c0_info_of_appr"
+  unfolding aform.c0_info_of_appr_def
+  by transfer_prover
+
+lemma aform_scaleR2_transfer[transfer_rule]:
+  "((=) ===> (=) ===> rel_set (rel_prod A B) ===> rel_set (rel_prod A B))
+    scaleR2 scaleR2"

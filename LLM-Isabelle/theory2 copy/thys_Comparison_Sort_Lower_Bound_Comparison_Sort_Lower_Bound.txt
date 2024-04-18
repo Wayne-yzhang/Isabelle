@@ -1,0 +1,49 @@
+theory Comparison_Sort_Lower_Bound
+  imports 
+    Complex_Main 
+    Linorder_Relations
+    Stirling_Formula.Stirling_Formula
+    "Landau_Symbols.Landau_More"
+begin
+  
+
+
+datatype 'a sorter = Return "'a list" | Query 'a 'a "bool \<Rightarrow> 'a sorter"
+    
+
+primrec count_queries :: "('a \<times> 'a) set \<Rightarrow> 'a sorter \<Rightarrow> nat" where
+  "count_queries _ (Return _)    = 0"
+| "count_queries R (Query a b f) = Suc (count_queries R (f ((a, b) \<in> R)))"
+
+definition count_wc_queries :: "('a \<times> 'a) set set \<Rightarrow> 'a sorter \<Rightarrow> nat" where
+  "count_wc_queries Rs sorter = (if Rs = {} then 0 else Max ((\<lambda>R. count_queries R sorter) ` Rs))"
+
+lemma count_wc_queries_empty [simp]: "count_wc_queries {} sorter = 0"
+  by (simp add: count_wc_queries_def)
+
+lemma count_wc_queries_aux:
+  assumes "\<And>R. R \<in> Rs \<Longrightarrow> sorter = sorter' R" "Rs \<subseteq> Rs'" "finite Rs'"
+  shows   "count_wc_queries Rs sorter \<le> Max ((\<lambda>R. count_queries R (sorter' R)) ` Rs')" 
+proof (cases "Rs = {}")
+  case False
+  hence "count_wc_queries Rs sorter = Max ((\<lambda>R. count_queries R sorter) ` Rs)"
+    by (simp add: count_wc_queries_def)
+  also have "(\<lambda>R. count_queries R sorter) ` Rs = (\<lambda>R. count_queries R (sorter' R)) ` Rs"
+    by (intro image_cong refl) (simp_all add: assms)
+  also have "Max \<dots> \<le> Max ((\<lambda>R. count_queries R (sorter' R)) ` Rs')" using False
+    by (intro Max_mono assms image_mono finite_imageI) auto
+  finally show ?thesis .
+qed simp_all
+
+primrec eval_sorter :: "('a \<times> 'a) set \<Rightarrow> 'a sorter \<Rightarrow> 'a list" where
+  "eval_sorter _ (Return ys)   = ys"
+| "eval_sorter R (Query a b f) = eval_sorter R (f ((a,b) \<in> R))"
+  
+lemma card_range_eval_sorter:
+  assumes "finite Rs"
+  shows   "card ((\<lambda>R. eval_sorter R e) ` Rs) \<le> 2 ^ count_wc_queries Rs e"
+using assms
+proof (induction e arbitrary: Rs)
+  case (Return xs Rs)
+  have *: "(\<lambda>R. eval_sorter R (Return xs)) ` Rs = (if Rs = {} then {} else {xs})" by auto
+  show ?case by (subst *) auto

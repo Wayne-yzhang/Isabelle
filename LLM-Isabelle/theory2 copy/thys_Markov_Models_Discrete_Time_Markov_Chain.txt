@@ -1,0 +1,174 @@
+theory Discrete_Time_Markov_Chain
+  imports Markov_Models_Auxiliary
+begin
+
+
+lemma sstart_eq': "sstart \<Omega> (x # xs) = {\<omega>. shd \<omega> = x \<and> stl \<omega> \<in> sstart \<Omega> xs}"
+  by (auto simp: sstart_eq)
+
+lemma measure_eq_stream_space_coinduct[consumes 1, case_names left right cont]:
+  assumes "R N M"
+  assumes R_1: "\<And>N M. R N M \<Longrightarrow> N \<in> space (prob_algebra (stream_space (count_space UNIV)))"
+    and R_2: "\<And>N M. R N M \<Longrightarrow> M \<in> space (prob_algebra (stream_space (count_space UNIV)))"
+    and cont: "\<And>N M. R N M \<Longrightarrow> \<exists>N' M' p. (\<forall>y\<in>set_pmf p. R (N' y) (M' y)) \<and>
+      (\<forall>x. N' x \<in> space (prob_algebra (stream_space (count_space UNIV)))) \<and> (\<forall>x. M' x \<in> space (prob_algebra (stream_space (count_space UNIV)))) \<and> 
+      N = (measure_pmf p \<bind> (\<lambda>y. distr (N' y) (stream_space (count_space UNIV)) ((##) y))) \<and>
+      M = (measure_pmf p \<bind> (\<lambda>y. distr (M' y) (stream_space (count_space UNIV)) ((##) y)))"
+  shows "N = M"
+proof -
+  let ?S = "stream_space (count_space UNIV)"
+  have "\<forall>N M. R N M \<longrightarrow> (\<exists>N' M' p. (\<forall>y\<in>set_pmf p. R (N' y) (M' y)) \<and>
+      (\<forall>x. N' x \<in> space (prob_algebra ?S)) \<and> (\<forall>x. M' x \<in> space (prob_algebra ?S)) \<and>
+      N = (measure_pmf p \<bind> (\<lambda>y. distr (N' y) ?S ((##) y))) \<and>
+      M = (measure_pmf p \<bind> (\<lambda>y. distr (M' y) ?S ((##) y))))"
+    using cont by auto
+  then obtain n m p where
+    p: "\<And>N M y. R N M \<Longrightarrow> y \<in> set_pmf (p N M) \<Longrightarrow> R (n N M y) (m N M y)" and
+    n: "\<And>N M x. R N M \<Longrightarrow> n N M x \<in> space (prob_algebra ?S)" and
+    n_eq: "\<And>N M y. R N M \<Longrightarrow> N = (measure_pmf (p N M) \<bind> (\<lambda>y. distr (n N M y) ?S ((##) y)))" and
+    m: "\<And>N M x. R N M \<Longrightarrow> m N M x \<in> space (prob_algebra ?S)" and
+    m_eq: "\<And>N M y. R N M \<Longrightarrow> M = (measure_pmf (p N M) \<bind> (\<lambda>y. distr (m N M y) ?S ((##) y)))"
+    unfolding choice_iff' choice_iff by blast
+
+  define A where "A = (SIGMA nm:UNIV. (\<lambda>x. (n (fst nm) (snd nm) x, m (fst nm) (snd nm) x)) ` p (fst nm) (snd nm))"
+  have A_singleton: "A `` {nm} = (\<lambda>x. (n (fst nm) (snd nm) x, m (fst nm) (snd nm) x)) ` p (fst nm) (snd nm)" for nm
+    by (auto simp: A_def)
+
+  have sets_n[measurable_cong, simp]: "sets (n N M y) = sets ?S" if "R N M" for N M y
+    using n[OF that, of y] by (auto simp: space_prob_algebra)
+  have sets_m[measurable_cong, simp]: "sets (m N M y) = sets ?S" if "R N M" for N M y
+    using m[OF that, of y] by (auto simp: space_prob_algebra)
+  have [simp]: "R N M \<Longrightarrow> prob_space (n N M y)" for N M y
+    using n[of N M y] by (auto simp: space_prob_algebra)
+  have [simp]: "R N M \<Longrightarrow> prob_space (m N M y)" for N M y
+    using m[of N M y] by (auto simp: space_prob_algebra)
+  have [measurable]: "R N M \<Longrightarrow> n N M \<in> count_space UNIV \<rightarrow>\<^sub>M subprob_algebra ?S" for N M
+    by (rule measurable_prob_algebraD) (auto intro: n)
+  have [measurable]: "R N M \<Longrightarrow> m N M \<in> count_space UNIV \<rightarrow>\<^sub>M subprob_algebra ?S" for N M
+    by (rule measurable_prob_algebraD) (auto intro: m)
+
+  define n' where "n' N M y = distr (n N M y) ?S ((##) y)" for N M y
+  define m' where "m' N M y = distr (m N M y) ?S ((##) y)" for N M y
+  have n'_eq: "R N M \<Longrightarrow> N = (measure_pmf (p N M) \<bind> n' N M)" for N M unfolding n'_def by (rule n_eq)
+  have m'_eq: "R N M \<Longrightarrow> M = (measure_pmf (p N M) \<bind> m' N M)" for N M unfolding m'_def by (rule m_eq)
+  have [measurable]: "R N M \<Longrightarrow> n' N M \<in> count_space UNIV \<rightarrow>\<^sub>M subprob_algebra ?S" for N M
+    unfolding n'_def by (rule measurable_distr2[where M="?S"]) measurable
+  have [measurable]: "R N M \<Longrightarrow> m' N M \<in> count_space UNIV \<rightarrow>\<^sub>M subprob_algebra ?S" for N M
+    unfolding m'_def by (rule measurable_distr2[where M="?S"]) measurable
+
+  have n'_shd: "R N M \<Longrightarrow> distr (n' N M y) (count_space UNIV) shd = measure_pmf (return_pmf y)" for N M y
+    unfolding n'_def by (subst distr_distr) (auto simp: comp_def prob_space.distr_const return_pmf.rep_eq)
+  have m'_shd: "R N M \<Longrightarrow> distr (m' N M y) (count_space UNIV) shd = measure_pmf (return_pmf y)" for N M y
+    unfolding m'_def by (subst distr_distr) (auto simp: comp_def prob_space.distr_const return_pmf.rep_eq)
+  have n'_stl: "R N M \<Longrightarrow> distr (n' N M y) ?S stl = n N M y" for N M y
+    unfolding n'_def by (subst distr_distr) (auto simp: comp_def distr_id2)
+  have m'_stl: "R N M \<Longrightarrow> distr (m' N M y) ?S stl = m N M y" for N M y
+    unfolding m'_def by (subst distr_distr) (auto simp: comp_def distr_id2)
+
+  define F where "F = (A\<^sup>* `` {(N, M)})"
+  have "countable F"
+    unfolding F_def
+    apply (intro countable_rtrancl countable_insert[of _ "(N, M)"] countable_empty)
+    apply (rule countable_Image)
+     apply (auto simp: A_singleton)
+    done
+  have F_NM[simp]: "(N, M) \<in> F" unfolding F_def by auto
+  have R_F[simp]: "R N' M'" if "(N', M') \<in> F" for N' M'
+  proof -
+    have "((N, M), (N', M')) \<in> A\<^sup>*" using that by (auto simp: F_def)
+    then show "R N' M'"
+  qed
+  have nm_F: "(n N' M' y, m N' M' y) \<in> F" if "y \<in> p N' M'" "(N', M') \<in> F" for N' M' y
+  proof -
+    have *: "((N, M), (N', M')) \<in> A\<^sup>*" using that by (auto simp: F_def)
+    with that show ?thesis
+      apply (simp add: F_def)
+      apply (intro rtrancl.rtrancl_into_rtrancl[OF *])
+      apply (auto simp: A_def)
+      done
+  qed
+
+  define \<Omega> where "\<Omega> = (\<Union>(n, m)\<in>F. set_pmf (p n m))"
+  have [measurable]: "\<Omega> \<in> sets (count_space UNIV)" by auto
+  have in_\<Omega>: "(N, M) \<in> F \<Longrightarrow> y \<in> p N M \<Longrightarrow> y \<in> \<Omega>" for N M y
+    by (auto simp: \<Omega>_def Bex_def)
+
+  show ?thesis
+  proof (intro stream_space_eq_sstart)
+      by (auto simp add: \<Omega>_def)
+    show "prob_space N" "prob_space M" "sets N = sets ?S" "sets M = sets ?S"
+    have "\<And>N M. (N, M) \<in> F \<Longrightarrow> AE x in N. x !! i \<in> \<Omega>" for i
+    proof (induction i)
+      case 0 note NM = 0[THEN R_F, simp] show ?case
+        apply (subst n'_eq[OF NM])
+        apply (subst AE_bind[where B="?S"])
+          apply measurable
+        apply (auto intro!: AE_distrD[where f=shd and M'="count_space UNIV"]
+                    simp: AE_measure_pmf_iff n[OF NM] n'_shd in_\<Omega>[OF 0] cong: AE_cong_simp)
+        done
+    next
+      case (Suc i) note NM = Suc(2)[THEN R_F, simp]
+      show ?case
+        apply (subst n'_eq[OF NM])
+        apply (subst AE_bind[where B="?S"])
+          apply measurable
+        apply (auto intro!: AE_distrD[where f=stl and M'="?S"] Suc(1)[OF nm_F] Suc(2)
+          simp: AE_measure_pmf_iff n'_stl cong: AE_cong_simp)
+        done
+    qed
+    then have AE_N: "\<And>N M. (N, M) \<in> F \<Longrightarrow> AE x in N. x \<in> streams \<Omega>"
+      unfolding streams_iff_snth AE_all_countable by auto
+    then show "AE x in N. x \<in> streams \<Omega>" by (blast intro: F_NM)
+
+    have "\<And>N M. (N, M) \<in> F \<Longrightarrow> AE x in M. x !! i \<in> \<Omega>" for i
+    proof (induction i arbitrary: N M)
+      case 0 note NM = 0[THEN R_F, simp] show ?case
+        apply (subst m'_eq[OF NM])
+        apply (subst AE_bind[where B="?S"])
+          apply measurable
+        apply (auto intro!: AE_distrD[where f=shd and M'="count_space UNIV"]
+                    simp: AE_measure_pmf_iff m[OF NM] m'_shd in_\<Omega>[OF 0] cong: AE_cong_simp)
+        done
+    next
+      case (Suc i) note NM = Suc(2)[THEN R_F, simp]
+      show ?case
+        apply (subst m'_eq[OF NM])
+        apply (subst AE_bind[where B="?S"])
+          apply measurable
+        apply (auto intro!: AE_distrD[where f=stl and M'="?S"] Suc(1)[OF nm_F] Suc(2)
+          simp: AE_measure_pmf_iff m'_stl cong: AE_cong_simp)
+        done
+    qed
+    then have AE_M: "\<And>N M. (N, M) \<in> F \<Longrightarrow> AE x in M. x \<in> streams \<Omega>"
+      unfolding streams_iff_snth AE_all_countable by auto
+    then show "AE x in M. x \<in> streams \<Omega>" by (blast intro: F_NM)
+
+    fix xs assume "xs \<in> lists \<Omega>"
+    proof (induction xs arbitrary: N M)
+      case Nil
+      have "prob_space N" "prob_space M" "sets N = sets ?S" "sets M = sets ?S"
+        using R_1[OF R_F[OF Nil(1)]] R_2[OF R_F[OF Nil(1)]] by (auto simp add: space_prob_algebra)
+      have "emeasure N (streams \<Omega>) = 1"
+      moreover have "emeasure M (streams \<Omega>) = 1"
+      ultimately show ?case by simp
+    next
+      case (Cons x xs)
+      note NM = Cons(2)[THEN R_F, simp]
+      have *: "(##) y -` sstart \<Omega> (x # xs) = (if x = y then sstart \<Omega> xs else {})" for y
+        by auto
+      show ?case
+        apply (subst n'_eq[OF NM])
+        apply (subst (3) m'_eq[OF NM])
+        apply (subst emeasure_bind[OF _ _ sstart_sets])
+          apply simp []
+         apply measurable []
+        apply (subst emeasure_bind[OF _ _ sstart_sets])
+          apply simp []
+         apply measurable []
+        apply (intro nn_integral_cong_AE AE_pmfI)
+        apply (subst n'_def)
+        apply (subst m'_def)
+        using Cons(3)
+        apply (auto intro!: Cons nm_F
+          simp add: emeasure_distr sets_eq_imp_space_eq[OF sets_n] sets_eq_imp_space_eq[OF sets_m]
+                    space_stream_space *)

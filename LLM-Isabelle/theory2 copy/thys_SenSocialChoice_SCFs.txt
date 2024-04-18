@@ -1,0 +1,172 @@
+theory SCFs
+
+imports RPRs
+
+begin
+
+
+
+
+definition choiceSet :: "'a set \<Rightarrow> 'a RPR \<Rightarrow> 'a set" where
+  "choiceSet A r \<equiv> { x \<in> A . \<forall>y \<in> A. x \<^bsub>r\<^esub>\<preceq> y }"
+
+definition choiceFn :: "'a set \<Rightarrow> 'a RPR \<Rightarrow> bool" where
+  "choiceFn A r \<equiv> \<forall>A' \<subseteq> A. A' \<noteq> {} \<longrightarrow> choiceSet A' r \<noteq> {}"
+
+lemma choiceSetI[intro]:
+  "\<lbrakk> x \<in> A; \<And>y. y \<in> A \<Longrightarrow> x \<^bsub>r\<^esub>\<preceq> y \<rbrakk> \<Longrightarrow> x \<in> choiceSet A r"
+  unfolding choiceSet_def by simp
+
+lemma choiceFnI[intro]:
+  "(\<And>A'. \<lbrakk> A' \<subseteq> A; A' \<noteq> {} \<rbrakk> \<Longrightarrow> choiceSet A' r \<noteq> {}) \<Longrightarrow> choiceFn A r"
+  unfolding choiceFn_def by simp
+
+
+definition quasi_trans :: "'a RPR \<Rightarrow> bool" where
+  "quasi_trans r \<equiv> \<forall>x y z. x \<^bsub>r\<^esub>\<prec> y \<and> y \<^bsub>r\<^esub>\<prec> z \<longrightarrow> x \<^bsub>r\<^esub>\<prec> z"
+
+lemma quasi_transI[intro]:
+  "(\<And>x y z. \<lbrakk> x \<^bsub>r\<^esub>\<prec> y; y \<^bsub>r\<^esub>\<prec> z \<rbrakk> \<Longrightarrow> x \<^bsub>r\<^esub>\<prec> z) \<Longrightarrow> quasi_trans r"
+  unfolding quasi_trans_def by blast
+
+lemma quasi_transD: "\<lbrakk> x \<^bsub>r\<^esub>\<prec> y; y \<^bsub>r\<^esub>\<prec> z; quasi_trans r \<rbrakk> \<Longrightarrow> x \<^bsub>r\<^esub>\<prec> z"
+  unfolding quasi_trans_def by blast
+
+lemma trans_imp_quasi_trans: "trans r \<Longrightarrow> quasi_trans r"
+  by (rule quasi_transI, unfold strict_pref_def trans_def, blast)
+
+lemma r_c_qt_imp_cf:
+  assumes finiteA: "finite A"
+      and c: "complete A r"
+      and qt: "quasi_trans r"
+      and r: "refl_on A r"
+  shows "choiceFn A r"
+proof
+  fix B assume B: "B \<subseteq> A" "B \<noteq> {}"
+  with finite_subset finiteA have finiteB: "finite B" by auto
+  from finiteB B show "choiceSet B r \<noteq> {}"
+  proof(induct rule: finite_subset_induct')
+    case empty with B show ?case by auto
+  next
+    case (insert a B)
+    hence finiteB: "finite B"
+        and aA: "a \<in> A"
+        and AB: "B \<subseteq> A"
+        and aB: "a \<notin> B"
+        and cF: "B \<noteq> {} \<Longrightarrow> choiceSet B r \<noteq> {}" by - blast
+    show ?case
+    proof(cases "B = {}")
+      case True with aA r show ?thesis
+        unfolding choiceSet_def by blast
+    next
+      case False
+      with cF obtain b where bCF: "b \<in> choiceSet B r" by blast
+      from AB aA bCF complete_refl_on[OF c r]
+      have "a \<^bsub>r\<^esub>\<prec> b \<or> b \<^bsub>r\<^esub>\<preceq> a" unfolding choiceSet_def strict_pref_def by blast
+      thus ?thesis
+      proof
+        assume ab: "b \<^bsub>r\<^esub>\<preceq> a"
+        with bCF show ?thesis unfolding choiceSet_def by auto
+      next
+        assume ab: "a \<^bsub>r\<^esub>\<prec> b"
+        have "a \<in> choiceSet (insert a B) r"
+        proof(rule ccontr)
+          assume aCF: "a \<notin> choiceSet (insert a B) r"
+          from aB have "\<And>b. b \<in> B \<Longrightarrow> a \<noteq> b" by auto
+          with aCF aA AB c r obtain b' where B: "b' \<in> B" "b' \<^bsub>r\<^esub>\<prec> a"
+            unfolding choiceSet_def complete_def strict_pref_def by blast
+          with ab qt have "b' \<^bsub>r\<^esub>\<prec> b" by (blast dest: quasi_transD)
+          with bCF B show False unfolding choiceSet_def strict_pref_def by blast
+        qed
+        thus ?thesis by auto
+      qed
+    qed
+  qed
+qed
+
+lemma rpr_choiceFn: "\<lbrakk> finite A; rpr A r \<rbrakk> \<Longrightarrow> choiceFn A r"
+  unfolding rpr_def by (blast dest: trans_imp_quasi_trans r_c_qt_imp_cf)
+
+
+
+
+type_synonym ('a, 'i) SCF = "('a, 'i) Profile \<Rightarrow> 'a RPR"
+
+
+definition
+  SCF :: "('a, 'i) SCF \<Rightarrow> 'a set \<Rightarrow> 'i set \<Rightarrow> ('a set \<Rightarrow> 'i set \<Rightarrow> ('a, 'i) Profile \<Rightarrow> bool) \<Rightarrow> bool"
+where
+  "SCF scf A Is Pcond \<equiv> (\<forall>P. Pcond A Is P \<longrightarrow> (complete A (scf P)))"
+
+lemma SCFI[intro]:
+  assumes c: "\<And>P. Pcond A Is P \<Longrightarrow> complete A (scf P)"
+  shows "SCF scf A Is Pcond"
+  unfolding SCF_def using assms by blast
+
+lemma SCF_completeD[dest]: "\<lbrakk> SCF scf A Is Pcond; Pcond A Is P \<rbrakk> \<Longrightarrow> complete A (scf P)"
+  unfolding SCF_def by blast
+
+
+
+
+definition
+  SWF :: "('a, 'i) SCF \<Rightarrow> 'a set \<Rightarrow> 'i set \<Rightarrow> ('a set \<Rightarrow> 'i set \<Rightarrow> ('a, 'i) Profile \<Rightarrow> bool) \<Rightarrow> bool"
+where
+  "SWF swf A Is Pcond \<equiv> (\<forall>P. Pcond A Is P \<longrightarrow> rpr A (swf P))"
+
+lemma SWF_rpr[dest]: "\<lbrakk> SWF swf A Is Pcond; Pcond A Is P \<rbrakk> \<Longrightarrow> rpr A (swf P)"
+  unfolding SWF_def by simp
+
+
+
+
+definition universal_domain :: "'a set \<Rightarrow> 'i set \<Rightarrow> ('a, 'i) Profile \<Rightarrow> bool" where
+  "universal_domain A Is P \<equiv> profile A Is P"
+
+declare universal_domain_def[simp]
+
+
+definition
+  weak_pareto :: "('a, 'i) SCF \<Rightarrow> 'a set \<Rightarrow> 'i set \<Rightarrow> ('a set \<Rightarrow> 'i set \<Rightarrow> ('a, 'i) Profile \<Rightarrow> bool) \<Rightarrow> bool"
+where
+  "weak_pareto scf A Is Pcond \<equiv>
+     (\<forall>P x y. Pcond A Is P \<and> x \<in> A \<and> y \<in> A \<and> (\<forall>i \<in> Is. x \<^bsub>(P i)\<^esub>\<prec> y) \<longrightarrow> x \<^bsub>(scf P)\<^esub>\<prec> y)"
+
+lemma weak_paretoI[intro]:
+  "(\<And>P x y. \<lbrakk>Pcond A Is P; x \<in> A; y \<in> A; \<And>i. i\<in>Is \<Longrightarrow> x \<^bsub>(P i)\<^esub>\<prec> y\<rbrakk> \<Longrightarrow> x \<^bsub>(scf P)\<^esub>\<prec> y)
+  \<Longrightarrow> weak_pareto scf A Is Pcond"
+  unfolding weak_pareto_def by simp
+
+lemma weak_paretoD:
+  "\<lbrakk> weak_pareto scf A Is Pcond; Pcond A Is P; x \<in> A; y \<in> A;
+     (\<And>i. i \<in> Is \<Longrightarrow> x \<^bsub>(P i)\<^esub>\<prec> y) \<rbrakk> \<Longrightarrow> x \<^bsub>(scf P)\<^esub>\<prec> y"
+  unfolding weak_pareto_def by simp
+
+
+definition iia :: "('a, 'i) SCF \<Rightarrow> 'a set \<Rightarrow> 'i set \<Rightarrow> bool" where
+  "iia scf S Is \<equiv>
+    (\<forall>P P' x y. profile S Is P \<and> profile S Is P'
+      \<and> x \<in> S \<and> y \<in> S
+      \<and> (\<forall>i \<in> Is. ((x \<^bsub>(P i)\<^esub>\<preceq> y) \<longleftrightarrow> (x \<^bsub>(P' i)\<^esub>\<preceq> y)) \<and> ((y \<^bsub>(P i)\<^esub>\<preceq> x) \<longleftrightarrow> (y \<^bsub>(P' i)\<^esub>\<preceq> x)))
+         \<longrightarrow> ((x \<^bsub>(scf P)\<^esub>\<preceq> y) \<longleftrightarrow> (x \<^bsub>(scf P')\<^esub>\<preceq> y)))"
+
+lemma iiaI[intro]:
+  "(\<And>P P' x y.
+    \<lbrakk> profile S Is P; profile S Is P';
+      x \<in> S; y \<in> S;
+      \<And>i. i \<in> Is \<Longrightarrow> ((x \<^bsub>(P i)\<^esub>\<preceq> y) \<longleftrightarrow> (x \<^bsub>(P' i)\<^esub>\<preceq> y)) \<and> ((y \<^bsub>(P i)\<^esub>\<preceq> x) \<longleftrightarrow> (y \<^bsub>(P' i)\<^esub>\<preceq> x))
+    \<rbrakk> \<Longrightarrow> ((x \<^bsub>(swf P)\<^esub>\<preceq> y) \<longleftrightarrow> (x \<^bsub>(swf P')\<^esub>\<preceq> y)))
+  \<Longrightarrow> iia swf S Is"
+  unfolding iia_def by simp
+
+lemma iiaE:
+  "\<lbrakk> iia swf S Is;
+     {x,y} \<subseteq> S;
+     a \<in> {x, y}; b \<in> {x, y};
+     \<And>i a b. \<lbrakk> a \<in> {x, y}; b \<in> {x, y}; i \<in> Is \<rbrakk> \<Longrightarrow> (a \<^bsub>(P' i)\<^esub>\<preceq> b) \<longleftrightarrow> (a \<^bsub>(P i)\<^esub>\<preceq> b);
+     profile S Is P; profile S Is P' \<rbrakk>
+  \<Longrightarrow> (a \<^bsub>(swf P)\<^esub>\<preceq> b) \<longleftrightarrow> (a \<^bsub>(swf P')\<^esub>\<preceq> b)"
+  unfolding iia_def by (simp, blast)
+
+
+

@@ -1,0 +1,327 @@
+theory Calculus
+  imports
+    Ordered_Resolution_Prover.Lazy_List_Liminf
+    Ordered_Resolution_Prover.Lazy_List_Chain
+begin
+
+
+
+locale consequence_relation =
+  fixes
+    Bot :: "'f set" and
+    entails :: "'f set \<Rightarrow> 'f set \<Rightarrow> bool" (infix "\<Turnstile>" 50)
+  assumes
+    bot_not_empty: "Bot \<noteq> {}" and
+    bot_entails_all: "B \<in> Bot \<Longrightarrow> {B} \<Turnstile> N1" and
+    subset_entailed: "N2 \<subseteq> N1 \<Longrightarrow> N1 \<Turnstile> N2" and
+    all_formulas_entailed: "(\<forall>C \<in> N2. N1 \<Turnstile> {C}) \<Longrightarrow> N1 \<Turnstile> N2" and
+    entails_trans[trans]: "N1 \<Turnstile> N2 \<Longrightarrow> N2 \<Turnstile> N3 \<Longrightarrow> N1 \<Turnstile> N3"
+begin
+
+lemma entail_set_all_formulas: "N1 \<Turnstile> N2 \<longleftrightarrow> (\<forall>C \<in> N2. N1 \<Turnstile> {C})"
+  by (meson all_formulas_entailed empty_subsetI insert_subset subset_entailed entails_trans)
+
+lemma entail_union: "N \<Turnstile> N1 \<and> N \<Turnstile> N2 \<longleftrightarrow> N \<Turnstile> N1 \<union> N2"
+  using entail_set_all_formulas[of N N1] entail_set_all_formulas[of N N2]
+    entail_set_all_formulas[of N "N1 \<union> N2"] by blast
+
+lemma entail_unions: "(\<forall>i \<in> I. N \<Turnstile> Ni i) \<longleftrightarrow> N \<Turnstile> \<Union> (Ni ` I)"
+  using entail_set_all_formulas[of N "\<Union> (Ni ` I)"] entail_set_all_formulas[of N]
+    Complete_Lattices.UN_ball_bex_simps(2)[of Ni I "\<lambda>C. N \<Turnstile> {C}", symmetric]
+  by meson
+
+lemma entail_all_bot: "(\<exists>B \<in> Bot. N \<Turnstile> {B}) \<Longrightarrow> \<forall>B' \<in> Bot. N \<Turnstile> {B'}"
+  using bot_entails_all entails_trans by blast
+
+lemma entails_trans_strong: "N1 \<Turnstile> N2 \<Longrightarrow> N1 \<union> N2 \<Turnstile> N3 \<Longrightarrow> N1 \<Turnstile> N3"
+  by (meson entail_union entails_trans order_refl subset_entailed)
+
+end
+
+
+
+locale consequence_relation_family =
+  fixes
+    Bot :: "'f set" and
+    Q :: "'q set" and
+    entails_q :: "'q \<Rightarrow> 'f set \<Rightarrow> 'f set \<Rightarrow> bool"
+  assumes
+    Q_nonempty: "Q \<noteq> {}" and
+    q_cons_rel: "\<forall>q \<in> Q. consequence_relation Bot (entails_q q)"
+begin
+
+lemma bot_not_empty: "Bot \<noteq> {}"
+  using Q_nonempty consequence_relation.bot_not_empty consequence_relation_family.q_cons_rel
+    consequence_relation_family_axioms by blast
+
+definition entails :: "'f set \<Rightarrow> 'f set \<Rightarrow> bool" (infix "\<Turnstile>Q" 50) where
+  "N1 \<Turnstile>Q N2 \<longleftrightarrow> (\<forall>q \<in> Q. entails_q q N1 N2)"
+
+lemma intersect_cons_rel_family: "consequence_relation Bot entails"
+  unfolding consequence_relation_def entails_def
+  by (intro conjI bot_not_empty) (metis consequence_relation_def q_cons_rel)+
+
+end
+
+
+
+datatype 'f inference =
+  Infer (prems_of: "'f list") (concl_of: "'f")
+
+locale inference_system =
+  fixes
+begin
+
+definition Inf_from :: "'f set \<Rightarrow> 'f inference set" where
+  "Inf_from N = {\<iota> \<in> Inf. set (prems_of \<iota>) \<subseteq> N}"
+
+definition Inf_between :: "'f set \<Rightarrow> 'f set \<Rightarrow> 'f inference set" where
+  "Inf_between N M = Inf_from (N \<union> M) - Inf_from (N - M)"
+
+lemma Inf_if_Inf_from: "\<iota> \<in> Inf_from N \<Longrightarrow> \<iota> \<in> Inf"
+  unfolding Inf_from_def by simp
+
+lemma Inf_if_Inf_between: "\<iota> \<in> Inf_between N M \<Longrightarrow> \<iota> \<in> Inf"
+  unfolding Inf_between_def Inf_from_def by simp
+
+lemma Inf_between_alt:
+  "Inf_between N M = {\<iota> \<in> Inf. \<iota> \<in> Inf_from (N \<union> M) \<and> set (prems_of \<iota>) \<inter> M \<noteq> {}}"
+  unfolding Inf_from_def Inf_between_def by auto
+
+lemma Inf_from_mono: "N \<subseteq> N' \<Longrightarrow> Inf_from N \<subseteq> Inf_from N'"
+  unfolding Inf_from_def by auto
+
+lemma Inf_between_mono: "N \<subseteq> N' \<Longrightarrow> M \<subseteq> M' \<Longrightarrow> Inf_between N M \<subseteq> Inf_between N' M'"
+  unfolding Inf_between_alt using Inf_from_mono[of "N \<union> M" "N' \<union> M'"] by auto
+
+end
+
+
+
+locale inference_system_family =
+  fixes
+    Q :: "'q set" and
+    Inf_q :: "'q \<Rightarrow> 'f inference set"
+  assumes
+    Q_nonempty: "Q \<noteq> {}"
+begin
+
+definition Inf_from_q :: "'q \<Rightarrow> 'f set \<Rightarrow> 'f inference set" where
+  "Inf_from_q q = inference_system.Inf_from (Inf_q q)"
+
+definition Inf_between_q :: "'q \<Rightarrow> 'f set \<Rightarrow> 'f set \<Rightarrow> 'f inference set" where
+  "Inf_between_q q = inference_system.Inf_between (Inf_q q)"
+
+lemma Inf_between_q_alt:
+  "Inf_between_q q N M = {\<iota> \<in> Inf_q q. \<iota> \<in> Inf_from_q q (N \<union> M) \<and> set (prems_of \<iota>) \<inter> M \<noteq> {}}"
+  unfolding Inf_from_q_def Inf_between_q_def inference_system.Inf_between_alt by auto
+
+end
+
+
+
+locale calculus = inference_system Inf + consequence_relation Bot entails
+  for
+    Bot :: "'f set" and
+    entails :: "'f set \<Rightarrow> 'f set \<Rightarrow> bool" (infix "\<Turnstile>" 50)
+  + fixes
+    Red_I :: "'f set \<Rightarrow> 'f inference set" and
+    Red_F :: "'f set \<Rightarrow> 'f set"
+  assumes
+    Red_I_to_Inf: "Red_I N \<subseteq> Inf" and
+    Red_F_Bot: "B \<in> Bot \<Longrightarrow> N \<Turnstile> {B} \<Longrightarrow> N - Red_F N \<Turnstile> {B}" and
+    Red_F_of_subset: "N \<subseteq> N' \<Longrightarrow> Red_F N \<subseteq> Red_F N'" and
+    Red_I_of_subset: "N \<subseteq> N' \<Longrightarrow> Red_I N \<subseteq> Red_I N'" and
+    Red_F_of_Red_F_subset: "N' \<subseteq> Red_F N \<Longrightarrow> Red_F N \<subseteq> Red_F (N - N')" and
+    Red_I_of_Red_F_subset: "N' \<subseteq> Red_F N \<Longrightarrow> Red_I N \<subseteq> Red_I (N - N')" and
+    Red_I_of_Inf_to_N: "\<iota> \<in> Inf \<Longrightarrow> concl_of \<iota> \<in> N \<Longrightarrow> \<iota> \<in> Red_I N"
+begin
+
+lemma Red_I_of_Inf_to_N_subset: "{\<iota> \<in> Inf. concl_of \<iota> \<in> N} \<subseteq> Red_I N"
+  using Red_I_of_Inf_to_N by blast
+
+lemma red_concl_to_red_inf:
+  assumes
+    i_in: "\<iota> \<in> Inf" and
+    concl: "concl_of \<iota> \<in> Red_F N"
+  shows "\<iota> \<in> Red_I N"
+proof -
+  have "\<iota> \<in> Red_I (Red_F N)" by (simp add: Red_I_of_Inf_to_N i_in concl)
+  then have i_in_Red: "\<iota> \<in> Red_I (N \<union> Red_F N)" by (simp add: Red_I_of_Inf_to_N concl i_in)
+  have red_n_subs: "Red_F N \<subseteq> Red_F (N \<union> Red_F N)" by (simp add: Red_F_of_subset)
+  then have "\<iota> \<in> Red_I ((N \<union> Red_F N) - (Red_F N - N))" using Red_I_of_Red_F_subset i_in_Red
+    by (meson Diff_subset subsetCE subset_trans)
+  then show ?thesis by (metis Diff_cancel Diff_subset Un_Diff Un_Diff_cancel contra_subsetD
+    calculus.Red_I_of_subset calculus_axioms sup_bot.right_neutral)
+qed
+
+definition saturated :: "'f set \<Rightarrow> bool" where
+  "saturated N \<longleftrightarrow> Inf_from N \<subseteq> Red_I N"
+
+definition reduc_saturated :: "'f set \<Rightarrow> bool" where
+  "reduc_saturated N \<longleftrightarrow> Inf_from (N - Red_F N) \<subseteq> Red_I N"
+
+lemma Red_I_without_red_F:
+  "Red_I (N - Red_F N) = Red_I N"
+  using Red_I_of_subset [of "N - Red_F N" N]
+    and Red_I_of_Red_F_subset [of "Red_F N" N] by blast
+
+lemma saturated_without_red_F:
+  assumes saturated: "saturated N"
+  shows "saturated (N - Red_F N)"
+proof -
+  have "Inf_from (N - Red_F N) \<subseteq> Inf_from N" unfolding Inf_from_def by auto
+  also have "Inf_from N \<subseteq> Red_I N" using saturated unfolding saturated_def by auto
+  also have "Red_I N \<subseteq> Red_I (N - Red_F N)" using Red_I_of_Red_F_subset by auto
+  finally have "Inf_from (N - Red_F N) \<subseteq> Red_I (N - Red_F N)" by auto
+  then show ?thesis unfolding saturated_def by auto
+qed
+
+definition fair :: "'f set llist \<Rightarrow> bool" where
+  "fair Ns \<longleftrightarrow> Inf_from (Liminf_llist Ns) \<subseteq> Sup_llist (lmap Red_I Ns)"
+
+inductive "derive" :: "'f set \<Rightarrow> 'f set \<Rightarrow> bool" (infix "\<rhd>" 50) where
+  derive: "M - N \<subseteq> Red_F N \<Longrightarrow> M \<rhd> N"
+
+
+lemma equiv_Sup_Liminf:
+  assumes
+    in_Sup: "C \<in> Sup_llist Ns" and
+    not_in_Liminf: "C \<notin> Liminf_llist Ns"
+  shows
+    "\<exists>i \<in> {i. enat (Suc i) < llength Ns}. C \<in> lnth Ns i - lnth Ns (Suc i)"
+proof -
+  obtain i where C_D_i: "C \<in> Sup_upto_llist Ns (enat i)" and "enat i < llength Ns"
+    using elem_Sup_llist_imp_Sup_upto_llist in_Sup by fast
+  then obtain j where j: "j \<ge> i \<and> enat j < llength Ns \<and> C \<notin> lnth Ns j"
+    using not_in_Liminf unfolding Sup_upto_llist_def chain_def Liminf_llist_def by auto
+  obtain k where k: "C \<in> lnth Ns k" "enat k < llength Ns" "k \<le> i" using C_D_i
+    unfolding Sup_upto_llist_def by auto
+  let ?S = "{i. i < j \<and> i \<ge> k \<and> C \<in> lnth Ns i}"
+  define l where "l = Max ?S"
+  then have nempty: "{i. i < j \<and> k \<le> i \<and> C \<in> lnth Ns i} \<noteq> {}" by auto
+  then have l_prop: "l < j \<and> l \<ge> k \<and> C \<in> lnth Ns l" using Max_in[of ?S, OF _ nempty]
+    unfolding l_def by auto
+  then have "C \<in> lnth Ns l - lnth Ns (Suc l)" using j gt_Max_notin[OF _ nempty, of "Suc l"]
+    unfolding l_def[symmetric] by (auto intro: Suc_lessI)
+  then show ?thesis
+  proof (rule bexI[of _ l])
+    show "l \<in> {i. enat (Suc i) < llength Ns}"
+      using l_prop j
+      by (clarify, metis Suc_leI dual_order.order_iff_strict enat_ord_simps(2) less_trans)
+  qed
+qed
+
+lemma Red_in_Sup:
+  assumes deriv: "chain (\<rhd>) Ns"
+  shows "Sup_llist Ns - Liminf_llist Ns \<subseteq> Red_F (Sup_llist Ns)"
+proof
+  fix C
+  assume C_in_subset: "C \<in> Sup_llist Ns - Liminf_llist Ns"
+  {
+    fix C i
+    assume
+      in_ith_elem: "C \<in> lnth Ns i - lnth Ns (Suc i)" and
+      i: "enat (Suc i) < llength Ns"
+    have "lnth Ns i \<rhd> lnth Ns (Suc i)" using i deriv in_ith_elem chain_lnth_rel by auto
+    then have "C \<in> Red_F (lnth Ns (Suc i))" using in_ith_elem derive.cases by blast
+    then have "C \<in> Red_F (Sup_llist Ns)" using Red_F_of_subset
+      by (meson contra_subsetD i lnth_subset_Sup_llist)
+  }
+  then show "C \<in> Red_F (Sup_llist Ns)" using equiv_Sup_Liminf[of C] C_in_subset by fast
+qed
+
+lemma Red_I_subset_Liminf:
+proof -
+    using Red_I_of_Red_F_subset[OF Red_in_Sup] deriv by auto
+    by (simp add: Liminf_llist_subset_Sup_llist double_diff)
+    using Sup_in_diff by auto
+  then have "Red_I (lnth Ns i) \<subseteq> Red_I (Sup_llist Ns)" using Red_I_of_subset
+    unfolding Sup_llist_def by auto
+  then show ?thesis using Red_I_Sup_in_Liminf by auto
+qed
+
+lemma Red_F_subset_Liminf:
+proof -
+    using Red_F_of_Red_F_subset[OF Red_in_Sup] deriv by auto
+    by (simp add: Liminf_llist_subset_Sup_llist double_diff)
+    using Sup_in_diff by auto
+  then have "Red_F (lnth Ns i) \<subseteq> Red_F (Sup_llist Ns)" using Red_F_of_subset
+    unfolding Sup_llist_def by auto
+  then show ?thesis using Red_F_Sup_in_Liminf by auto
+qed
+
+lemma i_in_Liminf_or_Red_F:
+  assumes
+proof (rule,rule)
+  fix C
+    using equiv_Sup_Liminf[of C Ns] C_not_Liminf by auto
+    using deriv by (meson chain_lnth_rel contra_subsetD derive.cases)
+qed
+
+lemma fair_implies_Liminf_saturated:
+  assumes
+  unfolding saturated_def
+proof
+  fix \<iota>
+    unfolding Sup_llist_def by auto
+    using deriv i_in_Liminf_or_Red_F[of Ns i] Red_I_subset_Liminf by blast
+qed
+
+end
+
+locale statically_complete_calculus = calculus +
+  assumes statically_complete: "B \<in> Bot \<Longrightarrow> saturated N \<Longrightarrow> N \<Turnstile> {B} \<Longrightarrow> \<exists>B'\<in>Bot. B' \<in> N"
+begin
+
+lemma dynamically_complete_Liminf:
+  fixes B Ns
+  assumes
+proof -
+  note lhd_is = lhd_conv_lnth[OF chain_not_lnull[OF deriv]]
+    using lhd_subset_Sup_llist[of Ns] non_empty by (simp add: lhd_conv_lnth)
+    using unsat subset_entailed[OF subs] entails_trans[of "Sup_llist Ns" "lhd Ns"] by auto
+    using bot_elem Red_F_Bot by auto
+    using deriv Red_in_Sup by auto
+    using Sup_no_Red subset_entailed[OF Sup_no_Red_in_Liminf] entails_trans by blast
+    using deriv fair fair_implies_Liminf_saturated unfolding saturated_def by auto
+  then show ?thesis
+    using bot_elem statically_complete Liminf_entails_Bot by auto
+qed
+
+end
+
+locale dynamically_complete_calculus = calculus +
+  assumes
+    dynamically_complete: "B \<in> Bot \<Longrightarrow> chain (\<rhd>) Ns \<Longrightarrow> fair Ns \<Longrightarrow> lhd Ns \<Turnstile> {B} \<Longrightarrow>
+      \<exists>i \<in> {i. enat i < llength Ns}. \<exists>B'\<in>Bot. B' \<in> lnth Ns i"
+begin
+
+sublocale statically_complete_calculus
+proof
+  fix B N
+  assume
+    saturated_N: "saturated N" and
+    refut_N: "N \<Turnstile> {B}"
+  define Ns where "Ns = LCons N LNil"
+  have liminf_is_N: "Liminf_llist Ns = N" by (simp add: Ns_def Liminf_llist_LCons)
+  have head_Ns: "N = lhd Ns" by (simp add: Ns_def)
+  have "Sup_llist (lmap Red_I Ns) = Red_I N" by (simp add: Ns_def)
+  then have fair_Ns: "fair Ns" using saturated_N by (simp add: fair_def saturated_def liminf_is_N)
+    using dynamically_complete[of B Ns] bot_elem fair_Ns head_Ns saturated_N deriv_Ns refut_N
+    by auto
+  then have "i = 0"
+    by (auto simp: Ns_def enat_0_iff)
+qed
+
+end
+
+sublocale statically_complete_calculus \<subseteq> dynamically_complete_calculus
+proof
+  fix B Ns
+  assume
+    by (rule dynamically_complete_Liminf)
+    unfolding Liminf_llist_def by auto
+qed
+
+end

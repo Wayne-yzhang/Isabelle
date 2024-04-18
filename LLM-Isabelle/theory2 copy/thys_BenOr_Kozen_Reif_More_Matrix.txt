@@ -1,0 +1,332 @@
+theory More_Matrix
+  imports "Jordan_Normal_Form.Matrix"
+    "Jordan_Normal_Form.DL_Rank"
+    "Jordan_Normal_Form.VS_Connect"
+    "Jordan_Normal_Form.Gauss_Jordan_Elimination"
+begin
+
+section "Kronecker Product"
+
+definition kronecker_product :: "'a :: ring mat \<Rightarrow> 'a mat \<Rightarrow> 'a mat" where
+  "kronecker_product A B =
+  (let ra = dim_row A; ca = dim_col A;
+       rb = dim_row B; cb = dim_col B
+  in
+    mat (ra*rb) (ca*cb)
+    (\<lambda>(i,j).
+      A $$ (i div rb, j div cb) *
+      B $$ (i mod rb, j mod cb)
+  ))"
+
+lemma arith:
+  assumes "d < a"
+  assumes "c < b"
+  shows "b*d+c < a*(b::nat)"
+proof -
+  have "b*d+c < b*(d+1)"
+    by (simp add: assms(2))
+  thus ?thesis
+    by (metis One_nat_def Suc_leI add.right_neutral add_Suc_right assms(1) less_le_trans mult.commute mult_le_cancel2)
+qed
+
+lemma dim_kronecker[simp]:
+  "dim_row (kronecker_product A B) = dim_row A * dim_row B"
+  "dim_col (kronecker_product A B) = dim_col A * dim_col B"
+  unfolding kronecker_product_def Let_def by auto
+
+lemma kronecker_inverse_index:
+  assumes "r < dim_row A" "s < dim_col A"
+  assumes "v < dim_row B" "w < dim_col B"
+  shows "kronecker_product A B $$ (dim_row B*r+v, dim_col B*s+w) = A $$ (r,s) * B $$ (v,w)"
+proof -
+  from arith[OF assms(1) assms(3)]
+  have "dim_row B*r+v < dim_row A * dim_row B" .
+  moreover from arith[OF assms(2) assms(4)]
+  have "dim_col B * s + w < dim_col A * dim_col B" .
+  ultimately show ?thesis
+    unfolding kronecker_product_def Let_def
+    using assms by auto
+qed
+
+lemma kronecker_distr_left:
+  assumes "dim_row B = dim_row C" "dim_col B = dim_col C"
+  shows "kronecker_product A (B+C) = kronecker_product A B + kronecker_product A C"
+  unfolding kronecker_product_def Let_def
+  using assms apply (auto simp add: mat_eq_iff) 
+  by (metis (no_types, lifting) distrib_left index_add_mat(1) mod_less_divisor mult_eq_0_iff neq0_conv not_less_zero)
+
+lemma kronecker_distr_right:
+  assumes "dim_row B = dim_row C" "dim_col B = dim_col C"
+  shows "kronecker_product (B+C) A = kronecker_product B A + kronecker_product C A"
+  unfolding kronecker_product_def Let_def
+  using assms by (auto simp add: mat_eq_iff less_mult_imp_div_less distrib_right)
+
+lemma index_mat_mod[simp]: "nr > 0 & nc > 0 \<Longrightarrow> mat nr nc f $$ (i mod nr,j mod nc) = f (i mod nr,j mod nc)"
+  by auto
+
+lemma kronecker_assoc:
+  shows "kronecker_product A (kronecker_product B C) = kronecker_product (kronecker_product A B) C"
+  unfolding kronecker_product_def Let_def
+  apply (case_tac "dim_row B * dim_row C > 0 & dim_col B * dim_col C > 0")
+   apply (auto simp add: mat_eq_iff less_mult_imp_div_less)
+  by (smt div_mult2_eq div_mult_mod_eq kronecker_inverse_index less_mult_imp_div_less linordered_semiring_strict_class.mult_pos_pos mod_less_divisor mod_mult2_eq mult.assoc mult.commute)
+
+lemma sum_sum_mod_div:
+  "(\<Sum>ia = 0::nat..<x. \<Sum>ja = 0..<y. f ia ja) =
+   (\<Sum>ia = 0..<x*y. f (ia div y) (ia mod y))"
+proof -
+  have 1: "inj_on (\<lambda>ia. (ia div y, ia mod y)) {0..<x * y}"
+    by (smt (verit, best) Pair_inject div_mod_decomp inj_onI)
+  have 21: "{0..<x} \<times> {0..<y} \<subseteq> (\<lambda>ia. (ia div y, ia mod y)) ` {0..<x * y}"
+  proof clarsimp
+    fix a b
+    assume *:"a < x" "b < y"
+    have "a * y +  b \<in> {0..<x*y}"
+      by (metis arith * atLeastLessThan_iff le0 mult.commute)
+    thus "(a, b) \<in> (\<lambda>ia. (ia div y, ia mod y)) ` {0..<x * y}"
+      using * by (auto simp add: image_iff)
+  qed
+  have 22:"(\<lambda>ia. (ia div y, ia mod y)) ` {0..<x * y} \<subseteq> {0..<x} \<times> {0..<y}"
+    using less_mult_imp_div_less apply auto
+    by (metis mod_less_divisor mult.commute neq0_conv not_less_zero)
+  have 2: "{0..<x} \<times> {0..<y} = (\<lambda>ia. (ia div y, ia mod y)) ` {0..<x * y}"
+    using 21 22 by auto
+  have *: "(\<Sum>ia = 0::nat..<x. \<Sum>ja = 0..<y. f ia ja) =
+        (\<Sum>(x, y)\<in>{0..<x} \<times> {0..<y}. f x y)"
+    by (auto simp add: sum.cartesian_product)
+  show ?thesis unfolding *
+    apply (intro sum.reindex_cong[of "\<lambda>ia. (ia div y, ia mod y)"])
+    using 1 2 by auto
+qed
+
+lemma kronecker_of_mult:
+  assumes "dim_col (A :: 'a :: comm_ring mat) = dim_row C"
+  assumes "dim_col B = dim_row D"
+  shows "kronecker_product A B * kronecker_product C D = kronecker_product (A * C) (B * D)"
+  unfolding kronecker_product_def Let_def mat_eq_iff
+proof clarsimp
+  fix i j
+  assume ij: "i < dim_row A * dim_row B" "j < dim_col C * dim_col D"
+  have 1: "(A * C) $$ (i div dim_row B, j div dim_col D) =
+    row A (i div dim_row B) \<bullet> col C (j div dim_col D)"
+    using ij less_mult_imp_div_less by (auto intro!: index_mult_mat)
+  have 2: "(B * D) $$ (i mod dim_row B, j mod dim_col D) =
+    row B (i mod dim_row B) \<bullet> col D (j mod dim_col D)"
+    using ij apply (auto intro!: index_mult_mat)
+    using gr_implies_not0 apply fastforce
+    using gr_implies_not0 by fastforce
+  have 3: "\<And>x. x < dim_row C * dim_row D \<Longrightarrow>
+         A $$ (i div dim_row B, x div dim_row D) *
+         B $$ (i mod dim_row B, x mod dim_row D) *
+         (C $$ (x div dim_row D, j div dim_col D) *
+          D $$ (x mod dim_row D, j mod dim_col D)) =
+         row A (i div dim_row B) $ (x div dim_row D) *
+         col C (j div dim_col D) $ (x div dim_row D) *
+         (row B (i mod dim_row B) $ (x mod dim_row D) *
+          col D (j mod dim_col D) $ (x mod dim_row D))"
+  proof -
+    fix x
+    assume *:"x < dim_row C * dim_row D"
+    have 1: "row A (i div dim_row B) $ (x div dim_row D) = A $$ (i div dim_row B, x div dim_row D)"
+      by (simp add: * assms(1) less_mult_imp_div_less row_def)
+    have 2: "row B (i mod dim_row B) $ (x mod dim_row D) = B $$ (i mod dim_row B, x mod dim_row D)"
+      by (metis "*" assms(2) ij(1) index_row(1) mod_less_divisor nat_0_less_mult_iff neq0_conv not_less_zero)
+    have 3: "col C (j div dim_col D) $ (x div dim_row D) = C $$ (x div dim_row D, j div dim_col D)"
+      by (simp add: "*" ij(2) less_mult_imp_div_less)
+    have 4: "col D (j mod dim_col D) $ (x mod dim_row D) = D $$ (x mod dim_row D, j mod dim_col D)"
+      by (metis "*" bot_nat_0.not_eq_extremum ij(2) index_col mod_less_divisor mult_zero_right not_less_zero)
+    show "A $$ (i div dim_row B, x div dim_row D) *
+         B $$ (i mod dim_row B, x mod dim_row D) *
+         (C $$ (x div dim_row D, j div dim_col D) *
+          D $$ (x mod dim_row D, j mod dim_col D)) =
+         row A (i div dim_row B) $ (x div dim_row D) *
+         col C (j div dim_col D) $ (x div dim_row D) *
+         (row B (i mod dim_row B) $ (x mod dim_row D) *
+          col D (j mod dim_col D) $ (x mod dim_row D))" unfolding 1 2 3 4
+      by (simp add: mult.assoc mult.left_commute)
+  qed
+  have *: "(A * C) $$ (i div dim_row B, j div dim_col D) *
+        (B * D) $$ (i mod dim_row B, j mod dim_col D) =
+    (\<Sum>ia = 0..<dim_row C * dim_row D.
+               A $$ (i div dim_row B, ia div dim_row D) *
+               B $$ (i mod dim_row B, ia mod dim_row D) *
+               (C $$ (ia div dim_row D, j div dim_col D) *
+                D $$ (ia mod dim_row D, j mod dim_col D)))"
+    unfolding 1 2 scalar_prod_def sum_product sum_sum_mod_div
+    apply (auto simp add: sum_product sum_sum_mod_div intro!: sum.cong)
+    using 3 by presburger
+  show "vec (dim_col A * dim_col B)
+          (\<lambda>j. A $$ (i div dim_row B, j div dim_col B) *
+               B $$ (i mod dim_row B, j mod dim_col B)) \<bullet>
+       vec (dim_row C * dim_row D)
+          (\<lambda>i. C $$ (i div dim_row D, j div dim_col D) *
+               D $$ (i mod dim_row D, j mod dim_col D)) =
+        (A * C) $$ (i div dim_row B, j div dim_col D) *
+        (B * D) $$ (i mod dim_row B, j mod dim_col D)"
+    unfolding * scalar_prod_def
+    by (auto simp add: assms sum_product sum_sum_mod_div intro!: sum.cong)
+qed
+
+lemma inverts_mat_length:
+  assumes "square_mat A" "inverts_mat A B" "inverts_mat B A"
+  shows "dim_row B = dim_row A" "dim_col B = dim_col A"
+   apply (metis assms(1) assms(3) index_mult_mat(3) index_one_mat(3) inverts_mat_def square_mat.simps)
+  by (metis assms(1) assms(2) index_mult_mat(3) index_one_mat(3) inverts_mat_def square_mat.simps)
+
+lemma less_mult_imp_mod_less:
+  "m mod i < i" if "m < n * i" for m n i :: nat
+  using gr_implies_not_zero that by fastforce
+
+lemma kronecker_one:
+  shows "kronecker_product ((1\<^sub>m x)::'a :: ring_1 mat) (1\<^sub>m y) = 1\<^sub>m (x*y)"
+  unfolding kronecker_product_def Let_def
+  apply  (auto simp add:mat_eq_iff less_mult_imp_div_less less_mult_imp_mod_less)
+  by (metis div_mult_mod_eq)
+
+lemma kronecker_invertible:
+  assumes "invertible_mat (A :: 'a :: comm_ring_1 mat)" "invertible_mat B"
+  shows "invertible_mat (kronecker_product A B)"
+proof -
+  obtain Ai where Ai: "inverts_mat A Ai" "inverts_mat Ai A" using assms invertible_mat_def by blast
+  obtain Bi where Bi: "inverts_mat B Bi" "inverts_mat Bi B" using assms invertible_mat_def by blast
+  have "square_mat (kronecker_product A B)"
+    by (metis (no_types, lifting) assms(1) assms(2) dim_col_mat(1) dim_row_mat(1) invertible_mat_def kronecker_product_def square_mat.simps)
+  moreover have "inverts_mat (kronecker_product A B) (kronecker_product Ai Bi)"
+    using Ai Bi unfolding inverts_mat_def
+    by (metis (no_types, lifting) dim_kronecker(1) index_mult_mat(3) index_one_mat(3) kronecker_of_mult kronecker_one)
+  moreover have "inverts_mat (kronecker_product Ai Bi) (kronecker_product A B)"
+    using Ai Bi unfolding inverts_mat_def
+    by (metis (no_types, lifting) dim_kronecker(1) index_mult_mat(3) index_one_mat(3) kronecker_of_mult kronecker_one)
+  ultimately show ?thesis unfolding invertible_mat_def by blast
+qed
+
+section "More DL Rank"
+
+instantiation mat :: (conjugate) conjugate
+begin
+
+definition conjugate_mat :: "'a :: conjugate mat \<Rightarrow> 'a mat"
+  where "conjugate m = mat (dim_row m) (dim_col m) (\<lambda>(i,j). conjugate (m $$ (i,j)))"
+
+lemma dim_row_conjugate[simp]: "dim_row (conjugate m) = dim_row m"
+  unfolding conjugate_mat_def by auto
+
+lemma dim_col_conjugate[simp]: "dim_col (conjugate m) = dim_col m"
+  unfolding conjugate_mat_def by auto
+
+lemma carrier_vec_conjugate[simp]: "m \<in> carrier_mat nr nc \<Longrightarrow> conjugate m \<in> carrier_mat nr nc"
+  by (auto)
+
+lemma mat_index_conjugate[simp]:
+  shows "i < dim_row m \<Longrightarrow> j < dim_col m \<Longrightarrow> conjugate m  $$ (i,j) = conjugate (m $$ (i,j))"
+  unfolding conjugate_mat_def by auto
+
+lemma row_conjugate[simp]: "i < dim_row m \<Longrightarrow> row (conjugate m) i = conjugate (row m i)"
+  by (auto)
+
+lemma col_conjugate[simp]: "i < dim_col m \<Longrightarrow> col (conjugate m) i = conjugate (col m i)"
+  by (auto)
+
+lemma rows_conjugate: "rows (conjugate m) = map conjugate (rows m)"
+  by (simp add: list_eq_iff_nth_eq)
+
+lemma cols_conjugate: "cols (conjugate m) = map conjugate (cols m)"
+  by (simp add: list_eq_iff_nth_eq)
+
+instance
+proof
+  fix a b :: "'a mat"
+  show "conjugate (conjugate a) = a"
+    unfolding mat_eq_iff by auto
+  let ?a = "conjugate a"
+  let ?b = "conjugate b"
+  show "conjugate a = conjugate b \<longleftrightarrow> a = b"
+    by (metis dim_col_conjugate dim_row_conjugate mat_index_conjugate conjugate_cancel_iff mat_eq_iff)
+qed
+
+end
+
+abbreviation conjugate_transpose :: "'a::conjugate mat  \<Rightarrow> 'a mat"
+  where "conjugate_transpose A \<equiv> conjugate (A\<^sup>T)"
+
+notation conjugate_transpose ("(_\<^sup>H)" [1000])
+
+lemma transpose_conjugate:
+  shows "(conjugate A)\<^sup>T = A\<^sup>H"
+  unfolding conjugate_mat_def
+  by auto
+
+lemma vec_module_col_helper:
+  fixes A:: "('a :: field) mat"
+  shows "(0\<^sub>v (dim_row A) \<in> LinearCombinations.module.span class_ring \<lparr>carrier = carrier_vec (dim_row A), mult = undefined, one = undefined, zero = 0\<^sub>v (dim_row A), add = (+), smult = (\<cdot>\<^sub>v)\<rparr> (set (cols A)))"
+proof -
+  have "\<forall>v. (0::'a) \<cdot>\<^sub>v v + v = v"
+    by auto
+  then show "0\<^sub>v (dim_row A) \<in> LinearCombinations.module.span class_ring \<lparr>carrier = carrier_vec (dim_row A), mult = undefined, one = undefined, zero = 0\<^sub>v (dim_row A), add = (+), smult = (\<cdot>\<^sub>v)\<rparr> (set (cols A))"
+    by (metis cols_dim module_vec_def right_zero_vec smult_carrier_vec vec_space.prod_in_span zero_carrier_vec)
+qed
+
+lemma vec_module_col_helper2:
+  fixes A:: "('a :: field) mat"
+  shows "\<And>a x. x \<in> LinearCombinations.module.span class_ring
+                \<lparr>carrier = carrier_vec (dim_row A), mult = undefined, one = undefined,
+                   zero = 0\<^sub>v (dim_row A), add = (+), smult = (\<cdot>\<^sub>v)\<rparr>
+                (set (cols A)) \<Longrightarrow>
+           (\<And>a b v. (a + b) \<cdot>\<^sub>v v = a \<cdot>\<^sub>v v + b \<cdot>\<^sub>v v) \<Longrightarrow>
+           a \<cdot>\<^sub>v x
+           \<in> LinearCombinations.module.span class_ring
+               \<lparr>carrier = carrier_vec (dim_row A), mult = undefined, one = undefined,
+                  zero = 0\<^sub>v (dim_row A), add = (+), smult = (\<cdot>\<^sub>v)\<rparr>
+               (set (cols A))"
+proof -
+  fix a :: 'a and x :: "'a vec"
+  assume "x \<in> LinearCombinations.module.span class_ring \<lparr>carrier = carrier_vec (dim_row A), mult = undefined, one = undefined, zero = 0\<^sub>v (dim_row A), add = (+), smult = (\<cdot>\<^sub>v)\<rparr> (set (cols A))"
+  then show "a \<cdot>\<^sub>v x \<in> LinearCombinations.module.span class_ring \<lparr>carrier = carrier_vec (dim_row A), mult = undefined, one = undefined, zero = 0\<^sub>v (dim_row A), add = (+), smult = (\<cdot>\<^sub>v)\<rparr> (set (cols A))"
+    by (metis (full_types) cols_dim idom_vec.smult_in_span module_vec_def)
+qed
+
+lemma vec_module_col: "module (class_ring :: 'a :: field ring)
+  (module_vec TYPE('a) 
+    (dim_row A)
+      \<lparr>carrier :=
+         LinearCombinations.module.span
+          class_ring (module_vec TYPE('a) (dim_row A)) (set (cols A))\<rparr>)"
+proof -
+  interpret abelian_group "module_vec TYPE('a) (dim_row A)
+      \<lparr>carrier :=
+         LinearCombinations.module.span
+          class_ring (module_vec TYPE('a) (dim_row A)) (set (cols A))\<rparr>"
+    apply (unfold_locales)
+          apply (auto simp add:module_vec_def)
+          apply (metis cols_dim module_vec_def partial_object.select_convs(1) ring.simps(2) vec_vs vectorspace.span_add1)
+         apply (metis assoc_add_vec cols_dim module_vec_def vec_space.cV vec_vs vectorspace.span_closed)
+    using vec_module_col_helper[of A] apply (auto)    
+       apply (metis cols_dim left_zero_vec module_vec_def partial_object.select_convs(1) vec_vs vectorspace.span_closed)
+      apply (metis cols_dim module_vec_def partial_object.select_convs(1) right_zero_vec vec_vs vectorspace.span_closed)
+     apply (metis cols_dim comm_add_vec module_vec_def vec_space.cV vec_vs vectorspace.span_closed)
+    unfolding Units_def apply auto
+    by (smt cols_dim module_vec_def partial_object.select_convs(1) uminus_l_inv_vec uminus_r_inv_vec vec_space.vec_neg vec_vs vectorspace.span_closed vectorspace.span_neg)
+  show ?thesis
+    apply (unfold_locales)
+    unfolding class_ring_simps apply auto
+    unfolding module_vec_simps using add_smult_distrib_vec apply auto
+     apply (auto simp add:module_vec_def)
+    using vec_module_col_helper2
+     apply blast
+    using cols_dim module_vec_def partial_object.select_convs(1) smult_add_distrib_vec vec_vs vectorspace.span_closed
+    by (smt (z3))
+qed
+
+lemma vec_vs_col: "vectorspace (class_ring :: 'a :: field ring)
+  (module_vec TYPE('a) (dim_row A)
+      \<lparr>carrier :=
+         LinearCombinations.module.span
+          class_ring
+          (module_vec TYPE('a)
+            (dim_row A))
+          (set (cols A))\<rparr>)"
+  unfolding vectorspace_def
+  using vec_module_col class_field 
+  by (auto simp: class_field_def)
+
+lemma cols_mat_mul_map:

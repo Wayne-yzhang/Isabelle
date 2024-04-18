@@ -1,0 +1,216 @@
+theory Cotangent_PFD_Formula
+  imports "HOL-Complex_Analysis.Complex_Analysis" "HOL-Real_Asymp.Real_Asymp" 
+begin
+
+
+lemma summable_comparison_test_bigo:
+  fixes f :: "nat \<Rightarrow> real"
+  assumes "summable (\<lambda>n. norm (g n))" "f \<in> O(g)"
+  shows   "summable f"
+proof -
+    by (auto elim: landau_o.bigE)
+  thus ?thesis
+    by (rule summable_comparison_test_ev) (insert assms, auto intro: summable_mult)
+qed
+
+lemma uniformly_on_image:
+  "uniformly_on (f ` A) g = filtercomap (\<lambda>h. h \<circ> f) (uniformly_on A (g \<circ> f))"
+  unfolding uniformly_on_def by (simp add: filtercomap_INF)
+
+lemma uniform_limit_image:
+  "uniform_limit (f ` A) g h F \<longleftrightarrow> uniform_limit A (\<lambda>x y. g x (f y)) (\<lambda>x. h (f x)) F"
+  by (simp add: uniformly_on_image filterlim_filtercomap_iff o_def)
+
+lemma Ints_add_iff1 [simp]: "x \<in> \<int> \<Longrightarrow> x + y \<in> \<int> \<longleftrightarrow> y \<in> \<int>"
+  by (metis Ints_add Ints_diff add.commute add_diff_cancel_right')
+
+lemma Ints_add_iff2 [simp]: "y \<in> \<int> \<Longrightarrow> x + y \<in> \<int> \<longleftrightarrow> x \<in> \<int>"
+  by (metis Ints_add Ints_diff add_diff_cancel_right')
+
+lemma discrete_imp_not_islimpt:
+  assumes e: "0 < e"
+    and d: "\<forall>x \<in> S. \<forall>y \<in> S. dist y x < e \<longrightarrow> y = x"
+  shows "\<not>x islimpt S"
+proof
+  assume "x islimpt S"
+  hence "x islimpt S - {x}"
+    by (meson islimpt_punctured)
+  moreover from assms have "closed (S - {x})"
+    by (intro discrete_imp_closed) auto
+  ultimately show False
+    unfolding closed_limpt by blast
+qed
+
+lemma Ints_not_limpt: "\<not>((x :: 'a :: real_normed_algebra_1) islimpt \<int>)"
+  by (rule discrete_imp_not_islimpt[of 1]) (auto elim!: Ints_cases simp: dist_of_int)
+
+lemma sums_long_telescope:
+  fixes f :: "nat \<Rightarrow> 'a :: {topological_group_add, topological_comm_monoid_add, ab_group_add}"
+  assumes lim: "f \<longlonglongrightarrow> 0"
+  shows "(\<lambda>n. f n - f (n + c)) sums (\<Sum>k<c. f k)" (is "_ sums ?S")
+proof -
+  thm tendsto_diff
+  have "(\<lambda>N. ?S - (\<Sum>n<c. f (N + n))) \<longlonglongrightarrow> ?S - 0"
+    by (intro tendsto_intros tendsto_null_sum filterlim_compose[OF assms]; real_asymp)
+  hence "(\<lambda>N. ?S - (\<Sum>n<c. f (N + n))) \<longlonglongrightarrow> ?S"
+    by simp
+  moreover have "eventually (\<lambda>N. ?S - (\<Sum>n<c. f (N + n)) = (\<Sum>n<N. f n - f (n + c))) sequentially"
+    using eventually_ge_at_top[of c]
+  proof eventually_elim
+    case (elim N)
+    have "(\<Sum>n<N. f n - f (n + c)) = (\<Sum>n<N. f n) - (\<Sum>n<N. f (n + c))"
+      by (simp only: sum_subtractf)
+    also have "(\<Sum>n<N. f n) = (\<Sum>n\<in>{..<c} \<union> {c..<N}. f n)"
+      using elim by (intro sum.cong) auto
+    also have "\<dots> = (\<Sum>n<c. f n) + (\<Sum>n\<in>{c..<N}. f n)"
+      by (subst sum.union_disjoint) auto
+    also have "(\<Sum>n<N. f (n + c)) = (\<Sum>n\<in>{c..<N+c}. f n)"
+      using elim by (intro sum.reindex_bij_witness[of _ "\<lambda>n. n - c" "\<lambda>n. n + c"]) auto
+    also have "\<dots> = (\<Sum>n\<in>{c..<N}\<union>{N..<N+c}. f n)"
+      using elim by (intro sum.cong) auto
+    also have "\<dots> = (\<Sum>n\<in>{c..<N}. f n) + (\<Sum>n\<in>{N..<N+c}. f n)"
+      by (subst sum.union_disjoint) auto
+    also have "(\<Sum>n\<in>{N..<N+c}. f n) = (\<Sum>n<c. f (N + n))"
+      by (intro sum.reindex_bij_witness[of _ "\<lambda>n. n + N" "\<lambda>n. n - N"]) auto
+    finally show ?case
+      by simp
+  qed
+  ultimately show ?thesis
+    unfolding sums_def by (rule Lim_transform_eventually)
+qed
+
+
+
+definition cot_pfd :: "'a :: {real_normed_field, banach} \<Rightarrow> 'a" where
+  "cot_pfd x = (\<Sum>n. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2))"
+
+lemma uniform_limit_cot_pfd_complex:
+  assumes "R \<ge> 0"
+  shows   "uniform_limit (cball 0 R :: complex set)
+             (\<lambda>N x. \<Sum>n<N. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2)) cot_pfd sequentially"
+  unfolding cot_pfd_def
+proof (rule Weierstrass_m_test_ev)
+  have "eventually (\<lambda>N. of_nat (N + 1) > R) at_top"
+    by real_asymp
+  thus "\<forall>\<^sub>F N in sequentially. \<forall>(x::complex)\<in>cball 0 R. norm (2 * x / (x ^ 2 - of_nat (Suc N) ^ 2)) \<le>
+          2 * R / (real (N + 1) ^ 2 - R ^ 2)"
+  proof eventually_elim
+    case (elim N)
+    show ?case
+    proof safe
+      fix x :: complex assume x: "x \<in> cball 0 R"
+      have "(1 + real N)\<^sup>2 - R\<^sup>2 \<le> norm ((1 + of_nat N :: complex) ^ 2) - norm (x ^ 2)"
+        using x by (auto intro: power_mono simp: norm_power simp flip: of_nat_Suc)
+      also have "\<dots> \<le> norm (x\<^sup>2 - (1 + of_nat N :: complex)\<^sup>2)"
+        by (metis norm_minus_commute norm_triangle_ineq2)
+      finally show "norm (2 * x / (x\<^sup>2 - (of_nat (Suc N))\<^sup>2)) \<le> 2 * R / (real (N + 1) ^ 2 - R ^ 2)"
+        by (intro mult_mono frac_le) (auto intro: power_strict_mono)
+    qed
+  qed
+next
+  show "summable (\<lambda>N. 2 * R / (real (N + 1) ^ 2 - R ^ 2))"
+  proof (rule summable_comparison_test_bigo)
+    show "(\<lambda>N. 2 * R / (real (N + 1) ^ 2 - R ^ 2)) \<in> O(\<lambda>N. 1 / real N ^ 2)"
+      by real_asymp
+  next
+    show "summable (\<lambda>n. norm (1 / real n ^ 2))"
+      using inverse_power_summable[of 2] by (simp add: field_simps)
+  qed
+qed
+
+lemma sums_cot_pfd_complex:
+  fixes x :: complex
+  shows "(\<lambda>n. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2)) sums cot_pfd x"
+  using tendsto_uniform_limitI[OF uniform_limit_cot_pfd_complex[of "norm x"], of x]
+  by (simp add: sums_def)
+
+lemma sums_cot_pfd_complex':
+  fixes x :: complex
+  assumes "x \<notin> \<int>"
+  shows   "(\<lambda>n. 1 / (x + of_nat (Suc n)) + 1 / (x - of_nat (Suc n))) sums cot_pfd x"
+proof -
+  have "(\<lambda>n. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2)) sums cot_pfd x"
+    by (rule sums_cot_pfd_complex)
+  also have "(\<lambda>n. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2)) = 
+             (\<lambda>n. 1 / (x + of_nat (Suc n)) + 1 / (x - of_nat (Suc n)))" (is "?lhs = ?rhs")
+  proof
+    fix n :: nat
+    have neq1: "x + of_nat (Suc n) \<noteq> 0"
+      using assms by (metis Ints_0 Ints_add_iff2 Ints_of_nat)
+    have neq2: "x - of_nat (Suc n) \<noteq> 0"
+      using assms by force
+    have neq3: "x ^ 2 - of_nat (Suc n) ^ 2 \<noteq> 0"
+     using assms by (metis Ints_of_nat eq_iff_diff_eq_0 minus_in_Ints_iff power2_eq_iff)
+    show "?lhs n = ?rhs n" using neq1 neq2 neq3
+      by (simp add: divide_simps del: of_nat_Suc) (auto simp: power2_eq_square algebra_simps)
+  qed
+  finally show ?thesis .
+qed
+
+lemma summable_cot_pfd_complex:
+  fixes x :: complex
+  shows "summable (\<lambda>n. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2))"
+  using sums_cot_pfd_complex[of x] by (simp add: sums_iff)
+
+lemma summable_cot_pfd_real:
+  fixes x :: real
+  shows "summable (\<lambda>n. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2))"
+proof -
+  have "summable (\<lambda>n. complex_of_real (2 * x / (x ^ 2 - of_nat (Suc n) ^ 2)))"
+    using summable_cot_pfd_complex[of "of_real x"] by simp
+  also have "?this \<longleftrightarrow> ?thesis"
+    by (rule summable_of_real_iff)
+  finally show ?thesis .
+qed
+
+lemma sums_cot_pfd_real:
+  fixes x :: real
+  shows "(\<lambda>n. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2)) sums cot_pfd x"
+  using summable_cot_pfd_real[of x] by (simp add: cot_pfd_def sums_iff)
+
+lemma cot_pfd_complex_of_real [simp]: "cot_pfd (complex_of_real x) = of_real (cot_pfd x)"
+  using sums_of_real[OF sums_cot_pfd_real[of x], where ?'a = complex]
+        sums_cot_pfd_complex[of "of_real x"] sums_unique2 by auto
+
+lemma uniform_limit_cot_pfd_real:
+  assumes "R \<ge> 0"
+  shows   "uniform_limit (cball 0 R :: real set)
+             (\<lambda>N x. \<Sum>n<N. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2)) cot_pfd sequentially"
+proof -
+  have "uniform_limit (cball 0 R)
+          (\<lambda>N x. Re (\<Sum>n<N. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2))) (\<lambda>x. Re (cot_pfd x)) sequentially"
+    by (intro uniform_limit_intros uniform_limit_cot_pfd_complex assms)
+  hence "uniform_limit (of_real ` cball 0 R)
+          (\<lambda>N x. Re (\<Sum>n<N. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2))) (\<lambda>x. Re (cot_pfd x)) sequentially"
+    by (rule uniform_limit_on_subset) auto
+  thus ?thesis
+    by (simp add: uniform_limit_image)
+qed
+
+
+
+lemma holomorphic_on_cot_pfd [holomorphic_intros]:
+  assumes "A \<subseteq> -(\<int>-{0})"
+  shows   "cot_pfd holomorphic_on A"
+proof -
+  have *: "open (-(\<int>-{0}) :: complex set)"
+    by (intro open_Compl closed_subset_Ints) auto
+  define f :: "nat \<Rightarrow> complex \<Rightarrow> complex"
+    where "f = (\<lambda>N x. \<Sum>n<N. 2 * x / (x ^ 2 - of_nat (Suc n) ^ 2))"
+  have "cot_pfd holomorphic_on -(\<int>-{0})"
+  proof (rule holomorphic_uniform_sequence[OF *])
+    fix n :: nat
+    have **: "x\<^sup>2 - (of_nat (Suc n))\<^sup>2 \<noteq> 0" if "x \<in> -(\<int>-{0})" for x :: complex and n :: nat
+    proof
+      assume "x\<^sup>2 - (of_nat (Suc n))\<^sup>2 = 0"
+      hence "(of_nat (Suc n))\<^sup>2 = x\<^sup>2"
+        by algebra
+      hence "x = of_nat (Suc n) \<or> x = -of_nat (Suc n)"
+        by (subst (asm) eq_commute, subst (asm) power2_eq_iff) auto
+      moreover have "(of_nat (Suc n) :: complex) \<in> \<int>" "(-of_nat (Suc n) :: complex) \<in> \<int>"
+        by (intro Ints_minus Ints_of_nat)+
+      ultimately show False using that
+        by (auto simp del: of_nat_Suc)
+    qed
+    show "f n holomorphic_on -(\<int> - {0})"
+      unfolding f_def by (intro holomorphic_intros **)

@@ -1,0 +1,482 @@
+theory Existence imports
+  Piecewise_Continuous
+begin
+
+
+definition has_laplace :: "(real \<Rightarrow> complex) \<Rightarrow> complex \<Rightarrow> complex \<Rightarrow> bool"
+  (infixr "has'_laplace" 46)
+  where "(f has_laplace L) s \<longleftrightarrow> ((\<lambda>t. exp (t *\<^sub>R - s) * f t) has_integral L) {0..}"
+
+lemma has_laplaceI:
+  assumes "((\<lambda>t. exp (t *\<^sub>R - s) * f t) has_integral L) {0..}"
+  shows "(f has_laplace L) s"
+  using assms
+  by (auto simp: has_laplace_def)
+
+lemma has_laplaceD:
+  assumes "(f has_laplace L) s"
+  shows "((\<lambda>t. exp (t *\<^sub>R - s) * f t) has_integral L) {0..}"
+  using assms
+  by (auto simp: has_laplace_def)
+
+lemma has_laplace_unique:
+  "L = M" if
+  "(f has_laplace L) s"
+  "(f has_laplace M) s"
+  using that
+  by (auto simp: has_laplace_def has_integral_unique)
+
+
+
+definition "exponential_order M c f \<longleftrightarrow> 0 < M \<and> (\<forall>\<^sub>F t in at_top. norm (f t) \<le> M * exp (c * t))"
+
+lemma exponential_orderI:
+  assumes "0 < M" and eo: "\<forall>\<^sub>F t in at_top. norm (f t) \<le> M * exp (c * t)"
+  shows "exponential_order M c f"
+  by (auto intro!: assms simp: exponential_order_def)
+
+lemma exponential_orderD:
+  assumes "exponential_order M c f"
+  shows "0 < M" "\<forall>\<^sub>F t in at_top. norm (f t) \<le> M * exp (c * t)"
+  using assms by (auto simp: exponential_order_def)
+
+context
+  fixes f::"real \<Rightarrow> complex"
+begin
+
+definition laplace_integrand::"complex \<Rightarrow> real \<Rightarrow> complex"
+  where "laplace_integrand s t = exp (t *\<^sub>R - s) * f t"
+
+lemma laplace_integrand_absolutely_integrable_on_Icc:
+  "laplace_integrand s absolutely_integrable_on {a..b}"
+  if "AE x\<in>{a..b} in lebesgue. cmod (f x) \<le> B" "f integrable_on {a..b}"
+  apply (cases "b \<le> a")
+  subgoal by (auto intro!: absolutely_integrable_onI integrable_negligible[OF negligible_real_ivlI])
+proof goal_cases
+  case 1
+  have "compact ((\<lambda>x. exp (- (x *\<^sub>R s))) ` {a .. b})"
+    by (rule compact_continuous_image) (auto intro!: continuous_intros)
+  then obtain C where C: "0 \<le> C" "a \<le> x \<Longrightarrow> x \<le> b \<Longrightarrow> cmod (exp (- (x *\<^sub>R s))) \<le> C" for x
+    using 1
+    apply (auto simp: bounded_iff dest!: compact_imp_bounded)
+    by (metis atLeastAtMost_iff exp_ge_zero order_refl order_trans scaleR_complex.sel(1))
+
+  have m: "(\<lambda>x. indicator {a..b} x *\<^sub>R f x) \<in> borel_measurable lebesgue"
+    apply (rule has_integral_implies_lebesgue_measurable)
+    apply (rule integrable_integral)
+    apply (rule that)
+    done
+  have "complex_set_integrable lebesgue {a..b} (\<lambda>x. exp (- (x *\<^sub>R s)) * (indicator {a .. b} x *\<^sub>R f x))"
+    unfolding set_integrable_def
+    apply (rule integrableI_bounded_set_indicator[where B="C * B"])
+       apply (simp; fail)
+      apply (rule borel_measurable_times)
+       apply measurable
+        apply (simp add: measurable_completion)
+       apply (simp add: measurable_completion)
+      apply (rule m)
+    apply (simp add: emeasure_lborel_Icc_eq)
+    using that(1)
+    apply eventually_elim
+    apply (auto simp: norm_mult)
+    apply (rule mult_mono)
+    using C
+    by auto
+  then show ?case
+    unfolding set_integrable_def
+    by (simp add: laplace_integrand_def[abs_def] indicator_inter_arith[symmetric])
+qed
+
+lemma laplace_integrand_integrable_on_Icc:
+  "laplace_integrand s integrable_on {a..b}"
+  if "AE x\<in>{a..b} in lebesgue. cmod (f x) \<le> B" "f integrable_on {a..b}"
+  using laplace_integrand_absolutely_integrable_on_Icc[OF that]
+  using set_lebesgue_integral_eq_integral(1) by blast
+
+lemma eventually_laplace_integrand_le:
+  "\<forall>\<^sub>F t in at_top. cmod (laplace_integrand s t) \<le> M * exp (- (Re s - c) * t)"
+  if "exponential_order M c f"
+  using exponential_orderD(2)[OF that]
+proof (eventually_elim)
+  case (elim t)
+  show ?case
+    unfolding laplace_integrand_def
+    apply (rule norm_mult_ineq[THEN order_trans])
+    apply (auto intro!: mult_left_mono[THEN order_trans, OF elim])
+    apply (auto simp: exp_minus divide_simps algebra_simps exp_add[symmetric])
+    done
+qed
+
+lemma
+  assumes eo: "exponential_order M c f"
+    and cs: "c < Re s"
+  shows laplace_integrand_integrable_on_Ici_iff:
+    "laplace_integrand s integrable_on {a..} \<longleftrightarrow>
+      (\<forall>k>a. laplace_integrand s integrable_on {a..k})"
+    (is ?th1)
+  and laplace_integrand_absolutely_integrable_on_Ici_iff:
+    "laplace_integrand s absolutely_integrable_on {a..} \<longleftrightarrow>
+      (\<forall>k>a. laplace_integrand s absolutely_integrable_on {a..k})"
+    (is ?th2)
+proof -
+  have "\<forall>\<^sub>F t in at_top. a < (t::real)"
+    using eventually_gt_at_top by blast
+  then have "\<forall>\<^sub>F t in at_top. t > a \<and> cmod (laplace_integrand s t) \<le> M * exp (- (Re s - c) * t)"
+    using eventually_laplace_integrand_le[OF eo]
+    by eventually_elim (auto)
+  then obtain A where A: "A > a" and le: "t \<ge> A \<Longrightarrow> cmod (laplace_integrand s t) \<le> M * exp (- (Re s - c) * t)" for t
+    unfolding eventually_at_top_linorder
+    by blast
+
+  let ?f = "\<lambda>(k::real) (t::real). indicat_real {A..k} t *\<^sub>R laplace_integrand s t"
+
+  from exponential_orderD[OF eo] have "M \<noteq> 0" by simp
+  have 2: "(\<lambda>t. M * exp (- (Re s - c) * t)) integrable_on {A..}"
+    by (rule integrable_on_exp_minus_to_infinity) (simp add: cs)
+
+  have 3: "t\<in>{A..} \<Longrightarrow> cmod (?f k t) \<le> M * exp (- (Re s - c) * t)"
+    (is "t\<in>_\<Longrightarrow> ?lhs t \<le> ?rhs t")
+    for t k
+  proof safe
+    fix t assume "A \<le> t"
+    have "?lhs t \<le> cmod (laplace_integrand s t)"
+      by (auto simp: indicator_def)
+    finally show "?lhs t \<le> ?rhs t" .
+  qed
+
+  have 4: "\<forall>t\<in>{A..}. ((\<lambda>k. ?f k t) \<longlongrightarrow> laplace_integrand s t) at_top"
+  proof safe
+    fix t assume t: "t \<ge> A"
+    have "\<forall>\<^sub>F k in at_top. k \<ge> t"
+      by (simp add: eventually_ge_at_top)
+    then have "\<forall>\<^sub>F k in at_top. laplace_integrand s t = ?f k t"
+    then show "((\<lambda>k. ?f k t) \<longlongrightarrow> laplace_integrand s t) at_top" using tendsto_const
+      by (rule Lim_transform_eventually[rotated])
+  qed
+
+  show th1: ?th1
+  proof safe
+    assume "\<forall>k>a. laplace_integrand s integrable_on {a..k}"
+    note li = this[rule_format]
+    have liA: "laplace_integrand s integrable_on {A..k}" for k
+    proof cases
+      assume "k \<le> A"
+      then have "{A..k} = (if A = k then {k} else {})" by auto
+      then show ?thesis by (auto intro!: integrable_negligible)
+    next
+      assume n: "\<not> k \<le> A"
+      show ?thesis
+        by (rule integrable_on_subinterval[OF li[of k]]) (use A n in auto)
+    qed
+    have "?f k integrable_on {A..k}" for k
+      using liA[of k] negligible_empty
+      by (rule integrable_spike) auto
+    then have 1: "?f k integrable_on {A..}" for k
+      by (rule integrable_on_superset) auto
+    note 1 2 3 4
+    note * = this[unfolded set_integrable_def]
+    from li[of A] dominated_convergence_at_top(1)[OF *]
+    show "laplace_integrand s integrable_on {a..}"
+  qed (rule integrable_on_subinterval, assumption, auto)
+
+  show ?th2
+  proof safe
+    assume ai: "\<forall>k>a. laplace_integrand s absolutely_integrable_on {a..k}"
+    then have "laplace_integrand s absolutely_integrable_on {a..A}"
+      using A by auto
+    moreover
+    from ai have "\<forall>k>a. laplace_integrand s integrable_on {a..k}"
+      using set_lebesgue_integral_eq_integral(1) by blast
+    with th1 have i: "laplace_integrand s integrable_on {a..}" by auto
+    have 1: "?f k integrable_on {A..}" for k
+      apply (rule integrable_on_superset[where S="{A..k}"])
+      using _ negligible_empty
+        apply (rule integrable_spike[where f="laplace_integrand s"])
+        apply (rule integrable_on_subinterval)
+         apply (rule i)
+    have "laplace_integrand s absolutely_integrable_on {A..}"
+      using _ dominated_convergence_at_top(1)[OF 1 2 3 4] 2
+      by (rule absolutely_integrable_integrable_bound) (use le in auto)
+    ultimately
+    have "laplace_integrand s absolutely_integrable_on ({a..A} \<union> {A..})"
+      by (rule set_integrable_Un) auto
+    finally show "local.laplace_integrand s absolutely_integrable_on {a..}" .
+  qed (rule set_integrable_subset, assumption, auto)
+qed
+
+theorem laplace_exists_laplace_integrandI:
+  assumes "laplace_integrand s integrable_on {0..}"
+  obtains F where "(f has_laplace F) s"
+proof -
+  from assms
+  have "(f has_laplace integral {0..} (laplace_integrand s)) s"
+    unfolding has_laplace_def laplace_integrand_def by blast
+  thus ?thesis ..
+qed
+
+lemma
+  assumes eo: "exponential_order M c f"
+    and pc: "\<And>k. AE x\<in>{0..k} in lebesgue. cmod (f x) \<le> B k" "\<And>k. f integrable_on {0..k}"
+    and s: "Re s > c"
+  shows laplace_integrand_integrable: "laplace_integrand s integrable_on {0..}" (is ?th1)
+    and laplace_integrand_absolutely_integrable:
+      "laplace_integrand s absolutely_integrable_on {0..}" (is ?th2)
+  using eo laplace_integrand_absolutely_integrable_on_Icc[OF pc] s
+  by (auto simp: laplace_integrand_integrable_on_Ici_iff
+      laplace_integrand_absolutely_integrable_on_Ici_iff
+      set_lebesgue_integral_eq_integral)
+
+lemma piecewise_continuous_on_AE_boundedE:
+  assumes pc: "\<And>k. piecewise_continuous_on a k (I k) f"
+  obtains B where "\<And>k. AE x\<in>{a..k} in lebesgue. cmod (f x) \<le> B k"
+  apply atomize_elim
+  apply (rule choice)
+  apply (rule allI)
+  subgoal for k
+    using bounded_piecewise_continuous_image[OF pc[of k]]
+    by (force simp: bounded_iff)
+  done
+
+theorem piecewise_continuous_on_has_laplace:
+  assumes eo: "exponential_order M c f"
+    and pc: "\<And>k. piecewise_continuous_on 0 k (I k) f"
+    and s: "Re s > c"
+  obtains F where "(f has_laplace F) s"
+proof -
+  from piecewise_continuous_on_AE_boundedE[OF pc]
+  obtain B where AE: "AE x\<in>{0..k} in lebesgue. cmod (f x) \<le> B k" for k by force
+  have int: "f integrable_on {0..k}" for k
+    using pc
+    by (rule piecewise_continuous_on_integrable)
+  show ?thesis
+    using pc
+    apply (rule piecewise_continuous_on_AE_boundedE)
+    apply (rule laplace_exists_laplace_integrandI)
+     apply (rule laplace_integrand_integrable)
+        apply (rule eo)
+       apply assumption
+      apply (rule int)
+     apply (rule s)
+    by (rule that)
+qed
+
+end
+
+
+
+lemma exp_scaleR_has_vector_derivative_left'[derivative_intros]:
+  "((\<lambda>t. exp (t *\<^sub>R A)) has_vector_derivative A * exp (t *\<^sub>R A)) (at t within S)"
+  by (metis exp_scaleR_has_vector_derivative_right exp_times_scaleR_commute)
+
+lemma
+  assumes a: "0 < Re a"
+  shows integrable_on_cexp_minus_to_infinity: "(\<lambda>x. exp (x *\<^sub>R - a)) integrable_on {c..}"
+    and integral_cexp_minus_to_infinity:  "integral {c..} (\<lambda>x. exp (x *\<^sub>R - a)) = exp (c *\<^sub>R - a) / a"
+proof -
+  from a have "a \<noteq> 0" by auto
+  define f where "f = (\<lambda>k x. if x \<in> {c..real k} then exp (x *\<^sub>R -a) else 0)"
+  {
+    fix k :: nat assume k: "of_nat k \<ge> c"
+      have "((\<lambda>x. exp (x *\<^sub>R -a)) has_integral (-exp (k *\<^sub>R -a)/a - (-exp (c *\<^sub>R -a)/a))) {c..real k}"
+      by (intro fundamental_theorem_of_calculus)
+         (auto intro!: derivative_eq_intros exp_scaleR_has_vector_derivative_left
+            simp: divide_inverse_commute
+               simp del: scaleR_minus_left scaleR_minus_right)
+    hence "(f k has_integral (exp (c *\<^sub>R -a)/a - exp (k *\<^sub>R -a)/a)) {c..}" unfolding f_def
+      by (subst has_integral_restrict) simp_all
+  } note has_integral_f = this
+
+  have integrable_fk: "f k integrable_on {c..}" for k
+  proof -
+    have "(\<lambda>x. exp (x *\<^sub>R -a)) integrable_on {c..of_real k}" (is ?P)
+      unfolding f_def by (auto intro!: continuous_intros integrable_continuous_real)
+    then have int: "(f k) integrable_on {c..of_real k}"
+      by (rule integrable_eq) (simp add: f_def)
+    show ?thesis
+      by (rule integrable_on_superset[OF int]) (auto simp: f_def)
+  qed
+  have limseq: "\<And>x. x \<in>{c..} \<Longrightarrow> (\<lambda>k. f k x) \<longlonglongrightarrow> exp (x *\<^sub>R - a)"
+    apply (auto intro!: Lim_transform_eventually[OF tendsto_const] simp: f_def)
+    by (meson eventually_sequentiallyI nat_ceiling_le_eq)
+  have bnd: "\<And>x. x \<in> {c..} \<Longrightarrow> cmod (f k x) \<le> exp (- Re a * x)" for k
+    by (auto simp: f_def)
+
+  have [simp]: "f k = (\<lambda>_. 0)" if "of_nat k < c" for k using that by (auto simp: fun_eq_iff f_def)
+  have integral_f: "integral {c..} (f k) =
+                      (if real k \<ge> c then exp (c *\<^sub>R -a)/a - exp (k *\<^sub>R -a)/a else 0)"
+    for k using integral_unique[OF has_integral_f[of k]] by simp
+
+  have "(\<lambda>k. exp (c *\<^sub>R -a)/a - exp (k *\<^sub>R -a)/a) \<longlonglongrightarrow> exp (c*\<^sub>R-a)/a - 0/a"
+    apply (intro tendsto_intros filterlim_compose[OF exp_at_bot]
+          filterlim_tendsto_neg_mult_at_bot[OF tendsto_const] filterlim_real_sequentially)+
+     apply (rule tendsto_norm_zero_cancel)
+        filterlim_compose[OF exp_at_bot] filterlim_compose[OF filterlim_uminus_at_bot_at_top]
+        filterlim_at_top_mult_tendsto_pos[OF tendsto_const])
+  moreover
+  note A = dominated_convergence[where g="\<lambda>x. exp (x *\<^sub>R -a)",
+      bnd limseq]
+  from A(1) show "(\<lambda>x. exp (x *\<^sub>R - a)) integrable_on {c..}" .
+  from eventually_gt_at_top[of "nat \<lceil>c\<rceil>"] have "eventually (\<lambda>k. of_nat k > c) sequentially"
+    by eventually_elim linarith
+  hence "eventually (\<lambda>k. exp (c *\<^sub>R -a)/a - exp (k *\<^sub>R -a)/a = integral {c..} (f k)) sequentially"
+    by eventually_elim (simp add: integral_f)
+  ultimately have "(\<lambda>k. integral {c..} (f k)) \<longlonglongrightarrow> exp (c *\<^sub>R -a)/a - 0/a"
+    by (rule Lim_transform_eventually)
+  from LIMSEQ_unique[OF A(2) this]
+  show "integral {c..} (\<lambda>x. exp (x *\<^sub>R -a)) = exp (c *\<^sub>R -a)/a" by simp
+qed
+
+lemma has_integral_cexp_minus_to_infinity:
+  assumes a: "0 < Re a"
+  shows "((\<lambda>x. exp (x *\<^sub>R - a)) has_integral exp (c *\<^sub>R - a) / a) {c..}"
+  using integral_cexp_minus_to_infinity[OF assms]
+    integrable_on_cexp_minus_to_infinity[OF assms]
+  using has_integral_integrable_integral by blast
+
+lemma has_laplace_one:
+  "((\<lambda>_. 1) has_laplace inverse s) s" if "Re s > 0"
+proof (safe intro!: has_laplaceI)
+  from that have "((\<lambda>t. exp (t *\<^sub>R - s)) has_integral inverse s) {0..}"
+    by (rule has_integral_cexp_minus_to_infinity[THEN has_integral_eq_rhs])
+       (auto simp: inverse_eq_divide)
+  then show "((\<lambda>t. exp (t *\<^sub>R - s) * 1) has_integral inverse s) {0..}" by simp
+qed
+
+lemma has_laplace_add:
+  assumes f: "(f has_laplace F) S"
+  assumes g: "(g has_laplace G) S"
+  shows "((\<lambda>x. f x + g x) has_laplace F + G) S"
+  apply (rule has_laplaceI)
+  using has_integral_add[OF has_laplaceD[OF f ] has_laplaceD[OF g]]
+  by (auto simp: algebra_simps)
+
+lemma has_laplace_cmul:
+  assumes "(f has_laplace F) S"
+  shows "((\<lambda>x. r *\<^sub>R f x) has_laplace r *\<^sub>R F) S"
+  apply (rule has_laplaceI)
+  using has_laplaceD[OF assms, THEN has_integral_cmul[where c=r]]
+  by auto
+
+lemma has_laplace_uminus:
+  assumes "(f has_laplace F) S"
+  shows "((\<lambda>x. - f x) has_laplace - F) S"
+  using has_laplace_cmul[OF assms, of "-1"]
+  by auto
+
+lemma has_laplace_minus:
+  assumes f: "(f has_laplace F) S"
+  assumes g: "(g has_laplace G) S"
+  shows "((\<lambda>x. f x - g x) has_laplace F - G) S"
+  using has_laplace_add[OF f has_laplace_uminus[OF g]]
+  by simp
+
+lemma has_laplace_spike:
+  "(f has_laplace L) s"
+  if L: "(g has_laplace L) s"
+    and "negligible T"
+    and "\<And>t. t \<notin> T \<Longrightarrow> t \<ge> 0 \<Longrightarrow> f t = g t"
+  by (auto intro!: has_laplaceI has_integral_spike[where S="T", OF _ _ has_laplaceD[OF L]] that)
+
+
+  "((\<lambda>t. exp (t *\<^sub>R b) * f t) has_laplace L) s"
+  if "(f has_laplace L) (s - b)"
+  using that
+  by (auto intro!: has_laplaceI dest!: has_laplaceD
+      simp: mult_exp_exp algebra_simps)
+
+theorem has_laplace_derivative_time_domain:
+  "(f' has_laplace s * L - f0) s"
+  if L: "(f has_laplace L) s"
+    and f': "\<And>t. t > 0 \<Longrightarrow> (f has_vector_derivative f' t) (at t)"
+    and f0: "(f \<longlongrightarrow> f0) (at_right 0)"
+    and eo: "exponential_order M c f"
+    and cs: "c < Re s"
+proof (rule has_laplaceI)
+  have ce: "continuous_on S (\<lambda>t. exp (t *\<^sub>R - s))" for S
+    by (auto intro!: continuous_intros)
+  have de: "((\<lambda>t. exp (t *\<^sub>R - s)) has_vector_derivative (- s * exp (- (t *\<^sub>R s)))) (at t)" for t
+    by (auto simp: has_vector_derivative_def intro!: derivative_eq_intros ext)
+  have "((\<lambda>x. -s * (f x * exp (- (x *\<^sub>R s)))) has_integral - s * L) {0..}"
+    apply (rule has_integral_mult_right)
+    using has_laplaceD[OF L]
+    by (auto simp: ac_simps)
+
+  define g where "g x = (if x \<le> 0 then f0 else f x)" for x
+
+  have eog: "exponential_order M c g"
+  proof -
+    from exponential_orderD[OF eo] have "0 < M"
+      and ev: "\<forall>\<^sub>F t in at_top. cmod (f t) \<le> M * exp (c * t)" .
+    have "\<forall>\<^sub>F t::real in at_top. t > 0" by simp
+    with ev have "\<forall>\<^sub>F t in at_top. cmod (g t) \<le> M * exp (c * t)"
+      by eventually_elim (auto simp: g_def)
+      by (rule exponential_orderI)
+  qed
+  have Lg: "(g has_laplace L) s"
+    using L
+    by (rule has_laplace_spike[where T="{0}"]) (auto simp: g_def)
+  have g': "\<And>t. 0 < t \<Longrightarrow> (g has_vector_derivative f' t) (at t)"
+    using f'
+    by (rule has_vector_derivative_transform_within_open[where S="{0<..}"]) (auto simp: g_def)
+  have cg: "continuous_on {0..k} g" for k
+    apply (auto simp: g_def continuous_on_def)
+     apply (rule filterlim_at_within_If)
+    subgoal by (rule tendsto_intros)
+    subgoal
+      apply (rule tendsto_within_subset)
+       apply (rule f0)
+      by auto
+    subgoal premises prems for x
+    proof -
+      from prems have "0 < x" by auto
+      from order_tendstoD[OF tendsto_ident_at this]
+      have "eventually ((<) 0) (at x within {0..k})" by auto
+      then have "\<forall>\<^sub>F x in at x within {0..k}. f x = (if x \<le> 0 then f0 else f x)"
+        by eventually_elim auto
+      moreover
+      note [simp] = at_within_open[where S="{0<..}"]
+      have "continuous_on {0<..} f"
+        by (rule continuous_on_vector_derivative)
+          (auto simp add: intro!: f')
+      then have "(f \<longlongrightarrow> f x) (at x within {0..k})"
+        by (auto simp: continuous_on_def intro: Lim_at_imp_Lim_at_within)
+      ultimately show ?thesis
+        by (rule Lim_transform_eventually[rotated])
+    qed
+    done
+  then have pcg: "piecewise_continuous_on 0 k {} g" for k
+    by (auto simp: piecewise_continuous_on_def)
+  from piecewise_continuous_on_AE_boundedE[OF this]
+  obtain B where B: "AE x\<in>{0..k} in lebesgue. cmod (g x) \<le> B k" for k by auto
+  have 1: "laplace_integrand g s absolutely_integrable_on {0..}"
+    apply (rule laplace_integrand_absolutely_integrable[OF eog])
+      apply (rule B)
+     apply (rule piecewise_continuous_on_integrable)
+     apply (rule pcg)
+    apply (rule cs)
+    done
+  then have csi: "complex_set_integrable lebesgue {0..} (\<lambda>x. exp (x *\<^sub>R - s) * g x)"
+    by (auto simp: laplace_integrand_def[abs_def])
+  from has_laplaceD[OF Lg, THEN has_integral_improperE, OF csi]
+  obtain J where J: "\<And>k. ((\<lambda>t. exp (t *\<^sub>R - s) * g t) has_integral J k) {0..k}"
+    and [tendsto_intros]: "(J \<longlongrightarrow> L) at_top"
+    by auto
+  have "((\<lambda>x. -s * (exp (x *\<^sub>R - s) * g x)) has_integral -s * J k) {0..k}" for k
+    by (rule has_integral_mult_right) (rule J)
+  then have *: "((\<lambda>x. g x * (- s * exp (- (x *\<^sub>R s)))) has_integral -s * J k) {0..k}" for k
+    by (auto simp: algebra_simps)
+  have "\<forall>\<^sub>F k::real in at_top. k \<ge> 0"
+    using eventually_ge_at_top by blast
+  then have evI: "\<forall>\<^sub>F k in at_top. ((\<lambda>t. exp (t *\<^sub>R - s) * f' t) has_integral
+    g k * exp (k *\<^sub>R - s) + s * J k - g 0) {0..k}"
+  proof eventually_elim
+    case (elim k)
+    show ?case
+      apply (subst mult.commute)
+      apply (rule integration_by_parts_interior[OF bounded_bilinear_mult], fact)
+      apply (rule cg) apply (rule ce) apply (rule g') apply force apply (rule de)
+      apply (rule has_integral_eq_rhs)
+       apply (rule *)
+lemma filtermap_times_pos_at_top: "filtermap ((*) e) at_top = at_top"
+  apply (rule filtermap_fun_inverse[of "(*) (inverse e)"])
+    have "\<forall>\<^sub>F t in (filtermap exp (filtermap ((*) c) at_top)). K < t"

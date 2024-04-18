@@ -1,0 +1,402 @@
+
+
+
+lemma all_edges_mono:
+  "vs \<subseteq> ws \<Longrightarrow> all_edges vs \<subseteq> all_edges ws"
+  unfolding all_edges_def by auto
+
+lemma all_edges_alt: "all_edges S = {{x, y} | x y . x \<in> S \<and> y \<in> S \<and> x \<noteq> y}"
+  unfolding all_edges_def
+proof (intro subset_antisym subsetI)
+  fix x assume "x \<in> {e. e \<subseteq> S \<and> card e = 2}"
+  then obtain u v where "x = {u, v}" and "card {u, v} = 2" and "{u, v} \<subseteq> S"
+    by (metis (mono_tags, lifting) card_2_iff mem_Collect_eq)
+  then show "x \<in> {{x, y} |x y. x \<in> S \<and> y \<in> S \<and> x \<noteq> y}"
+    by fastforce 
+next
+  show "\<And>x. x \<in> {{x, y} |x y. x \<in> S \<and> y \<in> S \<and> x \<noteq> y} \<Longrightarrow> x \<in> {e. e \<subseteq> S \<and> card e = 2}"
+    by auto
+qed
+
+lemma all_edges_alt_pairs: "all_edges S = mk_edge ` {uv \<in> S \<times> S. fst uv \<noteq> snd uv}"
+  unfolding all_edges_alt
+proof (intro subset_antisym)
+  have img: "mk_edge ` {uv \<in> S \<times> S. fst uv \<noteq> snd uv} = {mk_edge (u, v) | u v. (u, v) \<in> S \<times> S \<and> u \<noteq>v}"
+    by (smt (z3) Collect_cong fst_conv prod.collapse setcompr_eq_image snd_conv)
+  then show " mk_edge ` {uv \<in> S \<times> S. fst uv \<noteq> snd uv} \<subseteq> {{x, y} |x y. x \<in> S \<and> y \<in> S \<and> x \<noteq> y}"
+    by auto
+  show  "{{x, y} |x y. x \<in> S \<and> y \<in> S \<and> x \<noteq> y} \<subseteq> mk_edge ` {uv \<in> S \<times> S. fst uv \<noteq> snd uv}" 
+    using img by simp
+qed
+
+lemma all_edges_subset_Pow: "all_edges A \<subseteq> Pow A"
+  by (auto simp: all_edges_def)
+
+lemma all_edges_disjoint:  "S \<inter> T = {} \<Longrightarrow> all_edges S \<inter> all_edges T = {}"
+  by (auto simp add: all_edges_def disjoint_iff subset_eq)
+
+lemma card_all_edges: "finite A \<Longrightarrow> card (all_edges A) = card A choose 2"
+  using all_edges_def by (metis (full_types) n_subsets) 
+
+lemma finite_all_edges: "finite S \<Longrightarrow> finite (all_edges S)"
+  by (meson all_edges_subset_Pow finite_Pow_iff finite_subset)
+
+lemma in_mk_edge_img: "(a,b) \<in> A \<or> (b,a) \<in> A \<Longrightarrow> {a,b} \<in> mk_edge ` A"
+  by (auto intro: rev_image_eqI)
+
+thm in_mk_edge_img
+lemma in_mk_uedge_img_iff: "{a,b} \<in> mk_edge ` A \<longleftrightarrow> (a,b) \<in> A \<or> (b,a) \<in> A"
+  by (auto simp: doubleton_eq_iff intro: rev_image_eqI)
+
+lemma inj_on_mk_edge: "X \<inter> Y = {} \<Longrightarrow> inj_on mk_edge (X \<times> Y)"
+  by (auto simp: inj_on_def doubleton_eq_iff)
+
+definition complete_graph :: "'a set \<Rightarrow> 'a pregraph" where
+"complete_graph S \<equiv> (S, all_edges S)"
+
+definition all_edges_loops:: "'a set \<Rightarrow> 'a edge set"where
+"all_edges_loops S \<equiv> all_edges S \<union> {{v} | v. v \<in> S}"
+
+lemma all_edges_loops_alt: "all_edges_loops S = {e . e \<subseteq> S \<and> (card e = 2 \<or> card e = 1)}"
+proof -
+  have 1: " {{v} | v. v \<in> S} = {e . e \<subseteq> S \<and> card e = 1}"
+    by (metis One_nat_def card.empty card_Suc_eq empty_iff empty_subsetI insert_subset is_singleton_altdef is_singleton_the_elem )
+  have "{e . e \<subseteq> S \<and> (card e = 2 \<or> card e = 1)} = {e . e \<subseteq> S \<and> card e = 2} \<union> {e . e \<subseteq> S \<and> card e = 1}"
+    by auto
+  then have "{e . e \<subseteq> S \<and> (card e = 2 \<or> card e = 1)} = all_edges S \<union> {{v} | v. v \<in> S}"
+    by (simp add: all_edges_def 1)
+  then show ?thesis unfolding all_edges_loops_def by simp
+qed
+
+lemma loops_disjoint: "all_edges S \<inter> {{v} | v. v \<in> S} = {}"
+  unfolding all_edges_def using card_2_iff 
+  by fastforce
+
+lemma all_edges_loops_ss: "all_edges S \<subseteq> all_edges_loops S" "{{v} | v. v \<in> S} \<subseteq> all_edges_loops S"
+  by (simp_all add: all_edges_loops_def)
+
+lemma finite_singletons: "finite S \<Longrightarrow> finite ({{v} | v. v \<in> S})"
+  by (auto)
+
+lemma card_singletons: 
+  assumes "finite S" shows "card {{v} | v. v \<in> S} = card S" 
+  using assms
+proof (induct S rule: finite_induct)
+  case empty
+  then show ?case by simp
+next
+  case (insert x F)
+  then have disj: "{{x}} \<inter> {{v} |v. v \<in> F} = {}" by auto
+  have "{{v} |v. v \<in> insert x F} = ({{x}} \<union> {{v} |v. v \<in> F})" by auto
+  then have "card {{v} |v. v \<in> insert x F} = card ({{x}} \<union> {{v} |v. v \<in> F})" by simp
+  also have "... = card {{x}} + card {{v} |v. v \<in> F}" using card_Un_disjoint disj assms finite_subset
+    using insert.hyps(1) by force 
+  also have "... = 1 + card {{v} |v. v \<in> F}" using is_singleton_altdef by simp 
+  also have "... = 1 + card F" using insert.hyps by auto
+  finally show ?case using insert.hyps(1) insert.hyps(2) by force 
+qed
+
+lemma finite_all_edges_loops: "finite S \<Longrightarrow> finite (all_edges_loops S)"
+  unfolding all_edges_loops_def using finite_all_edges finite_singletons by auto
+
+lemma card_all_edges_loops: 
+  assumes "finite S"
+  shows "card (all_edges_loops S) = (card S) choose 2 + card S"
+proof -
+  have "card (all_edges_loops S) = card (all_edges S \<union> {{v} | v. v \<in> S})" 
+    by (simp add: all_edges_loops_def)
+  also have "... = card (all_edges S) + card {{v} | v. v \<in> S}"
+    using loops_disjoint assms card_Un_disjoint[of "all_edges S" "{{v} | v. v \<in> S}"] 
+      all_edges_loops_ss finite_all_edges_loops finite_subset by fastforce 
+  also have "... = (card S) choose 2 + card {{v} | v. v \<in> S}" by(simp add: card_all_edges assms)
+  finally show ?thesis using assms card_singletons by auto
+qed
+
+
+locale graph_system = 
+  fixes vertices :: "'a set" ("V")
+  fixes edges :: "'a edge set" ("E")
+  assumes wellformed: "e \<in> E \<Longrightarrow> e \<subseteq> V"
+begin
+
+abbreviation gorder :: "nat" where
+"gorder \<equiv> card (V)"
+
+abbreviation graph_size :: "nat" where
+"graph_size \<equiv> card E"
+
+definition vincident :: "'a \<Rightarrow> 'a edge \<Rightarrow> bool" where
+"vincident v e \<equiv> v \<in> e"
+
+lemma incident_edge_in_wf: "e \<in> E \<Longrightarrow> vincident v e \<Longrightarrow> v \<in> V"
+  using wellformed vincident_def by auto
+
+definition incident_edges :: "'a \<Rightarrow> 'a edge set" where
+"incident_edges v \<equiv>{e . e \<in> E \<and> vincident v e}"
+
+lemma incident_edges_empty: "\<not> (v \<in> V) \<Longrightarrow> incident_edges v = {}"
+  using incident_edges_def incident_edge_in_wf by auto 
+
+lemma finite_incident_edges: "finite E \<Longrightarrow> finite (incident_edges v)"
+  by (simp add: incident_edges_def)
+
+definition edge_adj :: "'a edge \<Rightarrow> 'a edge \<Rightarrow> bool" where
+"edge_adj e1 e2 \<equiv> e1 \<inter> e2 \<noteq> {} \<and> e1 \<in> E \<and> e2 \<in> E"
+
+lemma edge_adj_inE: "edge_adj e1 e2 \<Longrightarrow> e1 \<in> E \<and> e2 \<in> E" 
+  using edge_adj_def by auto
+
+lemma edge_adjacent_alt_def: "e1 \<in> E \<Longrightarrow> e2 \<in> E \<Longrightarrow> \<exists> x . x \<in> V \<and> x \<in> e1 \<and> x \<in> e2 \<Longrightarrow> edge_adj e1 e2"
+  unfolding edge_adj_def by auto
+
+lemma wellformed_alt_fst:  "{x, y} \<in> E \<Longrightarrow> x \<in> V"
+  using wellformed by auto
+
+lemma wellformed_alt_snd:  "{x, y} \<in> E \<Longrightarrow> y \<in> V"
+  using wellformed  by auto
+end
+
+locale fin_graph_system = graph_system + 
+  assumes finV: "finite V"
+begin
+
+lemma fin_edges: "finite E"
+  using wellformed finV
+  by (meson PowI finite_Pow_iff finite_subset subsetI) 
+
+end
+
+locale ne_graph_system = graph_system +
+  assumes not_empty: "V \<noteq> {}"
+
+locale ulgraph = graph_system +
+  assumes edge_size: "e \<in> E \<Longrightarrow> card e > 0 \<and> card e \<le> 2"
+
+begin
+
+lemma alt_edge_size: "e \<in> E \<Longrightarrow> card e = 1 \<or> card e = 2"
+  using edge_size by fastforce 
+
+definition is_loop:: "'a edge \<Rightarrow> bool" where
+"is_loop e \<equiv> card e = 1"
+
+definition is_sedge :: "'a edge \<Rightarrow> bool" where
+"is_sedge e \<equiv> card e = 2"
+
+lemma is_edge_or_loop: "e \<in> E \<Longrightarrow> is_loop e \<or> is_sedge e"
+  using alt_edge_size is_loop_def is_sedge_def by simp
+
+lemma edges_split_loop: "E = {e \<in> E . is_loop e } \<union> {e \<in> E . is_sedge e}"
+  using is_edge_or_loop by auto
+
+lemma edges_split_loop_inter_empty: "{} = {e \<in> E . is_loop e } \<inter> {e \<in> E . is_sedge e}"
+  unfolding is_loop_def is_sedge_def by auto
+
+"vert_adj v1 v2 \<equiv> {v1, v2} \<in> E"
+
+lemma vert_adj_sym: "vert_adj v1 v2 \<longleftrightarrow> vert_adj v2 v1"
+  unfolding vert_adj_def by (simp_all add: insert_commute)
+
+lemma vert_adj_imp_inV: "vert_adj v1 v2 \<Longrightarrow> v1 \<in> V \<and> v2 \<in> V"
+  using vert_adj_def wellformed by auto
+
+lemma vert_adj_inc_edge_iff: "vert_adj v1 v2 \<longleftrightarrow> vincident v1 {v1, v2} \<and> vincident v2 {v1, v2} \<and> {v1, v2} \<in> E"
+  unfolding vert_adj_def vincident_def by auto
+
+lemma not_vert_adj[simp]: "\<not> vert_adj v u \<Longrightarrow> {v, u} \<notin> E"
+  by (simp add: vert_adj_def)
+
+"neighborhood x \<equiv> {v \<in> V . vert_adj x v}"
+
+lemma neighborhood_incident: "u \<in> neighborhood v \<longleftrightarrow> {u, v} \<in> incident_edges v"
+  unfolding neighborhood_def incident_edges_def
+  by (smt (verit) vincident_def insert_commute insert_subset mem_Collect_eq subset_insertI vert_adj_def wellformed) 
+
+definition neighbors_ss :: "'a \<Rightarrow> 'a set \<Rightarrow> 'a set" where
+"neighbors_ss x Y \<equiv> {y \<in> Y . vert_adj x y}"
+
+lemma vert_adj_edge_iff2: 
+  assumes "v1 \<noteq> v2"
+  shows "vert_adj v1 v2 \<longleftrightarrow> (\<exists> e \<in> E . vincident v1 e \<and> vincident v2 e)"
+proof (intro iffI)
+  show "vert_adj v1 v2 \<Longrightarrow> \<exists>e\<in>E. vincident v1 e \<and> vincident v2 e" using vert_adj_inc_edge_iff by blast
+  assume "\<exists>e\<in>E. vincident v1 e \<and> vincident v2 e"
+  then obtain e where ein: "e \<in> E" and "vincident v1 e" and "vincident v2 e"
+  using vert_adj_inc_edge_iff assms alt_edge_size by auto 
+  then have "e = {v1, v2}" using alt_edge_size assms
+    by (smt (verit) card_1_singletonE card_2_iff vincident_def insertE insert_commute singletonD) 
+  then show "vert_adj v1 v2" using ein vert_adj_def
+    by simp 
+qed
+
+definition incident_sedges :: "'a \<Rightarrow> 'a edge set" where
+"incident_sedges v \<equiv> {e \<in> E . vincident v e \<and> card e = 2}"
+
+lemma finite_inc_sedges: "finite E \<Longrightarrow> finite (incident_sedges v)"
+  by (simp add: incident_sedges_def)
+
+lemma incident_sedges_empty[simp]: "v \<notin> V \<Longrightarrow> incident_sedges v = {}"
+  unfolding incident_sedges_def using vincident_def wellformed by fastforce 
+
+definition has_loop :: "'a \<Rightarrow> bool" where
+"has_loop v \<equiv> {v} \<in> E"
+
+lemma has_loop_in_verts: "has_loop v \<Longrightarrow> v \<in> V"
+  using has_loop_def wellformed by auto
+
+lemma is_loop_set_alt: "{{v} | v . has_loop v} = {e \<in> E . is_loop e}"
+proof (intro subset_antisym subsetI)
+  fix x assume "x \<in> {{v} |v. has_loop v}"
+  then obtain v where "x = {v}" and "has_loop v"
+    by blast
+  then show "x \<in> {e \<in> E. is_loop e}" using has_loop_def is_loop_def by auto
+next
+  fix x assume a: "x \<in>{e \<in> E. is_loop e}"
+  then have "is_loop x" by blast
+  then obtain v where "x = {v}" and "{v} \<in> E" using is_loop_def a
+    by (metis card_1_singletonE mem_Collect_eq)
+  thus "x \<in> {{v} |v. has_loop v}" using has_loop_def by simp
+qed
+
+definition incident_loops :: "'a \<Rightarrow> 'a edge set" where
+"incident_loops v \<equiv> {e \<in> E. e = {v}}"
+
+lemma card1_incident_imp_vert: "vincident v e \<and> card e = 1 \<Longrightarrow> e = {v}"
+  by (metis card_1_singletonE vincident_def singleton_iff)
+
+lemma incident_loops_alt: "incident_loops v = {e \<in> E. vincident v e \<and> card e = 1}"
+  unfolding incident_loops_def using card1_incident_imp_vert vincident_def by auto 
+
+lemma incident_loops_simp: "has_loop v \<Longrightarrow> incident_loops v = {{v}}" "\<not> has_loop v \<Longrightarrow> incident_loops v = {}"
+  unfolding incident_loops_def has_loop_def by auto
+
+lemma incident_loops_union: "\<Union> (incident_loops ` V) = {e \<in> E . is_loop e}"
+proof -
+  have "V = {v \<in> V. has_loop v} \<union> {v \<in> V . \<not> has_loop v}"
+    by auto
+  then have "\<Union> (incident_loops ` V) = \<Union> (incident_loops ` {v \<in> V. has_loop v}) \<union> 
+      \<Union> (incident_loops ` {v \<in> V. \<not> has_loop v})" by auto
+  also have "... = \<Union> (incident_loops ` {v \<in> V. has_loop v})" using incident_loops_simp(2) by simp
+  also have "... = \<Union> ({{{v}} | v . has_loop v})" using has_loop_in_verts incident_loops_simp(1) by auto
+  also have "... = ({{v} | v . has_loop v})" by auto
+  finally show ?thesis using is_loop_set_alt by simp
+qed
+
+lemma finite_incident_loops: "finite (incident_loops v)"
+   using incident_loops_simp by (cases "has_loop v") auto
+
+lemma incident_loops_card: "card (incident_loops v) \<le> 1"
+  by (cases "has_loop v") (simp_all add: incident_loops_simp)
+
+lemma incident_edges_union: "incident_edges v = incident_sedges v \<union> incident_loops v"
+  unfolding incident_edges_def incident_sedges_def incident_loops_alt using alt_edge_size
+  by auto 
+
+lemma incident_edges_sedges[simp]: "\<not> has_loop v \<Longrightarrow> incident_edges v = incident_sedges v"
+  using incident_edges_union incident_loops_simp by auto
+
+lemma incident_sedges_union: "\<Union> (incident_sedges ` V) = {e \<in> E . is_sedge e}"
+proof (intro subset_antisym subsetI)
+  fix x assume "x \<in> \<Union> (incident_sedges ` V)"
+  then obtain v where "x \<in> incident_sedges v" by blast
+  then show "x \<in> {e \<in> E. is_sedge e}" using incident_sedges_def is_sedge_def by auto
+next
+  fix x assume "x \<in> {e \<in> E. is_sedge e}"
+  then have xin: "x \<in> E" and c2: "card x = 2" using is_sedge_def by auto
+  then obtain v where "v \<in> x" and vin: "v \<in> V" using wellformed
+    by (meson card_2_iff' subsetD) 
+  then have "x \<in> incident_sedges v" unfolding incident_sedges_def vincident_def using xin c2 by auto
+  then show "x \<in> \<Union> (incident_sedges ` V)" using vin by auto
+qed
+
+lemma empty_not_edge: "{} \<notin> E"
+  using edge_size by fastforce
+
+definition degree :: "'a \<Rightarrow> nat" where
+"degree v \<equiv> card (incident_sedges v) + 2 * (card (incident_loops v))"
+
+lemma degree_no_loops[simp]: "\<not> has_loop v \<Longrightarrow> degree v = card (incident_edges v)"
+  using incident_edges_sedges degree_def incident_loops_simp(2) by auto
+
+lemma degree_none[simp]: "\<not> v  \<in> V \<Longrightarrow> degree v = 0"
+  using degree_def degree_no_loops has_loop_in_verts incident_edges_sedges incident_sedges_empty by auto
+
+lemma degree0_inc_edges_empt_iff: 
+  assumes "finite E"
+  shows "degree v = 0 \<longleftrightarrow> incident_edges v = {}"
+proof (intro iffI)
+  assume "degree v = 0"
+  then have "card (incident_sedges v) + 2 * (card (incident_loops v)) = 0" using degree_def by simp
+  then have "incident_sedges v = {}" and "incident_loops v = {}" 
+    using degree_def incident_edges_union assms finite_incident_edges finite_incident_loops by auto 
+  thus "incident_edges v = {}" using incident_edges_union by auto
+next
+  show "incident_edges v = {} \<Longrightarrow> degree v = 0" using incident_edges_union degree_def
+    by simp 
+qed
+
+lemma incident_edges_neighbors_img: "incident_edges v = (\<lambda> u . {v, u}) ` (neighborhood v)"
+proof (intro subset_antisym subsetI)
+  fix x assume a: "x \<in> incident_edges v"
+  then have xE: "x \<in> E" and vx: "v \<in> x" using incident_edges_def vincident_def by auto
+  then obtain u where "x = {u, v}" using alt_edge_size
+    by (smt (verit, best) card_1_singletonE card_2_iff insertE insert_absorb2 insert_commute singletonD) 
+  then have "u \<in> neighborhood v"
+    using a neighborhood_incident by blast 
+next
+  fix x assume "x \<in> (\<lambda>u. {v, u}) ` neighborhood v"
+  then obtain u' where "x = {v, u'}" and "u' \<in> neighborhood v"
+    by blast
+  then show "x \<in> incident_edges v"
+    by (simp add: insert_commute neighborhood_incident) 
+qed
+
+lemma card_incident_sedges_neighborhood: "card (incident_edges v) = card (neighborhood v)"
+proof -
+  have "bij_betw (\<lambda> u . {v, u}) (neighborhood v) (incident_edges v)" 
+    by(intro bij_betw_imageI inj_onI, simp_all add:incident_edges_neighbors_img)(metis doubleton_eq_iff)
+  thus ?thesis
+    by (metis bij_betw_same_card) 
+qed
+
+lemma degree0_neighborhood_empt_iff: 
+  assumes "finite E"
+  shows "degree v = 0 \<longleftrightarrow> neighborhood v = {}"
+  using degree0_inc_edges_empt_iff incident_edges_neighbors_img
+  by (simp add: assms) 
+
+definition is_isolated_vertex:: "'a \<Rightarrow> bool" where
+"is_isolated_vertex v \<equiv> v \<in> V \<and> (\<forall> u \<in> V . \<not> vert_adj u v)"
+
+lemma is_isolated_vertex_edge: "is_isolated_vertex v \<Longrightarrow> (\<And> e. e \<in> E \<Longrightarrow> \<not> (vincident v e))"
+  unfolding is_isolated_vertex_def
+  by (metis (full_types) all_not_in_conv vincident_def insert_absorb insert_iff mk_disjoint_insert 
+      vert_adj_def vert_adj_edge_iff2 vert_adj_imp_inV) 
+
+lemma is_isolated_vertex_no_loop: "is_isolated_vertex v \<Longrightarrow> \<not> has_loop v"
+  unfolding has_loop_def is_isolated_vertex_def vert_adj_def by auto
+
+lemma is_isolated_vertex_degree0: "is_isolated_vertex v \<Longrightarrow> degree v = 0"
+proof -
+  assume assm: "is_isolated_vertex v"
+  then have "\<not> has_loop v" using is_isolated_vertex_no_loop by simp
+  then have "degree v = card (incident_edges v)" using degree_no_loops by auto
+  moreover have "\<And> e. e \<in> E \<Longrightarrow> \<not> (vincident v e)"
+    using is_isolated_vertex_edge assm by auto
+  then have "(incident_edges v) = {}" unfolding incident_edges_def by auto
+  ultimately show "degree v = 0" by simp
+qed
+
+lemma iso_vertex_empty_neighborhood: "is_isolated_vertex v \<Longrightarrow> neighborhood v = {}"
+  using is_isolated_vertex_def neighborhood_def
+  by (metis (mono_tags, lifting) Collect_empty_eq is_isolated_vertex_edge vert_adj_inc_edge_iff) 
+
+definition max_degree :: "nat" where
+"max_degree \<equiv> Max {degree v | v. v \<in> V}"
+
+definition min_degree :: "nat" where
+"min_degree \<equiv> Min {degree v | v . v \<in> V}"
+
+definition is_edge_between :: "'a set \<Rightarrow> 'a set \<Rightarrow> 'a edge \<Rightarrow> bool" where
+"is_edge_between X Y e \<equiv> \<exists> x y. e = {x, y} \<and> x \<in> X \<and> y \<in> Y"
+

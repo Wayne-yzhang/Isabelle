@@ -1,0 +1,98 @@
+theory Mndetprefix
+  imports Process Stop Mprefix Ndet
+begin
+
+
+definition
+        Mndetprefix   :: "['\<alpha> set, '\<alpha> \<Rightarrow> '\<alpha> process] \<Rightarrow> '\<alpha> process" 
+        where   "Mndetprefix A P \<equiv> if A = {} 
+                                   then STOP
+                                   else Abs_process(\<Union> x\<in>A.  \<F>(x \<rightarrow> P x),
+                                                    \<Union> x\<in>A.  \<D>(x \<rightarrow> P x))"
+syntax
+  "_Mndetprefix"       :: "pttrn \<Rightarrow> 'a set \<Rightarrow> 'a process \<Rightarrow> 'a process" 
+                          ("(3\<sqinter>_\<in>_ \<rightarrow> / _)" [0, 0, 70] 70)
+
+translations
+  "\<sqinter>x\<in>A\<rightarrow> P" \<rightleftharpoons> "CONST Mndetprefix A (\<lambda>x. P)"
+
+lemma mt_Mndetprefix[simp] : "Mndetprefix {} P = STOP"
+  unfolding Mndetprefix_def   by simp
+
+lemma Mndetprefix_is_process : "A \<noteq> {} \<Longrightarrow> is_process (\<Union> x\<in>A. \<F>(x \<rightarrow> P x), \<Union> x\<in>A.   \<D>(x \<rightarrow> P x))"
+  unfolding is_process_def FAILURES_def DIVERGENCES_def
+  apply auto
+  using is_processT1 apply auto[1]
+  using is_processT2 apply blast
+  using is_processT3_SR apply blast
+  using is_processT4 apply blast  
+  using is_processT5_S1 apply blast
+  using is_processT6 apply blast
+  using is_processT7 apply blast
+  using NF_ND apply auto[1]
+  using is_processT9 by blast  
+
+lemma T_Mndetprefix1 : "\<T> (Mndetprefix {} P) = {[]}"
+  unfolding Mndetprefix_def by(simp add: T_STOP)
+
+lemma rep_abs_Mndetprefix[simp]: "A \<noteq> {} \<Longrightarrow>
+     (Rep_process (Abs_process(\<Union>x\<in>A. \<F>(x \<rightarrow> P x),\<Union>x\<in>A. \<D> (x \<rightarrow> P x)))) = 
+      (\<Union>x\<in>A. \<F>(x \<rightarrow> P x), \<Union>x\<in>A. \<D> (x \<rightarrow> P x))"
+  apply(subst Process.process.Abs_process_inverse)
+  by(auto intro: Mndetprefix_is_process[simplified])
+  
+lemma T_Mndetprefix: "A\<noteq>{} \<Longrightarrow> \<T> (Mndetprefix A P) = (\<Union> x\<in>A. \<T> (x \<rightarrow> P x))"
+  unfolding Mndetprefix_def
+  apply(simp, subst Traces_def, simp add: TRACES_def FAILURES_def)
+  apply(auto intro: Mndetprefix_is_process[simplified])
+  unfolding TRACES_def FAILURES_def apply(cases "A = {}") 
+   apply(auto intro: F_T D_T simp: Nil_elem_T)
+  using NF_NT by blast
+
+lemma F_Mndetprefix1 : "\<F> (Mndetprefix {} P) = {(s, X). s = []}"
+  unfolding Mndetprefix_def by(simp add: F_STOP)
+
+lemma F_Mndetprefix: "A\<noteq>{} \<Longrightarrow> \<F> (Mndetprefix A P) = (\<Union> x\<in>A. \<F>(x \<rightarrow> P x))"
+  unfolding Mndetprefix_def 
+  by(simp, subst Failures_def, auto simp : FAILURES_def F_Mndetprefix1)
+
+
+lemma D_Mndetprefix1 : "\<D> (Mndetprefix {} P) = {}"
+  unfolding Mndetprefix_def by(simp add: D_STOP)
+
+lemma D_Mndetprefix : "A\<noteq>{} \<Longrightarrow> \<D>(Mndetprefix A P) = (\<Union> x\<in>A. \<D> (x \<rightarrow> P x))"
+  unfolding Mndetprefix_def 
+  apply(simp, subst D_def, subst Process.process.Abs_process_inverse)
+   by(auto intro: Mndetprefix_is_process[simplified] simp: DIVERGENCES_def)
+  
+
+
+lemma Mndetprefix_unit : "(\<sqinter> x \<in> {a} \<rightarrow> P x)  = (a \<rightarrow> P a)" 
+  by(auto simp : Process.Process_eq_spec F_Mndetprefix D_Mndetprefix)
+
+lemma Mndetprefix_Un_distrib : "A \<noteq>{} \<Longrightarrow> B \<noteq>{} \<Longrightarrow> (\<sqinter> x \<in> A\<union>B \<rightarrow> P x) = ((\<sqinter> x \<in> A \<rightarrow> P x) \<sqinter> (\<sqinter> x \<in> B \<rightarrow> P x))"
+  by(auto simp : Process.Process_eq_spec F_Ndet D_Ndet F_Mndetprefix D_Mndetprefix)
+
+
+lemma Mndetprefix_distrib_unit : "A-{a} \<noteq> {}  \<Longrightarrow> (\<sqinter> x \<in> insert a A \<rightarrow> P x) = ((a \<rightarrow> P a) \<sqinter> (\<sqinter> x \<in> A-{a} \<rightarrow> P x))"
+  by (metis Un_Diff_cancel insert_is_Un insert_not_empty Mndetprefix_Un_distrib Mndetprefix_unit)
+
+
+
+lemma Mndetprefix_cont_finite[simp]:
+assumes "finite A"
+ and    "\<And>x. cont (f x)"
+shows   "cont (\<lambda>y. \<sqinter> z \<in> A \<rightarrow> f z y)"
+proof(rule Finite_Set.finite_induct[OF `finite A`])
+  show  "cont (\<lambda>y. \<sqinter>z\<in>{} \<rightarrow> f z y)" by auto
+next
+  fix A fix a 
+  assume "cont (\<lambda>y. \<sqinter>z\<in>A \<rightarrow> f z y)" and "a \<notin> A"
+  show   "cont (\<lambda>y. \<sqinter>z\<in>insert a A \<rightarrow> f z y)"
+  proof(cases "A={}")
+    case True
+    then show ?thesis by(simp add: Mndetprefix_unit True `\<And>x. cont (f x)`)
+  next
+    case False
+    show ?thesis
+      apply(simp only: Mndetprefix_distrib_unit[OF *], simp only: **)  

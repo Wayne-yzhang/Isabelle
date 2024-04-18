@@ -1,0 +1,139 @@
+theory Tree_Automata_Derivation_Split
+  imports Regular_Tree_Relations.Tree_Automata
+    Ground_MCtxt
+begin
+
+lemma ta_der'_inf_mctxt:
+  assumes "t |\<in>| ta_der' \<A> s"
+  shows "fst (split_vars t) \<le> (mctxt_of_term s)" using assms
+proof (induct s arbitrary: t)
+  case (Fun f ts) then show ?case
+    by (cases t) (auto simp: comp_def less_eq_mctxt_prime intro: less_eq_mctxt'.intros)
+qed (auto simp: ta_der'.simps)
+
+lemma ta_der'_poss_subt_at_ta_der':
+  assumes "t |\<in>| ta_der' \<A> s" and "p \<in> poss t"
+  shows "t |_ p |\<in>| ta_der' \<A> (s |_ p)" using assms
+  by (induct s arbitrary: t p) (auto simp: ta_der'.simps, blast+)
+
+lemma ta_der'_varposs_to_ta_der:
+  assumes "t |\<in>| ta_der' \<A> s" and "p \<in> varposs t"
+  shows "the_Var (t |_ p) |\<in>| ta_der \<A> (s |_ p)" using assms
+  by (induct s arbitrary: t p) (auto simp: ta_der'.simps, blast+)
+
+definition "ta_der'_target_mctxt t \<equiv> fst (split_vars t)"
+definition "ta_der'_target_args t \<equiv>  snd (split_vars t)"
+definition "ta_der'_source_args t s \<equiv> unfill_holes (fst (split_vars t)) s"
+
+lemmas ta_der'_mctxt_simps = ta_der'_target_mctxt_def ta_der'_target_args_def ta_der'_source_args_def
+
+lemma ta_der'_target_mctxt_funas [simp]:
+  "funas_mctxt (ta_der'_target_mctxt u) = funas_term u"
+  by (auto simp: ta_der'_target_mctxt_def)
+
+lemma ta_der'_target_mctxt_ground [simp]:
+  "ground_mctxt (ta_der'_target_mctxt t)"
+  by (auto simp: ta_der'_target_mctxt_def)
+
+lemma ta_der'_source_args_ground:
+  "t |\<in>| ta_der' \<A> s \<Longrightarrow> ground s \<Longrightarrow> \<forall> u \<in> set (ta_der'_source_args t s). ground u"
+  by (metis fill_unfill_holes ground_fill_holes length_unfill_holes ta_der'_inf_mctxt ta_der'_mctxt_simps)
+
+lemma ta_der'_source_args_term_of_gterm:
+  "t |\<in>| ta_der' \<A> (term_of_gterm s) \<Longrightarrow> \<forall> u \<in> set (ta_der'_source_args t (term_of_gterm s)). ground u"
+  by (intro ta_der'_source_args_ground) auto
+
+lemma ta_der'_source_args_length: 
+  "t |\<in>| ta_der' \<A> s \<Longrightarrow> num_holes (ta_der'_target_mctxt t) = length (ta_der'_source_args t s)"
+  by (auto simp: ta_der'_mctxt_simps ta_der'_inf_mctxt)
+
+lemma ta_der'_target_args_length: 
+  "num_holes (ta_der'_target_mctxt t) = length (ta_der'_target_args t)"
+  by (auto simp: ta_der'_mctxt_simps split_vars_num_holes)
+
+lemma ta_der'_target_args_vars_term_conv:
+  "vars_term t = set (ta_der'_target_args t)"
+  by (auto simp: ta_der'_target_args_def split_vars_vars_term_list)
+
+lemma ta_der'_target_args_vars_term_list_conv:
+  "ta_der'_target_args t = vars_term_list t"
+  by (auto simp: ta_der'_target_args_def split_vars_vars_term_list)
+
+
+lemma mctxt_args_ta_der':
+  assumes "num_holes C = length qs" "num_holes C = length ss" 
+    and "\<forall> i < length ss. qs ! i |\<in>| ta_der \<A> (ss ! i)"
+  shows "(fill_holes C (map Var qs)) |\<in>| ta_der' \<A> (fill_holes C ss)" using assms
+proof (induct rule: fill_holes_induct2)
+  case MHole then show ?case
+    by (cases ss; cases qs) (auto simp: ta_der_to_ta_der')
+next
+  case (MFun f ts) then show ?case
+    by (simp add: partition_by_nth_nth(1, 2))
+qed auto
+
+lemma ta_der'_mctxt_structure:
+  assumes "t |\<in>| ta_der' \<A> s"
+  shows "t = fill_holes (ta_der'_target_mctxt t) (map Var (ta_der'_target_args t))" (is "?G1")
+    "s = fill_holes (ta_der'_target_mctxt t) (ta_der'_source_args t s)" (is "?G2")
+    "num_holes (ta_der'_target_mctxt t) = length (ta_der'_source_args t s) \<and>
+     length (ta_der'_source_args t s) = length (ta_der'_target_args t)" (is "?G3")
+    "i < length (ta_der'_source_args t s) \<Longrightarrow> ta_der'_target_args t ! i |\<in>| ta_der \<A> (ta_der'_source_args t s ! i)"
+proof -
+  let ?C = "ta_der'_target_mctxt t" let ?ss = "ta_der'_source_args t s"
+  let ?qs = "ta_der'_target_args t"
+  have t_split: "?G1" by (auto simp: ta_der'_mctxt_simps split_vars_fill_holes)
+  have s_split: "?G2" by (auto simp: ta_der'_mctxt_simps ta_der'_inf_mctxt[OF assms]
+     intro!: fill_unfill_holes[symmetric])
+  have len: "num_holes ?C = length ?ss" "length ?ss = length ?qs" using assms
+    by (auto simp: ta_der'_mctxt_simps split_vars_num_holes ta_der'_inf_mctxt)
+  have "i < length (ta_der'_target_args t) \<Longrightarrow>
+       ta_der'_target_args t ! i |\<in>| ta_der \<A> (ta_der'_source_args t s ! i)" for i
+    using ta_der'_poss_subt_at_ta_der'[OF assms, of "varposs_list t ! i"]
+    unfolding ta_der'_mctxt_simps split_vars_vars_term_list length_map 
+    by (auto simp: unfill_holes_to_subst_at_hole_poss[OF ta_der'_inf_mctxt[OF assms]]
+       simp flip: varposs_list_to_var_term_list[of i t, unfolded varposs_list_var_terms_length])
+       (metis assms hole_poss_split_vars_varposs_list nth_map nth_mem
+        ta_der'_varposs_to_ta_der ta_der_to_ta_der' varposs_eq_varposs_list varposs_list_var_terms_length)
+  then show ?G1 ?G2 ?G3 "i < length (ta_der'_source_args t s) \<Longrightarrow>
+       ta_der'_target_args t ! i |\<in>| ta_der \<A> (ta_der'_source_args t s ! i)" using len t_split s_split
+    by (simp_all add: ta_der'_mctxt_simps)
+qed
+
+lemma ta_der'_ground_mctxt_structure:
+  assumes "t |\<in>| ta_der' \<A> (term_of_gterm s)"
+  shows "t = fill_holes (ta_der'_target_mctxt t) (map Var (ta_der'_target_args t))"
+    "term_of_gterm s = fill_holes (ta_der'_target_mctxt t) (ta_der'_source_args t (term_of_gterm s))"
+    "num_holes (ta_der'_target_mctxt t) =  length (ta_der'_source_args t (term_of_gterm s)) \<and>
+     length (ta_der'_source_args t (term_of_gterm s)) = length (ta_der'_target_args t)"
+    "i < length (ta_der'_target_args t) \<Longrightarrow> ta_der'_target_args t ! i |\<in>| ta_der \<A> (ta_der'_source_args t (term_of_gterm s) ! i)"
+  using ta_der'_mctxt_structure[OF assms]
+  by force+
+
+
+
+definition "ta_der'_gctxt t \<equiv> gctxt_of_gmctxt (gmctxt_of_mctxt (fst (split_vars t)))"
+abbreviation "ta_der'_ctxt t \<equiv> ctxt_of_gctxt (ta_der'_gctxt t)"
+definition "ta_der'_source_ctxt_arg t s \<equiv> hd (unfill_holes (fst (split_vars t)) s)"
+
+abbreviation "ta_der'_source_gctxt_arg t s \<equiv> gterm_of_term (ta_der'_source_ctxt_arg t (term_of_gterm s))"
+
+lemma ta_der'_ctxt_structure:
+  assumes "t |\<in>| ta_der' \<A> s" "vars_term_list t = [q]"
+  shows "t = (ta_der'_ctxt t)\<langle>Var q\<rangle>" (is "?G1")
+    "s = (ta_der'_ctxt t)\<langle>ta_der'_source_ctxt_arg t s\<rangle>" (is "?G2")
+    "ground_ctxt (ta_der'_ctxt t)" (is "?G3")
+    "q |\<in>| ta_der \<A> (ta_der'_source_ctxt_arg t s)" (is "?G4")
+proof -
+  have *: "length xs = Suc 0 \<Longrightarrow> xs = [hd xs]" for xs
+    by (metis length_0_conv length_Suc_conv list.sel(1))
+  have [simp]: "length (snd (split_vars t)) = Suc 0" using assms(2) ta_der'_inf_mctxt[OF assms(1)]
+    by (auto simp: split_vars_vars_term_list)
+  have [simp]: "num_gholes (gmctxt_of_mctxt (fst (split_vars t))) = Suc 0" using assms(2)
+    by (simp add: split_vars_num_holes split_vars_vars_term_list)
+  have [simp]: "ta_der'_source_args t s = [ta_der'_source_ctxt_arg t s]"
+    using assms(2) ta_der'_inf_mctxt[OF assms(1)]
+    by (auto simp: ta_der'_source_args_def ta_der'_source_ctxt_arg_def split_vars_num_holes intro!: *)
+(* Main lemmas *)
+(* TODO rewrite using ta_der'_mctxt_structure *)
+(* Reconstuction *)

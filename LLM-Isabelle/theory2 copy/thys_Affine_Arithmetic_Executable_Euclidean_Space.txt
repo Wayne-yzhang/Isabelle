@@ -1,0 +1,398 @@
+theory Executable_Euclidean_Space
+imports
+  "HOL-Analysis.Multivariate_Analysis"
+  "List-Index.List_Index"
+  "HOL-Library.Float"
+  "HOL-Library.Code_Cardinality"
+  Affine_Arithmetic_Auxiliarities
+begin
+
+
+class executable_euclidean_space = ordered_euclidean_space +
+  fixes Basis_list eucl_down eucl_truncate_down eucl_truncate_up
+  assumes eucl_down_def:
+    "eucl_down p b = (\<Sum>i \<in> Basis. round_down p (b \<bullet> i) *\<^sub>R i)"
+  assumes eucl_truncate_down_def:
+    "eucl_truncate_down q b = (\<Sum>i \<in> Basis. truncate_down q (b \<bullet> i) *\<^sub>R i)"
+  assumes eucl_truncate_up_def:
+    "eucl_truncate_up q b = (\<Sum>i \<in> Basis. truncate_up q (b \<bullet> i) *\<^sub>R i)"
+  assumes Basis_list[simp]: "set Basis_list = Basis"
+  assumes distinct_Basis_list[simp]: "distinct Basis_list"
+begin
+
+lemma length_Basis_list:
+  "length Basis_list = card Basis"
+  by (metis Basis_list distinct_Basis_list distinct_card)
+
+end
+
+lemma eucl_truncate_down_zero[simp]: "eucl_truncate_down p 0 = 0"
+  by (auto simp: eucl_truncate_down_def truncate_down_zero)
+
+lemma eucl_truncate_up_zero[simp]: "eucl_truncate_up p 0 = 0"
+  by (auto simp: eucl_truncate_up_def)
+
+
+instantiation real::executable_euclidean_space
+begin
+
+definition Basis_list_real :: "real list" where
+  "Basis_list_real = [1]"
+
+definition "eucl_down prec b = round_down prec b"
+definition "eucl_truncate_down prec b = truncate_down prec b"
+definition "eucl_truncate_up prec b = truncate_up prec b"
+
+instance proof qed (auto simp: Basis_list_real_def eucl_down_real_def eucl_truncate_down_real_def
+  eucl_truncate_up_real_def)
+
+end
+
+instantiation prod::(executable_euclidean_space, executable_euclidean_space)
+  executable_euclidean_space
+begin
+
+definition Basis_list_prod :: "('a \<times> 'b) list" where
+  "Basis_list_prod =
+    zip Basis_list (replicate (length (Basis_list::'a list)) 0) @
+    zip (replicate (length (Basis_list::'b list)) 0) Basis_list"
+
+definition "eucl_down p a = (eucl_down p (fst a), eucl_down p (snd a))"
+definition "eucl_truncate_down p a = (eucl_truncate_down p (fst a), eucl_truncate_down p (snd a))"
+definition "eucl_truncate_up p a = (eucl_truncate_up p (fst a), eucl_truncate_up p (snd a))"
+
+instance
+proof
+  show "set Basis_list = (Basis::('a*'b) set)"
+    by (auto simp: Basis_list_prod_def Basis_prod_def elim!: in_set_zipE)
+      (auto simp: Basis_list[symmetric] in_set_zip in_set_conv_nth simp del: Basis_list)
+  show "distinct (Basis_list::('a*'b)list)"
+    using distinct_Basis_list[where 'a='a] distinct_Basis_list[where 'a='b]
+    by (auto simp: Basis_list_prod_def Basis_list intro: distinct_zipI1 distinct_zipI2
+      elim!: in_set_zipE)
+qed
+  (auto simp: eucl_down_prod_def eucl_truncate_down_prod_def eucl_truncate_up_prod_def
+    sum_Basis_prod_eq inner_add_left inner_sum_left inner_Basis eucl_down_def
+    eucl_truncate_down_def eucl_truncate_up_def
+    intro!: euclidean_eqI[where 'a="'a*'b"])
+
+end
+
+lemma eucl_truncate_down_Basis[simp]:
+  "i \<in> Basis \<Longrightarrow> eucl_truncate_down e x \<bullet> i = truncate_down e (x \<bullet> i)"
+  by (simp add: eucl_truncate_down_def)
+
+lemma eucl_truncate_down_correct:
+  "dist (x::'a::executable_euclidean_space) (eucl_down e x) \<in>
+    {0..sqrt (DIM('a)) * 2 powr of_int (- e)}"
+proof -
+  have "dist x (eucl_down e x) = sqrt (\<Sum>i\<in>Basis. (dist (x \<bullet> i) (eucl_down e x \<bullet> i))\<^sup>2)"
+    unfolding euclidean_dist_l2[where 'a='a] L2_set_def ..
+  also have "\<dots> \<le> sqrt (\<Sum>i\<in>(Basis::'a set). ((2 powr of_int (- e))\<^sup>2))"
+    by (intro real_sqrt_le_mono sum_mono power_mono)
+      (auto simp: dist_real_def eucl_down_def abs_round_down_le)
+  finally show ?thesis
+    by (simp add: real_sqrt_mult)
+qed
+
+lemma eucl_down: "eucl_down e (x::'a::executable_euclidean_space) \<le> x"
+  by (auto simp add: eucl_le[where 'a='a] round_down eucl_down_def)
+
+lemma eucl_truncate_down: "eucl_truncate_down e (x::'a::executable_euclidean_space) \<le> x"
+  by (auto simp add: eucl_le[where 'a='a] truncate_down)
+
+lemma eucl_truncate_down_le:
+  "x \<le> y \<Longrightarrow> eucl_truncate_down w x \<le> (y::'a::executable_euclidean_space)"
+  using eucl_truncate_down
+  by (rule order.trans)
+
+lemma eucl_truncate_up_Basis[simp]: "i \<in> Basis \<Longrightarrow> eucl_truncate_up e x \<bullet> i = truncate_up e (x \<bullet> i)"
+  by (simp add: eucl_truncate_up_def truncate_up_def)
+
+lemma eucl_truncate_up: "x \<le> eucl_truncate_up e (x::'a::executable_euclidean_space)"
+  by (auto simp add: eucl_le[where 'a='a] round_up truncate_up_def)
+
+lemma eucl_truncate_up_le: "x \<le> y \<Longrightarrow> x \<le> eucl_truncate_up e (y::'a::executable_euclidean_space)"
+  using _ eucl_truncate_up
+  by (rule order.trans)
+
+lemma eucl_truncate_down_mono:
+  fixes x::"'a::executable_euclidean_space"
+  shows "x \<le> y \<Longrightarrow> eucl_truncate_down p x \<le> eucl_truncate_down p y"
+  by (auto simp: eucl_le[where 'a='a] intro!: truncate_down_mono)
+
+lemma eucl_truncate_up_mono:
+  fixes x::"'a::executable_euclidean_space"
+  shows "x \<le> y \<Longrightarrow> eucl_truncate_up p x \<le> eucl_truncate_up p y"
+  by (auto simp: eucl_le[where 'a='a] intro!: truncate_up_mono)
+
+lemma infnorm[code]:
+  fixes x::"'a::executable_euclidean_space"
+  shows "infnorm x = fold max (map (\<lambda>i. abs (x \<bullet> i)) Basis_list) 0"
+  by (auto simp: Max.set_eq_fold[symmetric] infnorm_Max[symmetric] infnorm_pos_le
+    intro!: max.absorb2[symmetric])
+
+declare Inf_real_def[code del]
+declare Sup_real_def[code del]
+declare Inf_prod_def[code del]
+declare Sup_prod_def[code del]
+declare [[code abort: "Inf::real set \<Rightarrow> real"]]
+declare [[code abort: "Sup::real set \<Rightarrow> real"]]
+declare [[code abort: "Inf::('a::Inf * 'b::Inf) set \<Rightarrow> 'a * 'b"]]
+declare [[code abort: "Sup::('a::Sup * 'b::Sup) set \<Rightarrow> 'a * 'b"]]
+
+lemma nth_Basis_list_in_Basis[simp]:
+  "n < length (Basis_list::'a::executable_euclidean_space list) \<Longrightarrow> Basis_list ! n \<in> (Basis::'a set)"
+  by (metis Basis_list nth_mem)
+
+
+lemma nth_eq_iff_index:
+  "distinct xs \<Longrightarrow> n < length xs \<Longrightarrow> xs ! n = i \<longleftrightarrow> n = index xs i"
+  using index_nth_id by fastforce
+
+lemma in_Basis_index_Basis_list: "i \<in> Basis \<Longrightarrow> i = Basis_list ! index Basis_list i"
+  by simp
+
+lemmas [simp] = length_Basis_list
+
+lemma sum_Basis_sum_nth_Basis_list:
+  "(\<Sum>i\<in>Basis. f i) = (\<Sum>i<DIM('a::executable_euclidean_space). f ((Basis_list::'a list) ! i))"
+  apply (rule sum.reindex_cong[OF _ _ refl])
+   apply (auto intro!: inj_on_nth)
+  by (metis Basis_list image_iff in_Basis_index_Basis_list index_less_size_conv length_Basis_list lessThan_iff)
+
+definition "eucl_of_list xs = (\<Sum>(x, i)\<leftarrow>zip xs Basis_list. x *\<^sub>R i)"
+
+lemma eucl_of_list_nth:
+  assumes "length xs = DIM('a)"
+  shows "eucl_of_list xs = (\<Sum>i<DIM('a::executable_euclidean_space). (xs ! i) *\<^sub>R ((Basis_list::'a list) ! i))"
+  by (auto simp: eucl_of_list_def sum_list_sum_nth length_Basis_list assms atLeast0LessThan)
+
+lemma eucl_of_list_inner:
+  fixes i::"'a::executable_euclidean_space"
+  assumes i: "i \<in> Basis"
+  assumes l: "length xs = DIM('a)"
+  shows "eucl_of_list xs \<bullet> i = xs ! (index Basis_list i)"
+  by (simp add: eucl_of_list_nth[OF l] inner_sum_left assms inner_Basis
+      nth_eq_iff_index sum.delta if_distrib cong: if_cong)
+
+lemma inner_eucl_of_list:
+  fixes i::"'a::executable_euclidean_space"
+  assumes i: "i \<in> Basis"
+  assumes l: "length xs = DIM('a)"
+  shows "i \<bullet> eucl_of_list xs = xs ! (index Basis_list i)"
+  using eucl_of_list_inner[OF assms] by (auto simp: inner_commute)
+
+
+definition "list_of_eucl x = map ((\<bullet>) x) Basis_list"
+
+lemma index_Basis_list_nth[simp]:
+  "i < DIM('a::executable_euclidean_space) \<Longrightarrow> index Basis_list ((Basis_list::'a list) ! i) = i"
+  by (simp add: index_nth_id)
+
+lemma list_of_eucl_eucl_of_list[simp]:
+  "length xs = DIM('a::executable_euclidean_space) \<Longrightarrow> list_of_eucl (eucl_of_list xs::'a) = xs"
+  by (auto simp: list_of_eucl_def eucl_of_list_inner intro!: nth_equalityI)
+
+lemma eucl_of_list_list_of_eucl[simp]:
+  "eucl_of_list (list_of_eucl x) = x"
+  by (auto simp: list_of_eucl_def eucl_of_list_inner intro!: euclidean_eqI[where 'a='a])
+
+
+lemma length_list_of_eucl[simp]: "length (list_of_eucl (x::'a::executable_euclidean_space)) = DIM('a)"
+  by (auto simp: list_of_eucl_def)
+
+lemma list_of_eucl_nth[simp]: "n < DIM('a::executable_euclidean_space) \<Longrightarrow> list_of_eucl x ! n = x \<bullet> (Basis_list ! n::'a)"
+  by (auto simp: list_of_eucl_def)
+
+lemma nth_ge_len: "n \<ge> length xs \<Longrightarrow> xs ! n = [] ! (n - length xs)"
+  by (induction xs arbitrary: n) auto
+
+lemma list_of_eucl_nth_if: "list_of_eucl x ! n = (if n < DIM('a::executable_euclidean_space) then x \<bullet> (Basis_list ! n::'a) else [] ! (n - DIM('a)))"
+  apply (auto simp: list_of_eucl_def )
+  apply (subst nth_ge_len)
+   apply auto
+  done
+
+lemma list_of_eucl_eq_iff:
+  "list_of_eucl (x::'a::executable_euclidean_space) = list_of_eucl (y::'b::executable_euclidean_space) \<longleftrightarrow>
+  (DIM('a) = DIM('b) \<and> (\<forall>i < DIM('b). x \<bullet> Basis_list ! i = y \<bullet> Basis_list ! i))"
+  by (auto simp: list_eq_iff_nth_eq)
+
+lemma eucl_le_Basis_list_iff:
+  "(x::'a::executable_euclidean_space) \<le> y \<longleftrightarrow>
+  (\<forall>i<DIM('a). x \<bullet> Basis_list ! i \<le> y \<bullet> Basis_list ! i)"
+  apply (auto simp:  eucl_le[where 'a='a])
+  subgoal for i
+    subgoal by (auto dest!: spec[where x="index Basis_list i"])
+    done
+  done
+
+lemma eucl_of_list_inj: "length xs = DIM('a::executable_euclidean_space) \<Longrightarrow> length ys = DIM('a) \<Longrightarrow>
+  (eucl_of_list xs::'a) = eucl_of_list (ys) \<Longrightarrow> xs = ys"
+  apply (auto intro!: nth_equalityI simp: euclidean_eq_iff[where 'a="'a"] eucl_of_list_inner)
+  using nth_Basis_list_in_Basis[where 'a="'a"]
+  by fastforce
+
+lemma eucl_of_list_map_plus[simp]:
+  assumes [simp]: "length xs = DIM('a::executable_euclidean_space)"
+  shows "(eucl_of_list (map (\<lambda>x. f x + g x) xs)::'a) =
+    eucl_of_list (map f xs) + eucl_of_list (map g xs)"
+  by (auto intro!: euclidean_eqI[where 'a='a] simp: algebra_simps eucl_of_list_inner)
+
+lemma eucl_of_list_map_uminus[simp]:
+  assumes [simp]: "length xs = DIM('a::executable_euclidean_space)"
+  shows "(eucl_of_list (map (\<lambda>x. - f x) xs)::'a) = - eucl_of_list (map f xs)"
+  by (auto intro!: euclidean_eqI[where 'a='a] simp: algebra_simps eucl_of_list_inner)
+
+lemma eucl_of_list_map_mult_left[simp]:
+  assumes [simp]: "length xs = DIM('a::executable_euclidean_space)"
+  shows "(eucl_of_list (map (\<lambda>x. r * f x) xs)::'a) = r *\<^sub>R eucl_of_list (map f xs)"
+  by (auto intro!: euclidean_eqI[where 'a='a] simp: algebra_simps eucl_of_list_inner)
+
+lemma eucl_of_list_map_mult_right[simp]:
+  assumes [simp]: "length xs = DIM('a::executable_euclidean_space)"
+  shows "(eucl_of_list (map (\<lambda>x. f x * r) xs)::'a) = r *\<^sub>R eucl_of_list (map f xs)"
+  by (auto intro!: euclidean_eqI[where 'a='a] simp: algebra_simps eucl_of_list_inner)
+
+lemma eucl_of_list_map_divide_right[simp]:
+  assumes [simp]: "length xs = DIM('a::executable_euclidean_space)"
+  shows "(eucl_of_list (map (\<lambda>x. f x / r) xs)::'a) = eucl_of_list (map f xs) /\<^sub>R r"
+  by (auto intro!: euclidean_eqI[where 'a='a] simp: algebra_simps eucl_of_list_inner divide_simps)
+
+lemma eucl_of_list_map_const[simp]:
+  assumes [simp]: "length xs = DIM('a::executable_euclidean_space)"
+  shows "(eucl_of_list (map (\<lambda>x. c) xs)::'a) = c *\<^sub>R One"
+  by (auto intro!: euclidean_eqI[where 'a='a] simp: algebra_simps eucl_of_list_inner)
+
+lemma replicate_eq_list_of_eucl_zero: "replicate DIM('a::executable_euclidean_space) 0 = list_of_eucl (0::'a)"
+  by (auto intro!: nth_equalityI)
+
+lemma eucl_of_list_append_zeroes[simp]: "eucl_of_list (xs @ replicate n 0) = eucl_of_list xs"
+  unfolding eucl_of_list_def
+  apply (auto simp: sum_list_sum_nth)
+  apply (rule sum.mono_neutral_cong_right)
+  by (auto simp: nth_append)
+
+lemma Basis_prodD:
+  assumes "(i, j) \<in> Basis"
+  shows "i \<in> Basis \<and> j = 0 \<or> i = 0 \<and> j \<in> Basis"
+  using assms
+  by (auto simp: Basis_prod_def)
+
+lemma eucl_of_list_take_DIM[simp]:
+  assumes "d = DIM('b::executable_euclidean_space)"
+  shows "(eucl_of_list (take d xs)::'b) = (eucl_of_list xs)"
+  by (auto simp: eucl_of_list_inner eucl_of_list_def fst_sum_list sum_list_sum_nth assms dest!: Basis_prodD)
+
+lemma eucl_of_list_eqI:
+  assumes "take DIM('a) (xs @ replicate (DIM('a) - length xs) 0) =
+    take DIM('a) (ys @ replicate (DIM('a) - length ys) 0)"
+  shows "eucl_of_list xs = (eucl_of_list ys::'a::executable_euclidean_space)"
+proof -
+  have "(eucl_of_list xs::'a) = eucl_of_list (take DIM('a) (xs @ replicate (DIM('a) - length xs) 0))"
+    by simp
+  also note assms
+  also have "eucl_of_list (take DIM('a) (ys @ replicate (DIM('a) - length ys) 0)) = (eucl_of_list ys::'a)"
+    by simp
+  finally show ?thesis .
+qed
+
+lemma eucl_of_list_replicate_zero[simp]: "eucl_of_list (replicate E 0) = 0"
+proof -
+  have "eucl_of_list (replicate E 0) = (eucl_of_list (replicate E 0 @ replicate (DIM('a) - E) 0)::'a)"
+    by simp
+  also have "\<dots> = eucl_of_list (replicate DIM('a) 0)"
+    apply (rule eucl_of_list_eqI)
+    by (auto simp: min_def nth_append intro!: nth_equalityI)
+  also have "\<dots> = 0"
+    by (simp add: replicate_eq_list_of_eucl_zero)
+  finally show ?thesis by simp
+qed
+
+lemma eucl_of_list_Nil[simp]: "eucl_of_list [] = 0"
+  using eucl_of_list_replicate_zero[of 0] by simp
+
+
+lemma fst_eucl_of_list_prod:
+  shows "fst (eucl_of_list xs::'b::executable_euclidean_space  \<times> _) = (eucl_of_list (take DIM('b) xs)::'b)"
+  apply (auto simp: eucl_of_list_inner eucl_of_list_def fst_sum_list dest!: Basis_prodD)
+  apply (simp add: sum_list_sum_nth)
+  apply (rule sum.mono_neutral_cong_right)
+  subgoal by simp
+  subgoal by auto
+  subgoal by (auto simp: Basis_list_prod_def nth_append)
+  subgoal by (auto simp: Basis_list_prod_def nth_append)
+  done
+
+lemma index_zip_replicate1[simp]: "index (zip (replicate d a) bs) (a, b) = index bs b"
+  if "d = length bs"
+  using that
+  by (induction bs arbitrary: d) auto
+
+lemma index_zip_replicate2[simp]: "index (zip as (replicate d b)) (a, b) = index as a"
+  if "d = length as"
+  using that
+  by (induction as arbitrary: d) auto
+
+lemma index_Basis_list_prod[simp]:
+  fixes a::"'a::executable_euclidean_space" and b::"'b::executable_euclidean_space"
+  shows "a \<in> Basis \<Longrightarrow> index Basis_list (a, 0::'b) = index Basis_list a"
+    "b \<in> Basis \<Longrightarrow> index Basis_list (0::'a, b) = DIM('a) + index Basis_list b"
+  by (auto simp: Basis_list_prod_def index_append
+      in_set_zip zip_replicate index_map_inj dest: spec[where x="index Basis_list a"])
+
+lemma eucl_of_list_eq_takeI:
+  assumes "(eucl_of_list (take DIM('a::executable_euclidean_space) xs)::'a) = x"
+  shows "eucl_of_list xs = x"
+  using eucl_of_list_take_DIM[OF refl, of xs, where 'b='a] assms
+  by auto
+
+lemma eucl_of_list_inner_le:
+  fixes i::"'a::executable_euclidean_space"
+  assumes i: "i \<in> Basis"
+  assumes l: "length xs \<ge> DIM('a)"
+  shows "eucl_of_list xs \<bullet> i = xs ! (index Basis_list i)"
+proof -
+  have "(eucl_of_list xs::'a) = eucl_of_list (take DIM('a) (xs @ (replicate (DIM('a) - length xs) 0)))"
+    by (rule eucl_of_list_eq_takeI) simp
+  also have "\<dots> \<bullet> i = xs ! (index Basis_list i)"
+    using assms
+    by (subst eucl_of_list_inner) auto
+  finally show ?thesis .
+qed
+
+lemma eucl_of_list_prod_if:
+  assumes "length xs = DIM('a::executable_euclidean_space) + DIM('b::executable_euclidean_space)"
+  shows "eucl_of_list xs =
+    (eucl_of_list (take DIM('a) xs)::'a, eucl_of_list (drop DIM('a) xs)::'b)"
+  apply (rule euclidean_eqI)
+  using assms
+  apply (auto simp: eucl_of_list_inner dest!: Basis_prodD)
+   apply (subst eucl_of_list_inner_le)
+  apply (auto simp: Basis_list_prod_def index_append in_set_zip)
+  done
+
+
+lemma snd_eucl_of_list_prod:
+  shows "snd (eucl_of_list xs::'b::executable_euclidean_space  \<times> 'c::executable_euclidean_space) =
+    (eucl_of_list (drop DIM('b) xs)::'c)"
+proof (cases "length xs \<le> DIM('b)")
+  case True
+  then show ?thesis
+    by (auto simp: eucl_of_list_inner eucl_of_list_def snd_sum_list dest!: Basis_prodD)
+      (simp add: sum_list_sum_nth Basis_list_prod_def nth_append)
+next
+  case False
+  have "xs = take DIM('b) xs @ drop DIM('b) xs" by simp
+  also have "eucl_of_list \<dots> = (eucl_of_list (\<dots> @ replicate (length xs - DIM('c)) 0)::'b \<times> 'c)"
+    by simp
+  finally have "eucl_of_list xs = (eucl_of_list (xs @ replicate (DIM('b) + DIM('c) - length xs) 0)::'b \<times> 'c)"
+    by simp
+  also have "\<dots> = eucl_of_list (take (DIM ('b \<times> 'c)) (xs @ replicate (DIM('b) + DIM('c) - length xs) 0))"
+    by simp
+  finally have *: "(eucl_of_list xs::'b\<times>'c) = eucl_of_list (take DIM('b \<times> 'c) (xs @ replicate (DIM('b) + DIM('c) - length xs) 0))"
+    by simp
+  show ?thesis
+    apply (subst *)
+definition "inner_lv_rel a b = sum_list (map2 (*) a b)"

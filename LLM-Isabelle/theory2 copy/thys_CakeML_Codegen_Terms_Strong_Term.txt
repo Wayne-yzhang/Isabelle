@@ -1,0 +1,82 @@
+theory Strong_Term
+imports Consts
+begin
+
+class pre_strong_term = "term" +
+  fixes wellformed :: "'a \<Rightarrow> bool"
+  fixes all_frees :: "'a \<Rightarrow> name fset"
+  assumes wellformed_const[simp]: "wellformed (const name)"
+  assumes wellformed_free[simp]: "wellformed (free name)"
+  assumes wellformed_app[simp]: "wellformed (app u\<^sub>1 u\<^sub>2) \<longleftrightarrow> wellformed u\<^sub>1 \<and> wellformed u\<^sub>2"
+  assumes all_frees_const[simp]: "all_frees (const name) = fempty"
+  assumes all_frees_free[simp]: "all_frees (free name) = {| name |}"
+  assumes all_frees_app[simp]: "all_frees (app u\<^sub>1 u\<^sub>2) = all_frees u\<^sub>1 |\<union>| all_frees u\<^sub>2"
+begin
+
+abbreviation wellformed_env :: "(name, 'a) fmap \<Rightarrow> bool" where
+"wellformed_env \<equiv> fmpred (\<lambda>_. wellformed)"
+
+end
+
+context pre_constants begin
+
+definition shadows_consts :: "'a::pre_strong_term \<Rightarrow> bool" where
+"shadows_consts t \<longleftrightarrow> \<not> fdisjnt all_consts (all_frees t)"
+
+sublocale shadows: simple_syntactic_or shadows_consts
+  by standard (auto simp: shadows_consts_def fdisjnt_alt_def)
+
+abbreviation not_shadows_consts_env :: "(name, 'a::pre_strong_term) fmap \<Rightarrow> bool" where
+"not_shadows_consts_env \<equiv> fmpred (\<lambda>_ s. \<not> shadows_consts s)"
+
+end
+
+declare pre_constants.shadows_consts_def[code]
+
+class strong_term = pre_strong_term +
+  assumes raw_frees_all_frees: "abs_pred (\<lambda>t. frees t |\<subseteq>| all_frees t) t"
+  assumes raw_subst_wellformed: "abs_pred (\<lambda>t. wellformed t \<longrightarrow> (\<forall>env. wellformed_env env \<longrightarrow> wellformed (subst t env))) t"
+begin
+
+lemma frees_all_frees: "frees t |\<subseteq>| all_frees t"
+proof (induction t rule: raw_induct)
+  case (abs t)
+  show ?case
+    by (rule raw_frees_all_frees)
+qed auto
+
+lemma subst_wellformed: "wellformed t \<Longrightarrow> wellformed_env env \<Longrightarrow> wellformed (subst t env)"
+proof (induction t arbitrary: env rule: raw_induct)
+  case (abs t)
+  show ?case
+    by (rule raw_subst_wellformed)
+qed (auto split: option.splits)
+
+end
+
+global_interpretation wellformed: subst_syntactic_and "wellformed :: 'a::strong_term \<Rightarrow> bool"
+by standard (auto simp: subst_wellformed)
+
+instantiation "term" :: strong_term begin
+
+fun all_frees_term :: "term \<Rightarrow> name fset" where
+"all_frees_term (Free x) = {| x |}" |
+"all_frees_term (t\<^sub>1 $ t\<^sub>2) = all_frees_term t\<^sub>1 |\<union>| all_frees_term t\<^sub>2" |
+"all_frees_term (\<Lambda> t) = all_frees_term t" |
+"all_frees_term _ = {||}"
+
+lemma frees_all_frees_term[simp]: "all_frees t = frees (t::term)"
+by (induction t) auto
+
+definition wellformed_term :: "term \<Rightarrow> bool" where
+[simp]: "wellformed_term t \<longleftrightarrow> Term.wellformed t"
+
+instance proof (standard, goal_cases)
+  case 8
+
+  have *: "abs_pred P t" if "P t" for P and t :: "term"
+    unfolding abs_pred_term_def using that
+    by auto
+
+  show ?case
+    apply (rule *)

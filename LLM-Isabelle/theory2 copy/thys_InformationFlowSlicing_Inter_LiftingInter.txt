@@ -1,0 +1,363 @@
+theory LiftingInter 
+imports NonInterferenceInter 
+begin
+
+
+
+
+datatype 'node LDCFG_node = Node 'node
+  | NewEntry
+  | NewExit
+
+
+type_synonym ('edge,'node,'var,'val,'ret,'pname) LDCFG_edge = 
+  "'node LDCFG_node \<times> (('var,'val,'ret,'pname) edge_kind) \<times> 'node LDCFG_node"
+
+
+
+inductive lift_valid_edge :: "('edge \<Rightarrow> bool) \<Rightarrow> ('edge \<Rightarrow> 'node) \<Rightarrow> ('edge \<Rightarrow> 'node) \<Rightarrow>
+  ('edge \<Rightarrow> ('var,'val,'ret,'pname) edge_kind) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+  ('edge,'node,'var,'val,'ret,'pname) LDCFG_edge \<Rightarrow> 
+  bool"
+for valid_edge::"'edge \<Rightarrow> bool" and src::"'edge \<Rightarrow> 'node" and trg::"'edge \<Rightarrow> 'node" 
+  and knd::"'edge \<Rightarrow> ('var,'val,'ret,'pname) edge_kind" and E::'node and X::'node
+
+where lve_edge:
+  "\<lbrakk>valid_edge a; src a \<noteq> E \<or> trg a \<noteq> X; 
+    e = (Node (src a),knd a,Node (trg a))\<rbrakk>
+  \<Longrightarrow> lift_valid_edge valid_edge src trg knd E X e"
+
+  | lve_Entry_edge:
+  "e = (NewEntry,(\<lambda>s. True)\<^sub>\<surd>,Node E) 
+  \<Longrightarrow> lift_valid_edge valid_edge src trg knd E X e"
+
+  | lve_Exit_edge:
+  "e = (Node X,(\<lambda>s. True)\<^sub>\<surd>,NewExit) 
+  \<Longrightarrow> lift_valid_edge valid_edge src trg knd E X e"
+
+  | lve_Entry_Exit_edge:
+  "e = (NewEntry,(\<lambda>s. False)\<^sub>\<surd>,NewExit) 
+  \<Longrightarrow> lift_valid_edge valid_edge src trg knd E X e"
+
+
+lemma [simp]:"\<not> lift_valid_edge valid_edge src trg knd E X (Node E,et,Node X)"
+by(auto elim:lift_valid_edge.cases)
+
+
+
+fun lift_get_proc :: "('node \<Rightarrow> 'pname) \<Rightarrow> 'pname \<Rightarrow> 'node LDCFG_node \<Rightarrow> 'pname"
+  where "lift_get_proc get_proc Main (Node n) = get_proc n"
+  | "lift_get_proc get_proc Main NewEntry = Main"
+  | "lift_get_proc get_proc Main NewExit = Main"
+
+
+inductive_set lift_get_return_edges :: "('edge \<Rightarrow> 'edge set) \<Rightarrow> ('edge \<Rightarrow> bool) \<Rightarrow> 
+  ('edge \<Rightarrow> 'node) \<Rightarrow> ('edge \<Rightarrow> 'node) \<Rightarrow> ('edge \<Rightarrow> ('var,'val,'ret,'pname) edge_kind) 
+  \<Rightarrow> ('edge,'node,'var,'val,'ret,'pname) LDCFG_edge 
+  \<Rightarrow> ('edge,'node,'var,'val,'ret,'pname) LDCFG_edge set"
+for get_return_edges :: "'edge \<Rightarrow> 'edge set" and valid_edge :: "'edge \<Rightarrow> bool"
+  and src::"'edge \<Rightarrow> 'node" and trg::"'edge \<Rightarrow> 'node" 
+  and knd::"'edge \<Rightarrow> ('var,'val,'ret,'pname) edge_kind" 
+  and e::"('edge,'node,'var,'val,'ret,'pname) LDCFG_edge"
+where lift_get_return_edgesI:
+  "\<lbrakk>e = (Node (src a),knd a,Node (trg a)); valid_edge a; a' \<in> get_return_edges a; 
+  e' = (Node (src a'),knd a',Node (trg a'))\<rbrakk>
+  \<Longrightarrow> e' \<in> lift_get_return_edges get_return_edges valid_edge src trg knd e"
+
+
+
+inductive_set lift_Def_set :: "('node \<Rightarrow> 'var set) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+                       'var set \<Rightarrow> 'var set \<Rightarrow> ('node LDCFG_node \<times> 'var) set"
+for Def::"('node \<Rightarrow> 'var set)" and E::'node and X::'node 
+  and H::"'var set" and L::"'var set"
+
+where lift_Def_node: 
+  "V \<in> Def n \<Longrightarrow> (Node n,V) \<in> lift_Def_set Def E X H L"
+
+  | lift_Def_High:
+  "V \<in> H \<Longrightarrow> (Node E,V) \<in> lift_Def_set Def E X H L"
+
+abbreviation lift_Def :: "('node \<Rightarrow> 'var set) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+                       'var set \<Rightarrow> 'var set \<Rightarrow> 'node LDCFG_node \<Rightarrow> 'var set"
+  where "lift_Def Def E X H L n \<equiv> {V. (n,V) \<in> lift_Def_set Def E X H L}"
+
+
+inductive_set lift_Use_set :: "('node \<Rightarrow> 'var set) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+                       'var set \<Rightarrow> 'var set \<Rightarrow> ('node LDCFG_node \<times> 'var) set"
+for Use::"'node \<Rightarrow> 'var set" and E::'node and X::'node 
+  and H::"'var set" and L::"'var set"
+
+where 
+  lift_Use_node: 
+  "V \<in> Use n \<Longrightarrow> (Node n,V) \<in> lift_Use_set Use E X H L"
+
+  | lift_Use_High:
+  "V \<in> H \<Longrightarrow> (Node E,V) \<in> lift_Use_set Use E X H L"
+
+  | lift_Use_Low:
+  "V \<in> L \<Longrightarrow> (Node X,V) \<in> lift_Use_set Use E X H L"
+
+
+abbreviation lift_Use :: "('node \<Rightarrow> 'var set) \<Rightarrow> 'node \<Rightarrow> 'node \<Rightarrow> 
+                       'var set \<Rightarrow> 'var set \<Rightarrow> 'node LDCFG_node \<Rightarrow> 'var set"
+  where "lift_Use Use E X H L n \<equiv> {V. (n,V) \<in> lift_Use_set Use E X H L}"
+
+
+fun lift_ParamUses :: "('node \<Rightarrow> 'var set list) \<Rightarrow> 'node LDCFG_node \<Rightarrow> 'var set list"
+  where "lift_ParamUses ParamUses (Node n) =  ParamUses n"
+  | "lift_ParamUses ParamUses NewEntry = []"
+  | "lift_ParamUses ParamUses NewExit = []"
+
+
+fun lift_ParamDefs :: "('node \<Rightarrow> 'var list) \<Rightarrow> 'node LDCFG_node \<Rightarrow> 'var list"
+  where "lift_ParamDefs ParamDefs (Node n) =  ParamDefs n"
+  | "lift_ParamDefs ParamDefs NewEntry = []"
+  | "lift_ParamDefs ParamDefs NewExit = []"
+
+
+
+
+
+
+abbreviation src :: "('edge,'node,'var,'val,'ret,'pname) LDCFG_edge \<Rightarrow> 'node LDCFG_node"
+  where "src a \<equiv> fst a"
+
+abbreviation trg :: "('edge,'node,'var,'val,'ret,'pname) LDCFG_edge \<Rightarrow> 'node LDCFG_node"
+  where "trg a \<equiv> snd(snd a)"
+
+abbreviation knd :: "('edge,'node,'var,'val,'ret,'pname) LDCFG_edge \<Rightarrow> 
+  ('var,'val,'ret,'pname) edge_kind"
+  where "knd a \<equiv> fst(snd a)"
+
+
+lemma lift_CFG:
+  assumes wf:"CFGExit_wf sourcenode targetnode kind valid_edge Entry get_proc 
+  get_return_edges procs Main Exit Def Use ParamDefs ParamUses"
+  and pd:"Postdomination sourcenode targetnode kind valid_edge Entry get_proc 
+  get_return_edges procs Main Exit"
+  shows "CFG src trg knd
+  (lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit) NewEntry
+  (lift_get_proc get_proc Main) 
+  (lift_get_return_edges get_return_edges valid_edge sourcenode targetnode kind) 
+  procs Main"
+proof -
+  interpret CFGExit_wf sourcenode targetnode kind valid_edge Entry get_proc 
+    get_return_edges procs Main Exit Def Use ParamDefs ParamUses
+    by(rule wf)
+  interpret Postdomination sourcenode targetnode kind valid_edge Entry get_proc 
+    get_return_edges procs Main Exit
+    by(rule pd)
+  show ?thesis
+  proof
+    fix a assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "trg a = NewEntry"
+    thus False by(fastforce elim:lift_valid_edge.cases)
+  next
+    show "lift_get_proc get_proc Main NewEntry = Main" by simp
+  next
+    fix a Q r p fs
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs" and "src a = NewEntry"
+    thus False by(fastforce elim:lift_valid_edge.cases)
+  next
+    fix a a' 
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a'"
+      and "src a = src a'" and "trg a = trg a'"
+    thus "a = a'"
+    proof(induct rule:lift_valid_edge.induct)
+      case lve_edge thus ?case by -(erule lift_valid_edge.cases,auto dest:edge_det)
+    qed(auto elim:lift_valid_edge.cases)
+  next
+    fix a Q r f
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q:r\<hookrightarrow>\<^bsub>Main\<^esub>f"
+    thus False by(fastforce elim:lift_valid_edge.cases dest:Main_no_call_target)
+  next
+    fix a Q' f'
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q'\<hookleftarrow>\<^bsub>Main\<^esub>f'"
+    thus False by(fastforce elim:lift_valid_edge.cases dest:Main_no_return_source)
+  next
+    fix a Q r p fs
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    thus "\<exists>ins outs. (p, ins, outs) \<in> set procs"
+      by(fastforce elim:lift_valid_edge.cases intro:callee_in_procs)
+  next
+    fix a assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "intra_kind (knd a)"
+    thus "lift_get_proc get_proc Main (src a) = lift_get_proc get_proc Main (trg a)"
+      by(fastforce elim:lift_valid_edge.cases intro:get_proc_intra 
+                  simp:get_proc_Entry get_proc_Exit)
+  next
+    fix a Q r p fs 
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    thus "lift_get_proc get_proc Main (trg a) = p"
+      by(fastforce elim:lift_valid_edge.cases intro:get_proc_call)
+  next
+    fix a Q' p f'
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+    thus "lift_get_proc get_proc Main (src a) = p"
+      by(fastforce elim:lift_valid_edge.cases intro:get_proc_return)
+  next
+    fix a Q r p fs
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    then obtain ax where "valid_edge ax" and "kind ax = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+      and "sourcenode ax \<noteq> Entry \<or> targetnode ax \<noteq> Exit"
+      and "src a = Node (sourcenode ax)" and "trg a = Node (targetnode ax)"
+      by(fastforce elim:lift_valid_edge.cases)
+    have all:"\<forall>a'. valid_edge a' \<and> targetnode a' = targetnode ax \<longrightarrow> 
+               (\<exists>Qx rx fsx. kind a' = Qx:rx\<hookrightarrow>\<^bsub>p\<^esub>fsx)"
+      by(auto dest:call_edges_only)
+    { fix a' 
+      assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a'"
+        and "trg a' = trg a"
+      hence "\<exists>Qx rx fsx. knd a' = Qx:rx\<hookrightarrow>\<^bsub>p\<^esub>fsx"
+      proof(induct rule:lift_valid_edge.induct)
+        case (lve_edge ax' e)
+        have "targetnode ax' = targetnode ax" by simp
+        thus ?case by simp
+      next
+        case (lve_Entry_edge e)
+        have "targetnode ax = Entry" by simp
+        thus ?case by simp
+      next
+        case (lve_Exit_edge e)
+        thus ?case by simp
+      next
+        case (lve_Entry_Exit_edge e)
+        thus ?case by simp
+      qed }
+    thus "\<forall>a'. lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a' \<and>
+               trg a' = trg a \<longrightarrow> (\<exists>Qx rx fsx. knd a' = Qx:rx\<hookrightarrow>\<^bsub>p\<^esub>fsx)" by simp
+  next
+    fix a Q' p f'
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+    then obtain ax where "valid_edge ax" and "kind ax = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+      and "sourcenode ax \<noteq> Entry \<or> targetnode ax \<noteq> Exit"
+      and "src a = Node (sourcenode ax)" and "trg a = Node (targetnode ax)"
+      by(fastforce elim:lift_valid_edge.cases)
+    have all:"\<forall>a'. valid_edge a' \<and> sourcenode a' = sourcenode ax \<longrightarrow> 
+            (\<exists>Qx fx. kind a' = Qx\<hookleftarrow>\<^bsub>p\<^esub>fx)"
+      by(auto dest:return_edges_only)
+    { fix a' 
+      assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a'"
+        and "src a' = src a"
+      hence "\<exists>Qx fx. knd a' = Qx\<hookleftarrow>\<^bsub>p\<^esub>fx"
+      proof(induct rule:lift_valid_edge.induct)
+        case (lve_edge ax' e)
+        have "sourcenode ax' = sourcenode ax" by simp
+        thus ?case by simp
+      next
+        case (lve_Entry_edge e)
+        thus ?case by simp
+      next
+        case (lve_Exit_edge e)
+        thus ?case by simp
+      next
+        case (lve_Entry_Exit_edge e)
+        thus ?case by simp
+      qed }
+    thus "\<forall>a'. lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a' \<and>
+               src a' = src a \<longrightarrow> (\<exists>Qx fx. knd a' = Qx\<hookleftarrow>\<^bsub>p\<^esub>fx)" by simp
+  next
+    fix a Q r p fs
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    thus "lift_get_return_edges get_return_edges valid_edge 
+      sourcenode targetnode kind a \<noteq> {}"
+    proof(induct rule:lift_valid_edge.induct)
+      case (lve_edge ax e)
+      have "kind ax = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs" by simp
+        by(rule get_return_edge_call)
+      then obtain ax' where "ax' \<in> get_return_edges ax" by blast
+      have "(Node (sourcenode ax'),kind ax',Node (targetnode ax')) \<in> 
+        lift_get_return_edges get_return_edges valid_edge 
+        sourcenode targetnode kind e"
+        by(fastforce intro:lift_get_return_edgesI)
+      thus ?case by fastforce
+    qed simp_all
+  next
+    fix a a'
+    assume "a' \<in> lift_get_return_edges get_return_edges valid_edge 
+      sourcenode targetnode kind a"
+      and "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+    thus "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a'"
+    proof (induct rule:lift_get_return_edges.induct)
+      case (lift_get_return_edgesI ax a' e')
+        by(rule get_return_edges_valid)
+        where "kind ax = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs" by(fastforce dest!:only_call_get_return_edges)
+        where "kind a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'" by(fastforce dest!:call_return_edges)
+        by(rule get_proc_return)
+      have "sourcenode a' \<noteq> Entry"
+      proof
+        assume "sourcenode a' = Entry"
+      qed
+      show ?case by(fastforce intro:lve_edge)
+    qed
+  next
+    fix a a'
+    assume "a' \<in> lift_get_return_edges get_return_edges valid_edge sourcenode
+      targetnode kind a"
+      and "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+    thus "\<exists>Q r p fs. knd a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    proof (induct rule:lift_get_return_edges.induct)
+      case (lift_get_return_edgesI ax a' e') 
+      have "\<exists>Q r p fs. kind ax = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+        by(rule only_call_get_return_edges)
+      show ?case by simp
+    qed
+  next
+    fix a Q r p fs a'
+    assume "a' \<in> lift_get_return_edges get_return_edges 
+      valid_edge sourcenode targetnode kind a" and "knd a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+      and "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+    thus "\<exists>Q' f'. knd a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+    proof (induct rule:lift_get_return_edges.induct)
+      case (lift_get_return_edgesI ax a' e')
+      have "kind ax = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs" by simp
+        by -(rule call_return_edges)
+      show ?case by simp
+    qed
+  next
+    fix a Q' p f'
+    assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a"
+      and "knd a = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+    thus "\<exists>!a'. lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit a' \<and>
+      (\<exists>Q r fs. knd a' = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs) \<and> a \<in> lift_get_return_edges get_return_edges 
+      valid_edge sourcenode targetnode kind a'"
+    proof(induct rule:lift_valid_edge.induct)
+      case (lve_edge a e)
+      have "\<exists>!a'. valid_edge a' \<and> (\<exists>Q r fs. kind a' = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs) \<and> 
+        a \<in> get_return_edges a'"
+        by(rule return_needs_call)
+      then obtain a' Q r fs where "valid_edge a'" and "kind a' = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+        and "a \<in> get_return_edges a'"
+        and imp:"\<forall>x. valid_edge x \<and> (\<exists>Q r fs. kind x = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs) \<and> 
+        a \<in> get_return_edges x \<longrightarrow> x = a'"
+        by(fastforce elim:ex1E)
+      let ?e' = "(Node (sourcenode a'),kind a',Node (targetnode a'))"
+      have "sourcenode a' \<noteq> Entry"
+      proof
+        assume "sourcenode a' = Entry"
+        show False by(rule Entry_no_call_source)
+      qed
+      have "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit ?e'"
+        by(fastforce intro:lift_valid_edge.lve_edge)
+      moreover
+      moreover
+      have "e \<in> lift_get_return_edges get_return_edges valid_edge
+        sourcenode targetnode kind ?e'" by(fastforce intro:lift_get_return_edgesI)
+      moreover
+      { fix x
+        assume "lift_valid_edge valid_edge sourcenode targetnode kind Entry Exit x"
+          and "\<exists>Q r fs. knd x = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs" 
+          and "e \<in> lift_get_return_edges get_return_edges valid_edge
+          sourcenode targetnode kind x"
+          and "x = (Node (sourcenode y), kind y, Node (targetnode y))"
+          by(fastforce elim:lift_valid_edge.cases)

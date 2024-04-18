@@ -1,0 +1,204 @@
+theory CoCallImplSafe
+imports CoCallAnalysisImpl CoCallAnalysisSpec ArityAnalysisFixProps
+begin
+
+locale CoCallImplSafe
+begin
+sublocale CoCallAnalysisImpl.
+
+lemma ccNeighbors_Int_ccrestr: "(ccNeighbors x G \<inter> S) = ccNeighbors x (cc_restr (insert x S) G) \<inter> S"
+  by transfer auto
+  
+lemma 
+  assumes "x \<notin> S" and "y \<notin> S"
+  shows CCexp_subst: "cc_restr S (CCexp e[y::=x]\<cdot>a) = cc_restr S (CCexp e\<cdot>a)"
+    and Aexp_restr_subst: "(Aexp e[y::=x]\<cdot>a) f|` S = (Aexp e\<cdot>a) f|` S"
+using assms
+proof (nominal_induct e avoiding: x y  arbitrary: a  S rule: exp_strong_induct_rec_set)
+  case (Var b v) 
+  case 1 show ?case by auto
+  case 2 thus ?case by auto
+next
+  case (App e v)
+  case 1
+    with App show ?case
+    by (auto simp add: Int_insert_left fv_subst_int simp del: join_comm intro: join_mono)
+  case 2
+    with App show ?case
+     by (auto simp add: env_restr_join simp del: fun_meet_simp)
+next
+  case (Lam v e)
+  case 1
+    with Lam
+    show ?case
+      by (auto simp add: CCexp_pre_simps cc_restr_predCC  Diff_Int_distrib2 fv_subst_int env_restr_join env_delete_env_restr_swap[symmetric] simp del: CCexp_simps)
+  case 2
+    with Lam
+    show ?case
+      by (auto simp add: env_restr_join env_delete_env_restr_swap[symmetric]  simp del: fun_meet_simp)
+next
+  case (Let \<Gamma> e x y)
+  hence [simp]: "x \<notin> domA \<Gamma> " "y \<notin> domA \<Gamma>"
+    by (metis (erased, opaque_lifting) bn_subst domA_not_fresh fresh_def fresh_star_at_base fresh_star_def obtain_fresh subst_is_fresh(2))+
+
+  note Let(1,2)[simp]
+
+  from Let(3)
+  have "\<not> nonrec (\<Gamma>[y::h=x])"  by (simp add: nonrec_subst)
+
+  case [simp]: 1
+  have "cc_restr (S \<union> domA \<Gamma>) (CCfix \<Gamma>[y::h=x]\<cdot>(Afix \<Gamma>[y::h=x]\<cdot>(Aexp e[y::=x]\<cdot>a \<squnion> (\<lambda>_. up\<cdot>0) f|` thunks \<Gamma>), CCexp e[y::=x]\<cdot>a)) =
+        cc_restr (S \<union> domA \<Gamma>) (CCfix \<Gamma>\<cdot>        (Afix \<Gamma>\<cdot>        (Aexp e\<cdot>       a \<squnion> (\<lambda>_. up\<cdot>0) f|` thunks \<Gamma>), CCexp e\<cdot>       a))"
+    apply (subst CCfix_restr_subst')
+      apply (erule Let(4))
+      apply auto[5]
+    apply (subst CCfix_restr) back
+      apply simp
+    apply (subst Afix_restr_subst')
+      apply (erule Let(5))
+      apply auto[5]
+    apply (subst Afix_restr) back
+      apply simp
+    apply (simp only: env_restr_join)
+    apply (subst Let(7))
+      apply auto[2]
+    apply (subst Let(6))
+      apply auto[2]
+    apply rule
+    done
+    by (auto simp add: fresh_star_Pair  elim: cc_restr_eq_subset[rotated] )
+
+  case [simp]: 2
+  have "Afix \<Gamma>[y::h=x]\<cdot>(Aexp e[y::=x]\<cdot>a \<squnion> (\<lambda>_. up\<cdot>0) f|` (thunks \<Gamma>)) f|` (S \<union> domA \<Gamma>) = Afix \<Gamma>\<cdot>(Aexp e\<cdot>a \<squnion> (\<lambda>_. up\<cdot>0) f|` (thunks \<Gamma>)) f|` (S \<union> domA \<Gamma>)"
+    apply (subst Afix_restr_subst')
+      apply (erule Let(5))
+      apply auto[5]
+    apply (subst Afix_restr) back
+      apply auto[1]
+    apply (simp only: env_restr_join)
+    apply (subst Let(7))
+      apply auto[2]
+    apply rule
+    done
+  thus ?case using Let(1,2)
+    by (auto simp add: fresh_star_Pair elim:env_restr_eq_subset[rotated])
+next
+  case (Let_nonrec x' e exp x y)
+
+  from Let_nonrec(1,2)
+  have  "x \<noteq> x'" "y \<noteq> x'" by (simp_all add: fresh_at_base)
+
+  note Let_nonrec(1,2)[simp]
+  
+  have [simp]: "x' \<notin> fv (e[y::=x])"
+    by (auto simp add: fv_subst_eq)
+
+
+  case [simp]: 1
+
+  have "\<And> a. cc_restr {x'} (CCexp exp[y::=x]\<cdot>a) = cc_restr {x'} (CCexp exp\<cdot>a)"
+   by (rule Let_nonrec(6)) auto
+  from arg_cong[where f = "\<lambda>x.  x'--x'\<in>x", OF this]
+  have [simp]: "x'--x'\<in>CCexp  exp[y::=x]\<cdot>a \<longleftrightarrow> x'--x'\<in>CCexp exp\<cdot>a" by auto
+
+  have [simp]: "\<And> a. Aexp e[y::=x]\<cdot>a f|` S = Aexp e\<cdot>a f|` S"
+    by (rule Let_nonrec(5)) auto
+
+  have [simp]: "\<And> a. fup\<cdot>(Aexp e[y::=x])\<cdot>a f|` S = fup\<cdot>(Aexp e)\<cdot>a f|` S"
+    by (case_tac a) auto
+
+  have [simp]: "Aexp  exp[y::=x]\<cdot>a f|` S = Aexp exp\<cdot>a f|` S"
+    by (rule Let_nonrec(7)) auto
+
+  have "Aexp exp[y::=x]\<cdot>a f|` {x'} = Aexp exp\<cdot>a f|` {x'}"
+    by (rule Let_nonrec(7)) auto
+  from fun_cong[OF this, where x = x']
+  have [simp]: "(Aexp exp[y::=x]\<cdot>a) x' = (Aexp exp\<cdot>a) x'" by auto
+
+  have [simp]:  "\<And> a. cc_restr S (CCexp exp[y::=x]\<cdot>a) = cc_restr S (CCexp exp\<cdot>a)"
+    by (rule Let_nonrec(6)) auto
+
+  have [simp]:  "\<And> a. cc_restr S (CCexp e[y::=x]\<cdot>a) = cc_restr S (CCexp e\<cdot>a)"
+    by (rule Let_nonrec(4)) auto
+
+  have [simp]: "\<And> a. cc_restr S (fup\<cdot>(CCexp e[y::=x])\<cdot>a) = cc_restr S (fup\<cdot>(CCexp e)\<cdot>a)"
+    by (rule fup_ccExp_restr_subst') simp
+
+  have [simp]: "fv e[y::=x] \<inter> S = fv e \<inter> S"
+    by (auto simp add: fv_subst_eq)
+
+  have [simp]:
+    "ccNeighbors x' (CCexp exp[y::=x]\<cdot>a) \<inter> - {x'} \<inter> S = ccNeighbors x' (CCexp exp\<cdot>a)  \<inter> - {x'} \<inter> S"
+    apply (simp only: Int_assoc)
+    apply (subst (1 2) ccNeighbors_Int_ccrestr)
+    apply (subst Let_nonrec(6))
+      apply auto[2]
+    apply rule
+    done
+
+  have [simp]:
+    "ccNeighbors x' (CCexp exp[y::=x]\<cdot>a) \<inter> S = ccNeighbors x' (CCexp exp\<cdot>a) \<inter> S"
+    apply (subst (1 2) ccNeighbors_Int_ccrestr)
+    apply (subst Let_nonrec(6))
+      apply auto[2]
+    apply rule
+    done
+
+  show "cc_restr S (CCexp (let x' be e in exp )[y::=x]\<cdot>a) = cc_restr S (CCexp (let x' be e in exp )\<cdot>a)"
+    apply (subst subst_let_be)
+      apply auto[2]
+    apply (subst (1 2) CCexp_simps(6))
+      apply fact+
+    apply (simp only: cc_restr_cc_delete_twist)
+    apply (rule arg_cong) back
+    apply (simp add:  Diff_eq ccBind_eq ABind_nonrec_eq)
+    done
+
+  show "Aexp (let x' be e in exp )[y::=x]\<cdot>a f|` S = Aexp (let x' be e in exp )\<cdot>a f|` S"
+    by (simp add: env_restr_join env_delete_env_restr_swap[symmetric] ABind_nonrec_eq)
+next
+  case (IfThenElse scrut e1 e2)
+  case [simp]: 2
+    from IfThenElse
+    show "cc_restr S (CCexp (scrut ? e1 : e2)[y::=x]\<cdot>a) = cc_restr S (CCexp (scrut ? e1 : e2)\<cdot>a)"
+      by (auto simp del: edom_env env_restr_empty env_restr_empty_iff simp  add: edom_env[symmetric])
+
+    from IfThenElse(2,4,6)
+    show "Aexp (scrut ? e1 : e2)[y::=x]\<cdot>a f|` S = Aexp (scrut ? e1 : e2)\<cdot>a f|` S"
+       by (auto simp add: env_restr_join simp del: fun_meet_simp)
+qed auto
+   
+sublocale ArityAnalysisSafe Aexp
+  by standard (simp_all add:Aexp_restr_subst)
+
+
+sublocale ArityAnalysisLetSafe Aexp Aheap
+proof
+  fix \<Gamma> e a
+  show "edom (Aheap \<Gamma> e\<cdot>a) \<subseteq> domA \<Gamma>"
+    by (cases "nonrec \<Gamma>")
+       (auto simp add: Aheap_nonrec_simp dest: subsetD[OF edom_esing_subset] elim!: nonrecE)
+next
+  fix x y :: var and \<Gamma> :: heap and e :: exp
+  assume assms: "x \<notin> domA \<Gamma>"  "y \<notin> domA \<Gamma>"
+
+  from Aexp_restr_subst[OF assms(2,1)]
+  have **: "\<And> a. Aexp e[x::=y]\<cdot>a f|` domA \<Gamma> = Aexp e\<cdot>a f|` domA \<Gamma>".
+
+  show "Aheap \<Gamma>[x::h=y] e[x::=y] = Aheap \<Gamma> e"
+  proof(cases "nonrec \<Gamma>")
+    case [simp]: False
+
+    from assms
+    have "atom ` domA \<Gamma> \<sharp>* x" and "atom ` domA \<Gamma> \<sharp>* y"
+      by (auto simp add: fresh_star_at_base image_iff)
+    hence [simp]: "\<not> nonrec (\<Gamma>[x::h=y])"
+      by (simp add: nonrec_subst)
+
+    show ?thesis
+    apply (rule cfun_eqI)
+    apply simp
+    apply (subst Afix_restr_subst[OF assms subset_refl])
+    apply (subst Afix_restr[OF  subset_refl]) back
+    apply (simp add: env_restr_join)
+    apply (subst **)

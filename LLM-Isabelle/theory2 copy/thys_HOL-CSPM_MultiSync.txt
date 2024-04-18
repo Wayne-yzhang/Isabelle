@@ -1,0 +1,136 @@
+theory MultiSync
+  imports "HOL-Library.Multiset" PreliminaryWork Patch
+begin
+
+
+
+
+
+      @{thm Multiset.finite_set_mset[no_vars]}).\<close>
+fun MultiSync_list :: \<open>['b set, 'a list, 'a \<Rightarrow> 'b process] \<Rightarrow> 'b process\<close>
+  where \<open>MultiSync_list S   []    P = STOP\<close>
+  |     \<open>MultiSync_list S (l # L) P = fold (\<lambda>x r. r \<lbrakk>S\<rbrakk> P x) L (P l)\<close> 
+syntax "_MultiSync_list" :: \<open>[pttrn, 'b set, 'a list, 'b process] \<Rightarrow> 'b process\<close>
+                            (\<open>(3\<^bold>\<lbrakk>_\<^bold>\<rbrakk>\<^sub>l_\<in>_./ _)\<close> 63)
+interpretation MultiSync: comp_fun_commute where f = \<open>\<lambda>x r. r \<lbrakk>E\<rbrakk> P x\<close>
+  \<open>mset L = mset L' \<Longrightarrow> MultiSync_list S L P = MultiSync_list S L' P\<close> 
+  assume * : \<open>add_mset a (mset l) = mset L'\<close>  and  ** : \<open>L = a # l\<close>
+  then obtain a' l' where *** : \<open> L' = a' # l'\<close>
+  have a0: \<open>a \<noteq> a' \<Longrightarrow> MultiSync_list S L P = 
+                       fold (\<lambda>x r. r \<lbrakk>S\<rbrakk> P x) (a' # (remove1 a' l)) (P a)\<close>
+    apply (subst fold_multiset_equiv[where ys = \<open>l\<close>])
+  have a1: \<open>a \<noteq> a' \<Longrightarrow> MultiSync_list S L' P =
+                       fold (\<lambda>x r. r \<lbrakk>S\<rbrakk> P x) (a # (remove1 a l')) (P a')\<close>   
+    apply (subst fold_multiset_equiv[where ys = \<open>l'\<close>])
+  show \<open>fold (\<lambda>x r. r \<lbrakk>S\<rbrakk> P x) l (P a) = MultiSync_list S L' P\<close>
+    apply (cases \<open>a = a'\<close>, simp)
+    apply (subst fold_multiset_equiv[where ys = \<open>remove1 a l'\<close>],
+definition MultiSync :: \<open>['b set, 'a multiset, 'a \<Rightarrow> 'b process] \<Rightarrow> 'b process\<close>
+  where \<open>MultiSync S M P = MultiSync_list S (SOME L. mset L = M) P\<close> 
+syntax "_MultiSync" :: \<open>[pttrn,'b set,'a multiset,'b process] \<Rightarrow> 'b process\<close>
+                       (\<open>(3\<^bold>\<lbrakk>_\<^bold>\<rbrakk> _\<in>#_. / _)\<close> 63)
+text \<open>Special case of \<^term>\<open>MultiSync E P\<close> when \<^term>\<open>E = {}\<close>.\<close>
+abbreviation MultiInter :: \<open>['a multiset, 'a \<Rightarrow> 'b process] \<Rightarrow> 'b process\<close>
+  where \<open>MultiInter M P \<equiv> MultiSync {} M P\<close> 
+syntax "_MultiInter" :: \<open>[pttrn, 'a multiset, 'b process] \<Rightarrow> 'b process\<close>
+                        (\<open>(3\<^bold>|\<^bold>|\<^bold>| _\<in>#_. / _)\<close> 77)
+text \<open>Special case of \<^term>\<open>MultiSync E P\<close> when \<^term>\<open>E = UNIV\<close>.\<close>
+abbreviation MultiPar :: \<open>['a multiset, 'a \<Rightarrow> 'b process] \<Rightarrow> 'b process\<close>
+  where \<open>MultiPar M P \<equiv> MultiSync UNIV M P\<close> 
+syntax "_MultiPar" :: \<open>[pttrn, 'a multiset, 'b process] \<Rightarrow> 'b process\<close>
+                      (\<open>(3\<^bold>|\<^bold>| _\<in>#_. / _)\<close> 77)
+section \<open>First Properties\<close>
+lemma MultiSync_rec0[simp]: \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># {#}. P p) = STOP\<close>
+lemma MultiSync_rec1[simp]: \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># {#a#}. P p) = P a\<close> 
+  \<open>M \<noteq> {#} \<Longrightarrow> (\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># add_mset m M. P p) = P m \<lbrakk>S\<rbrakk> (\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># M. P p)\<close>
+  assume \<open>M \<noteq> {#}\<close> \<open>mset L = M\<close> \<open>mset L' = add_mset m M\<close>
+  thus \<open>MultiSync_list S L' P = P m \<lbrakk>S\<rbrakk> MultiSync_list S L P\<close>
+    apply (subst MultiSync_list_mset[where L = \<open>L'\<close> and L' = \<open>L @ [m]\<close>], simp)
+  \<open>\<forall>x \<in># M. P x = Q x \<Longrightarrow> MultiSync S M P = MultiSync S M Q\<close>
+lemmas MultiInter_rec0 = MultiSync_rec0[where S = \<open>{}\<close>]
+   and MultiPar_rec0 = MultiSync_rec0[where S = \<open>UNIV\<close>]
+   and MultiInter_rec1 = MultiSync_rec1[where S = \<open>{}\<close>]
+   and MultiPar_rec1 = MultiSync_rec1[where S = \<open>UNIV\<close>]
+   and MultiInter_add  =  MultiSync_add[where S = \<open>{}\<close>]
+   and MultiPar_add  =  MultiSync_add[where S = \<open>UNIV\<close>]
+   and mono_MultiInter_eq = mono_MultiSync_eq[where S = \<open>{}\<close>]
+   and mono_MultiPar_eq = mono_MultiSync_eq[where S = \<open>UNIV\<close>]
+section \<open>Some Tests\<close>
+lemma \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk>\<^sub>l p \<in> []. P p) = STOP\<close> 
+  and \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk>\<^sub>l p \<in> [a]. P p) = P a\<close> 
+  and \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk>\<^sub>l p \<in> [a, b]. P p) = P a \<lbrakk>S\<rbrakk> P b\<close>  
+  and \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk>\<^sub>l p \<in> [a, b, c]. P p) = P a \<lbrakk>S\<rbrakk> P b \<lbrakk>S\<rbrakk> P c\<close>    
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># mset []. P p) = STOP\<close>
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># mset [a]. P p) = P a\<close>
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># mset [a, b]. P p) = P a \<lbrakk>S\<rbrakk> P b\<close>
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># mset [a, b, c]. P p) = P a \<lbrakk>S\<rbrakk> P b \<lbrakk>S\<rbrakk> P c\<close>
+lemma MultiSync_set1: \<open>MultiSync S (mset_set {k::nat..<k}) P = STOP\<close>
+lemma MultiSync_set2: \<open>MultiSync S (mset_set {k..<Suc k}) P = P k\<close>
+  \<open>l <  k \<Longrightarrow> MultiSync S (mset_set {l ..< Suc k}) P =
+   P l \<lbrakk>S\<rbrakk> (MultiSync S (mset_set {Suc l ..< Suc k}) P)\<close>
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># mset_set {1::int .. 3}. P p) = P 1 \<lbrakk>S\<rbrakk> P 2 \<lbrakk>S\<rbrakk> P 3\<close>
+  have \<open>{1::int .. 3} = insert 1 (insert 2 (insert 3 {}))\<close> by fastforce
+  thus \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># mset_set {1::int .. 3}. P p) = P 1 \<lbrakk>S\<rbrakk> P 2 \<lbrakk>S\<rbrakk> P 3\<close> by (simp add: Sync_assoc)
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># mset_set {0::nat .. a}. P p) =
+    \<^bold>\<lbrakk>S\<^bold>\<rbrakk> p \<in># mset_set ({a} \<union> {1 .. a} \<union> {0}) . P p\<close>
+lemmas   test_MultiInter =   test_MultiSync[where S = \<open>{}\<close>]
+   and   test_MultiPar =   test_MultiSync[where S = \<open>UNIV\<close>]
+   and   MultiInter_set1 =   MultiSync_set1[where S = \<open>{}\<close>]
+   and   MultiPar_set1 =   MultiSync_set1[where S = \<open>UNIV\<close>]
+   and   MultiInter_set2 =   MultiSync_set2[where S = \<open>{}\<close>]
+   and   MultiPar_set2 =   MultiSync_set2[where S = \<open>UNIV\<close>]
+   and   MultiInter_set3 =   MultiSync_set3[where S = \<open>{}\<close>]
+   and   MultiPar_set3 =   MultiSync_set3[where S = \<open>UNIV\<close>]
+   and  test_MultiInter' =  test_MultiSync'[where S = \<open>{}\<close>]
+   and  test_MultiPar' =  test_MultiSync'[where S = \<open>UNIV\<close>]
+   and test_MultiInter'' = test_MultiSync''[where S = \<open>{}\<close>]
+   and test_MultiPar'' = test_MultiSync''[where S = \<open>UNIV\<close>]
+section \<open>Continuity\<close>
+  \<open>\<forall>x \<in># M. cont (P x) \<Longrightarrow> cont (\<lambda>y. \<^bold>\<lbrakk>S\<^bold>\<rbrakk> z \<in># M. P z y)\<close>
+  by (cases \<open>M = {#}\<close>, simp, erule mset_induct_nonempty, simp+)
+lemmas MultiInter_cont[simp] = MultiSync_cont[where S = \<open>{}\<close>]
+   and   MultiPar_cont[simp] = MultiSync_cont[where S = \<open>UNIV\<close>]
+section \<open>Factorization of \<^const>\<open>Sync\<close> in front of \<^const>\<open>MultiSync\<close>\<close>
+  \<open>\<lbrakk>M \<noteq> {#}; N \<noteq> {#}\<rbrakk> \<Longrightarrow>
+   (\<^bold>\<lbrakk>S\<^bold>\<rbrakk> z \<in># M. P z) \<lbrakk>S\<rbrakk> (\<^bold>\<lbrakk>S\<^bold>\<rbrakk> z \<in># N. P z) = \<^bold>\<lbrakk>S\<^bold>\<rbrakk> z\<in># M + N. P z\<close>
+       MultiSync_factorization_union[where S = \<open>{}\<close>]
+       MultiSync_factorization_union[where S = \<open>UNIV\<close>]
+section \<open>\<^term>\<open>\<bottom>\<close> Absorbance\<close>
+  \<open>m \<in># M \<Longrightarrow> P m = \<bottom> \<Longrightarrow> (\<^bold>\<lbrakk>S\<^bold>\<rbrakk> z \<in># M. P z) = \<bottom>\<close>
+lemmas MultiInter_BOT_absorb = MultiSync_BOT_absorb[where S =  \<open>{}\<close> ]
+   and   MultiPar_BOT_absorb = MultiSync_BOT_absorb[where S = \<open>UNIV\<close>]
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> m \<in># M. P m) = \<bottom> \<longleftrightarrow> (\<exists>m \<in># M. P m = \<bottom>)\<close>
+  apply (cases \<open>M = {#}\<close>, simp add: BOT_iff_D D_STOP)
+lemmas MultiInter_is_BOT_iff = MultiSync_is_BOT_iff[where S =  \<open>{}\<close> ]
+   and   MultiPar_is_BOT_iff = MultiSync_is_BOT_iff[where S = \<open>UNIV\<close>]
+section \<open>Other Properties\<close>
+lemma MultiSync_SKIP_id: \<open>M \<noteq> {#} \<Longrightarrow> (\<^bold>\<lbrakk>S\<^bold>\<rbrakk> z \<in># M. SKIP) = SKIP\<close>
+lemmas     MultiInter_SKIP_id = MultiSync_SKIP_id[where S = \<open>{}\<close>]
+   and       MultiPar_SKIP_id = MultiSync_SKIP_id[where S = \<open>UNIV\<close>]
+  assumes \<open>m \<in># M\<close> and \<open>m' \<in># M\<close> and \<open>fst m \<noteq> fst m'\<close>
+  shows \<open>(\<^bold>|\<^bold>| a \<in># M. (fst a \<rightarrow> P (snd a))) = STOP\<close>
+  obtain M' where f2: \<open>M = add_mset m (add_mset m' M')\<close>
+  show \<open>(\<^bold>|\<^bold>| x \<in># M. (fst x \<rightarrow> P (snd x))) = STOP\<close>
+    apply (cases \<open>M' = {#}\<close>,
+  \<open>\<lbrakk>(m, n) \<in># M; (m', n') \<in># M; m \<noteq> m'\<rbrakk> \<Longrightarrow> 
+   (\<^bold>|\<^bold>| (m, n) \<in># M. (m \<rightarrow> P n)) = STOP\<close>
+  apply (subst cond_case_prod_eta[where g = \<open>\<lambda> x. (fst x \<rightarrow> P (snd x))\<close>])
+section \<open>Behaviour of \<^const>\<open>MultiSync\<close> with \<^const>\<open>Sync\<close>\<close>
+lemma Sync_STOP_STOP: \<open>STOP \<lbrakk>S\<rbrakk> STOP = STOP\<close>
+  by (fact Mprefix_Sync_distr_subset[of \<open>{}\<close> S \<open>{}\<close>, simplified, 
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> z \<in># M. P z) \<lbrakk>S\<rbrakk> (\<^bold>\<lbrakk>S\<^bold>\<rbrakk> z \<in># M. P' z) = \<^bold>\<lbrakk>S\<^bold>\<rbrakk> z \<in># M. P z \<lbrakk>S\<rbrakk> P' z\<close>
+  apply (cases \<open>M = {#}\<close>, simp add: Sync_STOP_STOP)
+lemmas MultiInter_Inter = MultiSync_Sync[where S = \<open>{}\<close>]
+   and     MultiPar_Par = MultiSync_Sync[where S = \<open>UNIV\<close>]
+section \<open>Commutativity\<close>
+  \<open>(\<^bold>\<lbrakk>S\<^bold>\<rbrakk> a \<in># M. \<^bold>\<lbrakk>S\<^bold>\<rbrakk> b \<in># N. P a b) = \<^bold>\<lbrakk>S\<^bold>\<rbrakk> b \<in># N. \<^bold>\<lbrakk>S\<^bold>\<rbrakk> a \<in># M. P a b\<close>
+  apply (cases \<open>N = {#}\<close>, induct M, simp_all, 
+lemmas MultiInter_sets_commute = MultiSync_sets_commute[where S = \<open>{}\<close>]
+   and   MultiPar_sets_commute = MultiSync_sets_commute[where S = \<open>UNIV\<close>]
+section \<open>Behaviour with Injectivity\<close>
+  \<open>inj_on f (set_mset M) \<Longrightarrow> 
+   (\<^bold>\<lbrakk>S\<^bold>\<rbrakk> x \<in># M. P x) = \<^bold>\<lbrakk>S\<^bold>\<rbrakk> x \<in># image_mset f M. P (inv_into (set_mset M) f x)\<close>
+  hence f1: \<open>inv_into (insert a (set_mset N)) f (f a) = a\<close> by force
+           rule arg_cong[where f = \<open>\<lambda>x. P a \<lbrakk>S\<rbrakk> x\<close>])
+       inj_on_mapping_over_MultiSync[where S = \<open>{}\<close>]
+       inj_on_mapping_over_MultiSync[where S = \<open>UNIV\<close>]

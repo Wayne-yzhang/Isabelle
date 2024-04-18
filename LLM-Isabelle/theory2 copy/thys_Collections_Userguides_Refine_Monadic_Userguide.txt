@@ -1,0 +1,259 @@
+theory Refine_Monadic_Userguide
+imports "../Refine_Dflt_Only_ICF"
+begin
+
+
+
+
+
+definition sum_max :: "nat set \<Rightarrow> (nat\<times>nat) nres" where
+  "sum_max V \<equiv> do {
+    (_,s,m) \<leftarrow> WHILE (\<lambda>(V,s,m). V\<noteq>{}) (\<lambda>(V,s,m). do {
+      x\<leftarrow>SPEC (\<lambda>x. x\<in>V); 
+      let V=V-{x};
+      let s=s+x;
+      let m=max m x;
+      RETURN (V,s,m)
+    }) (V,0,0);
+    RETURN (s,m)
+  }"
+
+
+
+definition "sum_max_invar V\<^sub>0 \<equiv> \<lambda>(V,s::nat,m).
+             V\<subseteq>V\<^sub>0
+           \<and> s=\<Sum>(V\<^sub>0-V) 
+           \<and> m=(if (V\<^sub>0-V)={} then 0 else Max (V\<^sub>0-V)) 
+           \<and> finite (V\<^sub>0-V)"
+
+
+lemma sum_max_invar_step:
+  assumes "x\<in>V" "sum_max_invar V\<^sub>0 (V,s,m)"
+  shows "sum_max_invar V\<^sub>0 (V-{x},s+x,max m x)"
+  using assms unfolding sum_max_invar_def by (auto simp: it_step_insert_iff)
+
+theorem sum_max_correct:
+  assumes PRE: "V\<noteq>{}" 
+  shows "sum_max V \<le> SPEC (\<lambda>(s,m). s=\<Sum>V \<and> m=Max V)"
+  using PRE unfolding sum_max_def
+  done
+
+
+
+definition "sum_max'_invar V\<^sub>0 \<sigma> \<equiv> 
+  sum_max_invar V\<^sub>0 \<sigma> 
+  \<and> (let (V,_,_)=\<sigma> in finite (V\<^sub>0-V))"
+
+definition sum_max' :: "nat set \<Rightarrow> (nat\<times>nat) nres" where
+  "sum_max' V \<equiv> do {
+    (_,s,m) \<leftarrow> WHILE\<^sub>T\<^bsup>sum_max'_invar V\<^esup> (\<lambda>(V,s,m). V\<noteq>{}) (\<lambda>(V,s,m). do {
+      x\<leftarrow>SPEC (\<lambda>x. x\<in>V); 
+      let V=V-{x};
+      let s=s+x;
+      let m=max m x;
+      RETURN (V,s,m)
+    }) (V,0,0);
+    RETURN (s,m)
+  }"
+
+
+theorem sum_max'_correct:
+  assumes NE: "V\<noteq>{}" and FIN: "finite V"
+  shows "sum_max' V \<le> SPEC (\<lambda>(s,m). s=\<Sum>V \<and> m=Max V)"
+  using NE FIN unfolding sum_max'_def
+
+  apply (subgoal_tac "wf (inv_image finite_psubset fst)",
+
+
+  done
+
+
+definition sum_max_impl :: "nat ls \<Rightarrow> (nat\<times>nat) nres" where
+  "sum_max_impl V \<equiv> do {
+    (_,s,m) \<leftarrow> WHILE (\<lambda>(V,s,m). \<not>ls.isEmpty V) (\<lambda>(V,s,m). do {
+      x\<leftarrow>RETURN (the (ls.sel V (\<lambda>x. True)));
+      let V=ls.delete x V;
+      let s=s+x;
+      let m=max m x;
+      RETURN (V,s,m)
+    }) (V,0,0);
+    RETURN (s,m)
+  }"
+
+
+theorem sum_max_impl_refine: 
+  assumes "(V,V')\<in>build_rel ls.\<alpha> ls.invar" 
+  shows "sum_max_impl V \<le> \<Down>Id (sum_max V')"
+
+  using assms unfolding sum_max_impl_def sum_max_def
+
+  apply (auto simp add: 
+  done
+
+theorem sum_max_impl_correct:
+  assumes "(V,V')\<in>build_rel ls.\<alpha> ls.invar" and "V'\<noteq>{}"
+  shows "sum_max_impl V \<le> SPEC (\<lambda>(s,m). s=\<Sum>V' \<and> m=Max V')"
+proof -
+  note sum_max_impl_refine
+  also note sum_max_correct
+  finally show ?thesis using assms .
+qed
+
+definition sum_max'_impl :: "nat ls \<Rightarrow> (nat\<times>nat) nres" where
+  "sum_max'_impl V \<equiv> do {
+    (_,s,m) \<leftarrow> WHILE\<^sub>T (\<lambda>(V,s,m). \<not>ls.isEmpty V) (\<lambda>(V,s,m). do {
+      x\<leftarrow>RETURN (the (ls.sel V (\<lambda>x. True)));
+      let V=ls.delete x V;
+      let s=s+x;
+      let m=max m x;
+      RETURN (V,s,m)
+    }) (V,0,0);
+    RETURN (s,m)
+  }"
+
+theorem sum_max'_impl_refine: 
+  "(V,V')\<in>build_rel ls.\<alpha> ls.invar \<Longrightarrow> sum_max'_impl V \<le> \<Down>Id (sum_max' V')"
+  unfolding sum_max'_impl_def sum_max'_def
+  apply refine_rcg
+  apply refine_dref_type
+  apply (auto simp: refine_hsimp ls.correct refine_rel_defs)
+  done
+
+theorem sum_max'_impl_correct:
+  assumes "(V,V')\<in>build_rel ls.\<alpha> ls.invar" and "V'\<noteq>{}"
+  shows "sum_max'_impl V \<le> SPEC (\<lambda>(s,m). s=\<Sum>V' \<and> m=Max V')"
+  using ref_two_step[OF sum_max'_impl_refine sum_max'_correct] assms
+  apply (auto simp: build_rel_def)
+  done
+
+schematic_goal sum_max_code_aux: "nres_of ?sum_max_code \<le> sum_max_impl V"
+  unfolding sum_max_impl_def
+  apply (refine_transfer)
+  done
+
+concrete_definition sum_max_code for V uses sum_max_code_aux
+
+thm sum_max_code_def
+thm sum_max_code.refine
+
+  the left hand side of the refinement statement.
+\<close>
+text \<open>Finally, we can prove a correctness statement that is independent
+  from our refinement framework:\<close>
+  txt \<open>The proof is done by transitivity, and unfolding some 
+    definitions:\<close>
+text \<open>For total correctness, the approach is the same. The 
+  only difference is, that we use @{const "RETURN"} instead 
+  of @{const "nres_of"}:\<close>
+text \<open>
+  If we use recursion combinators, a plain function can only be generated,
+  if the recursion combinators can be defined. Alternatively, for total correct
+  programs, we may generate a (plain) function that internally uses the 
+  deterministic monad, and then extracts the result.
+\<close>
+  apply (refine_transfer the_resI) \<comment> \<open>Using @{text "the_resI"} for internal monad and result extraction\<close>
+text \<open>Now, we can generate verified code with the Isabelle/HOL code
+  generator:\<close>
+subsection \<open>Foreach-Loops\<close>
+text \<open>
+  the elements of a set. As this pattern is used commonly, there is
+  an abbreviation for it in the refinement framework. The construct 
+  
+  With foreach-loops, we could have written our example as follows:
+\<close>
+  apply (rule FIN) \<comment> \<open>Discharge finiteness of iterated set\<close>
+  apply (auto intro: sum_max_invar_step) \<comment> \<open>Discharge step\<close>
+  unfolding sum_max_invar_def \<comment> \<open>Unfold invariant definition\<close>
+  apply (auto) \<comment> \<open>Discharge remaining goals\<close>
+text \<open>Note: The nondeterminism for iterators is currently resolved at
+  transfer phase, where they are replaced by iterators from the ICF.\<close>
+  txt \<open>Note that we specified \<open>inj_on_id\<close> as additional introduction 
+  @{term "nofail S"} states that \<open>S\<close> does not fail,
+  and @{term "inres S x"} states that one possible result of \<open>S\<close> is
+  \<open>x\<close> (Note that this includes the case that \<open>S\<close> fails).
+  collection \<open>refine_pw_simps\<close>.
+  the nrec-mode for the \<open>partial_function\<close> command, as well as the fixed 
+  Examples for \<open>partial_function\<close> can be found in 
+  \<open>ex/Refine_Fold\<close>. Examples for the recursion combinators can be found
+  in \<open>ex/Recursion\<close> and \<open>ex/Nested_DFS\<close>.
+      \item{@{term "RES X"}} All results from set \<open>X\<close>.
+      \item[@{term "RETURN x"}] Return single result \<open>x\<close>. Defined in 
+        terms of \<open>RES\<close>: @{lemma "RETURN x = RES {x}" by simp}.
+        succeed if \<open>r=None\<close>, otherwise return value of \<open>r\<close>.
+        All results that satisfy predicate \<open>\<Phi>\<close>. Defined in terms of
+        \<open>M\<close> and apply \<open>f\<close> to it. Note that usually the 
+        \<open>do\<close>-notation is used, i.e., \<open>do {x\<leftarrow>M; f x}\<close> or
+        \<open>do {M;f}\<close> if the result of \<open>M\<close> is not important.
+        If \<open>M\<close> fails, @{term [source] "bind M f"} also fails.
+        if \<open>\<Phi>\<close> does not hold, otherwise returns \<open>()\<close>.
+        if \<open>\<Phi>\<close> does not hold, otherwise returns \<open>()\<close>. Note that
+        May be used to express arbitrary recursion. Returns \<open>SUCCEED\<close> on
+        Returns \<open>FAIL\<close> on nontermination.
+        Start with state \<open>\<sigma>\<^sub>0\<close>,
+        and repeatedly apply \<open>f\<close> as long as \<open>b\<close> holds for the
+        Start with state \<open>\<sigma>\<^sub>0\<close>, and transform
+        the state with \<open>f x\<close> for each element \<open>x\<in>S\<close>. Asserts that 
+        \<open>S\<close> is finite.
+        \<open>I::'a set \<Rightarrow> 'b \<Rightarrow> bool\<close>, where \<open>I it \<sigma>\<close> means, that
+        the invariant holds for the remaining set of elements \<open>it\<close> and
+        current state \<open>\<sigma>\<close>. 
+        If \<open>c::'\<sigma>\<Rightarrow>bool\<close> becomes false for the current state,
+      \item[\<open>partial_function (nrec)\<close>] Mode of the partial function 
+          \<open>S \<le> S'\<close> means, that every result in 
+          \<open>S\<close> is also a result in \<open>S'\<close>. 
+          Moreover, \<open>S\<close> may only fail if \<open>S'\<close> fails.
+          \<open>\<le>\<close> forms a complete lattice, with least element 
+          \<open>SUCCEED\<close> and greatest element \<open>FAIL\<close>.
+          \<open>R::('c\<times>'a) set\<close> that relates concrete to abstract values, 
+          The functions \<open>\<Down>R\<close> and \<open>\<Up>R\<close> form a Galois-connection,
+          i.e., we have: \<open>S \<le> \<Down>R S' \<longleftrightarrow> \<Up>R S \<le> S'\<close>.
+        \item{@{term "nofail S"}} Predicate that states that \<open>S\<close> does
+        \item{@{term "inres S x"}} Predicate that states that \<open>S\<close> 
+          includes result \<open>x\<close>. Note that a failing program includes all
+              \item[Method:] \<open>intro refine_vcg\<close>
+              \item[Attributes:] \<open>refine_vcg\<close>
+            form \<open>S \<le> SPEC \<Phi>\<close> into verification conditions by 
+            decomposing the structure of \<open>S\<close>. Invariants for loops 
+            \<open>intro WHILE_rule[where I=\<dots>] refine_vcg\<close>.
+            \<open>refine_vcg\<close> is a named theorems collection that contains
+              \item[Method:] \<open>refine_rcg\<close> [thms]. 
+              \item[Attributes:] \<open>refine0\<close>, \<open>refine\<close>, 
+                \<open>refine2\<close>.
+              \item[Flags:] \<open>refine_no_prod_split\<close>.
+            Tries to prove a subgoal of the form \<open>S \<le> \<Down>R S'\<close> by 
+            decomposing the structure of \<open>S\<close> and \<open>S'\<close>. 
+            \<open>refine\<close>. More rules may be passed as argument to the method.
+            Rules contained in \<open>refine0\<close> are always 
+            tried first, and rules in \<open>refine2\<close> are tried last. 
+            should be put into \<open>refine\<close>. Rules that may make big steps,
+            \<open>refine0\<close> (e.g., @{thm [source] Id_refine}). Rules that 
+            before giving up should be put into \<open>refine2\<close>, e.g., 
+            setting the flag \<open>refine_no_prod_split\<close>.
+              \item[Method:] \<open>refine_dref_type\<close> [(trace)].
+              \item[Attributes:] \<open>refine_dref_RELATES\<close>,  
+                \<open>refine_dref_pattern\<close>.
+              \item[Flags:] \<open>refine_dref_tracing\<close>.
+            \<open>refine_dref_pattern\<close> to introduce a goal of the form
+            \<open>RELATES ?R\<close>, that is then solved by exhaustively 
+            applying rules declared as \<open>refine_dref_RELATES\<close>.
+            The flag \<open>refine_dref_tracing\<close> controls tracing of 
+            resolving \<open>RELATES\<close>-goals. Tracing may also be enabled by
+              \item[Attributes:] \<open>refine_pw_simps\<close>
+              \item[Attributes:] \<open>refine_hsimp\<close>
+              \item[Method:] \<open>refine_transfer\<close> [thms] 
+              \item[Attribute:] \<open>refine_transfer\<close>
+            Tries to prove a subgoal of the form \<open>\<alpha> f \<le> S\<close> by 
+            decomposing the structure of \<open>f\<close> and \<open>S\<close>. 
+            with a schematic lemma, to generate \<open>f\<close> from the structure
+            of \<open>S\<close>.
+            The theorems declared as \<open>refine_transfer\<close> are used to do
+            over product types (\<open>\<lambda>(a,b) (c,d). \<dots>\<close>) is done, and the
+            There is a standard setup for \<open>\<alpha>=RETURN\<close> 
+            \<open>\<alpha>=nres_of\<close> (transfer to deterministic result monad, for 
+              \item[Method:] \<open>refine_autoref\<close> 
+               \<open>concrete_definition name [attribs] for params uses thm\<close>
+               where \<open>attribs\<close> and the \<open>for\<close>-part are optional.
+               \<open>RETURN _\<close> and \<open>nres_of\<close>, in which cases those 
+               registered as \<open>name.refine\<close>.
+              \<open>prepare_code_thms thms\<close> takes a list of definitional 
+            will replace \<open>FOREACH\<close>-statements by the corresponding 

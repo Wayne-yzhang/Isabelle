@@ -1,0 +1,186 @@
+theory SAS_Plus_Semantics  
+  imports "SAS_Plus_Representation" "List_Supplement"
+    "Map_Supplement"
+begin
+section "SAS+ Semantics"
+
+
+subsection "Serial Execution Semantics"
+
+
+primrec execute_serial_plan_sas_plus
+  where "execute_serial_plan_sas_plus s [] = s"
+  | "execute_serial_plan_sas_plus s (op # ops) 
+    = (if is_operator_applicable_in s op 
+    then execute_serial_plan_sas_plus (execute_operator_sas_plus s op) ops
+    else s)" 
+
+
+definition is_serial_solution_for_problem
+  :: "('variable, 'domain) sas_plus_problem \<Rightarrow> ('variable, 'domain) sas_plus_plan \<Rightarrow> bool" 
+  where "is_serial_solution_for_problem \<Psi> \<psi>
+    \<equiv> let 
+        I = sas_plus_problem.initial_of \<Psi>
+        ; G = sas_plus_problem.goal_of \<Psi>
+        ; ops = sas_plus_problem.operators_of \<Psi>
+      in G \<subseteq>\<^sub>m execute_serial_plan_sas_plus I \<psi>
+        \<and> list_all (\<lambda>op. ListMem op ops) \<psi>" 
+
+
+context
+begin
+
+private lemma execute_operator_sas_plus_effect_i:
+  assumes "is_operator_applicable_in s op"
+    and "\<forall>(v, a) \<in> set (effect_of op). \<forall>(v', a') \<in> set (effect_of op).
+      v \<noteq> v' \<or> a = a'"
+    and"(v, a) \<in> set (effect_of op)"
+  shows "(s \<then>\<^sub>+ op) v = Some a"
+proof -
+  let ?effect = "effect_of op"
+  have "map_of ?effect v = Some a" 
+    using map_of_constant_assignments_defined_if[OF assms(2, 3)] try0
+    by blast
+  thus ?thesis 
+    unfolding execute_operator_sas_plus_def map_add_def
+    by fastforce
+qed
+    
+private lemma  execute_operator_sas_plus_effect_ii:
+  assumes "is_operator_applicable_in s op"
+    and "\<forall>(v', a') \<in> set (effect_of op). v' \<noteq> v"
+  shows "(s \<then>\<^sub>+ op) v = s v"
+proof -
+  let ?effect = "effect_of op" 
+  {
+    have "v \<notin> fst ` set ?effect" 
+      using assms(2)
+      by fastforce
+    then have "v \<notin> dom (map_of ?effect)"
+      using dom_map_of_conv_image_fst[of ?effect]
+      by argo
+    hence "(s ++ map_of ?effect) v = s v" 
+      using map_add_dom_app_simps(3)[of v "map_of ?effect" s]
+      by blast
+  }
+  thus ?thesis 
+    by fastforce
+qed
+
+has the following properties:
+\begin{itemize}
+\end{itemize} 
+
+theorem execute_operator_sas_plus_effect:
+  assumes "is_operator_applicable_in s op"
+    and "\<forall>(v, a) \<in> set (effect_of op). 
+      \<forall>(v', a') \<in> set (effect_of op). v \<noteq> v' \<or> a = a'"
+  shows "(v, a) \<in> set (effect_of op) 
+      \<longrightarrow> (s \<then>\<^sub>+ op) v = Some a"
+    and "(\<forall>a. (v, a) \<notin> set (effect_of op)) 
+      \<longrightarrow> (s \<then>\<^sub>+ op) v = s v"
+proof -
+  show "(v, a) \<in> set (effect_of op) 
+    \<longrightarrow> (s \<then>\<^sub>+ op) v = Some a" 
+    using execute_operator_sas_plus_effect_i[OF assms(1, 2)]
+    by blast
+next 
+  show "(\<forall>a. (v, a) \<notin> set (effect_of op)) 
+    \<longrightarrow> (s \<then>\<^sub>+ op) v = s v" 
+    using execute_operator_sas_plus_effect_ii[OF assms(1)]
+    by blast
+qed
+
+end
+
+
+subsection "Parallel Execution Semantics"
+
+
+type_synonym ('variable, 'domain) sas_plus_parallel_plan 
+  = "('variable, 'domain) sas_plus_operator list list" 
+    
+definition are_all_operators_applicable_in
+  :: "('variable, 'domain) state 
+    \<Rightarrow> ('variable, 'domain) sas_plus_operator list
+    \<Rightarrow> bool"
+  where "are_all_operators_applicable_in s ops 
+    \<equiv> list_all (is_operator_applicable_in s) ops"
+
+definition are_operator_effects_consistent
+  :: "('variable, 'domain) sas_plus_operator
+    \<Rightarrow> ('variable, 'domain) sas_plus_operator
+    \<Rightarrow> bool"
+  where "are_operator_effects_consistent op op' 
+    \<equiv> let 
+        effect = effect_of op
+        ; effect' = effect_of op'
+      in list_all (\<lambda>(v, a). list_all (\<lambda>(v', a'). v \<noteq> v' \<or> a = a') effect') effect"
+
+definition are_all_operator_effects_consistent
+  :: "('variable, 'domain) sas_plus_operator list
+    \<Rightarrow> bool"
+  where "are_all_operator_effects_consistent ops 
+    \<equiv> list_all (\<lambda>op. list_all (are_operator_effects_consistent op) ops) ops"   
+
+definition execute_parallel_operator_sas_plus
+  :: "('variable, 'domain) state 
+    \<Rightarrow> ('variable, 'domain) sas_plus_operator list 
+    \<Rightarrow> ('variable, 'domain) state"
+  where "execute_parallel_operator_sas_plus s ops 
+    \<equiv> foldl (++) s (map (map_of \<circ> effect_of) ops)" 
+
+
+fun execute_parallel_plan_sas_plus
+  :: "('variable, 'domain) state 
+    \<Rightarrow> ('variable, 'domain) sas_plus_parallel_plan
+    \<Rightarrow> ('variable, 'domain) state" 
+  where "execute_parallel_plan_sas_plus s [] = s"
+  | "execute_parallel_plan_sas_plus s (ops # opss) = (if 
+      are_all_operators_applicable_in s ops 
+      \<and> are_all_operator_effects_consistent ops
+    then execute_parallel_plan_sas_plus 
+      (execute_parallel_operator_sas_plus s ops) opss
+    else s)"
+
+fun trace_parallel_plan_sas_plus
+  :: "('variable, 'domain) state  
+    \<Rightarrow> ('variable, 'domain) sas_plus_parallel_plan 
+    \<Rightarrow> ('variable, 'domain) state list"
+  where "trace_parallel_plan_sas_plus s [] = [s]"
+  | "trace_parallel_plan_sas_plus s (ops # opss) = s # (if 
+      are_all_operators_applicable_in s ops 
+      \<and> are_all_operator_effects_consistent ops
+    then trace_parallel_plan_sas_plus 
+      (execute_parallel_operator_sas_plus s ops) opss
+    else [])"
+
+\begin{enumerate}
+    are specified in the problem description.
+\end{enumerate} \<close>
+text \<open>The following lemmas show the properties of SAS+ parallel plan execution traces. 
+\begin{itemize}
+problem (lemma \ref{isathm:head-parallel-plan-trace-sas-plus}); moreover,
+  \item for all but the last element of the trace---i.e. elements with index 
+\ref{isathm:parallel-plan-trace-operator-execution-conditions-sas-plus}); and 
+finally, 
+\ref{isathm:parallel-trace-plan-prefixes-sas-plus}).
+\end{itemize} \<close>
+  \<comment> \<open> NOTE Base case yields contradiction with assumption and can be left to automation. \<close>
+      \<comment> \<open> NOTE Thesis follows from contradiction with assumption. \<close>
+  \<comment> \<open> NOTE rewrite the goal using the subplan formulation to be able. This allows us to make the 
+    initial state arbitrary. \<close>
+text \<open> Finally, we obtain the result corresponding to lemma 
+\ref{isathm:parallel-solution-trace-strips} in the SAS+ case: it is equivalent to say that parallel 
+SAS+ execution reaches the problem's goal state and that the last element of the corresponding 
+trace satisfies the goal state. \<close>
+        \<comment> \<open> NOTE Base case follows from simplification. \<close>
+text \<open> Again we want to establish conditions for the serializability of plans. Let
+two important results, namely that
+\begin{enumerate}
+(lemma \ref{isathm:serial-sas-plus-embedding}); and conversely that,
+concatenated to obtain a serial solution (lemma 
+\ref{isathm:embedded-serial-solution-flattening-sas-plus}).
+\end{enumerate} \<close>
+\<comment> \<open> Relate the locale definition \<open>range_of\<close> with its corresponding implementation for valid 
+operators and given an effect \<open>(v, a)\<close>. \<close>

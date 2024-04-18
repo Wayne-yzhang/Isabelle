@@ -1,0 +1,290 @@
+theory Kirby
+  imports ZFC_Cardinals
+
+begin
+
+
+
+
+instantiation V :: plus
+begin
+
+definition plus_V :: "V \<Rightarrow> V \<Rightarrow> V"
+  where "plus_V x \<equiv> transrec (\<lambda>f z. x \<squnion> set (f ` elts z))"
+
+instance ..
+end
+
+definition lift :: "V \<Rightarrow> V \<Rightarrow> V"
+  where "lift x y \<equiv> set (plus x ` elts y)"
+
+lemma plus: "x + y = x \<squnion> set ((+)x ` elts y)"
+  unfolding plus_V_def  by (subst transrec) auto
+
+lemma plus_eq_lift: "x + y = x \<squnion> lift x y"
+  unfolding lift_def  using plus by blast
+
+lemma lift_sup_distrib: "lift x (a \<squnion> b) = lift x a \<squnion> lift x b"
+  by (simp add: image_Un lift_def sup_V_def)
+
+lemma lift_Sup_distrib: "small Y \<Longrightarrow> lift x (\<Squnion> Y) = \<Squnion> (lift x ` Y)"
+  by (auto simp: lift_def Sup_V_def image_Union)
+
+lemma add_Sup_distrib:
+  fixes x::V shows "y \<noteq> 0 \<Longrightarrow> x + (\<Squnion>z\<in>elts y. f z) = (\<Squnion>z\<in>elts y. x + f z)"
+  by (auto simp: plus_eq_lift SUP_sup_distrib lift_Sup_distrib image_image)
+
+lemma Limit_add_Sup_distrib:
+  fixes x::V shows "Limit \<alpha> \<Longrightarrow> x + (\<Squnion>z\<in>elts \<alpha>. f z) = (\<Squnion>z\<in>elts \<alpha>. x + f z)"
+  using add_Sup_distrib by force
+
+instantiation V :: monoid_add
+begin
+instance
+proof
+  show "a + b + c = a + (b + c)" for a b c :: V
+  proof (induction c rule: eps_induct)
+    case (step c)
+    have "(a+b) + c = a + b \<squnion> set ((+) (a + b) ` elts c)"
+      by (metis plus)
+    also have "\<dots> = a \<squnion> lift a b \<squnion> set ((\<lambda>u. a + (b+u)) ` elts c)"
+      using plus_eq_lift step.IH by auto
+    also have "\<dots> = a \<squnion> lift a (b + c)"
+    proof -
+      have "lift a b \<squnion> set ((\<lambda>u. a + (b + u)) ` elts c) = lift a (b + c)"
+        unfolding lift_def
+        by (metis elts_of_set image_image lift_def lift_sup_distrib plus_eq_lift replacement small_elts)
+      then show ?thesis
+        by (simp add: sup_assoc)
+    qed
+    also have "\<dots> = a + (b + c)"
+      using plus_eq_lift by auto
+    finally show ?case .
+  qed
+  show "0 + x = x" for x :: V
+  proof (induction rule: eps_induct)
+    case (step x)
+    then show ?case
+      by (subst plus) auto
+  qed
+  show "x + 0 = x" for x :: V
+    by (subst plus) auto
+qed
+end
+
+lemma lift_0 [simp]: "lift 0 x = x"
+  by (simp add: lift_def)
+
+lemma lift_by0 [simp]: "lift x 0 = 0"
+  by (simp add: lift_def)
+
+lemma lift_by1 [simp]: "lift x 1 = set{x}"
+  by (simp add: lift_def)
+
+lemma add_eq_0_iff [simp]:
+  fixes x y::V
+  shows "x+y = 0 \<longleftrightarrow> x=0 \<and> y=0"
+  proof safe
+  show "x = 0" if "x + y = 0"
+    by (metis that le_imp_less_or_eq not_less_0 plus sup_ge1)
+  then show "y = 0" if "x + y = 0"
+    using that by auto
+qed auto
+
+lemma plus_vinsert: "x + vinsert z y = vinsert (x+z) (x + y)"
+proof -
+  have f1: "elts (x + y) = elts x \<union> (+) x ` elts y"
+    by (metis elts_of_set lift_def plus_eq_lift replacement small_Un small_elts sup_V_def)
+  moreover have "lift x (vinsert z y) = set ((+) x ` elts (set (insert z (elts y))))"
+    using vinsert_def lift_def by presburger
+  ultimately show ?thesis
+    by (simp add: vinsert_def plus_eq_lift sup_V_def)
+qed
+
+lemma plus_V_succ_right: "x + succ y = succ (x + y)"
+  by (metis plus_vinsert succ_def)
+
+lemma succ_eq_add1: "succ x = x + 1"
+  by (simp add: plus_V_succ_right one_V_def)
+
+lemma ord_of_nat_add: "ord_of_nat (m+n) = ord_of_nat m + ord_of_nat n"
+  by (induction n) (auto simp: plus_V_succ_right)
+
+lemma succ_0_plus_eq [simp]:
+  assumes "\<alpha> \<in> elts \<omega>" 
+  shows "succ 0 + \<alpha> = succ \<alpha>"
+proof -
+  obtain n where "\<alpha> = ord_of_nat n"
+    using assms elts_\<omega> by blast
+  then show ?thesis
+    by (metis One_nat_def ord_of_nat.simps ord_of_nat_add plus_1_eq_Suc)
+qed
+
+lemma omega_closed_add [intro]:
+  assumes "\<alpha> \<in> elts \<omega>" "\<beta> \<in> elts \<omega>" shows "\<alpha>+\<beta> \<in> elts \<omega>"
+proof -
+  obtain m n where "\<alpha> = ord_of_nat m" "\<beta> = ord_of_nat n"
+    using assms elts_\<omega> by auto
+  then have "\<alpha>+\<beta> = ord_of_nat (m+n)"
+    using ord_of_nat_add by auto
+  then show ?thesis
+    by (simp add: \<omega>_def)
+qed
+
+lemma mem_plus_V_E:
+  assumes l: "l \<in> elts (x + y)"
+  obtains "l \<in> elts x" | z where "z \<in> elts y" "l = x + z"
+  using l by (auto simp: plus [of x y] split: if_split_asm)
+
+lemma not_add_less_right: assumes "Ord y" shows "\<not> (x + y < x)"
+  using assms
+proof (induction rule: Ord_induct)
+  case (step i)
+  then show ?case
+    by (metis less_le_not_le plus sup_ge1)
+qed
+
+lemma not_add_mem_right: "\<not> (x + y \<in> elts x)"
+  by (metis sup_ge1 mem_not_refl plus vsubsetD)
+
+lemma add_not_less_TC_self: "\<not> x + y \<sqsubset> x"
+proof (induction y arbitrary: x rule: eps_induct)
+  case (step y)
+  then show ?case
+    using less_TC_imp_not_le plus_eq_lift by fastforce
+qed
+
+lemma TC_sup_lift: "TC x \<sqinter> lift x y = 0"
+proof -
+  have "elts (TC x) \<inter> elts (set ((+) x ` elts y)) = {}"
+    using add_not_less_TC_self by (auto simp: less_TC_def)
+  then have "TC x \<sqinter> set ((+) x ` elts y) = set {}"
+    by (metis inf_V_def)
+  then show ?thesis
+    using lift_def by auto
+qed
+
+lemma lift_lift: "lift x (lift y z) = lift (x+y) z"
+  using add.assoc  by (auto simp: lift_def)
+
+lemma lift_self_disjoint: "x \<sqinter> lift x u = 0"
+  by (metis TC_sup_lift arg_subset_TC inf.absorb_iff2 inf_assoc inf_sup_aci(3) lift_0)
+
+lemma sup_lift_eq_lift:
+  assumes "x \<squnion> lift x u = x \<squnion> lift x v"
+  shows "lift x u = lift x v"
+  by (metis (no_types) assms inf_sup_absorb inf_sup_distrib2 lift_self_disjoint sup_commute sup_inf_absorb)
+
+
+proposition lift_eq_lift: "lift x y = lift x z \<Longrightarrow> y = z"
+proof (induction y arbitrary: z rule: eps_induct)
+  case (step y)
+  show ?case
+  proof (intro vsubsetI order_antisym)
+    show "u \<in> elts z" if "u \<in> elts y" for u
+    proof -
+      have "x+u \<in> elts (lift x z)"
+        using lift_def step.prems that by fastforce
+      then obtain v where "v \<in> elts z" "x+u = x+v"
+        using lift_def by auto
+      then have "lift x u = lift x v"
+        using sup_lift_eq_lift by (simp add: plus_eq_lift)
+      then have "u=v"
+        using step.IH that by blast
+      then show ?thesis
+    qed
+    show "u \<in> elts y" if "u \<in> elts z" for u
+    proof -
+      have "x+u \<in> elts (lift x y)"
+        using lift_def step.prems that by fastforce
+      then obtain v where "v \<in> elts y" "x+u = x+v"
+        using lift_def by auto
+      then have "lift x u = lift x v"
+        using sup_lift_eq_lift by (simp add: plus_eq_lift)
+      then have "u=v"
+      then show ?thesis
+    qed
+  qed
+qed
+
+corollary inj_lift: "inj_on (lift x) A"
+  by (auto simp: inj_on_def dest: lift_eq_lift)
+
+corollary add_right_cancel [iff]:
+  fixes x y z::V shows "x+y = x+z \<longleftrightarrow> y=z"
+  by (metis lift_eq_lift plus_eq_lift sup_lift_eq_lift)
+
+corollary add_mem_right_cancel [iff]:
+  fixes x y z::V shows "x+y \<in> elts (x+z) \<longleftrightarrow> y \<in> elts z"
+  apply safe
+   apply (metis mem_plus_V_E not_add_mem_right add_right_cancel)
+  by (metis ZFC_in_HOL.ext dual_order.antisym elts_vinsert insert_subset order_refl plus_vinsert)
+
+corollary add_le_cancel_left [iff]:
+  fixes x y z::V shows "x+y \<le> x+z \<longleftrightarrow> y\<le>z"
+  by auto (metis add_mem_right_cancel mem_plus_V_E plus sup_ge1 vsubsetD)
+
+corollary add_less_cancel_left [iff]:
+  fixes x y z::V shows "x+y < x+z \<longleftrightarrow> y<z"
+  by (simp add: less_le_not_le)
+
+corollary lift_le_self [simp]: "lift x y \<le> x \<longleftrightarrow> y = 0"
+  by (auto simp: inf.absorb_iff2 lift_eq_lift lift_self_disjoint)
+
+lemma succ_less_\<omega>_imp: "succ x < \<omega> \<Longrightarrow> x < \<omega>"
+  by (metis add_le_cancel_left add.right_neutral le_0 le_less_trans succ_eq_add1)
+
+lemma card_lift: "vcard (lift x y) = vcard y"
+proof (rule cardinal_cong)
+  have "bij_betw ((+)x) (elts y) (elts (lift x y))"
+    unfolding bij_betw_def
+    by (simp add: inj_on_def lift_def)
+  then show "elts (lift x y) \<approx> elts y"
+    using eqpoll_def eqpoll_sym by blast
+qed
+
+lemma eqpoll_lift: "elts (lift x y) \<approx> elts y"
+  by (metis card_lift cardinal_eqpoll eqpoll_sym eqpoll_trans)
+
+lemma vcard_add: "vcard (x + y) = vcard x \<oplus> vcard y"
+  using card_lift [of x y] lift_self_disjoint [of x]
+  by (simp add: plus_eq_lift vcard_disjoint_sup)
+
+lemma countable_add:
+  assumes "countable (elts A)" "countable (elts B)"
+  shows "countable (elts (A+B))"
+proof -
+  have "vcard A \<le> \<aleph>0" "vcard B \<le> \<aleph>0"
+    using assms countable_iff_le_Aleph0 by blast+
+  then have "vcard (A+B) \<le> \<aleph>0"
+    unfolding vcard_add
+    by (metis Aleph_0 Card_\<omega> InfCard_cdouble_eq InfCard_def cadd_le_mono order_refl)
+  then show ?thesis
+    by (simp add: countable_iff_le_Aleph0)
+qed
+
+proposition TC_add: "TC (x + y) = TC x \<squnion> lift x (TC y)"
+proof (induction y rule: eps_induct)
+  case (step y)
+  have *: "\<Squnion> (TC ` (+) x ` elts y) = TC x \<squnion> (\<Squnion>u\<in>elts y. TC (set ((+) x ` elts u)))"
+    if "elts y \<noteq> {}"
+  proof -
+    obtain w where "w \<in> elts y"
+    then have "TC x \<le> TC (x + w)"
+      by (simp add: step.IH)
+    then have \<dagger>: "TC x \<le> (\<Squnion>w\<in>elts y. TC (x + w))"
+    show ?thesis
+      using that
+      apply (intro conjI ballI impI order_antisym; clarsimp simp add: image_comp \<dagger>)
+       apply(metis TC_sup_distrib Un_iff elts_sup_iff plus)
+      by (metis TC_least Transset_TC arg_subset_TC le_sup_iff plus vsubsetD)
+  qed
+  have "TC (x + y) = (x + y) \<squnion> \<Squnion> (TC ` elts (x + y))"
+    using TC by blast
+  also have "\<dots> = x \<squnion> lift x y \<squnion> \<Squnion> (TC ` elts x) \<squnion> \<Squnion> ((\<lambda>u. TC (x+u)) ` elts y)"
+    apply (simp add: plus_eq_lift image_Un Sup_Un_distrib sup.left_commute sup_assoc TC_sup_distrib SUP_sup_distrib)
+    apply (simp add: lift_def sup.commute sup_aci *)
+lemma mult_Sup_distrib: "small Y \<Longrightarrow> x * (\<Squnion>Y) = \<Squnion> ((*) x ` Y)" for Y:: "V set"
+lemma mult_Limit: "Limit \<gamma> \<Longrightarrow> x * \<gamma> = \<Squnion> ((*) x ` elts \<gamma>)"
+  have "\<alpha> \<in> (*) \<alpha> ` elts \<mu>"
+  then have "\<alpha> \<le> \<Squnion> ((*) \<alpha> ` elts \<mu>)"

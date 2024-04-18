@@ -1,0 +1,94 @@
+theory MTX_Flows
+  imports 
+    SQ_MTX 
+    Hybrid_Systems_VCs.HS_ODEs
+
+begin
+
+
+
+definition matrix_continuous_on :: "real set \<Rightarrow> (real \<Rightarrow> ('a::real_normed_algebra_1)^'n^'m) \<Rightarrow> bool" 
+  where "matrix_continuous_on T A = (\<forall>t \<in> T. \<forall>\<epsilon> > 0. \<exists> \<delta> > 0. \<forall>\<tau>\<in>T. \<bar>\<tau> - t\<bar> < \<delta> \<longrightarrow> \<parallel>A \<tau> - A t\<parallel>\<^sub>o\<^sub>p \<le> \<epsilon>)"
+
+lemma continuous_on_matrix_vector_multl:
+  assumes "matrix_continuous_on T A"
+  shows "continuous_on T (\<lambda>t. A t *v s)"
+proof(rule continuous_onI, simp add: dist_norm)
+  fix e t::real assume "0 < e" and "t \<in> T"
+  let ?\<epsilon> = "e/(\<parallel>(if s = 0 then 1 else s)\<parallel>)"
+  have "?\<epsilon> > 0"
+  then obtain \<delta> where dHyp: "\<delta> > 0 \<and> (\<forall>\<tau>\<in>T. \<bar>\<tau> - t\<bar> < \<delta> \<longrightarrow> \<parallel>A \<tau> - A t\<parallel>\<^sub>o\<^sub>p \<le> ?\<epsilon>)"
+  {fix \<tau> assume "\<tau> \<in> T" and "\<bar>\<tau> - t\<bar> < \<delta>"
+    have obs: "?\<epsilon> * (\<parallel>s\<parallel>) = (if s = 0 then 0 else e)"
+      by auto
+    have "\<parallel>A \<tau> *v s - A t *v s\<parallel> = \<parallel>(A \<tau> - A t) *v s\<parallel>"
+      by (simp add: matrix_vector_mult_diff_rdistrib)      
+    also have "... \<le> (\<parallel>A \<tau> - A t\<parallel>\<^sub>o\<^sub>p) * (\<parallel>s\<parallel>)"
+      using norm_matrix_le_mult_op_norm by blast
+    also have "... \<le> ?\<epsilon> * (\<parallel>s\<parallel>)"
+    finally have "\<parallel>A \<tau> *v s - A t *v s\<parallel> \<le> e"
+  thus "\<exists>d>0. \<forall>\<tau>\<in>T. \<bar>\<tau> - t\<bar> < d \<longrightarrow> \<parallel>A \<tau> *v s - A t *v s\<parallel> \<le> e"
+    using dHyp by blast
+qed
+
+lemma lipschitz_cond_affine:
+  fixes A :: "real \<Rightarrow> 'a::real_normed_algebra_1^'n^'m" and T::"real set"
+  defines "L \<equiv> Sup {\<parallel>A t\<parallel>\<^sub>o\<^sub>p |t. t \<in> T}"
+  assumes "t \<in> T" and "bdd_above {\<parallel>A t\<parallel>\<^sub>o\<^sub>p |t. t \<in> T}"
+  shows "\<parallel>A t *v x - A t *v y\<parallel> \<le> L * (\<parallel>x - y\<parallel>)"
+proof-
+  have obs: "\<parallel>A t\<parallel>\<^sub>o\<^sub>p \<le> Sup {\<parallel>A t\<parallel>\<^sub>o\<^sub>p |t. t \<in> T}"
+    apply(rule cSup_upper)
+    using continuous_on_subset assms by (auto simp: dist_norm)
+  have "\<parallel>A t *v x - A t *v y\<parallel> = \<parallel>A t *v (x - y)\<parallel>"
+    by (simp add: matrix_vector_mult_diff_distrib)
+  also have "... \<le> (\<parallel>A t\<parallel>\<^sub>o\<^sub>p) * (\<parallel>x - y\<parallel>)"
+    using norm_matrix_le_mult_op_norm by blast
+  also have "... \<le> Sup {\<parallel>A t\<parallel>\<^sub>o\<^sub>p |t. t \<in> T} * (\<parallel>x - y\<parallel>)"
+    using obs mult_right_mono norm_ge_zero by blast 
+  finally show "\<parallel>A t *v x - A t *v y\<parallel> \<le> L * (\<parallel>x - y\<parallel>)"
+    unfolding assms .
+qed
+
+lemma local_lipschitz_affine:
+  fixes A :: "real \<Rightarrow> 'a::real_normed_algebra_1^'n^'m"
+  assumes "open T" and "open S" 
+    and Ahyp: "\<And>\<tau> \<epsilon>. \<epsilon> > 0 \<Longrightarrow> \<tau> \<in> T \<Longrightarrow> cball \<tau> \<epsilon> \<subseteq> T \<Longrightarrow> bdd_above {\<parallel>A t\<parallel>\<^sub>o\<^sub>p |t. t \<in> cball \<tau> \<epsilon>}"
+  shows "local_lipschitz T S (\<lambda>t s. A t *v s + B t)"
+proof(unfold local_lipschitz_def lipschitz_on_def, clarsimp)
+  fix s t assume "s \<in> S" and "t \<in> T"
+  then obtain e1 e2 where "cball t e1 \<subseteq> T" and "cball s e2 \<subseteq> S" and "min e1 e2 > 0"
+  hence obs: "cball t (min e1 e2) \<subseteq> T"
+    by auto
+  let ?L = "Sup {\<parallel>A \<tau>\<parallel>\<^sub>o\<^sub>p |\<tau>. \<tau> \<in> cball t (min e1 e2)}"
+  have "\<parallel>A t\<parallel>\<^sub>o\<^sub>p \<in> {\<parallel>A \<tau>\<parallel>\<^sub>o\<^sub>p |\<tau>. \<tau> \<in> cball t (min e1 e2)}"
+  moreover have bdd: "bdd_above {\<parallel>A \<tau>\<parallel>\<^sub>o\<^sub>p |\<tau>. \<tau> \<in> cball t (min e1 e2)}"
+  moreover have "Sup {\<parallel>A \<tau>\<parallel>\<^sub>o\<^sub>p |\<tau>. \<tau> \<in> cball t (min e1 e2)} \<ge> 0"
+    apply(rule order.trans[OF op_norm_ge_0[of "A t"]])
+    by (rule cSup_upper[OF calculation])
+  moreover have "\<forall>x\<in>cball s (min e1 e2) \<inter> S. \<forall>y\<in>cball s (min e1 e2) \<inter> S. 
+    \<forall>\<tau>\<in>cball t (min e1 e2) \<inter> T. dist (A \<tau> *v x) (A \<tau> *v y) \<le> ?L * dist x y"
+    apply(clarify, simp only: dist_norm, rule lipschitz_cond_affine)
+  ultimately show "\<exists>e>0. \<exists>L. \<forall>t\<in>cball t e \<inter> T. 0 \<le> L \<and> 
+    (\<forall>x\<in>cball s e \<inter> S. \<forall>y\<in>cball s e \<inter> S. dist (A t *v x) (A t *v y) \<le> L * dist x y)"
+qed
+
+lemma picard_lindeloef_affine:
+  fixes A :: "real \<Rightarrow> 'a::{banach,real_normed_algebra_1,heine_borel}^'n^'n"
+  assumes Ahyp: "matrix_continuous_on T A"
+      and "\<And>\<tau> \<epsilon>. \<tau> \<in> T \<Longrightarrow> \<epsilon> > 0 \<Longrightarrow> bdd_above {\<parallel>A t\<parallel>\<^sub>o\<^sub>p |t. dist \<tau> t \<le> \<epsilon>}"
+      and Bhyp: "continuous_on T B" and "open S" 
+      and "t\<^sub>0 \<in> T" and Thyp: "open T" "is_interval T" 
+    shows "picard_lindeloef (\<lambda> t s. A t *v s + B t) T S t\<^sub>0"
+  apply (unfold_locales, simp_all add: assms, clarsimp)
+   apply (rule continuous_on_add[OF continuous_on_matrix_vector_multl[OF Ahyp] Bhyp])
+  by (rule local_lipschitz_affine) (simp_all add: assms)
+
+lemma picard_lindeloef_autonomous_affine: 
+  fixes A :: "'a::{banach,real_normed_field,heine_borel}^'n^'n"
+  shows "picard_lindeloef (\<lambda> t s. A *v s + B) UNIV UNIV t\<^sub>0"
+  using picard_lindeloef_affine[of _ "\<lambda>t. A" "\<lambda>t. B"] 
+  unfolding matrix_continuous_on_def by (simp only: diff_self op_norm0, auto)
+
+lemma picard_lindeloef_autonomous_linear:
+  fixes A :: "'a::{banach,real_normed_field,heine_borel}^'n^'n"

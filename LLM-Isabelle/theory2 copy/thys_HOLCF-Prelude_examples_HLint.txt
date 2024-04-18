@@ -1,0 +1,606 @@
+theory HLint
+  imports
+    "../HOLCF_Prelude"
+    "../List_Comprehension"
+begin
+
+
+
+
+
+
+
+lemma "(eq\<cdot>(x::'a::Eq_sym)\<cdot>a orelse eq\<cdot>x\<cdot>b orelse eq\<cdot>x\<cdot>c) = elem\<cdot>x\<cdot>[a, b, c]"
+  by (auto simp add: eq_sym)
+
+lemma "(neq\<cdot>(x::'a::Eq_sym)\<cdot>a andalso neq\<cdot>x\<cdot>b andalso neq\<cdot>x\<cdot>c) = notElem\<cdot>x\<cdot>[a, b, c]"
+  by (auto simp add: eq_sym)
+
+
+
+lemma "concat\<cdot>(map\<cdot>f\<cdot>x) = concatMap\<cdot>f\<cdot>x"
+  by (auto simp add: concatMap_def)
+
+lemma "concat\<cdot>[a, b] = a ++ b"
+  by auto
+
+lemma "map\<cdot>f\<cdot>(map\<cdot>g\<cdot>x) = map\<cdot>(f oo g)\<cdot>x"
+  by auto
+
+lemma "x !! 0 = head\<cdot>x"
+  by (cases x) auto
+
+lemma "take\<cdot>n\<cdot>(repeat\<cdot>x) = replicate\<cdot>n\<cdot>x"
+  by (simp add: replicate_def)
+
+lemma "head\<cdot>(reverse\<cdot>x) = last\<cdot>x"
+proof (cases "finite_list x")
+  case True then show ?thesis
+    by (induct x rule: reverse_induct) (auto simp add: last_append_singleton)
+next
+  case False then show ?thesis
+    by (simp add: last_spine_strict reverse_spine_strict)
+qed
+
+lemma
+  assumes "le\<cdot>0\<cdot>n \<noteq> FF"
+  shows "head\<cdot>(drop\<cdot>n\<cdot>x) = x !! n"
+proof (cases "le\<cdot>0\<cdot>n")
+  assume "le\<cdot>0\<cdot>n = FF" with assms show ?thesis..
+next
+  assume "le\<cdot>0\<cdot>n = TT"
+  then show ?thesis
+  proof (induction arbitrary: x rule: nonneg_Integer_induct)
+    case 0
+    show ?case by (cases x) auto
+  next
+    case (step i x)
+    from step.hyps have [simp]:"le\<cdot>i\<cdot>0 = FF" by (cases i, auto simp add: one_Integer_def zero_Integer_def)
+    from step.hyps have [simp]:"eq\<cdot>i\<cdot>0 = FF" by (cases i, auto simp add: one_Integer_def zero_Integer_def)
+    show ?case
+      using step.IH  by (cases x)auto
+  qed
+qed simp
+
+lemma "reverse\<cdot>(tail\<cdot>(reverse\<cdot>x)) \<sqsubseteq> init\<cdot>x"
+proof (cases "finite_list x")
+  case True
+  then show ?thesis
+    by (induct x rule: reverse_induct) (auto simp add: init_append_singleton)
+next
+  case False
+  then show ?thesis
+    by (auto simp add: reverse_spine_strict)
+qed
+
+lemma
+  assumes "x \<noteq> []"
+  shows "take\<cdot>(length\<cdot>x - 1)\<cdot>x \<sqsubseteq> init\<cdot>x"
+  using assms
+proof (induct x)
+  case IH: (Cons y ys)
+  show ?case
+  proof (cases ys)
+    case (Cons z zs)
+    show ?thesis
+      using IH
+      by (cases "length\<cdot>zs")
+         (auto simp: Cons one_Integer_def dest: length_ge_0)
+  qed (auto simp: one_Integer_def)
+qed auto
+
+lemma foldr_append_concat:"foldr\<cdot>append\<cdot>[] = concat"
+proof (rule cfun_eqI)
+  fix xs :: "[['a]]"
+  show "foldr\<cdot>append\<cdot>[]\<cdot>xs = concat\<cdot>xs"
+    by (induct xs) auto
+qed
+
+lemma "foldl\<cdot>append\<cdot>[] \<sqsubseteq> concat"
+proof (rule cfun_belowI)
+  fix xs :: "[['a]]"
+  show "foldl\<cdot>append\<cdot>[]\<cdot>xs \<sqsubseteq> concat\<cdot>xs"
+    by (cases "finite_list xs")
+       (auto simp add: foldr_append_concat foldl_assoc_foldr foldl_spine_strict)
+qed
+
+lemma "span\<cdot>(neg oo p) = break\<cdot>p"
+  by simp
+
+lemma "break\<cdot>(neg oo p) = span\<cdot>p"
+  by (unfold break.simps) (subst assoc_oo, simp)
+
+
+lemma "the_or\<cdot>(map\<cdot>p\<cdot>x) = any\<cdot>p\<cdot>x"
+  by simp
+
+lemma "the_and\<cdot>(map\<cdot>p\<cdot>x) = all\<cdot>p\<cdot>x"
+  by simp
+
+lemma "zipWith\<cdot>\<langle>,\<rangle> = zip"
+  by (simp add: zip_def)
+
+lemma "zipWith3\<cdot>\<langle>,,\<rangle> = zip3"
+  by (simp add: zip3_def)
+
+lemma "eq\<cdot>(length\<cdot>x)\<cdot>0 \<sqsubseteq> null\<cdot>x"
+proof (cases x)
+  case (Cons y ys)
+  then show ?thesis
+    by (cases "length\<cdot>ys")
+       (auto dest: length_ge_0 simp: zero_Integer_def one_Integer_def)
+qed simp+
+
+lemma "neq\<cdot>(length\<cdot>x)\<cdot>0 \<sqsubseteq> neg\<cdot>(null\<cdot>x)"
+proof (cases x)
+  case (Cons y ys)
+  then show ?thesis
+    by (cases "length\<cdot>ys")
+       (auto dest: length_ge_0 simp: zero_Integer_def one_Integer_def)
+qed simp+
+
+
+lemma "map\<cdot>(uncurry\<cdot>f)\<cdot>(zip\<cdot>x\<cdot>y) = zipWith\<cdot>f\<cdot>x\<cdot>y"
+proof (induct x arbitrary: y)
+  case (Cons x xs y) then show ?case by (cases y) auto
+qed auto
+
+lemma "map\<cdot>f\<cdot>(zip\<cdot>x\<cdot>y) = zipWith\<cdot>(curry\<cdot>f)\<cdot>x\<cdot>y"
+proof(induct x arbitrary: y)
+  case (Cons x xs y) then show ?case by (cases y) auto
+qed auto
+
+lemma "neg\<cdot>(elem\<cdot>x\<cdot>y) = notElem\<cdot>x\<cdot>y"
+  by (induct y) auto
+
+lemma "foldr\<cdot>f\<cdot>z\<cdot>(map\<cdot>g\<cdot>x) = foldr\<cdot>(f oo g)\<cdot>z\<cdot>x"
+  by (induct x) auto
+
+lemma "null\<cdot>(filter\<cdot>f\<cdot>x) = neg\<cdot>(any\<cdot>f\<cdot>x)"
+proof (induct x)
+  case (Cons x xs)
+  then show ?case by (cases "f\<cdot>x") auto
+qed auto
+
+lemma "eq\<cdot>(filter\<cdot>f\<cdot>x)\<cdot>[] = neg\<cdot>(any\<cdot>f\<cdot>x)"
+proof (induct x)
+  case (Cons x xs)
+  then show ?case by (cases "f\<cdot>x") auto
+qed auto
+
+lemma "neq\<cdot>(filter\<cdot>f\<cdot>x)\<cdot>[] = any\<cdot>f\<cdot>x"
+proof (induct x)
+  case (Cons x xs)
+  then show ?case by (cases "f\<cdot>x") auto
+qed auto
+
+lemma "any\<cdot>(\<Lambda> z. eq\<cdot>z\<cdot>a) = elem\<cdot>a"
+proof (rule cfun_eqI)
+  fix xs
+  show "any\<cdot>(\<Lambda> z. eq\<cdot>z\<cdot>a)\<cdot>xs = elem\<cdot>a\<cdot>xs"
+    by (induct xs) auto
+qed
+
+lemma "any\<cdot>(eq\<cdot>(a::'a::Eq_sym)) = elem\<cdot>a"
+proof (rule cfun_eqI)
+  fix xs
+  show "any\<cdot>(eq\<cdot>a)\<cdot>xs = elem\<cdot>a\<cdot>xs"
+    by (induct xs) (auto simp: eq_sym)
+qed
+
+lemma "any\<cdot>(\<Lambda> z. eq\<cdot>(a::'a::Eq_sym)\<cdot>z) = elem\<cdot>a"
+proof (rule cfun_eqI)
+  fix xs
+  show "any\<cdot>(\<Lambda> z. eq\<cdot>a\<cdot>z)\<cdot>xs = elem\<cdot>a\<cdot>xs"
+    by (induct xs) (auto simp: eq_sym)
+qed
+
+lemma "all\<cdot>(\<Lambda> z. neq\<cdot>z\<cdot>(a::'a::Eq_sym)) = notElem\<cdot>a"
+proof (rule cfun_eqI)
+  fix xs
+  show "all\<cdot>(\<Lambda> z. neq\<cdot>z\<cdot>a)\<cdot>xs = notElem\<cdot>a\<cdot>xs"
+    by (induct xs) auto
+qed
+
+lemma "all\<cdot>(\<Lambda> z. neq\<cdot>(a::'a::Eq_sym)\<cdot>z) = notElem\<cdot>a"
+proof (rule cfun_eqI)
+  fix xs
+  show "all\<cdot>(\<Lambda> z. neq\<cdot>a\<cdot>z)\<cdot>xs = notElem\<cdot>a\<cdot>xs"
+    by (induct xs) (auto simp: eq_sym)
+qed
+
+
+
+
+lemma "foldr\<cdot>trand\<cdot>TT = the_and"
+  by (subst the_and.simps, rule)
+
+lemma foldl_to_and:"foldl\<cdot>trand\<cdot>TT \<sqsubseteq> the_and"
+proof (rule cfun_belowI)
+  fix xs
+  show "foldl\<cdot>trand\<cdot>TT\<cdot>xs \<sqsubseteq> the_and\<cdot>xs"
+    by (cases "finite_list xs") (auto simp: foldl_assoc_foldr foldl_spine_strict)
+qed
+
+lemma "foldr1\<cdot>trand \<sqsubseteq> the_and"
+proof (rule cfun_belowI)
+  fix xs
+  show "foldr1\<cdot>trand\<cdot>xs \<sqsubseteq> the_and\<cdot>xs"
+  proof (induct xs)
+    case (Cons y ys)
+    then show ?case by (cases ys) (auto elim: monofun_cfun_arg)
+  qed simp+
+qed
+
+lemma "foldl1\<cdot>trand \<sqsubseteq> the_and"
+proof (rule cfun_belowI)
+  fix x
+  have "foldl1\<cdot>trand\<cdot>x \<sqsubseteq> foldl\<cdot>trand\<cdot>TT\<cdot>x"
+    by (cases x, auto)
+  also have "... \<sqsubseteq> the_and\<cdot>x"
+    by (rule monofun_cfun_fun[OF foldl_to_and])
+  finally show "foldl1\<cdot>trand\<cdot>x \<sqsubseteq> the_and\<cdot>x" .
+qed
+
+lemma "foldr\<cdot>tror\<cdot>FF = the_or"
+  by (subst the_or.simps, rule)
+
+lemma foldl_to_or: "foldl\<cdot>tror\<cdot>FF \<sqsubseteq> the_or"
+proof (rule cfun_belowI)
+  fix xs
+  show "foldl\<cdot>tror\<cdot>FF\<cdot>xs \<sqsubseteq> the_or\<cdot>xs"
+    by (cases "finite_list xs") (auto simp: foldl_assoc_foldr foldl_spine_strict)
+qed
+
+lemma "foldr1\<cdot>tror \<sqsubseteq> the_or"
+proof (rule cfun_belowI)
+  fix xs
+  show "foldr1\<cdot>tror\<cdot>xs \<sqsubseteq> the_or\<cdot>xs"
+  proof (induct xs)
+    case (Cons y ys)
+    then show ?case by (cases ys) (auto elim: monofun_cfun_arg)
+  qed simp+
+qed
+
+lemma "foldl1\<cdot>tror \<sqsubseteq> the_or"
+proof(rule cfun_belowI)
+  fix x
+  have "foldl1\<cdot>tror\<cdot>x \<sqsubseteq> foldl\<cdot>tror\<cdot>FF\<cdot>x"
+    by (cases x, auto)
+  also have "... \<sqsubseteq> the_or\<cdot>x"
+    by (rule monofun_cfun_fun[OF foldl_to_or])
+  finally show "foldl1\<cdot>tror\<cdot>x \<sqsubseteq> the_or\<cdot>x" .
+qed
+
+
+lemma "(\<Lambda> x. x) = ID"
+  by (metis ID_def)
+
+lemma "(\<Lambda> x y. x) = const"
+  by (intro cfun_eqI) simp
+
+lemma "(\<Lambda> \<langle>x, y\<rangle>. x) = fst"
+proof (rule cfun_eqI)
+  fix p
+  show "(case p of \<langle>x, y\<rangle> \<Rightarrow> x) = fst \<cdot> p"
+  proof (cases p)
+    case bottom then show ?thesis by simp
+  next
+    case Tuple2 then show ?thesis by simp
+  qed
+qed
+
+lemma "(\<Lambda> \<langle>x, y\<rangle>. y) = snd"
+proof (rule cfun_eqI)
+  fix p
+  show "(case p of \<langle>x, y\<rangle> \<Rightarrow> y) = snd \<cdot> p"
+  proof (cases p)
+    case bottom then show ?thesis by simp
+  next
+    case Tuple2 then show ?thesis by simp
+  qed
+qed
+
+lemma "(\<Lambda> x y. f\<cdot>\<langle>x, y\<rangle>) = curry\<cdot>f"
+  by (auto intro!: cfun_eqI)
+
+lemma "(\<Lambda> \<langle>x, y\<rangle>. f\<cdot>x\<cdot>y) \<sqsubseteq> uncurry\<cdot>f"
+  by (rule cfun_belowI, rename_tac x, case_tac x, auto)
+
+
+lemma "(\<Lambda> x. y) = const\<cdot>y"
+  by (intro cfun_eqI) simp
+
+lemma "flip\<cdot>f\<cdot>x\<cdot>y = f\<cdot>y\<cdot>x" by simp
+
+
+
+lemma eq_true:"eq\<cdot>x\<cdot>TT = x"
+  by (cases x, auto)
+
+lemma eq_false:"eq\<cdot>x\<cdot>FF = neg\<cdot>x"
+  by (cases x, auto)
+
+lemma if_equal:"(If a then x else x) \<sqsubseteq> x"
+  by (cases a, auto)
+
+lemma "(If a then TT else FF) = a"
+  by (cases a, auto)
+
+lemma "(If a then FF else TT) = neg\<cdot>a"
+  by (cases a, auto)
+
+lemma "(If a then t else (If b then t else f)) = (If a orelse b then t else f)"
+  by (cases a, auto)
+
+lemma "(If a then (If b then t else f) else f) = (If a andalso b then t else f)"
+  by (cases a, auto)
+
+lemma "(If x then TT else y) = (x orelse y)"
+  by (cases x, auto)
+
+lemma "(If x then y else FF) = (x andalso y)"
+  by (cases x, auto)
+
+lemma "(If c then \<langle>TT, x\<rangle> else \<langle>FF, x\<rangle>) \<sqsubseteq> \<langle>c, x\<rangle>"
+  by (cases c, auto)
+
+lemma "(If c then \<langle>FF, x\<rangle> else \<langle>TT, x\<rangle>) \<sqsubseteq> \<langle>neg\<cdot>c, x\<rangle>"
+  by (cases c, auto)
+
+lemma "the_or\<cdot>[x, y] = (x orelse y)"
+  by (fixrec_simp)
+
+lemma "the_or\<cdot>[x, y, z] = (x orelse y orelse z)"
+  by (fixrec_simp)
+
+lemma "the_and\<cdot>[x, y] = (x andalso y)"
+  by (fixrec_simp)
+
+lemma "the_and\<cdot>[x, y, z] = (x andalso y andalso z)"
+  by (fixrec_simp)
+
+
+
+lemma "x \<sqsubseteq> \<langle>fst\<cdot>x, snd\<cdot>x\<rangle>"
+  by (cases x, auto)
+
+
+
+lemma "seq\<cdot>x\<cdot>x = x" by (simp add: seq_def)
+
+
+
+lemma "(TT andalso x) = x" by auto
+
+lemma "(FF andalso x) = FF" by auto
+
+lemma "(TT orelse x) = TT" by auto
+
+lemma "(FF orelse x) = x" by auto
+
+lemma "neg\<cdot>TT = FF" by auto
+
+lemma "neg\<cdot>FF = TT" by auto
+
+lemma "fst\<cdot>\<langle>x, y\<rangle> = x" by auto
+
+lemma "snd\<cdot>\<langle>x, y\<rangle> = y" by auto
+
+lemma "f\<cdot>(fst\<cdot>p)\<cdot>(snd\<cdot>p) = uncurry\<cdot>f\<cdot>p"
+  by (cases p, auto)
+
+lemma "init\<cdot>[x] = []" by auto
+
+lemma "null\<cdot>[] = TT" by auto
+
+lemma "length\<cdot>[] = 0" by auto
+
+lemma "foldl\<cdot>f\<cdot>z\<cdot>[] = z" by simp
+
+lemma "foldr\<cdot>f\<cdot>z\<cdot>[] = z" by auto
+
+lemma "foldr1\<cdot>f\<cdot>[x] = x" by simp
+
+lemma "scanr\<cdot>f\<cdot>z\<cdot>[] = [z]" by simp
+
+lemma "scanr1\<cdot>f\<cdot>[] = []" by simp
+
+lemma "scanr1\<cdot>f\<cdot>[x] = [x]" by simp
+
+lemma "take\<cdot>n\<cdot>[] \<sqsubseteq> []" by (cases n, auto)
+
+lemma "drop\<cdot>n\<cdot>[] \<sqsubseteq> []"
+  by (subst drop.simps) (auto simp: if_equal)
+
+lemma "takeWhile\<cdot>p\<cdot>[] = []" by (fixrec_simp)
+
+lemma "dropWhile\<cdot>p\<cdot>[] = []" by (fixrec_simp)
+
+lemma "span\<cdot>p\<cdot>[] = \<langle>[], []\<rangle>" by (fixrec_simp)
+
+lemma "concat\<cdot>[a] = a" by auto
+
+lemma "concat\<cdot>[] = []" by auto
+
+lemma "zip\<cdot>[]\<cdot>[] = []" by auto
+
+lemma "ID\<cdot>x = x" by auto
+
+lemma "const\<cdot>x\<cdot>y = x" by simp
+
+
+lemma
+  fixes t :: "['a::Eq_sym]"
+  shows "eq\<cdot>(take\<cdot>(length\<cdot>t)\<cdot>s)\<cdot>t \<sqsubseteq> isPrefixOf\<cdot>t\<cdot>s"
+  by (subst eq_sym) (rule eq_take_length_isPrefixOf)
+
+lemma
+  assumes "t = []" and "s = x : xs" and "i = 1"
+  shows "\<not> (eq\<cdot>(take\<cdot>i\<cdot>s)\<cdot>t \<sqsubseteq> (le\<cdot>(length\<cdot>t)\<cdot>i andalso isPrefixOf\<cdot>t\<cdot>s))"
+  using assms by simp
+
+lemma
+  assumes "le\<cdot>0\<cdot>i = TT" and "le\<cdot>i\<cdot>0 = FF"
+    and "s = \<bottom>" and "t = []"
+  shows "\<not> ((le\<cdot>(length\<cdot>t)\<cdot>i andalso isPrefixOf\<cdot>t\<cdot>s) \<sqsubseteq> eq\<cdot>(take\<cdot>i\<cdot>s)\<cdot>t)"
+  using assms by (subst take.simps) simp
+
+
+lemma "neg\<cdot>(eq\<cdot>a\<cdot>b) = neq\<cdot>a\<cdot>b" by auto
+
+lemma "neg\<cdot>(neq\<cdot>a\<cdot>b) = eq\<cdot>a\<cdot>b" by auto
+
+lemma map_id:"map\<cdot>ID = ID" by (auto simp add: cfun_eq_iff)
+
+lemma "eq\<cdot>x\<cdot>[] = null\<cdot>x" by (cases x, auto)
+
+lemma "any\<cdot>ID = the_or" by (auto simp add:map_id)
+
+lemma "all\<cdot>ID = the_and" by (auto simp add:map_id)
+
+lemma "(If x then FF else y) = (neg\<cdot>x andalso y)" by (cases x, auto)
+
+lemma "(If x then y else TT) = (neg\<cdot>x orelse y)" by (cases x, auto)
+
+lemma "neg\<cdot>(neg\<cdot>x) = x" by auto
+
+lemma "(If c then f\<cdot>x else f\<cdot>y) \<sqsubseteq> f\<cdot>(If c then x else y)" by (cases c, auto)
+
+lemma "(\<Lambda> x. [x]) = (\<Lambda> z. z : [])" by auto
+
+lemma "eq\<cdot>TT\<cdot>a = a" by (cases a, auto)
+
+lemma "eq\<cdot>FF\<cdot>a = neg\<cdot>a" by (cases a, auto)
+
+lemma "neq\<cdot>a\<cdot>TT = neg\<cdot>a" by (cases a, auto)
+
+lemma "neq\<cdot>a\<cdot>FF = a" by (cases a, auto)
+
+lemma "neq\<cdot>TT\<cdot>a = neg\<cdot>a" by (cases a, auto)
+
+lemma "neq\<cdot>FF\<cdot>a = a" by (cases a, auto)
+
+lemma "neg\<cdot>(isNothing\<cdot>x) = isJust\<cdot>x" by auto
+
+lemma "neg\<cdot>(isJust\<cdot>x) = isNothing\<cdot>x" by auto
+
+lemma "eq\<cdot>x\<cdot>Nothing = isNothing\<cdot>x" by (cases x, auto)
+
+lemma "eq\<cdot>Nothing\<cdot>x = isNothing\<cdot>x" by (cases x, auto)
+
+lemma "neq\<cdot>x\<cdot>Nothing = isJust\<cdot>x" by (cases x, auto)
+
+lemma "neq\<cdot>Nothing\<cdot>x = isJust\<cdot>x" by (cases x, auto)
+
+lemma "(If isNothing\<cdot>x then y else fromJust\<cdot>x) = fromMaybe\<cdot>y\<cdot>x" by (cases x, auto)
+
+lemma "(If isJust\<cdot>x then fromJust\<cdot>x else y) = fromMaybe\<cdot>y\<cdot>x" by (cases x, auto)
+
+lemma "(isJust\<cdot>x andalso (eq\<cdot>(fromJust\<cdot>x)\<cdot>y)) = eq\<cdot>x\<cdot>(Just\<cdot>y)" by (cases x, auto)
+
+lemma "elem\<cdot>TT = the_or"
+proof (rule cfun_eqI)
+  fix xs
+  show "elem\<cdot>TT\<cdot>xs = the_or\<cdot>xs"
+    by (induct xs) (auto simp: eq_true)
+qed
+
+lemma "notElem\<cdot>FF = the_and"
+proof (rule cfun_eqI)
+  fix xs
+  show "notElem\<cdot>FF\<cdot>xs = the_and\<cdot>xs"
+    by (induct xs) (auto simp: eq_false)
+qed
+
+lemma "all\<cdot>(neq\<cdot>(a::'a::Eq_sym)) = notElem\<cdot>a"
+proof (rule cfun_eqI)
+  fix xs
+  show "all\<cdot>(neq\<cdot>a)\<cdot>xs = notElem\<cdot>a\<cdot>xs"
+    by (induct xs) (auto simp: eq_sym)
+qed
+
+lemma "maybe\<cdot>x\<cdot>ID = fromMaybe\<cdot>x"
+proof (rule cfun_eqI)
+  fix xs
+  show "maybe\<cdot>x\<cdot>ID\<cdot>xs = fromMaybe\<cdot>x\<cdot>xs"
+    by (cases xs) auto
+qed
+
+lemma "maybe\<cdot>FF\<cdot>(const\<cdot>TT) = isJust"
+proof (rule cfun_eqI)
+  fix x :: "'a Maybe"
+  show "maybe\<cdot>FF\<cdot>(const\<cdot>TT)\<cdot>x = isJust\<cdot>x"
+    by (cases x) simp+
+qed
+
+lemma "maybe\<cdot>TT\<cdot>(const\<cdot>FF) = isNothing"
+proof (rule cfun_eqI)
+  fix x :: "'a Maybe"
+  show "maybe\<cdot>TT\<cdot>(const\<cdot>FF)\<cdot>x = isNothing\<cdot>x"
+    by (cases x) simp+
+qed
+
+lemma "maybe\<cdot>[]\<cdot>(\<Lambda> z. z : []) = maybeToList"
+proof (rule cfun_eqI)
+  fix x :: "'a Maybe"
+  show "maybe\<cdot>[]\<cdot>(\<Lambda> z. z : [])\<cdot>x = maybeToList\<cdot>x"
+    by (cases x) simp+
+qed
+
+lemma "catMaybes\<cdot>(map\<cdot>f\<cdot>x) = mapMaybe\<cdot>f\<cdot>x" by auto
+
+lemma "(If isNothing\<cdot>x then y else f\<cdot>(fromJust\<cdot>x)) = maybe\<cdot>y\<cdot>f\<cdot>x" by (cases x, auto)
+
+lemma "(If isJust\<cdot>x then f\<cdot>(fromJust\<cdot>x) else y) = maybe\<cdot>y\<cdot>f\<cdot>x" by (cases x, auto)
+
+lemma "(map\<cdot>fromJust oo filter\<cdot>isJust) = catMaybes"
+proof (rule cfun_eqI)
+  fix xs :: "['a Maybe]"
+  show "(map\<cdot>fromJust oo filter\<cdot>isJust)\<cdot>xs = catMaybes\<cdot>xs"
+  proof (induct xs)
+    case (Cons y ys)
+    then show ?case by (cases y) simp+
+  qed simp+
+qed
+
+lemma "concatMap\<cdot>(maybeToList oo f) = mapMaybe\<cdot>f"
+proof (rule cfun_eqI)
+  fix xs
+  show "concatMap\<cdot>(maybeToList oo f)\<cdot>xs = mapMaybe\<cdot>f\<cdot>xs"
+    by (induct xs) auto
+qed
+
+lemma "concatMap\<cdot>maybeToList = catMaybes" by auto
+
+lemma "mapMaybe\<cdot>f\<cdot>(map\<cdot>g\<cdot>x) = mapMaybe\<cdot>(f oo g)\<cdot>x" by auto
+
+lemma "(dollar oo f) = f" by (auto simp add:cfun_eq_iff)
+
+lemma "(\<Lambda> z. dollar\<cdot>f\<cdot>z) = f" by (auto simp add:cfun_eq_iff)
+
+lemma "(\<Lambda> a b. g\<cdot>(f\<cdot>a)\<cdot>(f\<cdot>b)) = on\<cdot>g\<cdot>f" by (auto simp add:cfun_eq_iff)
+
+lemma "dollarBang\<cdot>ID\<cdot>x = x" by (auto simp add:seq_def)
+
+lemma "[x | x <- y] = y" by (induct y, auto)
+
+lemma "isPrefixOf\<cdot>(reverse\<cdot>x)\<cdot>(reverse\<cdot>y) = isSuffixOf\<cdot>x\<cdot>y" by auto
+
+lemma "concat\<cdot>(intersperse\<cdot>x\<cdot>y) = intercalate\<cdot>x\<cdot>y" by auto
+
+lemma
+  assumes "x \<noteq> \<bottom>" shows "seq\<cdot>x\<cdot>y = y"
+  using assms by (simp add: seq_def)
+
+lemma assumes "x \<noteq> \<bottom>" shows "dollarBang\<cdot>f\<cdot>x = f\<cdot>x"
+  using assms by (simp add: seq_def)
+
+lemma "maybe\<cdot>(f\<cdot>x)\<cdot>(f oo g) \<sqsubseteq> (f oo maybe\<cdot>x\<cdot>g)"
+proof (rule cfun_belowI)
+  fix y
+  show "maybe\<cdot>(f\<cdot>x)\<cdot>(f oo g)\<cdot>y \<sqsubseteq> (f oo maybe\<cdot>x\<cdot>g)\<cdot>y"
+    by (cases y) auto
+qed
+
+end

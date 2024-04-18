@@ -1,0 +1,104 @@
+theory Optimal_BST2
+imports
+  Optimal_BST
+  Quadrilateral_Inequality
+begin
+
+
+
+lemma argmin_takes_last: "xs \<noteq> [] \<Longrightarrow>
+  argmin f xs = xs ! Max {i. i < length xs \<and> (\<forall>x \<in> set xs. f(xs!i) \<le> f x)}"
+  (is "_ \<Longrightarrow> _ = _ ! Max (?M xs)")
+proof(induction xs)
+  case (Cons x xs)
+  show ?case
+  proof cases
+    assume "xs = []" thus ?thesis by(simp cong: conj_cong)
+  next
+    assume 0: "xs \<noteq> []"
+    show ?thesis
+    proof cases
+      assume 1: "\<forall>u \<in> set xs. f x < f u"
+      hence 2: "?M (x#xs) = {0}"
+        by (fastforce simp: not_less[symmetric] less_Suc_eq_0_disj)
+      have "f x < f (argmin f xs)" using 0 1 argmin_Min[of xs f] by auto
+      with 1 Cons.prems show ?case by(subst 2) (auto simp: Let_def)
+    next
+      assume 1: "\<not>(\<forall>u \<in> set xs. f x < f u)"
+      have 2: "\<not> f x < f (argmin f xs)" using 1 argmin_Min[of xs f] 0 by auto
+      have "argmin f xs : {u \<in> set xs. \<forall>x\<in>set xs. f u \<le> f x}"
+        using 0 argmin_Min[of xs f] by (simp add: argmin_in)
+      hence "{u \<in> set xs. \<forall>x\<in>set xs. f u \<le> f x} \<noteq> {}" by blast
+      hence ne: "?M xs \<noteq> {}" by(auto simp: in_set_conv_nth)
+      have "Max (?M (x#xs)) = Max (?M xs) + 1"
+      proof (cases "\<exists>u \<in> set xs. f u < f x")
+        case True
+        hence "?M (x#xs) = (+) 1 ` ?M xs"
+          by (auto simp: nth_Cons' image_def less_Suc_eq_0_disj)
+        thus ?thesis
+          using mono_Max_commute[of "(+) 1" "?M xs"] ne by (auto simp: mono_def)
+      next
+        case False
+        hence *: "?M (x#xs) = insert 0 ((+) 1 ` ?M xs)"
+          using 1 by (auto simp: nth_Cons' image_def less_Suc_eq_0_disj)
+        hence "Max (?M (x#xs)) = Max ((+) 1 ` ?M xs)" using Max_insert ne by simp
+        thus ?thesis using mono_Max_commute[of "(+) 1" "?M xs"] ne by (auto simp: mono_def)
+      qed
+      with Cons 2 0 show ?case by auto
+    qed
+  qed
+qed simp
+
+lemma Min_ex: "\<lbrakk> finite F; F \<noteq> {} \<rbrakk> \<Longrightarrow> \<exists>m \<in> F. \<forall>n \<in> F. m \<le> (n::_::linorder)"
+using eq_Min_iff[of F "Min F"] by (fastforce)
+
+
+lemma argmin_Max_Args_min_on: assumes [arith]: "i \<le> j"
+shows "argmin f [i..j] = Max (Args_min_on f {i..j})"
+proof -
+  let ?min = "\<lambda>k. \<forall>n \<in> {i..j}. f([i..j]!k) \<le> f n"
+  let ?M = "{k. k < nat(j-i+1) \<and> ?min k}"
+  let ?Max = "Max ?M"
+  have "?M \<noteq> {}" using Min_ex[of "f ` {i..j}"]
+    apply(auto simp add: nth_upto)
+    apply(rule_tac x="nat (m-i)" in exI)
+    by simp
+  hence "?Max < nat(j-i+1)" by(simp add: nth_upto)
+  hence 1: "i + int ?Max \<le> j" by linarith
+  have "argmin f [i..j] = [i..j] ! ?Max"
+    using argmin_takes_last[of "[i..j]" f] by simp
+  also have "\<dots> = i + int ?Max" using 1 by(simp add: nth_upto)
+  also have "\<dots> = i + Max(int ` {k. k < nat(j-i+1) \<and> ?min k})"
+  also have "\<dots> = Max ((\<lambda>x. i + x) ` (int ` {k. k < nat(j-i+1) \<and> ?min k}))"
+  also have "(\<lambda>x. i + x) ` (int ` {k. k < nat(j-i+1) \<and> ?min k}) =
+   {k. is_arg_min_on f {i..j} k}"
+    apply(auto simp: is_arg_min_on_def Ball_def nth_upto image_def cong: conj_cong)
+    apply(rule_tac x = "x-i" in exI)
+    apply auto
+    apply(rule_tac x = "nat(x-i)" in exI)
+    by auto
+   finally show ?thesis by(simp add: Args_min_simps)
+qed
+
+
+lemma argmin_red_ivl:
+assumes "i \<le> i'" "argmin f [i..j] \<in> {i'..j'}" "j' \<le> j"
+shows "argmin f [i'..j'] = argmin f [i..j]"
+proof -
+  have ij[arith]: "i \<le> j" using assms by simp
+  have ij'[arith]: "i' \<le> j'" using assms by simp
+  from Min_ex[of "f ` {i..j}"] have m: "\<exists>m \<in> {i..j}. \<forall>n \<in> {i..j}. f m \<le> f n" by auto
+  note * = argmin_Max_Args_min_on[OF ij, of f]
+  note ** = argmin_Max_Args_min_on[OF ij', of f]
+  let ?M = "Args_min_on f {i..j}"
+  let ?M' = "Args_min_on f {i'..j'}"
+  have M: "finite ?M" "?M \<noteq> {}"
+    using m by (fastforce simp: Args_min_simps simp del: atLeastAtMost_iff)+
+  have "Max ?M \<in> ?M" by (simp add: M)
+  have "Max ?M \<in> ?M'" using Max_in[OF M] assms * by(auto simp: Args_min_simps)
+    by(force simp add: Args_min_simps Ball_def)
+qed
+
+fun root:: "'a tree \<Rightarrow> 'a" where
+"root \<langle>_,r,_\<rangle> = r"
+

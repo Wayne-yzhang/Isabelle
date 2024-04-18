@@ -1,0 +1,184 @@
+theory Temporal imports Main
+begin
+  notation
+    bot ("\<bottom>") and
+    top ("\<top>") and
+    inf (infixl "\<sqinter>" 70)
+    and sup (infixl "\<squnion>" 65)
+
+  class temporal = complete_boolean_algebra +
+    fixes at :: "'a \<Rightarrow> nat \<Rightarrow> 'a" (infixl "!!" 150)
+    assumes [simp]: "a !! i !! j = a !! (i + j)"
+    assumes [simp]: "a !! 0 = a"
+    assumes [simp]: "\<top> !! i = \<top>"
+    assumes [simp]: "-(a !! i) = (-a) !! i"
+    assumes [simp]: "(a \<sqinter> b) !! i = (a !! i) \<sqinter> (b !! i)"
+    begin
+      definition always :: "'a \<Rightarrow> 'a"  ("\<box> (_)" [900] 900) where
+        "\<box> p = (INF i . p !! i)"
+
+      definition eventually :: "'a \<Rightarrow> 'a"  ("\<diamond> (_)" [900] 900) where
+        "\<diamond> p = (SUP i . p !! i)"
+
+      definition "next" :: "'a \<Rightarrow> 'a"  ("\<circle> (_)" [900] 900) where
+        "\<circle> p = p !! (Suc 0)"
+
+      definition until :: "'a \<Rightarrow> 'a \<Rightarrow> 'a" (infix "until" 65) where 
+        "(p until q) = (SUP n . (Inf (at p ` {i . i < n})) \<sqinter> (q !! n))"
+    end
+
+  context complete_boolean_algebra
+    begin
+      lemma until_always: "(INF n. (SUP i \<in> {i. i < n} . - p i) \<squnion> ((p :: nat \<Rightarrow> 'a) n)) \<le> p n"
+        proof -
+          have "(INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> (INF i\<in>{i. i \<le> n}. p i)"
+            proof (induction n)
+              have "(INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> (SUP i\<in>{i. i < 0}. - p i) \<squnion> p 0"
+                by (rule INF_lower, simp)
+              also have "... \<le> (INF i\<in>{i. i \<le> 0}. p i)"
+                by simp
+              finally show "(INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> (INF i\<in>{i. i \<le> 0}. p i)"
+                by simp
+            next
+              fix n::nat assume "(INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> (INF i \<in> {i. i \<le> n}. p i)"
+              also have "\<And> i . i \<le> n \<Longrightarrow> ... \<le> p i" by (rule INF_lower, simp)
+              finally have [simp]: "\<And> i . i \<le> n \<Longrightarrow> (INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> p i"
+                by simp
+              show "(INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> (INF i \<in> {i. i \<le> Suc n}. p i)"
+                proof (rule INF_greatest, safe, cases)
+                  fix i::nat
+                    assume "i \<le> n" from this show "(INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> p i" by simp
+                next
+                  fix i::nat
+                    have A: "{i. i \<le> n} = {i . i < Suc n}" by auto
+                    have B: "(SUP i\<in>{i. i \<le> n}. - p i) \<le> - (INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n)"
+                    assume "i \<le> Suc n" and "\<not> i \<le> n"
+                    from this have [simp]: "i = Suc n" by simp
+                    have "(INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> (INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<sqinter> ((SUP i\<in>{i. i \<le> n}. - p i) \<squnion> p (Suc n))"
+                      by (simp add: A, rule INF_lower, simp)
+                    also have "... \<le> ((INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<sqinter> ((- (INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n)) \<squnion> p (Suc n)))"
+                      by (rule inf_mono, simp_all, rule_tac y = "- (INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n)" in order_trans, simp_all add: B)
+                    also have "... \<le> p i"
+                      by (simp add: inf_sup_distrib1 inf_compl_bot)
+                    finally show "(INF n. (SUP i\<in>{i. i < n}. - p i) \<squnion> p n) \<le> p i" by simp
+                qed
+            qed
+        also have "(INF i\<in>{i. i \<le> n}. p i) \<le> p n" by (rule INF_lower, auto)
+        finally show "(INF n. (SUP i \<in> {i. i < n} . - p i) \<squnion> ((p :: nat \<Rightarrow> 'a) n)) \<le> p n" by simp
+        qed
+
+     end
+
+  context temporal
+    begin   
+      lemma [simp]: "(a \<squnion> b) !! i = (a !! i) \<squnion> (b !! i)"
+        by (subst compl_eq_compl_iff [THEN sym], simp)
+
+      lemma always_less [simp]: "\<box> p \<le> p"
+        proof -
+          have "\<box> p \<le> p !! 0"
+            by (unfold always_def, rule INF_lower, simp)
+          also have "p !! 0 = p" by simp
+          finally show "\<box> p \<le> p" by simp
+        qed
+
+      lemma always_and: "\<box> (p \<sqinter> q) = (\<box> p) \<sqinter> (\<box> q)"
+        by (simp add: always_def INF_inf_distrib)
+
+      lemma eventually_or: "\<diamond> (p \<squnion> q) = (\<diamond> p) \<squnion> (\<diamond> q)"
+        by (simp add: eventually_def SUP_sup_distrib)
+
+      lemma neg_until_always: "-(p until -p) = \<box> p"
+        proof (rule order.antisym)
+          show "- (p until - p) \<le> \<box> p"
+           by (simp add: until_def always_def uminus_SUP uminus_INF, rule INF_greatest, cut_tac p = "\<lambda> n . p !! n" in until_always, simp)
+        next
+          have "\<And> n . \<box> p \<le> p !! n"
+            by (simp add: always_def INF_lower)
+          also have "\<And> n . p !! n \<le> (SUP x\<in>{i. i < n}. (- p) !! x) \<squnion> p !! n"
+            by simp
+          finally show "\<box> p \<le> -(p until -p)"
+            apply (simp add: until_def uminus_SUP uminus_INF)
+            by (rule INF_greatest, simp)
+        qed
+
+      lemma neg_always_eventually: "\<box> p = - \<diamond> (- p)"
+        by (simp add: fun_eq_iff always_def eventually_def until_def uminus_SUP)
+        
+      lemma neg_true_until_always: "-(\<top> until -p) = \<box> p"
+        by (simp add: fun_eq_iff always_def until_def uminus_SUP uminus_INF)
+
+      lemma true_until_eventually: "(\<top> until p) = \<diamond> p"
+        by (cut_tac p = "-p" in neg_always_eventually, cut_tac p = "-p" in neg_true_until_always, simp)
+    end
+
+
+  instantiation bool :: temporal
+    begin
+      definition at_bool_def [simp]: "(p::bool) !! i = p"
+    instance proof 
+      qed auto
+    end
+
+  type_synonym 'a trace = "nat \<Rightarrow> 'a"
+
+
+  class trace =
+    fixes suffix :: "'a \<Rightarrow> nat \<Rightarrow> 'a" ("_[_ ..]" [80, 15] 80)
+    assumes [simp]: "a[i..][j..] = a[i + j..]"
+    assumes [simp]: "a[0..] = a"
+    begin
+      definition "next_trace" :: "'a \<Rightarrow> 'a"  ("\<odot> (_)" [900] 900) where
+        "\<odot> p = p[Suc 0..]"
+    end
+
+  instantiation "fun" :: (trace, temporal) temporal
+    begin
+      definition at_fun_def: "(P:: 'a \<Rightarrow> 'b) !! i = (\<lambda> x . (P (x[i..])) !! i)"
+      instance proof qed  (simp_all add: at_fun_def add.commute fun_eq_iff le_fun_def)
+    end
+
+
+  class nat = zero + plus + minus +
+    fixes RepNat :: "'a \<Rightarrow> nat"
+    fixes AbsNat :: "nat \<Rightarrow> 'a"
+    assumes [simp]: "RepNat (AbsNat n) = n"
+    and [simp]: "AbsNat (RepNat x) = x"
+    and zero_Nat_def: "0 = AbsNat 0"
+    and plus_Nat_def: "a + b = AbsNat (RepNat a + RepNat b)"
+    and minus_Nat_def: "a - b = AbsNat (RepNat a - RepNat b)"
+  begin
+    lemma AbsNat_plus: "AbsNat (i + j) = AbsNat i + AbsNat j"
+      by (simp add: plus_Nat_def)
+    lemma AbsNat_zero [simp]: "AbsNat 0 + i = i"
+      by (simp add: plus_Nat_def)
+
+    subclass comm_monoid_diff 
+      apply (unfold_locales)
+        apply (simp_all add: plus_Nat_def zero_Nat_def minus_Nat_def add.assoc)
+        by (simp add: add.commute)
+  end
+
+
+  instantiation nat :: nat
+    begin
+      definition RepNat_nat_def [simp]: "(RepNat:: nat \<Rightarrow> nat) = id"
+      definition AbsNat_nat_def [simp]: "(AbsNat:: nat \<Rightarrow> nat) = id"
+      instance proof 
+        qed auto
+    end
+
+
+  instantiation "fun" :: (nat, type) trace
+    begin
+      definition at_trace_def [simp]: "((t :: 'a \<Rightarrow> 'b)[i..]) j = (t  (AbsNat i + j))"
+    instance proof
+      qed (simp_all add: fun_eq_iff AbsNat_plus add.assoc)
+    end
+
+
+
+  lemma "(\<box> r) OO (\<box> r') \<le> (\<box> (r OO r'))"
+    by (simp add: le_fun_def always_def at_fun_def, auto)
+
+  end

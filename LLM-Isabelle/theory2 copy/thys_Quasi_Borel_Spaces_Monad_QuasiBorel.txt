@@ -1,0 +1,158 @@
+theory Monad_QuasiBorel
+  imports "Probability_Space_QuasiBorel"
+begin
+
+definition monadP_qbs_Px :: "'a quasi_borel \<Rightarrow> 'a qbs_prob_space set" where
+"monadP_qbs_Px X \<equiv> {s. qbs_prob_space_qbs s = X}"
+
+locale in_Px =
+  fixes X :: "'a quasi_borel" and s :: "'a qbs_prob_space" 
+  assumes in_Px:"s \<in> monadP_qbs_Px X"
+begin
+
+lemma qbs_prob_space_X[simp]:
+ "qbs_prob_space_qbs s = X"
+  using in_Px by(simp add: monadP_qbs_Px_def)
+
+end
+
+locale in_MPx =
+  fixes X :: "'a quasi_borel" and \<beta> :: "real \<Rightarrow> 'a qbs_prob_space"
+  assumes ex:"\<exists>\<alpha>\<in> qbs_Mx X. \<exists>g \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel.
+                         \<forall>r. \<beta> r = qbs_prob_space (X,\<alpha>,g r)"
+begin
+
+lemma rep_inMPx:
+ "\<exists>\<alpha> g. \<alpha> \<in> qbs_Mx X \<and> g \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel \<and>
+        \<beta> = (\<lambda>r. qbs_prob_space (X,\<alpha>,g r))"
+proof -
+  obtain \<alpha> g where hb:
+   "\<alpha> \<in> qbs_Mx X" "g \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel"
+        "\<beta> = (\<lambda>r. qbs_prob_space (X,\<alpha>,g r))"
+    using ex by auto
+  thus ?thesis
+    by(auto intro!: exI[where x=\<alpha>] exI[where x=g] simp: hb)
+qed
+
+end
+
+definition monadP_qbs_MPx :: "'a quasi_borel \<Rightarrow> (real \<Rightarrow> 'a qbs_prob_space) set" where
+"monadP_qbs_MPx X \<equiv> {\<beta>. in_MPx X \<beta>}"
+
+definition monadP_qbs :: "'a quasi_borel \<Rightarrow> 'a qbs_prob_space quasi_borel" where
+"monadP_qbs X \<equiv> Abs_quasi_borel (monadP_qbs_Px X, monadP_qbs_MPx X)"
+
+lemma(in qbs_prob) qbs_prob_space_in_Px:
+  "qbs_prob_space (X,\<alpha>,\<mu>) \<in> monadP_qbs_Px X"
+  using qbs_prob_axioms by(simp add: monadP_qbs_Px_def)
+
+lemma rep_monadP_qbs_Px:
+  assumes "s \<in> monadP_qbs_Px X"
+  shows "\<exists>\<alpha> \<mu>. s = qbs_prob_space (X, \<alpha>, \<mu>) \<and> qbs_prob X \<alpha> \<mu>"
+  using rep_qbs_prob_space' assms in_Px.qbs_prob_space_X
+  by(auto simp: monadP_qbs_Px_def)
+
+lemma rep_monadP_qbs_MPx:
+  assumes "\<beta> \<in> monadP_qbs_MPx X"
+  shows "\<exists>\<alpha> g. \<alpha> \<in> qbs_Mx X \<and> g \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel \<and>
+        \<beta> = (\<lambda>r. qbs_prob_space (X,\<alpha>,g r))"
+  using assms in_MPx.rep_inMPx
+  by(auto simp: monadP_qbs_MPx_def)
+
+lemma qbs_prob_MPx:
+  assumes "\<alpha> \<in> qbs_Mx X"
+      and "g \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel"
+    shows "qbs_prob X \<alpha> (g r)"
+  using measurable_space[OF assms(2)]
+  by(auto intro!: qbs_prob.intro simp: space_prob_algebra in_Mx_def real_distribution_def real_distribution_axioms_def assms(1))
+
+lemma monadP_qbs_f[simp]: "monadP_qbs_MPx X \<subseteq> UNIV \<rightarrow> monadP_qbs_Px X"
+  unfolding monadP_qbs_MPx_def
+proof auto
+  fix \<beta> r
+  assume "in_MPx X \<beta>"
+  then obtain \<alpha> g where hb:
+   "\<alpha> \<in> qbs_Mx X" "g \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel"
+        "\<beta> = (\<lambda>r. qbs_prob_space (X,\<alpha>,g r))"
+    using in_MPx.rep_inMPx by blast
+  then interpret qp : qbs_prob X \<alpha> "g r"
+    by(simp add: qbs_prob_MPx)
+  show "\<beta> r \<in> monadP_qbs_Px X"
+    by(simp add: hb(3) qp.qbs_prob_space_in_Px)
+qed
+
+lemma monadP_qbs_closed1: "qbs_closed1 (monadP_qbs_MPx X)"
+  unfolding monadP_qbs_MPx_def in_MPx_def
+  apply(rule qbs_closed1I)
+  subgoal for \<alpha> f
+    apply auto
+    subgoal for \<beta> g
+      apply(auto intro!: bexI[where x=\<beta>] bexI[where x="g\<circ>f"])
+      done
+    done
+  done
+
+lemma monadP_qbs_closed2: "qbs_closed2 (monadP_qbs_Px X) (monadP_qbs_MPx X)"
+  unfolding qbs_closed2_def
+proof
+  fix s
+  assume "s \<in> monadP_qbs_Px X"
+  then obtain \<alpha> \<mu> where h:
+   "qbs_prob X \<alpha> \<mu>" "s = qbs_prob_space (X, \<alpha>, \<mu>)"
+    using rep_qbs_prob_space'[of s X] monadP_qbs_Px_def by blast
+  then interpret qp : qbs_prob X \<alpha> \<mu>
+    by simp
+  define g :: "real \<Rightarrow> real measure"
+    where "g \<equiv> (\<lambda>_. \<mu>)"
+  have "g \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel"
+    using h prob_algebra_real_prob_measure[of \<mu>]
+    by(simp add: qbs_prob_def g_def)
+  thus "(\<lambda>r. s) \<in> monadP_qbs_MPx X"
+    by(auto intro!: bexI[where x=\<alpha>] bexI[where x=g] simp: monadP_qbs_MPx_def in_MPx_def g_def h)
+qed
+
+lemma monadP_qbs_closed3: "qbs_closed3 (monadP_qbs_MPx (X :: 'a quasi_borel))"
+proof(rule qbs_closed3I)
+  fix P :: "real \<Rightarrow> nat"
+  fix Fi
+  assume "\<And>i. P -` {i} \<in> sets real_borel"
+  then have HP_mble[measurable] : "P \<in> real_borel \<rightarrow>\<^sub>M nat_borel"
+    by (simp add: separate_measurable)
+  assume "\<And>i :: nat. Fi i \<in> monadP_qbs_MPx X"
+  then have "\<forall>i. \<exists>\<alpha>i. \<exists>gi. \<alpha>i \<in> qbs_Mx X \<and> gi \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel \<and>
+                    Fi i = (\<lambda>r. qbs_prob_space (X, \<alpha>i, gi r))"
+    using in_MPx.rep_inMPx[of X] by(simp add: monadP_qbs_MPx_def)
+  hence "\<exists>\<alpha>. \<forall>i. \<exists>gi. \<alpha> i \<in> qbs_Mx X \<and> gi \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel \<and>
+                    Fi i = (\<lambda>r. qbs_prob_space (X, \<alpha> i, gi r))"
+    by(rule choice)
+  then obtain \<alpha> :: "nat \<Rightarrow> real \<Rightarrow> _" where
+       "\<forall>i. \<exists>gi. \<alpha> i \<in> qbs_Mx X \<and> gi \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel \<and>
+                     Fi i = (\<lambda>r. qbs_prob_space (X, \<alpha> i, gi r))"
+    by auto
+  hence  "\<exists>g. \<forall>i. \<alpha> i \<in> qbs_Mx X \<and> g i \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel \<and>
+                  Fi i = (\<lambda>r. qbs_prob_space (X, \<alpha> i, g i r))"
+    by(rule choice)
+  then obtain g :: "nat \<Rightarrow> real \<Rightarrow> real measure" where 
+       H0: "\<And>i. \<alpha> i \<in> qbs_Mx X" "\<And>i. g i \<in> real_borel \<rightarrow>\<^sub>M prob_algebra real_borel"
+           "\<And>i. Fi i = (\<lambda>r. qbs_prob_space (X, \<alpha> i, g i r))"
+    by blast
+  hence LHS: "(\<lambda>r. Fi (P r) r) = (\<lambda>r. qbs_prob_space (X, \<alpha> (P r), g (P r) r))"
+    by auto
+
+       such that @{thm nat_real.gf_comp_id'(1)}. \<close>
+  \<comment> \<open> The proof is divided into 3 steps.
+       \begin{enumerate}
+       \end{enumerate}\<close>
+  \<comment> \<open> Step 1.\<close>
+  \<comment> \<open> Step 2.\<close>
+  \<comment> \<open> Step 3.\<close>
+text \<open> If \<open>\<beta> \<in> MPx\<close>, there exists \<open>X\<close> \<open>\<alpha>\<close> \<open>g\<close> s.t.\<open>\<beta> r = [X,\<alpha>,g r]\<close>.
+       We define a function which picks \<open>X\<close> \<open>\<alpha>\<close> \<open>g\<close> from \<open>\<beta> \<in> MPx\<close>.\<close>
+subsubsection \<open> Return \<close>
+subsubsection \<open>Bind\<close>
+subsubsection \<open> The Functorial Action $P(f)$\<close>
+text \<open> We show that P is a functor i.e. P preserves identity and composition.\<close>
+subsubsection \<open> Join \<close>
+subsubsection \<open> Strength \<close>
+subsubsection \<open> Properties of Return and Bind \<close>
+subsubsection \<open> Properties of Integrals\<close>

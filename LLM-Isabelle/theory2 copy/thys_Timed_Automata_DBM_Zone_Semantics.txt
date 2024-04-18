@@ -1,0 +1,43 @@
+theory DBM_Zone_Semantics
+imports DBM_Operations
+begin
+
+
+inductive step_z_dbm ::
+  "('a, 'c, 't, 's) ta \<Rightarrow> 's \<Rightarrow> ('t::time) DBM
+    \<Rightarrow> ('c \<Rightarrow> nat) \<Rightarrow> nat \<Rightarrow> 's \<Rightarrow> ('t::time) DBM \<Rightarrow> bool"
+("_ \<turnstile> \<langle>_, _\<rangle> \<leadsto>\<^bsub>_,_\<^esub> \<langle>_, _\<rangle>" [61,61,61] 61)
+where
+  step_t_z_dbm:
+    "D_inv = abstr (inv_of A l) (\<lambda>i j. \<infinity>) v \<Longrightarrow> A \<turnstile> \<langle>l,D\<rangle> \<leadsto>\<^bsub>v,n\<^esub> \<langle>l,And (up (And D D_inv)) D_inv\<rangle>" |
+  step_a_z_dbm:
+    "A \<turnstile> l \<longrightarrow>\<^bsup>g,a,r\<^esup> l'
+    \<Longrightarrow> A \<turnstile> \<langle>l,D\<rangle> \<leadsto>\<^bsub>v,n\<^esub> \<langle>l',And (reset' (And D (abstr g (\<lambda>i j. \<infinity>) v)) n r v 0)
+                                             (abstr (inv_of A l') (\<lambda>i j. \<infinity>) v)\<rangle>"
+inductive_cases step_z_cases: "A \<turnstile> \<langle>l, D\<rangle> \<leadsto>\<^bsub>v,n\<^esub> \<langle>l', D'\<rangle>"
+
+declare step_z_dbm.intros[intro]
+
+lemma step_z_dbm_preserves_int:
+  assumes "A \<turnstile> \<langle>l,D\<rangle> \<leadsto>\<^bsub>v,n\<^esub> \<langle>l',D'\<rangle>" "global_clock_numbering A v n" "valid_abstraction A X k"
+          "dbm_int D n"
+  shows "dbm_int D' n"
+using assms
+proof (cases, goal_cases)
+  case (1 D'')
+  hence "clock_numbering' v n" "\<forall>c\<in>clk_set A. v c \<le> n" by blast+
+  from 1(2) have "\<forall> (x, m) \<in> clkp_set A. m \<in> \<nat>" by (auto elim: valid_abstraction.cases)
+  from dbm_int_inv_abstr[OF this] 1 have D''_int: "dbm_int D'' n" by simp
+  show ?thesis unfolding 1(5) by (intro And_int_preservation up_int_preservation dbm_int_inv_abstr D''_int 1)
+next
+  case (2 g a r)
+  hence assms: "clock_numbering' v n" "\<forall>c\<in>clk_set A. v c \<le> n" "\<forall>k\<le>n. k > 0 \<longrightarrow> (\<exists>c. v c = k)" by blast+
+  from 2(2) have *: "\<forall> (x, m) \<in> clkp_set A. m \<in> \<nat>" by (auto elim: valid_abstraction.cases)
+  from dbm_int_inv_abstr[OF this] have D'_int: "dbm_int (abstr (inv_of A l') (\<lambda>i j. \<infinity>) v) n" by simp
+  from dbm_int_guard_abstr 2 have D''_int: "dbm_int (abstr g (\<lambda>i j. \<infinity>) v) n" by simp
+  have "set r \<subseteq> clk_set A" using 2(5) unfolding trans_of_def collect_clkvt_def by fastforce
+  hence **:"\<forall>c\<in>set r. v c \<le> n" using assms(2) by fastforce
+  show ?thesis unfolding 2(4)
+  by (intro And_int_preservation DBM_reset'_int_preservation dbm_int_inv_abstr 2 D''_int)
+     (simp_all add: assms(1) * **)
+(*>*)

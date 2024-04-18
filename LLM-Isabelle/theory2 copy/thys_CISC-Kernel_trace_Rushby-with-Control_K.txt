@@ -1,0 +1,52 @@
+theory K
+  imports List_Theorems Option_Binders
+begin
+
+  
+
+
+type_synonym ('action_t) execution = "'action_t list list"
+type_synonym time_t = nat
+
+
+locale Kernel =
+  fixes kstep :: "'state_t \<Rightarrow> 'action_t \<Rightarrow> 'state_t"
+    and output_f :: "'state_t \<Rightarrow> 'action_t \<Rightarrow> 'output_t"
+    and s0 :: 'state_t
+    and control :: "'state_t \<Rightarrow> 'dom_t \<Rightarrow> 'action_t execution \<Rightarrow>
+                              (('action_t option) \<times> 'action_t execution \<times> 'state_t)" 
+    and kinvolved :: "'action_t \<Rightarrow> 'dom_t set"
+begin
+
+
+definition next_action::"'state_t \<Rightarrow> ('dom_t \<Rightarrow> 'action_t execution) \<Rightarrow> 'action_t option"
+where "next_action s execs = fst (control s (current s) (execs (current s)))"
+definition next_execs::"'state_t \<Rightarrow> ('dom_t \<Rightarrow> 'action_t execution) \<Rightarrow> ('dom_t \<Rightarrow> 'action_t execution)"
+where "next_execs s execs = (fun_upd execs (current s) (fst (snd (control s  (current s) (execs (current s))))))"
+definition next_state::"'state_t \<Rightarrow> ('dom_t \<Rightarrow> 'action_t execution) \<Rightarrow> 'state_t"
+where "next_state s execs = snd (snd (control s  (current s) (execs (current s))))"
+
+abbreviation thread_empty::"'action_t execution \<Rightarrow> bool"
+where "thread_empty exec \<equiv> exec = [] \<or> exec = [[]]"
+
+definition step where "step s oa \<equiv> case oa of None \<Rightarrow> s | (Some a) \<Rightarrow> kstep s a"
+definition precondition :: "'state_t \<Rightarrow> 'action_t option \<Rightarrow> bool"
+where "precondition s a \<equiv> a \<rightharpoonup> kprecondition s"
+definition involved
+where "involved oa \<equiv> case oa of None \<Rightarrow> {} | (Some a) \<Rightarrow> kinvolved a"
+
+
+function run :: "time_t \<Rightarrow> 'state_t option \<Rightarrow> ('dom_t \<Rightarrow> 'action_t execution) \<Rightarrow> 'state_t option"
+where "run 0 s execs = s"
+| "run (Suc n) None execs = None"
+| "interrupt (Suc n) \<Longrightarrow> run (Suc n) (Some s) execs = run n (Some (cswitch (Suc n) s)) execs"
+| "\<not>interrupt (Suc n) \<Longrightarrow> thread_empty(execs (current s)) \<Longrightarrow> run (Suc n) (Some s) execs = run n (Some s) execs"
+| "\<not>interrupt (Suc n) \<Longrightarrow> \<not>thread_empty(execs (current s)) \<Longrightarrow> \<not>precondition (next_state s execs) (next_action s execs) \<Longrightarrow> run (Suc n) (Some s) execs = None"
+| "\<not>interrupt (Suc n) \<Longrightarrow> \<not>thread_empty(execs (current s)) \<Longrightarrow> precondition (next_state s execs) (next_action s execs) \<Longrightarrow>
+      run (Suc n) (Some s) execs = run n (Some (step (next_state s execs)  (next_action s execs))) (next_execs s execs)"
+using not0_implies_Suc by (metis option.exhaust prod_cases3,auto) 
+termination by lexicographic_order
+end
+
+
+end

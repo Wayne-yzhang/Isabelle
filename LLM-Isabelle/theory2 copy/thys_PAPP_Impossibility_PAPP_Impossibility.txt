@@ -1,0 +1,119 @@
+theory PAPP_Impossibility
+  imports PAPP_Impossibility_Base_Case Anonymous_PAPP_Lowering
+begin
+
+
+lemma obtain_2_elements:
+  assumes "infinite X \<or> card X \<ge> 2"
+  obtains x y where "x \<in> X" "y \<in> X" "x \<noteq> y"
+proof -
+  from assms have "X \<noteq> {}"
+    by auto
+  then obtain x where "x \<in> X"
+    by blast
+  with assms have "infinite X \<or> card (X - {x}) > 0"
+    by (subst card_Diff_subset) auto
+  hence "X - {x} \<noteq> {}"
+    by (metis card_gt_0_iff finite.emptyI infinite_remove)
+  then obtain y where "y \<in> X - {x}"
+    by blast
+    using that[of x y] by blast
+qed
+
+theorem papp_impossibility1:
+  assumes "k \<ge> 3" and "card parties \<ge> k + 1" and "finite parties"
+  shows   "\<not>card_stratproof_weak_rep_anon_papp (2 * k * l) parties k r"
+  using assms
+proof (induction k arbitrary: parties r rule: less_induct)
+  case (less k parties r)
+  show ?case
+  proof (cases "k = 3")
+    assume [simp]: "k = 3"
+    show ?thesis
+    proof
+      assume "card_stratproof_weak_rep_anon_papp (2 * k * l) parties k r"
+      then interpret card_stratproof_weak_rep_anon_papp "l * 6" parties 3 r
+        by (simp add: mult_ac)
+      interpret divide_voters_card_stratproof_weak_rep_anon_papp l 6 parties 3 r ..
+
+      have "card parties \<ge> 4"
+        using less.prems by auto
+      then obtain parties' where parties': "parties' \<subseteq> parties" "card parties' = 4"
+        by (metis obtain_subset_with_card_n)
+      have "\<exists>r. card_stratproof_weak_rep_anon_papp 6 parties' 3 r"
+      proof (rule card_stratproof_weak_rep_anon_papp_restrict_parties)
+        show "card_stratproof_weak_rep_anon_papp 6 parties 3 (r \<circ> lift_profile)"
+          by (rule lowered.card_stratproof_weak_rep_anon_papp_axioms)
+      qed (use parties' in auto)
+      thus False
+        using papp_impossibility_base_case[OF parties'(2)] by blast
+    qed
+  next
+    assume "k \<noteq> 3"
+    with less.prems have "k > 3"
+      by simp
+
+    obtain x y where xy: "x \<in> parties" "y \<in> parties" "x \<noteq> y"
+      using obtain_2_elements[of parties] less.prems by auto
+    define parties' where "parties' = parties - {y}"
+    have [simp]: "card parties' = card parties - 1"
+      unfolding parties'_def using xy by (subst card_Diff_subset) auto
+
+    show ?thesis
+    proof
+      assume "card_stratproof_weak_rep_anon_papp (2 * k * l) parties k r"
+      then interpret card_stratproof_weak_rep_anon_papp
+        "2 * l * (k - 1 + 1)" "insert y parties'" "k - 1 + 1" r
+      interpret decrease_committee_card_stratproof_weak_rep_anon_papp "2 * l" "k - 1" y parties' r x
+      have "\<not>card_stratproof_weak_rep_anon_papp (2 * (k - 1) * l) parties' (k - 1) lowered"
+      with lowered.card_stratproof_weak_rep_anon_papp_axioms show False
+        by (simp add: mult_ac)
+    qed
+  qed
+qed
+
+corollary papp_impossibility2:
+  assumes "k \<ge> 3" and "card parties \<ge> 4" and "finite parties"
+  shows   "\<not>card_stratproof_weak_prop_rep_anon_papp (2 * k * l) parties k r"
+  using assms
+proof (induction k arbitrary: parties r rule: less_induct)
+  case (less k parties r)
+  show ?case
+  proof (cases "k = 3")
+    assume [simp]: "k = 3"
+    show ?thesis
+    proof
+      assume "card_stratproof_weak_prop_rep_anon_papp (2 * k * l) parties k r"
+      then interpret card_stratproof_weak_prop_rep_anon_papp "l * 6" parties 3 r
+        by (simp add: mult_ac)
+      have "card_stratproof_weak_rep_anon_papp (l * 6) parties 3 r" ..
+      moreover have "\<not>card_stratproof_weak_rep_anon_papp (l * 6) parties 3 r"
+        using papp_impossibility1[of 3 parties l r] less.prems by (simp add: mult_ac)
+      ultimately show False
+        by contradiction
+    qed
+  next
+    assume "k \<noteq> 3"
+
+    with less.prems have "k > 3"
+      by simp
+
+    have "parties \<noteq> {}"
+      using less.prems by auto
+    then obtain x where x: "x \<in> parties"
+      by blast
+
+    show ?thesis
+    proof
+      assume "card_stratproof_weak_prop_rep_anon_papp (2 * k * l) parties k r"
+      then interpret card_stratproof_weak_prop_rep_anon_papp
+        "2 * l * (k - 1 + 1)" parties "k - 1 + 1" r
+      interpret decrease_committee_card_stratproof_weak_prop_rep_anon_papp "2 * l" "k - 1" parties r x
+      have "\<not>card_stratproof_weak_prop_rep_anon_papp (2 * (k - 1) * l) parties (k - 1) lowered"
+      with lowered.card_stratproof_weak_prop_rep_anon_papp_axioms show False
+        by (simp add: mult_ac)
+    qed
+  qed
+qed
+
+end

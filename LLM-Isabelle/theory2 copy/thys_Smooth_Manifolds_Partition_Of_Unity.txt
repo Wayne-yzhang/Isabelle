@@ -1,0 +1,346 @@
+theory Partition_Of_Unity
+  imports Bump_Function Differentiable_Manifold
+begin
+
+
+
+context c_manifold begin
+
+definition "regular_cover I (\<psi>::'i\<Rightarrow>('a, 'b) chart) \<longleftrightarrow>
+  countable I \<and>
+  carrier = (\<Union>i\<in>I. domain (\<psi> i)) \<and>
+  locally_finite_on carrier I (domain o \<psi>) \<and>
+  (\<forall>i\<in>I. codomain (\<psi> i) = ball 0 3) \<and>
+  carrier = (\<Union>i\<in>I. inv_chart (\<psi> i) ` ball 0 1)"
+
+lemma reguler_refinementE:
+  fixes \<X>::"'i \<Rightarrow> 'a set"
+  assumes cover: "carrier \<subseteq> (\<Union>i\<in>I. \<X> i)" and open_cover: "\<And>i. i \<in> I \<Longrightarrow> open (\<X> i)"
+  obtains N::"nat set" and \<psi>::"nat \<Rightarrow> ('a, 'b) chart"
+  where "\<And>i. i \<in> N \<Longrightarrow> \<psi> i \<in> atlas" "(domain o \<psi>) ` N refines \<X> ` I" "regular_cover N \<psi>"
+proof -
+  from precompact_locally_finite_open_coverE
+  obtain V::"nat\<Rightarrow>_" where V:
+    "carrier = (\<Union>i. V i)"
+    "\<And>i. open (V i)"
+    "\<And>i. compact (closure (V i))"
+    "\<And>i. closure (V i) \<subseteq> carrier"
+    "locally_finite_on carrier UNIV V"
+    by auto
+
+  define intersecting where "intersecting v = {i. V i \<inter> v \<noteq> {}}" for v
+  have intersecting_closure: "intersecting (closure x) = intersecting x" for x
+    using open_Int_closure_eq_empty[OF V(2), of _ x]
+    by (auto simp: intersecting_def)
+  from locally_finite_compactD[OF V(5) V(3) V(4)]
+  have "finite (intersecting (closure (V x)))" for x
+    by (simp add: intersecting_def)
+  then have finite_intersecting: "finite (intersecting (V x))" for x
+    by (simp add: intersecting_closure)
+
+  have "\<exists>\<psi>::('a, 'b) chart.
+    \<psi> \<in> atlas \<and>
+    codomain \<psi> = ball 0 3 \<and>
+    (\<exists>c\<in>I. domain \<psi> \<subseteq> \<X> c) \<and>
+     (\<forall>j. p \<in> V j \<longrightarrow> domain \<psi> \<subseteq> V j) \<and>
+      p \<in> domain \<psi> \<and>
+      \<psi> p = 0"
+    if "p \<in> carrier" for p
+  proof -
+    from cover that open_cover obtain c where c: "p \<in> \<X> c" "open (\<X> c)" "c \<in> I"
+      by force
+    define VS where "VS = {U. p \<in> V U}"
+    have open_VS: "\<And>T. T \<in> VS \<Longrightarrow> open (V T)"
+      by (auto simp: VS_def V)
+    from locally_finite_onD[OF V(5) that]
+    have "finite VS" by (simp add: VS_def)
+    from atlasE[OF that] obtain \<psi>' where \<psi>': "\<psi>' \<in> atlas" "p \<in> domain \<psi>'" .
+    define W where  "W = (\<Inter>i\<in>VS. V i) \<inter> domain \<psi>' \<inter> \<X> c"
+    have "open W"
+    have "p \<in> W" by (auto simp: W_def c \<psi>' VS_def)
+    have "W \<subseteq> carrier"
+      using \<psi>'
+      by (auto simp: W_def)
+    have "0 < (3::real)" by auto
+    obtain \<psi> where \<psi>: "\<psi> \<in> atlas" "p \<in> domain \<psi>" "\<psi> p = 0" "domain \<psi> \<subseteq> W" "codomain \<psi> = ball 0 3"
+      by auto
+    moreover have "\<exists>x\<in>I. domain \<psi> \<subseteq> \<X> x"
+      using c \<psi> by (auto simp: W_def)
+    moreover have "p \<in> V j \<Longrightarrow> domain \<psi> \<subseteq> V j" for j
+      using c \<psi> by (auto simp: W_def VS_def)
+    ultimately show ?thesis
+      by (intro exI[where x=\<psi>]) auto
+  qed
+  then have "\<forall>p2 \<in> carrier.
+    \<exists>\<psi>::('a, 'b) chart. \<psi> \<in> atlas \<and> codomain \<psi> = ball 0 3 \<and>
+         (\<exists>c\<in>I. domain \<psi> \<subseteq> \<X> c) \<and> (\<forall>j. p2 \<in> V j \<longrightarrow> domain \<psi> \<subseteq> V j) \<and> p2 \<in> domain \<psi> \<and>
+         apply_chart \<psi> p2 = 0"
+    by blast
+  then obtain \<psi>::"'a \<Rightarrow> ('a, 'b) chart" where \<psi>:
+    "\<And>p. p \<in> carrier \<Longrightarrow> codomain (\<psi> p) = ball 0 3"
+    "\<And>p. p \<in> carrier \<Longrightarrow> (\<exists>c\<in>I. domain (\<psi> p) \<subseteq> \<X> c)"
+    "\<And>p j. p \<in> V j \<Longrightarrow> domain (\<psi> p) \<subseteq> V j"
+    "\<And>p j. p \<in> carrier \<Longrightarrow> p \<in> domain (\<psi> p)"
+    "\<And>p. p \<in> carrier \<Longrightarrow> (\<psi> p) p = 0"
+    "\<And>p. p \<in> carrier \<Longrightarrow> \<psi> p \<in> atlas"
+    unfolding bchoice_iff
+    apply atomize_elim
+    apply auto
+    subgoal for f
+      apply (rule exI[where x=f])
+      using V
+      by auto
+    done
+
+  define U where "U p = inv_chart (\<psi> p) ` ball 0 1" for p
+  have U_open: "open (U p)" if "p \<in> carrier" for p
+    using that \<psi>
+    by (auto simp: U_def)
+  have U_subset_domain: "x \<in> U p \<Longrightarrow> x \<in> domain (\<psi> p)" if "p \<in> carrier" for x p
+    using \<psi>(1) that
+    by (auto simp: U_def)
+
+  have "\<exists>M. M \<subseteq> closure (V l) \<and> finite M \<and> closure (V l) \<subseteq> \<Union>(U ` M)" for l
+  proof -
+    have clcover: "closure (V l) \<subseteq> \<Union>(U ` closure (V l))"
+      using \<psi>
+      apply (auto simp: U_def)
+      apply (rule bexI)
+       prefer 2 apply assumption
+      apply (rule image_eqI)
+       apply (rule inv_chart_inverse[symmetric])
+       apply (rule \<psi>)
+       apply auto
+      using V(4) apply force
+      by (metis V(4) less_irrefl norm_numeral norm_one norm_zero one_less_numeral_iff subsetCE
+          zero_less_norm_iff zero_neq_numeral)
+    have "B \<in> U ` closure (V l) \<Longrightarrow> open B" for B
+      using V(4) by (auto intro!: U_open)
+    from compactE[OF V(3) clcover this]
+    obtain Um where Um: "Um \<subseteq> U ` closure (V l)" "finite Um" "closure (V l) \<subseteq> \<Union>Um"
+      by auto
+    from Um(1) have "\<forall>t\<in>Um. \<exists>p\<in>closure (V l). t = U p"
+      by auto
+    then obtain p_of where p_of: "\<And>t. t \<in> Um \<Longrightarrow> p_of t \<in> closure (V l)"
+      "\<And>t. t \<in> Um \<Longrightarrow> t = U (p_of t)"
+      by metis
+    have "p_of ` Um \<subseteq> closure (V l)"
+      using p_of
+      by auto
+    moreover have "closure (V l) \<subseteq> \<Union>(U ` p_of ` Um)"
+      using Um p_of by auto
+    ultimately show ?thesis by blast
+  qed
+  then obtain M' where M': "\<And>l. M' l \<subseteq> closure (V l)" "\<And>l. finite (M' l)" "\<And>l. closure (V l) \<subseteq> \<Union>(U ` M' l)"
+    by metis
+  define M where "M v = M' (LEAST l. V l = v)" for v
+  have V_Least: "V (LEAST la. V la = V l) = V l" for l
+    by (rule LeastI_ex) auto
+  have M: "M (V l) \<subseteq> closure (V l)" "finite (M v)" "closure (V l) \<subseteq> \<Union>(U ` M (V l))" for v l
+    subgoal
+      unfolding M_def
+      apply (rule order_trans)
+       apply (rule M')
+      by (auto simp: V_Least)
+    subgoal using M' by (auto simp: M_def)
+    subgoal
+      unfolding M_def
+      apply (subst V_Least[symmetric])
+      by (rule M')
+    done
+
+  from M(1) V(4) have M_carrier: "x \<in> M (V l) \<Longrightarrow> x \<in> carrier" for x l by auto
+
+  have "countable (\<Union>l. M (V l))"
+    using M(2) by (auto simp: countable_finite)
+  from countableE_bij[OF this]
+  obtain m and N::"nat set" where n: "bij_betw m N (\<Union>l. M (V l))" .
+  define m' where "m' = the_inv_into N m"
+  have m_inverse[simp]: "\<And>i. i \<in> N \<Longrightarrow> m' (m i) = i"
+    and m'_inverse[simp]: "\<And>x l. x \<in> M (V l) \<Longrightarrow> m (m' x) = x"
+    using n
+    by (force simp: bij_betw_def m'_def the_inv_into_f_f)+
+
+  have m_in: "m i \<in> (\<Union>l. M (V l))" if "i \<in> N" for i
+    using n that
+    by (auto dest!: bij_betwE)
+  have m'_in: "m' x \<in> N" if "x \<in> M (V l)" for x l
+    using that n
+    by (auto simp: m'_def bij_betw_def intro!: the_inv_into_into)
+
+  from m_in have m_in_carrier: "m i \<in> carrier" if "i \<in> N" for i
+    using that M_carrier
+    by auto
+  then have "\<And>i. i \<in> N \<Longrightarrow> \<psi> (m i) \<in> atlas"
+    by (rule \<psi>(6))
+  moreover
+  have "(domain o (\<lambda>i. (\<psi> (m i)))) ` N refines \<X> ` I"
+    by (auto simp: refines_def dest!: m_in_carrier \<psi>(2))
+  moreover
+  have "regular_cover N (\<lambda>i. \<psi> (m i))"
+  proof -
+    have "countable N" by simp
+    moreover
+    have carrier_subset: "carrier \<subseteq> (\<Union>i \<in> N. inv_chart (\<psi> (m i)) ` ball 0 1)"
+      unfolding V
+    proof safe
+      fix x i
+      assume "x \<in> V i"
+      with M obtain p where p: "p \<in> M (V i)" "x \<in> U p" by blast
+      from p show "x \<in> (\<Union>i\<in>N. inv_chart (\<psi> (m i)) ` ball 0 1)"
+        by (auto simp: U_def intro!: bexI[where x="m' p"] m'_in)
+    qed
+    have carrier_eq_W:  "carrier = (\<Union>i\<in>N. domain (\<psi> (m i)))" (is "_ = ?W")
+    proof (rule antisym)
+      note carrier_subset
+      also have "\<dots> \<subseteq> ?W"
+        using U_subset_domain \<psi>(1) M_carrier m_in
+        by (force simp: V)
+      finally show "carrier \<subseteq> ?W"
+        by auto
+      show "?W \<subseteq> carrier" using M_carrier \<psi>(6)  
+        by (auto dest!: m_in)
+    qed
+    moreover have "locally_finite_on carrier N (\<lambda>i. domain (\<psi> (m i)))"
+    proof (rule locally_finite_on_open_coverI)
+      show "open (domain (\<psi> (m i)))" for i by auto
+      show "carrier \<subseteq> (\<Union>i\<in>N. domain (\<psi> (m i)))"
+        unfolding carrier_eq_W by auto
+      fix ki
+      assume "ki \<in> N"
+      from m_in[OF this]
+      obtain k where k: "m ki \<in> M (V k)" by auto
+      have pkc: "m ki \<in> closure (V k)"
+        using k M(1) by force
+      obtain j where j: "m ki \<in> V j"
+        using M_carrier[of "m ki" k] V(1) k by force
+      have kj: "V k \<inter> V j \<noteq> {}"
+        using open_Int_closure_eq_empty[OF V(2)]
+        using pkc j by auto
+      then have jinterk: "j \<in> intersecting (V k)" by (auto simp: intersecting_def)
+
+      have 1: "compact (closure (V k))" by (rule V)
+      have 2: "closure (V k) \<subseteq> \<Union>(range V)" unfolding V(1)[symmetric] by (rule V)
+      have 3: "B \<in> range V \<Longrightarrow> open B" for B by (auto simp: V)
+      from compactE[OF 1 2 3]
+      obtain Vj where "Vj \<subseteq> range V" "finite Vj" "closure (V k) \<subseteq> \<Union>Vj" by auto
+      then obtain J where "finite J" "closure (V k) \<subseteq> \<Union>(V ` J)"
+        apply atomize_elim
+        by (metis finite_subset_image)
+
+      {
+        fix ki' assume "ki' \<in> N"
+        assume H: "domain (\<psi> (m ki')) \<inter> domain (\<psi> (m ki)) \<noteq> {}"
+        have k': "domain (\<psi> (m ki')) \<inter> domain (\<psi> (m ki)) \<noteq> {}" "m ki' \<in> M (V k')"
+          using ki'  H by auto
+        have pkc': "m ki' \<in> closure (V k')"
+          using k' M(1) by force
+        obtain j' where j': "m ki' \<in> V j'"
+          using M_carrier V(1) k' by force
+        have kj': "(V k') \<inter> V j' \<noteq> {}"
+          using open_Int_closure_eq_empty[OF V(2)]
+          using pkc' j' by auto
+        then have j'interk': "k' \<in> intersecting (V j')" by (auto simp: intersecting_def)
+
+        have j'interj: "j' \<in> intersecting (V j)"
+          using k' \<psi>(3)[OF j'] \<psi>(3)[OF j]
+          by (auto simp: intersecting_def)
+        have "k' \<in> \<Union>(intersecting ` V ` \<Union>(intersecting ` V ` intersecting (V k)))"
+          using jinterk j'interk' j'interj
+          by blast
+        then have "m ki' \<in> \<Union>((\<lambda>x. M (V x)) ` \<Union>(intersecting ` V ` \<Union>(intersecting ` V ` intersecting (V k))))"
+          using ki'
+          by auto
+        from m_inverse[symmetric] this have "ki' \<in> m' ` \<Union>((\<lambda>x. M (V x)) ` \<Union>(intersecting ` V ` \<Union>(intersecting ` V ` intersecting (V k))))"
+          by (rule image_eqI) fact
+      } note * = this
+      show "finite {i \<in> N. domain (\<psi> (m i)) \<inter> domain (\<psi> (m ki)) \<noteq> {}}"
+        apply (rule finite_subset[where B="m' ` \<Union>((\<lambda>x. M (V x)) ` \<Union>(intersecting ` V ` \<Union>(intersecting ` V ` intersecting (V k))))"])
+         apply clarsimp
+        subgoal by (drule *, assumption, force)
+        using finite_intersecting intersecting_def M by auto
+    qed
+    moreover have "(\<forall>i \<in> N. codomain (\<psi> (m i)) = ball 0 3)"
+      using \<psi>(1) M_carrier m_in
+      by force
+    moreover have "carrier = (\<Union>i \<in> N. inv_chart (\<psi> (m i)) ` ball 0 1)"
+    proof (rule antisym)
+      show "(\<Union>i\<in>N. inv_chart (\<psi> (m i)) ` ball 0 1) \<subseteq> carrier"
+        using \<psi>(6)[OF M_carrier] M_carrier m_in
+        by (force simp: \<psi>(1))
+    qed (rule carrier_subset)
+    ultimately show ?thesis
+      by (auto simp: regular_cover_def o_def)
+  qed
+  ultimately
+  show ?thesis ..
+qed
+
+lemma diff_apply_chart:
+  "diff k (charts_submanifold (domain \<psi>)) charts_eucl \<psi>" if "\<psi> \<in> atlas"
+proof -
+  interpret submanifold charts k "domain \<psi>"
+    by unfold_locales auto
+  show ?thesis
+  proof (unfold_locales)
+    fix x assume x: "x \<in> sub.carrier"
+    show "\<exists>c1\<in>sub.atlas.
+            \<exists>c2\<in>manifold_eucl.dest.atlas.
+               x \<in> domain c1 \<and> \<psi> ` domain c1 \<subseteq> domain c2 \<and> k-smooth_on (codomain c1) (c2 \<circ> \<psi> \<circ> inv_chart c1)"
+      apply (rule bexI[where x = "restrict_chart (domain \<psi>) \<psi>"])
+       apply (rule bexI[where x = "chart_eucl"])
+      subgoal
+      proof safe
+        show "x \<in> domain (restrict_chart (domain \<psi>) \<psi>)"
+          by auto
+        show "k-smooth_on (codomain (restrict_chart (domain \<psi>) \<psi>)) (chart_eucl \<circ> \<psi> \<circ> inv_chart (restrict_chart (domain \<psi>) \<psi>))"
+          apply (auto simp: o_def)
+          apply (rule smooth_on_cong[where g="\<lambda>x. x"])
+          by (auto intro!: open_continuous_vimage' continuous_on_codomain)
+      qed simp
+      subgoal by auto
+      subgoal by (rule submanifold_atlasI) fact
+      done
+  qed
+qed
+
+lemma diff_inv_chart:
+  "diff k (manifold_eucl.charts_submanifold (codomain c)) charts (inv_chart c)" if "c \<in> atlas"
+proof -
+  interpret submanifold charts_eucl k "codomain c"
+    by unfold_locales auto
+  show ?thesis
+  proof (unfold_locales)
+    fix x assume x: "x \<in> sub.carrier"
+    show "\<exists>c1\<in>sub.atlas.
+            \<exists>c2\<in>atlas.
+               x \<in> domain c1 \<and> inv_chart c ` domain c1 \<subseteq> domain c2 \<and>
+               k-smooth_on (codomain c1) (c2 \<circ> inv_chart c \<circ> inv_chart c1)"
+      apply (rule bexI[where x = "restrict_chart (codomain c) chart_eucl"])
+       apply (rule bexI[where x = c])
+      subgoal
+      proof safe
+        show "x \<in> domain (restrict_chart (codomain c) chart_eucl)"
+          by auto
+        show "k-smooth_on (codomain (restrict_chart (codomain c) chart_eucl)) (c \<circ> inv_chart c \<circ> inv_chart (restrict_chart (codomain c) chart_eucl))"
+          apply (auto simp: o_def)
+          apply (rule smooth_on_cong[where g="\<lambda>x. x"])
+          by (auto intro!: open_continuous_vimage' continuous_on_codomain)
+      qed simp
+      subgoal using that by simp
+      subgoal
+        by (rule submanifold_atlasI) auto
+      done
+  qed
+qed
+
+lemma chart_inj_on [simp]:
+  fixes c :: "('a, 'b) chart"
+  assumes "x \<in> domain c" "y \<in> domain c"
+  shows "c x = c y \<longleftrightarrow> x = y"
+proof -
+  have "inj_on c (domain c)" by (rule inj_on_apply_chart)
+  with assms show ?thesis by (auto simp: inj_on_def)
+qed
+
+

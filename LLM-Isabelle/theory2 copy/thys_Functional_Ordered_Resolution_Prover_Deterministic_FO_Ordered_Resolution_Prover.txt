@@ -1,0 +1,96 @@
+theory Deterministic_FO_Ordered_Resolution_Prover
+  imports
+    Polynomial_Factorization.Missing_List
+    Weighted_FO_Ordered_Resolution_Prover
+    Lambda_Free_RPOs.Lambda_Free_Util
+begin
+
+
+
+lemma apfst_fst_snd: "apfst f x = (f (fst x), snd x)"
+  by (rule apfst_conv[of _ "fst x" "snd x" for x, unfolded prod.collapse])
+
+lemma apfst_comp_rpair_const: "apfst f \<circ> (\<lambda>x. (x, y)) = (\<lambda>x. (x, y)) \<circ> f"
+  by (simp add: comp_def)
+
+lemma length_remove1_less[termination_simp]: "x \<in> set xs \<Longrightarrow> length (remove1 x xs) < length xs"
+  by (induct xs) auto
+
+lemma map_filter_neq_eq_filter_map:
+  "map f (filter (\<lambda>y. f x \<noteq> f y) xs) = filter (\<lambda>z. f x \<noteq> z) (map f xs)"
+  by (induct xs) auto
+
+lemma mset_map_remdups_gen:
+  "mset (map f (remdups_gen f xs)) = mset (remdups_gen (\<lambda>x. x) (map f xs))"
+  by (induct f xs rule: remdups_gen.induct) (auto simp: map_filter_neq_eq_filter_map)
+
+lemma mset_remdups_gen_ident: "mset (remdups_gen (\<lambda>x. x) xs) = mset_set (set xs)"
+proof -
+  have "f = (\<lambda>x. x) \<Longrightarrow> mset (remdups_gen f xs) = mset_set (set xs)" for f
+  proof (induct f xs rule: remdups_gen.induct)
+    case (2 f x xs)
+    note ih = this(1) and f = this(2)
+    show ?case
+      unfolding f remdups_gen.simps ih[OF f, unfolded f] mset.simps
+      by (metis finite_set list.simps(15) mset_set.insert_remove removeAll_filter_not_eq
+          remove_code(1) remove_def)
+  qed simp
+  then show ?thesis
+    by simp
+qed
+
+lemma funpow_fixpoint: "f x = x \<Longrightarrow> (f ^^ n) x = x"
+  by (induct n) auto
+
+lemma rtranclp_imp_eq_image: "(\<forall>x y. R x y \<longrightarrow> f x = f y) \<Longrightarrow> R\<^sup>*\<^sup>* x y \<Longrightarrow> f x = f y"
+  by (erule rtranclp.induct) auto
+
+lemma tranclp_imp_eq_image: "(\<forall>x y. R x y \<longrightarrow> f x = f y) \<Longrightarrow> R\<^sup>+\<^sup>+ x y \<Longrightarrow> f x = f y"
+  by (erule tranclp.induct) auto
+
+
+
+type_synonym 'a lclause = "'a literal list"
+type_synonym 'a dclause = "'a lclause \<times> nat"
+type_synonym 'a dstate = "'a dclause list \<times> 'a dclause list \<times> 'a dclause list \<times> nat"
+
+locale deterministic_FO_resolution_prover =
+  weighted_FO_resolution_prover_with_size_timestamp_factors S subst_atm id_subst comp_subst
+    renamings_apart atm_of_atms mgu less_atm size_atm timestamp_factor size_factor
+  for
+    S :: "('a :: wellorder) clause \<Rightarrow> 'a clause" and
+    subst_atm :: "'a \<Rightarrow> 's \<Rightarrow> 'a" and
+    id_subst :: "'s" and
+    comp_subst :: "'s \<Rightarrow> 's \<Rightarrow> 's" and
+    renamings_apart :: "'a literal multiset list \<Rightarrow> 's list" and
+    atm_of_atms :: "'a list \<Rightarrow> 'a" and
+    mgu :: "'a set set \<Rightarrow> 's option" and
+    less_atm :: "'a \<Rightarrow> 'a \<Rightarrow> bool" and
+    size_atm :: "'a \<Rightarrow> nat" and
+    timestamp_factor :: nat and
+    size_factor :: nat +
+  assumes
+    S_empty: "S C = {#}"
+begin
+
+lemma less_atm_irrefl: "\<not> less_atm A A"
+  using ex_ground_subst less_atm_ground less_atm_stable unfolding is_ground_subst_def by blast
+
+fun wstate_of_dstate :: "'a dstate \<Rightarrow> 'a wstate" where
+  "wstate_of_dstate (N, P, Q, n) =
+   (mset (map (apfst mset) N), mset (map (apfst mset) P), mset (map (apfst mset) Q), n)"
+
+fun state_of_dstate :: "'a dstate \<Rightarrow> 'a state" where
+  "state_of_dstate (N, P, Q, _) =
+   (set (map (mset \<circ> fst) N), set (map (mset \<circ> fst) P), set (map (mset \<circ> fst) Q))"
+
+abbreviation clss_of_dstate :: "'a dstate \<Rightarrow> 'a clause set" where
+  "clss_of_dstate St \<equiv> clss_of_state (state_of_dstate St)"
+
+fun is_final_dstate :: "'a dstate \<Rightarrow> bool" where
+  "is_final_dstate (N, P, Q, n) \<longleftrightarrow> N = [] \<and> P = []"
+
+declare is_final_dstate.simps [simp del]
+
+abbreviation rtrancl_weighted_RP (infix "\<leadsto>\<^sub>w\<^sup>*" 50) where
+  "(\<leadsto>\<^sub>w\<^sup>*) \<equiv> (\<leadsto>\<^sub>w)\<^sup>*\<^sup>*"

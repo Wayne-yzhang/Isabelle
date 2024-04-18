@@ -1,0 +1,139 @@
+theory Social_Choice_Functions
+imports 
+  "Randomised_Social_Choice.Preference_Profile_Cmd"
+begin
+
+
+definition supporters :: "('agent, 'alt) pref_profile \<Rightarrow> 'alt \<Rightarrow> 'alt \<Rightarrow> 'agent set" where
+  supporters_auxdef: "supporters R x y = {i. x \<succeq>[R i] y}" 
+
+definition weighted_majority :: "('agent, 'alt) pref_profile \<Rightarrow> 'alt \<Rightarrow> 'alt \<Rightarrow> int" where
+  "weighted_majority R x y = int (card (supporters R x y)) - int (card (supporters R y x))"
+  
+lemma weighted_majority_refl [simp]: "weighted_majority R x x = 0"
+  by (simp add: weighted_majority_def)
+  
+lemma weighted_majority_swap: "weighted_majority R x y = -weighted_majority R y x"
+  by (simp add: weighted_majority_def)
+
+lemma eval_set_filter: 
+  "Set.filter P {} = {}" 
+  "P x \<Longrightarrow> Set.filter P (insert x A) = insert x (Set.filter P A)"
+  "\<not>P x \<Longrightarrow> Set.filter P (insert x A) = Set.filter P A"
+  unfolding Set.filter_def by auto
+  
+context election
+begin
+
+lemma supporters_def: 
+  assumes "is_pref_profile R"
+  shows   "supporters R x y = {i\<in>agents. x \<succeq>[R i] y}"
+proof -
+  interpret pref_profile_wf agents alts R by fact
+  show ?thesis using not_outside unfolding supporters_auxdef by blast
+qed
+
+lemma supporters_nonagent1:
+  assumes "is_pref_profile R" "x \<notin> alts"
+  shows   "supporters R x y = {}"
+proof -
+  interpret pref_profile_wf agents alts R by fact
+  from assms show ?thesis by (auto simp: supporters_def dest: not_outside)
+qed
+
+lemma supporters_nonagent2:
+  assumes "is_pref_profile R" "y \<notin> alts"
+  shows   "supporters R x y = {}"
+proof -
+  interpret pref_profile_wf agents alts R by fact
+  from assms show ?thesis by (auto simp: supporters_def dest: not_outside)
+qed
+
+lemma weighted_majority_nonagent1:
+  assumes "is_pref_profile R" "x \<notin> alts"
+  shows   "weighted_majority R x y = 0"
+  using assms by (simp add: weighted_majority_def supporters_nonagent1 supporters_nonagent2)
+
+lemma weighted_majority_nonagent2:
+  assumes "is_pref_profile R" "y \<notin> alts"
+  shows   "weighted_majority R x y = 0"
+  using assms by (simp add: weighted_majority_def supporters_nonagent1 supporters_nonagent2)
+
+lemma weighted_majority_eq_iff:
+  assumes "is_pref_profile R1" "is_pref_profile R2"
+  shows   "weighted_majority R1 = weighted_majority R2 \<longleftrightarrow>
+             (\<forall>x\<in>alts. \<forall>y\<in>alts. weighted_majority R1 x y = weighted_majority R2 x y)"
+proof (intro iffI ext)
+  fix x y :: 'alt
+  assume "\<forall>x\<in>alts. \<forall>y\<in>alts. weighted_majority R1 x y = weighted_majority R2 x y"
+  with assms show "weighted_majority R1 x y = weighted_majority R2 x y"
+    by (cases "x \<in> alts"; cases "y \<in> alts") 
+       (auto simp: fun_eq_iff weighted_majority_nonagent1 weighted_majority_nonagent2)
+qed auto
+
+end
+
+  
+
+locale social_choice_function = election agents alts 
+  for agents :: "'agent set" and alts :: "'alt set" +
+  fixes scf :: "('agent, 'alt) pref_profile \<Rightarrow> 'alt set"
+  assumes scf_nonempty: "is_pref_profile R \<Longrightarrow> scf R \<noteq> {}"
+  assumes scf_alts: "is_pref_profile R \<Longrightarrow> scf R \<subseteq> alts"
+
+
+locale anonymous_scf = social_choice_function agents alts scf
+  for agents :: "'agent set" and alts :: "'alt set" and scf +
+  assumes anonymous: "\<pi> permutes agents \<Longrightarrow> is_pref_profile R \<Longrightarrow> scf (R \<circ> \<pi>) = scf R" 
+begin
+
+lemma anonymous':
+  assumes "anonymous_profile R1 = anonymous_profile R2"
+  assumes "is_pref_profile R1" "is_pref_profile R2"
+  shows   "scf R1 = scf R2"
+proof -
+  from anonymous_profile_agent_permutation[OF assms finite_agents]
+    obtain \<pi> where "\<pi> permutes agents" "R1 = R2 \<circ> \<pi>" by blast
+  with anonymous[of \<pi> R2] assms show ?thesis by simp
+qed
+
+lemma anonymity_prefs_from_table:
+  assumes "prefs_from_table_wf agents alts xs" "prefs_from_table_wf agents alts ys"
+  assumes "mset (map snd xs) = mset (map snd ys)"
+  shows   "scf (prefs_from_table xs) = scf (prefs_from_table ys)"
+proof -
+  from assms obtain \<pi> where "\<pi> permutes agents" "prefs_from_table xs \<circ> \<pi> = prefs_from_table ys"
+    by (rule prefs_from_table_agent_permutation)
+  with anonymous[of \<pi>, of "prefs_from_table xs"] assms(1) show ?thesis 
+    by (simp add: pref_profile_from_tableI)
+qed
+
+context
+begin
+qualified lemma anonymity_prefs_from_table_aux:
+  assumes "R1 = prefs_from_table xs" "prefs_from_table_wf agents alts xs"
+  assumes "R2 = prefs_from_table ys" "prefs_from_table_wf agents alts ys"
+  assumes "mset (map snd xs) = mset (map snd ys)"
+  shows   "scf R1 = scf R2" unfolding assms(1,3)
+  by (rule anonymity_prefs_from_table) (simp_all add: assms del: mset_map)
+end
+
+end
+
+
+
+locale neutral_scf = social_choice_function agents alts scf
+  for agents :: "'agent set" and alts :: "'alt set" and scf +
+  assumes neutral: "\<sigma> permutes alts \<Longrightarrow> is_pref_profile R \<Longrightarrow> 
+                        scf (permute_profile \<sigma> R) = \<sigma> ` scf R"
+begin
+
+lemma neutral':
+  assumes "\<sigma> permutes alts"
+  assumes "is_pref_profile R"
+  assumes "a \<in> alts"
+  shows   "\<sigma> a \<in> scf (permute_profile \<sigma> R) \<longleftrightarrow> a \<in> scf R"
+proof -
+  have *: "x = y" if "\<sigma> x = \<sigma> y" for x y
+    using permutes_inj[OF assms(1)] that by (auto dest: injD)
+  from assms show ?thesis by (auto simp: neutral dest!: *)

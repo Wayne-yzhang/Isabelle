@@ -1,0 +1,172 @@
+
+theory Incidence_Matrices imports "Design_Extras" Matrix_Vector_Extras "List-Index.List_Index"
+ "Design_Theory.Design_Isomorphisms"
+begin
+
+
+definition inc_vec_of :: "'a list \<Rightarrow> 'a set \<Rightarrow> ('b :: {ring_1}) vec" where
+"inc_vec_of Vs bl \<equiv> vec (length Vs) (\<lambda> i . if (Vs ! i) \<in> bl then 1 else 0)"
+
+lemma inc_vec_one_zero_elems: "set\<^sub>v (inc_vec_of Vs bl) \<subseteq> {0, 1}"
+  by (auto simp add: vec_set_def inc_vec_of_def)
+
+lemma finite_inc_vec_elems: "finite (set\<^sub>v (inc_vec_of Vs bl))"
+  using finite_subset inc_vec_one_zero_elems by blast
+
+lemma inc_vec_elems_max_two: "card (set\<^sub>v (inc_vec_of Vs bl)) \<le> 2"
+  using card_mono inc_vec_one_zero_elems finite.insertI card_0_eq card_2_iff
+  by (smt (verit)  insert_absorb2 linorder_le_cases linordered_nonzero_semiring_class.zero_le_one 
+      obtain_subset_with_card_n one_add_one subset_singletonD trans_le_add1) 
+
+lemma inc_vec_dim: "dim_vec (inc_vec_of Vs bl) = length Vs"
+  by (simp add: inc_vec_of_def)
+
+lemma inc_vec_index: "i < length Vs \<Longrightarrow> inc_vec_of Vs bl $ i = (if (Vs ! i) \<in> bl then 1 else 0)"
+  by (simp add: inc_vec_of_def)
+
+lemma inc_vec_index_one_iff:  "i < length Vs \<Longrightarrow> inc_vec_of Vs bl $ i = 1 \<longleftrightarrow> Vs ! i \<in> bl"
+  by (auto simp add: inc_vec_of_def ) 
+
+lemma inc_vec_index_zero_iff: "i < length Vs \<Longrightarrow> inc_vec_of Vs bl $ i = 0 \<longleftrightarrow> Vs ! i \<notin> bl"
+  by (auto simp add: inc_vec_of_def)
+
+lemma inc_vec_of_bij_betw: 
+  assumes "inj_on f (set Vs)"
+  assumes "bl \<subseteq> (set Vs)"
+  shows "inc_vec_of Vs bl = inc_vec_of (map f Vs) (f ` bl)"
+proof (intro eq_vecI, simp_all add: inc_vec_dim)
+  fix i assume "i < length Vs"
+  then have "Vs ! i \<in> bl \<longleftrightarrow> (map f Vs) ! i \<in> (f ` bl)"
+    by (metis assms(1) assms(2) inj_on_image_mem_iff nth_map nth_mem)
+  then show "inc_vec_of Vs bl $ i = inc_vec_of (map f Vs) (f ` bl) $ i"
+qed
+
+
+lemma rpbd_incidence_matrix_cond: "N * (N\<^sup>T) = \<Lambda> \<cdot>\<^sub>m (J\<^sub>m \<v>) + (\<r> - \<Lambda>) \<cdot>\<^sub>m (1\<^sub>m \<v>)"
+proof (intro eq_matI)
+  fix i j
+  assume ilt: "i < dim_row (int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>)" 
+    and jlt: "j < dim_col (int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>)"
+  then have "(int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>) $$ (i, j) = 
+    (int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v>) $$(i, j) + (int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>) $$ (i, j)" 
+    by simp
+  then have split: "(int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>) $$ (i, j) = 
+    (int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v>) $$(i, j) + (\<r> - \<Lambda>) * ((1\<^sub>m \<v>) $$ (i, j))"
+    using ilt jlt by simp
+  have lhs: "(int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v>) $$(i, j) = \<Lambda>" using ilt jlt by simp
+  show "(N * N\<^sup>T) $$ (i, j) = (int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>) $$ (i, j)"
+  proof (cases "i = j")
+    case True
+    then have rhs: "(int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>) $$ (i, j) = (\<r> - \<Lambda>)" using ilt by fastforce 
+    have "(int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>) $$ (i, j) = \<Lambda> + (\<r> - \<Lambda>)"
+      using True jlt by auto
+    then have "(int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>) $$ (i, j) = \<r>" 
+      using reg_index_lt_rep by (simp add: nat_diff_split)
+    then show ?thesis using lhs split rhs True transpose_N_mult_diag ilt jlt by simp
+  next
+    case False
+    then have "(1\<^sub>m \<v>) $$ (i, j) = 0" using ilt jlt by simp
+    then have "(\<r> - \<Lambda>) * ((1\<^sub>m \<v>) $$ (i, j)) = 0" using ilt jlt
+    then show ?thesis using lhs transpose_N_mult_off_diag ilt jlt False by simp
+  qed
+next
+  show "dim_row (N * N\<^sup>T) = dim_row (int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>)"
+    using transpose_N_mult_dim(1) by auto
+next
+  show "dim_col (N * N\<^sup>T) = dim_col (int \<Lambda> \<cdot>\<^sub>m J\<^sub>m \<v> + int (\<r> - \<Lambda>) \<cdot>\<^sub>m 1\<^sub>m \<v>)"
+    using transpose_N_mult_dim(1) by auto
+qed
+end
+
+locale ordered_bibd = ordered_proper_design \<V>s \<B>s + bibd "set \<V>s" "mset \<B>s" \<k> \<Lambda> 
+  for \<V>s and \<B>s and \<k> and \<Lambda>
+
+sublocale ordered_bibd \<subseteq> ordered_incomplete_design
+  by unfold_locales
+
+sublocale ordered_bibd \<subseteq> ordered_constant_rep \<V>s \<B>s \<r>
+  by unfold_locales
+
+sublocale ordered_bibd \<subseteq> ordered_pairwise_balance
+  by unfold_locales
+
+locale ordered_sym_bibd = ordered_bibd \<V>s \<B>s \<k> \<Lambda> + symmetric_bibd "set \<V>s" "mset \<B>s" \<k> \<Lambda> 
+  for \<V>s and \<B>s and \<k> and \<Lambda>
+
+
+sublocale ordered_sym_bibd \<subseteq> ordered_simple_design
+  by (unfold_locales)
+
+locale ordered_const_intersect_design = ordered_proper_design \<V>s \<B>s + const_intersect_design "set \<V>s" "mset \<B>s" \<m>
+  for \<V>s \<B>s \<m>
+
+
+locale simp_ordered_const_intersect_design = ordered_const_intersect_design + ordered_simple_design
+begin 
+
+lemma max_one_block_size_inter: 
+  assumes "\<b> \<ge> 2"
+  assumes "bl \<in># \<B>"
+  assumes "card bl = \<m>"
+  assumes "bl2 \<in># \<B> - {#bl#}"
+  shows "\<m> < card bl2"
+proof -
+  have sd: "simple_design \<V> \<B>"
+    by (simp add: simple_design_axioms) 
+  have bl2in: "bl2 \<in># \<B>" using assms(4)
+    by (meson in_diffD)
+  have blin: "bl \<in># {#b \<in># \<B> . card b = \<m>#}" using assms(3) assms(2) by simp
+  then have slt: "size {#b \<in># \<B> . card b = \<m>#} = 1" using simple_const_inter_iff sd assms(1)
+    by (metis count_empty count_eq_zero_iff less_one nat_less_le size_eq_0_iff_empty) 
+  then have "size {#b \<in># (\<B> - {#bl#}) . card b = \<m>#} = 0" using blin
+    by (smt (verit) add_mset_eq_singleton_iff count_eq_zero_iff count_filter_mset 
+        filter_mset_add_mset insert_DiffM size_1_singleton_mset size_eq_0_iff_empty) 
+  then have ne: "card bl2 \<noteq> \<m>" using assms(4)
+    by (metis (mono_tags, lifting) filter_mset_empty_conv size_eq_0_iff_empty) 
+  thus ?thesis using inter_num_le_block_size assms bl2in nat_less_le by presburger 
+qed
+
+lemma block_size_inter_num_cases:
+  assumes "bl \<in># \<B>"
+  assumes "\<b> \<ge> 2"
+  shows "\<m> < card bl \<or> (card bl = \<m> \<and> (\<forall> bl' \<in># (\<B> - {#bl#}) . \<m> < card bl'))"
+proof (cases "card bl = \<m>")
+  case True
+  have "(\<And> bl'. bl' \<in># (\<B> - {#bl#}) \<Longrightarrow> \<m> < card bl')"
+    using max_one_block_size_inter True assms by simp
+  then show ?thesis using True by simp
+next
+  case False
+  then have "\<m> < card bl" using assms inter_num_le_block_size nat_less_le by presburger
+  then show ?thesis by simp
+qed
+
+lemma indexed_const_intersect: 
+  assumes "j1 < \<b>"
+  assumes "j2 < \<b>"
+  assumes "j1 \<noteq> j2"
+  shows "(\<B>s ! j1) |\<inter>| (\<B>s ! j2) = \<m>"
+proof -
+  obtain bl1 bl2 where "bl1 \<in># \<B>" and "\<B>s ! j1 = bl1" and "bl2 \<in># \<B> - {#bl1#}" and "\<B>s ! j2 = bl2" 
+    using obtains_two_diff_block_indexes assms by fastforce 
+  thus ?thesis by (simp add: const_intersect)
+qed
+
+lemma const_intersect_block_size_diff: 
+  assumes "j' < \<b>" and "j < \<b>" and "j \<noteq> j'" and "card (\<B>s ! j') = \<m>" and "\<b> \<ge> 2"
+  shows "card (\<B>s ! j) - \<m> > 0"
+proof -
+  obtain bl1 bl2 where "bl1 \<in># \<B>" and "\<B>s ! j' = bl1" and "bl2 \<in># \<B> - {#bl1#}" and "\<B>s ! j = bl2"
+    using assms(1) assms(2) assms(3) obtains_two_diff_block_indexes by fastforce 
+  then have "\<m> < card (bl2)" 
+    using max_one_block_size_inter assms(4) assms(5) by blast  
+  thus ?thesis
+qed
+
+lemma scalar_prod_inc_vec_const_inter: 
+  assumes "j1 < \<b>" "j2 < \<b>" "j1 \<noteq> j2"
+  shows "(col N j1) \<bullet> (col N j2) = \<m>"
+  using scalar_prod_inc_vec_inter_num indexed_const_intersect assms by simp
+
+end
+

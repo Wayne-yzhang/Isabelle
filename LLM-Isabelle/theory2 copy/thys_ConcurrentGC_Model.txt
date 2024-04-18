@@ -1,0 +1,300 @@
+theory Model
+imports
+  ConcurrentIMP.CIMP
+  "HOL-Library.Sublist"
+begin
+
+declare subst_all [simp del] [[simproc del: defined_all]]
+
+
+
+We begin by defining the types of the various parts. Our program
+locations are labelled with strings for readability. We enumerate the
+names of the processes in our system. The safety proof treats an
+arbitary (unbounded) number of mutators.
+
+\<close>
+text \<open>
+
+The garbage collection process can be in one of the following phases.
+
+\<close>
+text \<open>
+
+The garbage collector instructs mutators to perform certain actions,
+and blocks until the mutators signal these actions are done. The
+mutators always respond with their work list (a set of
+references). The handshake can be of one of the specified types.
+
+\<close>
+text\<open>
+
+We track how many \texttt{noop} and \texttt{get\_roots} handshakes
+each process has participated in as ghost state. See
+\S\ref{sec:gc_handshakes}.
+
+\<close>
+  = hp_Idle \<comment> \<open>done 1 noop\<close>
+  | hp_Mark \<comment> \<open>done 4 noops\<close>
+  | hp_IdleMarkSweep \<comment> \<open>done get roots\<close>
+text \<open>
+
+An object consists of a garbage collection mark and two partial
+maps. Firstly the types:
+
+\<^item> @{typ "'field"} is the abstract type of fields.
+\<^item> @{typ "'ref"} is the abstract type of object references.
+\<^item> @{typ "'mut"} is the abstract type of the mutators' names.
+
+The maps:
+
+  references (or @{const "None"} signifying \texttt{NULL} or type
+  error).
+  data. For convenience we similarly allow that to be \texttt{NULL}.
+
+\<close>
+text\<open>
+
+
+\<close>
+text\<open>
+
+An action is a request by a mutator or the garbage collector to the
+system.
+
+\<close>
+  | mv_Payload "'payload option" \<comment>\<open> the requested reference might be invalid \<close>
+text\<open>
+
+The following record is the type of all processes's local states. For
+the mutators and the garbage collector, consider these to be local
+variables or registers.
+
+operations.
+
+\<close>
+  \<comment> \<open>System-specific fields\<close>
+  \<comment> \<open>TSO memory state\<close>
+  \<comment> \<open>Handshake state\<close>
+  \<comment> \<open>Ghost state\<close>
+  \<comment> \<open>Mutator-specific temporaries\<close>
+  \<comment> \<open>Garbage collector-specific temporaries\<close>
+  \<comment> \<open>Local variables used by multiple processes\<close>
+  \<comment> \<open>Handshake state\<close>
+  \<comment> \<open>Ghost state\<close>
+text\<open>We instantiate CIMP's types as follows:\<close>
+text\<open>
+
+We use one locale per process to define a namespace for definitions
+local to these processes. Mutator definitions are parametrised by the
+typically use their contents by prefixing identifiers with the locale
+name. This might be considered an abuse. The attributes depend on
+locale scoping somewhat, which is a mixed blessing.
+
+If we have more than one mutator then we need to show that mutators do
+not mutually interfere. To that end we define an extra locale that
+contains these proofs.
+
+\<close>
+subsection\<open>Object marking \label{sec:gc-marking}\<close>
+text\<open>
+
+Both the mutators and the garbage collector mark references, which
+indicates that a reference is live in the current round of
+parameterised by the name of the process.
+
+\<close>
+text\<open>
+
+The reference we're marking is given in @{const "ref"}. If the current
+process wins the \texttt{CAS} race then the reference is marked and
+added to the local work list @{const "W"}.
+
+TSO means we cannot avoid having the mark store pending in a store
+buffer; in other words, we cannot have objects atomically transition
+from white to grey. The following scheme blackens a white object, and
+then reverts it to grey. The @{const "ghost_honorary_grey"} variable
+is used to track objects undergoing this transition.
+
+As CIMP provides no support for function calls, we prefix each
+statement's label with a string from its callsite.
+
+\<close>
+           \<comment> \<open>CAS: claim object\<close>
+text\<open>
+
+The worklists (field @{term "W"}) are not subject to TSO. As we later
+show (\S\ref{def:valid_W_inv}), these are disjoint and hence
+operations on these are private to each process, with the sole
+exception of when the GC requests them from the mutators. We describe
+that mechanism next.
+
+\<close>
+subsection\<open>Handshakes \label{sec:gc_handshakes}\<close>
+text\<open>
+
+The garbage collector needs to synchronise with the mutators.
+and then waits for each to respond.
+
+The system side of the interface collects the responses from the
+mutators into a single worklist, which acts as a proxy for the garbage
+We carefully model the effect these handshakes have on the processes' TSO buffers.
+
+The system and mutators track handshake phases using ghost state; see
+\S\ref{sec:phase-invariants}.
+
+The handshake type and handshake pending bit are not subject to TSO as we expect
+a realistic implementation of handshakes would involve synchronisation.
+
+\<close>
+text\<open>
+
+The mutators' side of the interface. Also updates the ghost state
+tracking the handshake state for @{const "ht_NOOP"} and @{const
+"ht_GetRoots"} but not @{const "ht_GetWork"}.
+
+Again we could make these subject to TSO, but that would be over specification.
+
+\<close>
+text\<open>
+
+The garbage collector's side of the interface.
+
+\<close>
+subsection\<open>The system process\<close>
+text \<open>
+
+The system process models the environment in which the garbage
+collector and mutators execute.  We translate the x86-TSO memory model
+into a CIMP process. It is a reactive system: it receives requests and
+returns values, but initiates no communication itself. It can,
+however, autonomously commit a store pending in a TSO store buffer.
+
+The memory bus can be locked by atomic compare-and-swap (\texttt{CAS})
+instructions (and others in general). A processor is not blocked
+(i.e., it can read from memory) when it holds the lock, or no-one
+does.
+
+\<close>
+text\<open>
+
+We compute the view a processor has of memory by applying all its
+pending stores.
+
+\<close>
+text\<open>
+
+process with a non-empty store buffer. We omit their treatment of
+registers; these are handled by the local states of the other
+processes. The system can autonomously take the oldest store in the
+
+\<close>
+text\<open>
+
+We track which references are allocated using the domain of @{const
+"heap"}.
+
+\label{sec:sys_alloc}
+
+For now we assume that the system process magically allocates and
+deallocates references.
+
+We also arrange for the object to be marked atomically (see
+\S\ref{sec:mut_alloc}) which morally should be done by the mutator. In
+practice allocation pools enable this kind of atomicity (wrt the sweep
+loop in the GC described in \S\ref{sec:gc-model-gc}).
+
+fails and the mutator can revert to activity outside of
+\texttt{Alloc}, avoiding deadlock. We instead signal the exhaustion of
+the heap explicitly, i.e., the @{const "ro_Alloc"} action cannot fail.
+
+\<close>
+text\<open>
+
+References are freed by removing them from @{const "heap"}.
+
+\<close>
+text\<open>
+
+The top-level system process.
+
+\<close>
+subsection\<open>Mutators\<close>
+text\<open>
+
+The mutators need to cooperate with the garbage collector. In
+particular, when the garbage collector is not idle the mutators use a
+\emph{write barrier} (see \S\ref{sec:gc-marking}).
+
+The local state for each mutator tracks a working set of references,
+which abstracts from how the process's registers and stack are
+traversed to discover roots.
+
+\<close>
+text\<open>
+
+\label{sec:mut_alloc}
+
+for how we abstract it.
+
+\<close>
+text\<open>
+
+The mutator can always discard any references it holds.
+
+\<close>
+text\<open>
+
+
+Dereferencing a reference can increase the set of mutator roots.
+
+\<close>
+text\<open>
+
+\label{sec:write-barriers}
+
+Storing a reference involves marking both the old and new references,
+i.e., both \emph{insertion} and \emph{deletion} barriers are
+installed. The deletion barrier preserves the \emph{weak tricolour
+invariant}, and the insertion barrier preserves the \emph{strong
+tricolour invariant}; see \S\ref{sec:strong-tricolour-invariant} for
+further discussion.
+
+Note that the the mutator reads the overwritten reference but does not
+store it in its roots.
+
+\<close>
+     \<comment> \<open>Choose vars for \<open>ref\<rightarrow>field := new_ref\<close>\<close>
+     \<comment> \<open>Mark the reference we're about to overwrite. Does not update roots.\<close>
+     \<comment> \<open>Mark the reference we're about to insert.\<close>
+text\<open>
+
+Load and store payload data.
+
+\<close>
+text\<open>
+
+A mutator makes a non-deterministic choice amongst its possible
+actions. For completeness we allow mutators to issue \texttt{MFENCE}
+instructions. We leave \texttt{CAS} (etc) to future work. Neither has
+a significant impact on the rest of the development.
+
+\<close>
+at the top level of \<open>handshake\<close> + a noop transition + appropriate fairness constraints might work.
+subsection \<open>Garbage collector \label{sec:gc-model-gc}\<close>
+text\<open>
+
+We abstract the primitive actions of the garbage collector thread.
+
+\<close>
+text\<open>
+
+The following CIMP program encodes the garbage collector algorithm
+
+\<close>
+       \<lbrace>''idle_noop''\<rbrace> handshake_noop ;; \<comment> \<open>\<open>hp_Idle\<close>\<close>
+       \<lbrace>''idle_flip_noop''\<rbrace> handshake_noop ;; \<comment> \<open>\<open>hp_IdleInit\<close>\<close>
+       \<lbrace>''init_noop''\<rbrace> handshake_noop ;; \<comment> \<open>\<open>hp_InitMark\<close>\<close>
+       \<lbrace>''mark_noop''\<rbrace> handshake_noop ;; \<comment> \<open>\<open>hp_Mark\<close>\<close>
+       \<lbrace>''mark_loop_get_roots''\<rbrace> handshake_get_roots ;; \<comment> \<open>\<open>hp_IdleMarkSweep\<close>\<close>
+       \<comment> \<open>sweep\<close>

@@ -1,0 +1,126 @@
+theory Step
+  imports Step_policies
+begin
+
+
+
+
+datatype ipc_direction_t = SEND | RECV
+datatype ipc_stage_t = PREP | WAIT | BUF page_t
+
+datatype ev_consume_t = EV_CONSUME_ALL | EV_CONSUME_ONE
+datatype ev_wait_stage_t = EV_PREP | EV_WAIT | EV_FINISH
+datatype ev_signal_stage_t = EV_SIGNAL_PREP | EV_SIGNAL_FINISH
+
+datatype int_point_t =
+
+
+
+
+consts
+  partition :: "thread_id_t \<Rightarrow> partition_id_t"
+
+
+record thread_t =
+  
+record state_t =  
+
+
+
+
+
+definition set_object_value :: "obj_id_t \<Rightarrow> obj_t \<Rightarrow> state_t \<Rightarrow> state_t" where
+  "set_object_value obj_id val s =
+    s \<lparr> obj := fun_upd (obj s) obj_id val \<rparr>"
+
+
+definition opposite_ipc_direction :: "ipc_direction_t \<Rightarrow> ipc_direction_t" where
+  "opposite_ipc_direction dir \<equiv> case dir of SEND \<Rightarrow> RECV | RECV \<Rightarrow> SEND"
+
+
+definition add_access_right :: "partition_id_t => obj_id_t => mode_t => state_t => state_t" where
+  "add_access_right part_id obj_id m s = 
+    s \<lparr> sp_impl_subj_obj := \<lambda> q q' q''. (part_id = q \<and> obj_id = q' \<and> m = q'') 
+     \<or> sp_impl_subj_obj s q q' q''\<rparr>"
+
+
+definition add_comm_right :: "partition_id_t \<Rightarrow> partition_id_t \<Rightarrow> state_t \<Rightarrow> state_t" where
+  "add_comm_right p p' s \<equiv>
+    s \<lparr> sp_impl_subj_subj := \<lambda> q q' . (p = q \<and> p' = q') \<or> sp_impl_subj_subj s q q' \<rparr>"
+
+
+
+definition ipc_precondition :: "thread_id_t \<Rightarrow> ipc_direction_t \<Rightarrow> thread_id_t \<Rightarrow> page_t \<Rightarrow> state_t \<Rightarrow> bool" where
+  "ipc_precondition tid dir partner page s \<equiv>
+    let sender = (case dir of SEND \<Rightarrow> tid | RECV \<Rightarrow> partner) in
+    let receiver = (case dir of SEND \<Rightarrow> partner | RECV \<Rightarrow> tid) in
+    let local_access_mode = (case dir of SEND \<Rightarrow> READ | RECV \<Rightarrow> WRITE) in
+    (sp_impl_subj_subj s (partition sender) (partition receiver)
+      \<and> sp_impl_subj_obj s (partition tid) (PAGE page) local_access_mode)"
+
+definition atomic_step_ipc :: "thread_id_t \<Rightarrow> ipc_direction_t \<Rightarrow> ipc_stage_t \<Rightarrow> thread_id_t \<Rightarrow> page_t \<Rightarrow> state_t \<Rightarrow> state_t" where
+  "atomic_step_ipc tid dir stage partner page s \<equiv>
+    case stage of
+      PREP \<Rightarrow>
+         s
+    | WAIT \<Rightarrow>
+         s
+    | BUF page' \<Rightarrow>
+       (case dir of
+          SEND \<Rightarrow>
+             (set_object_value (PAGE page') (obj s (PAGE page)) s)
+        | RECV \<Rightarrow> s)"
+
+
+
+definition ev_signal_precondition :: "thread_id_t \<Rightarrow> thread_id_t \<Rightarrow> state_t \<Rightarrow> bool" where
+ "ev_signal_precondition tid partner s \<equiv>
+    (sp_impl_subj_subj s (partition tid) (partition partner))"
+
+definition atomic_step_ev_signal :: "thread_id_t \<Rightarrow> thread_id_t \<Rightarrow> state_t \<Rightarrow> state_t" where
+ "atomic_step_ev_signal tid partner s =
+    s \<lparr> thread := fun_upd (thread s) partner (thread s partner \<lparr> ev_counter := Suc (ev_counter (thread s partner) ) \<rparr> )   \<rparr>"
+
+definition atomic_step_ev_wait_one :: "thread_id_t \<Rightarrow> state_t \<Rightarrow> state_t" where
+ "atomic_step_ev_wait_one tid s =
+    s \<lparr> thread := fun_upd (thread s) tid (thread s tid \<lparr> ev_counter := (ev_counter (thread s tid) - 1) \<rparr> )   \<rparr>"
+
+definition atomic_step_ev_wait_all :: "thread_id_t \<Rightarrow> state_t \<Rightarrow> state_t" where
+ "atomic_step_ev_wait_all tid  s =
+    s \<lparr> thread := fun_upd (thread s) tid (thread s tid \<lparr> ev_counter := 0 \<rparr> )   \<rparr>"
+
+
+definition aborting :: "state_t \<Rightarrow> thread_id_t \<Rightarrow> int_point_t \<Rightarrow> bool"
+where "aborting s tid a \<equiv> case a of SK_IPC dir PREP partner page \<Rightarrow>
+                            \<not>ipc_precondition tid dir partner page s
+                           | SK_EV_SIGNAL EV_SIGNAL_PREP partner \<Rightarrow>
+                            \<not>ev_signal_precondition tid partner s
+                           | _ => False"
+definition waiting :: "state_t \<Rightarrow> thread_id_t \<Rightarrow> int_point_t \<Rightarrow> bool"
+where "waiting s tid a \<equiv> 
+           case a of SK_IPC dir WAIT partner page \<Rightarrow> 
+                                   \<not>ipc_precondition partner (opposite_ipc_direction dir) tid (SOME page' . True) s
+                   | SK_EV_WAIT EV_PREP _ \<Rightarrow> False
+                   | SK_EV_WAIT EV_WAIT _ \<Rightarrow> ev_counter (thread s tid) = 0
+                   | SK_EV_WAIT EV_FINISH _ \<Rightarrow> False
+                   | _ \<Rightarrow> False"
+
+
+
+definition atomic_step :: "state_t \<Rightarrow> int_point_t \<Rightarrow> state_t" where
+  "atomic_step s ipt \<equiv>
+    case ipt of
+      SK_IPC dir stage partner page \<Rightarrow>
+        atomic_step_ipc (current s) dir stage partner page s
+    |  SK_EV_WAIT EV_PREP consume \<Rightarrow> s
+    |  SK_EV_WAIT EV_WAIT consume \<Rightarrow> s
+    |  SK_EV_WAIT EV_FINISH consume \<Rightarrow>
+      case consume of
+          EV_CONSUME_ONE \<Rightarrow> atomic_step_ev_wait_one (current s) s   
+        | EV_CONSUME_ALL \<Rightarrow> atomic_step_ev_wait_all (current s) s  
+    | SK_EV_SIGNAL EV_SIGNAL_PREP partner \<Rightarrow> s
+    | SK_EV_SIGNAL EV_SIGNAL_FINISH partner \<Rightarrow>
+      atomic_step_ev_signal (current s) partner s
+    | NONE \<Rightarrow> s"
+
+end

@@ -1,0 +1,479 @@
+theory RRn_Automata
+  imports Tree_Automata_Complement Ground_Ctxt
+begin
+
+
+
+definition gpair :: "'f gterm \<Rightarrow> 'g gterm \<Rightarrow> ('f option \<times> 'g option) gterm" where
+  "gpair s t = glabel (\<lambda>p. (gfun_at s p, gfun_at t p)) (gunion (gdomain s) (gdomain t))"
+
+
+definition zip_fill :: "'a list \<Rightarrow> 'b list \<Rightarrow> ('a option \<times> 'b option) list" where
+  "zip_fill xs ys = zip (map Some xs @ replicate (length ys - length xs) None)
+    (map Some ys @ replicate (length xs - length ys) None)"
+
+lemma zip_fill_code [code]:
+  "zip_fill xs [] = map (\<lambda>x. (Some x, None)) xs"
+  "zip_fill [] ys = map (\<lambda>y. (None, Some y)) ys"
+  "zip_fill (x # xs) (y # ys) = (Some x, Some y) # zip_fill xs ys"
+  subgoal by (induct xs) (auto simp: zip_fill_def)
+  subgoal by (induct ys) (auto simp: zip_fill_def)
+  subgoal by (auto simp: zip_fill_def)
+  done
+
+lemma length_zip_fill [simp]:
+  "length (zip_fill xs ys) = max (length xs) (length ys)"
+  by (auto simp: zip_fill_def)
+
+lemma nth_zip_fill:
+  assumes "i < max (length xs) (length ys)"
+  shows "zip_fill xs ys ! i = (if i < length xs then Some (xs ! i) else None, if i < length ys then Some (ys ! i) else None)"
+  using assms by (auto simp: zip_fill_def nth_append)
+
+fun gpair_impl :: "'f gterm option \<Rightarrow> 'g gterm option \<Rightarrow> ('f option \<times> 'g option) gterm" where
+  "gpair_impl (Some s) (Some t) = gpair s t"
+| "gpair_impl (Some s) None     = map_gterm (\<lambda>f. (Some f, None)) s"
+| "gpair_impl None     (Some t) = map_gterm (\<lambda>f. (None, Some f)) t"
+| "gpair_impl None     None     = GFun (None, None) []"
+
+declare gpair_impl.simps(2-4)[code]
+
+lemma gpair_impl_code [simp, code]:
+  "gpair_impl (Some s) (Some t) =
+    (case s of GFun f ss \<Rightarrow> case t of GFun g ts \<Rightarrow>
+    GFun (Some f, Some g) (map (\<lambda>(s, t). gpair_impl s t) (zip_fill ss ts)))"
+proof (induct "gdomain s" "gdomain t" arbitrary: s t rule: gunion.induct)
+  case (1 f ss g ts)
+  obtain f' ss' where [simp]: "s = GFun f' ss'" by (cases s)
+  obtain g' ts' where [simp]: "t = GFun g' ts'" by (cases t)
+  show ?case using 1(2,3) 1(1)[of i "ss' ! i" "ts' ! i" for i]
+    by (auto simp: gpair_def comp_def nth_zip_fill intro: glabel_map_gterm_conv[unfolded comp_def]
+      intro!: nth_equalityI)
+qed
+
+lemma gpair_code [code]:
+  "gpair s t = gpair_impl (Some s) (Some t)"
+  by simp
+
+
+declare gpair_impl.simps(1)[simp del]
+
+
+lemma gpair_swap:
+  "map_gterm prod.swap (gpair s t) = gpair t s"
+  by (intro eq_gterm_by_gposs_gfun_at) (auto simp: gpair_def)
+
+lemma gpair_assoc:
+  defines "f \<equiv> \<lambda>(f, gh). (f, gh \<bind> fst, gh \<bind> snd)"
+  defines "g \<equiv> \<lambda>(fg, h). (fg \<bind> fst, fg \<bind> snd, h)"
+  shows "map_gterm f (gpair s (gpair t u)) = map_gterm g (gpair (gpair s t) u)"
+  by (intro eq_gterm_by_gposs_gfun_at) (auto simp: gpair_def f_def g_def)
+
+
+
+fun gcollapse :: "'f option gterm \<Rightarrow> 'f gterm option" where
+  "gcollapse (GFun None _) = None"
+| "gcollapse (GFun (Some f) ts) = Some (GFun f (map the (filter (\<lambda>t. \<not> Option.is_none t) (map gcollapse ts))))"
+
+lemma gcollapse_groot_None [simp]:
+  "groot_sym t = None \<Longrightarrow> gcollapse t = None"
+  "fst (groot t) = None \<Longrightarrow> gcollapse t = None"
+  by (cases t, simp)+
+
+definition gfst :: "('f option \<times> 'g option) gterm \<Rightarrow> 'f gterm" where
+  "gfst = the \<circ> gcollapse \<circ> map_gterm fst"
+
+definition gsnd :: "('f option \<times> 'g option) gterm \<Rightarrow> 'g gterm" where
+  "gsnd = the \<circ> gcollapse \<circ> map_gterm snd"
+
+lemma filter_less_upt:
+  "[i\<leftarrow>[i..<m] . i < n] = [i..<min n m]"
+proof (cases "i \<le> m")
+  case True then show ?thesis
+  proof (induct rule: inc_induct)
+    case (step n) then show ?case by (auto simp: upt_rec[of n])
+  qed simp
+qed simp
+
+lemma gcollapse_aux:
+  assumes "gposs s = {p. p \<in> gposs t \<and> gfun_at t p \<noteq> Some None}"
+  shows "gposs (the (gcollapse t)) = gposs s"
+    "\<And>p. p \<in> gposs s \<Longrightarrow> gfun_at (the (gcollapse t)) p = (gfun_at t p \<bind> id)"
+proof (goal_cases)
+  define s' t' where "s' \<equiv> gdomain s" and "t' \<equiv> gdomain t"
+  have *: "gposs (the (gcollapse t)) = gposs s \<and>
+    (\<forall>p. p \<in> gposs s \<longrightarrow> gfun_at (the (gcollapse t)) p = (gfun_at t p \<bind> id))"
+  using assms s'_def t'_def
+  proof (induct s' t' arbitrary: s t rule: gunion.induct)
+    case (1 f' ss' g' ts')
+    obtain f ss where s [simp]: "s = GFun f ss" by (cases s)
+    obtain g ts where t [simp]: "t = GFun (Some g) ts"
+      using arg_cong[OF 1(2), of "\<lambda>P. [] \<in> P"] by (cases t) auto
+    have *: "i < length ts \<Longrightarrow> \<not> Option.is_none (gcollapse (ts ! i)) \<longleftrightarrow> i < length ss" for i
+      using arg_cong[OF 1(2), of "\<lambda>P. [i] \<in> P"] by (cases "ts ! i") auto
+    have l: "length ss \<le> length ts"
+      using arg_cong[OF 1(2), of "\<lambda>P. [length ss-1] \<in> P"] by auto
+    have [simp]: "[t\<leftarrow>map gcollapse ts . \<not> Option.is_none t] = take (length ss) (map gcollapse ts)"
+      by (subst (2) map_nth[symmetric]) (auto simp add: * filter_map comp_def filter_less_upt
+        cong: filter_cong[OF refl, of "[0..<length ts]", unfolded set_upt atLeastLessThan_iff]
+        intro!: nth_equalityI)
+    have [simp]: "i < length ss \<Longrightarrow> gposs (ss ! i) = gposs (the (gcollapse (ts ! i)))" for i
+      using conjunct1[OF 1(1), of i "ss ! i" "ts ! i"] l arg_cong[OF 1(2), of "\<lambda>P. {p. i # p \<in> P}"]
+        1(3,4) by simp
+    show ?case
+    proof (intro conjI allI, goal_cases A B)
+      case A show ?case using l by (auto simp: comp_def split: if_splits)
+    next
+      case (B p) show ?case
+      proof (cases p)
+        case (Cons i q) then show ?thesis using arg_cong[OF 1(2), of "\<lambda>P. {p. i # p \<in> P}"]
+          spec[OF conjunct2[OF 1(1)], of i "ss ! i" "ts ! i" q] 1(3,4) by auto
+      qed auto
+    qed
+  qed
+  { case 1 then show ?case using * by blast
+  next
+    case 2 then show ?case using * by blast }
+qed
+
+lemma gfst_gpair:
+  "gfst (gpair s t) = s"
+proof -
+  have *: "gposs s = {p \<in> gposs (map_gterm fst (gpair s t)). gfun_at (map_gterm fst (gpair s t)) p \<noteq> Some None}"
+    using gfun_at_nongposs
+    by (fastforce simp: gpair_def elim: gfun_at_possE)
+  show ?thesis unfolding gfst_def comp_def using gcollapse_aux[OF *]
+    by (auto intro!: eq_gterm_by_gposs_gfun_at simp: gpair_def)
+qed
+
+lemma gsnd_gpair:
+  "gsnd (gpair s t) = t"
+  using gfst_gpair[of t s] gpair_swap[of t s, symmetric]
+  by (simp add: gfst_def gsnd_def gpair_def gterm.map_comp comp_def)
+
+lemma gpair_impl_None_Inv:
+  "map_gterm (the \<circ> snd) (gpair_impl None (Some t)) = t"
+  by (simp add: gterm.map_ident gterm.map_comp comp_def)
+
+
+lemma gpair_context1:
+  assumes "length ts = length us"
+  shows "gpair (GFun f ts) (GFun f us) = GFun (Some f, Some f) (map (case_prod gpair) (zip ts us))"
+  using assms unfolding gpair_code by (auto intro!: nth_equalityI simp: zip_fill_def)
+
+lemma gpair_context2:
+  assumes "\<And> i. i < length ts \<Longrightarrow> ts ! i = gpair (ss ! i) (us ! i)"
+  and "length ss = length ts" and "length us = length ts"
+  shows "GFun (Some f, Some h) ts = gpair (GFun f ss) (GFun h us)"
+  using assms unfolding gpair_code gpair_impl_code
+  by (auto simp: zip_fill_def intro!: nth_equalityI)
+
+lemma map_funs_term_some_gpair:
+  shows "gpair t t = map_gterm (\<lambda>f. (Some f, Some f)) t"
+proof (induct t)
+  case (GFun f ts)
+  then show ?case by (auto intro!: gpair_context2[symmetric])
+qed
+
+
+lemma gpair_inject [simp]:
+  "gpair s t = gpair s' t' \<longleftrightarrow> s = s' \<and> t = t'"
+  by (metis gfst_gpair gsnd_gpair)
+
+abbreviation gterm_to_None_Some :: "'f gterm \<Rightarrow> ('f option \<times> 'f option) gterm" where
+  "gterm_to_None_Some t \<equiv> map_gterm (\<lambda>f. (None, Some f)) t"
+abbreviation "gterm_to_Some_None t \<equiv> map_gterm (\<lambda>f. (Some f, None)) t"
+
+lemma inj_gterm_to_None_Some: "inj gterm_to_None_Some"
+    by (meson Pair_inject gterm.inj_map inj_onI option.inject)
+
+lemma zip_fill1:
+  assumes "length ss < length ts"
+  shows "zip_fill ss ts = zip (map Some ss) (map Some (take (length ss) ts)) @
+    map (\<lambda> x. (None, Some x)) (drop (length ss) ts)"
+  using assms by (auto simp: zip_fill_def list_eq_iff_nth_eq nth_append simp add: min.absorb2)
+
+lemma zip_fill2:
+  assumes "length ts < length ss"
+  shows "zip_fill ss ts = zip (map Some (take (length ts) ss)) (map Some ts) @
+    map (\<lambda> x. (Some x, None)) (drop (length ts) ss)"
+  using assms by (auto simp: zip_fill_def list_eq_iff_nth_eq nth_append simp add: min.absorb2)
+
+
+lemma not_gposs_append [simp]:
+  assumes "p \<notin> gposs t"
+  shows "p @ q \<in> gposs t = False" using assms poss_gposs_conv
+  using poss_append_poss by blast
+
+
+lemma gfun_at_gpair:
+  "gfun_at (gpair s t) p = (if p \<in> gposs s then (if p \<in> gposs t
+                                                 then Some (gfun_at s p, gfun_at t p)
+                                                 else Some (gfun_at s p, None)) else
+                           (if p \<in> gposs t then Some (None, gfun_at t p) else None))"
+  using gfun_at_glabel by (auto simp: gpair_def)
+
+lemma gposs_of_gpair [simp]:
+  shows "gposs (gpair s t) = gposs s \<union> gposs t"
+  by (auto simp: gpair_def)
+
+lemma poss_to_gpair_poss:
+  "p \<in> gposs s \<Longrightarrow> p \<in> gposs (gpair s t)"
+  "p \<in> gposs t \<Longrightarrow> p \<in> gposs (gpair s t)"
+  by auto
+
+lemma gsubt_at_gpair_poss:
+  assumes "p \<in> gposs s" and "p \<in> gposs t"
+  shows "gsubt_at (gpair s t) p = gpair (gsubt_at s p) (gsubt_at t p)" using assms
+  by (auto simp: gunion_gsubt_at_poss gfun_at_gpair intro!: eq_gterm_by_gposs_gfun_at)
+
+lemma subst_at_gpair_nt_poss_Some_None:
+  assumes "p \<in> gposs s" and "p \<notin> gposs t"
+  shows "gsubt_at (gpair s t) p = gterm_to_Some_None (gsubt_at s p)" using assms gfun_at_poss
+  by (force simp: gunion_gsubt_at_poss gfun_at_gpair intro!: eq_gterm_by_gposs_gfun_at)
+
+lemma subst_at_gpair_nt_poss_None_Some:
+  assumes "p \<in> gposs t" and "p \<notin> gposs s"
+  shows "gsubt_at (gpair s t) p = gterm_to_None_Some (gsubt_at t p)" using assms gfun_at_poss
+  by (force simp: gunion_gsubt_at_poss gfun_at_gpair intro!: eq_gterm_by_gposs_gfun_at)
+
+
+lemma gpair_ctxt_decomposition:
+  fixes C defines "p \<equiv> ghole_pos C"
+  assumes "p \<notin> gposs s" and "gpair s t = C\<langle>gterm_to_None_Some u\<rangle>\<^sub>G"
+  shows "gpair s (gctxt_at_pos t p)\<langle>v\<rangle>\<^sub>G = C\<langle>gterm_to_None_Some v\<rangle>\<^sub>G"
+  using assms(2-)
+proof -
+  note p[simp] = assms(1)
+  have pt: "p \<in> gposs t" and pc: "p \<in> gposs C\<langle>gterm_to_None_Some v\<rangle>\<^sub>G"
+    and pu: "p \<in> gposs C\<langle>gterm_to_None_Some u\<rangle>\<^sub>G"
+    using arg_cong[OF assms(3), of gposs] assms(2) ghole_pos_in_apply
+    by auto
+  have *: "gctxt_at_pos (gpair s (gctxt_at_pos t (ghole_pos C))\<langle>v\<rangle>\<^sub>G) (ghole_pos C) = gctxt_at_pos (gpair s t) (ghole_pos C)"
+    using assms(2) pt
+    by (intro eq_gctxt_at_pos)
+      (auto simp: gposs_gctxt_at_pos gunion_gsubt_at_poss gfun_at_gpair gfun_at_gctxt_at_pos_not_after)
+  have "gsubt_at (gpair s (gctxt_at_pos t p)\<langle>v\<rangle>\<^sub>G) p = gsubt_at C\<langle>gterm_to_None_Some v\<rangle>\<^sub>G p"
+    using pt assms(2) subst_at_gpair_nt_poss_None_Some[OF _ assms(2), of "(gctxt_at_pos t p)\<langle>v\<rangle>\<^sub>G"]
+    using ghole_pos_gctxt_at_pos
+    by (simp add: ghole_pos_in_apply)
+  then show ?thesis using assms(2) ghole_pos_gctxt_at_pos
+    using gsubst_at_gctxt_at_eq_gtermD[OF assms(3) pu]
+    by (intro gsubst_at_gctxt_at_eq_gtermI[OF _ pc])
+       (auto simp: ghole_pos_in_apply * gposs_gctxt_at_pos[OF pt, unfolded p])
+qed
+
+lemma groot_gpair [simp]:
+  "fst (groot (gpair s t)) = (Some (fst (groot s)), Some (fst (groot t)))"
+  by (cases s; cases t) (auto simp add: gpair_code)
+
+lemma ground_ctxt_adapt_ground [intro]:
+  assumes "ground_ctxt C"
+  shows "ground_ctxt (adapt_vars_ctxt C)"
+  using assms by (induct C) auto
+
+lemma adapt_vars_ctxt2 :
+  assumes "ground_ctxt C"
+  shows "adapt_vars_ctxt (adapt_vars_ctxt C) = adapt_vars_ctxt C" using assms
+  by (induct C) (auto simp: adapt_vars2)
+
+
+definition gencode :: "'f gterm list \<Rightarrow> 'f option list gterm" where
+  "gencode ts = glabel (\<lambda>p. map (\<lambda>t. gfun_at t p) ts) (gunions (map gdomain ts))"
+
+definition gdecode_nth :: "'f option list gterm \<Rightarrow> nat \<Rightarrow> 'f gterm" where
+  "gdecode_nth t i = the (gcollapse (map_gterm (\<lambda>f. f ! i) t))"
+
+lemma gdecode_nth_gencode:
+  assumes "i < length ts"
+  shows "gdecode_nth (gencode ts) i = ts ! i"
+proof -
+  have *: "gposs (ts ! i) = {p \<in> gposs (map_gterm (\<lambda>f. f ! i) (gencode ts)).
+           gfun_at (map_gterm (\<lambda>f. f ! i) (gencode ts)) p \<noteq> Some None}"
+    using assms
+    by (auto simp: gencode_def elim: gfun_at_possE dest: gfun_at_poss_gpossD) (force simp: fun_at_def' split: if_splits)
+  show ?thesis unfolding gdecode_nth_def comp_def using assms gcollapse_aux[OF *]
+    by (auto intro!: eq_gterm_by_gposs_gfun_at simp: gencode_def)
+     (metis (no_types) gposs_map_gterm length_map list.set_map map_nth_eq_conv nth_mem) 
+qed
+
+definition gdecode :: "'f option list gterm \<Rightarrow> 'f gterm list" where
+  "gdecode t = (case t of GFun f ts \<Rightarrow> map (\<lambda>i. gdecode_nth t i) [0..<length f])"
+
+lemma gdecode_gencode:
+  "gdecode (gencode ts) = ts"
+proof (cases "gencode ts")
+  case (GFun f ts')
+  have "length f = length ts" using arg_cong[OF GFun, of "\<lambda>t. gfun_at t []"]
+    by (auto simp: gencode_def)
+  then show ?thesis using gdecode_nth_gencode[of _ ts]
+    by (auto intro!: nth_equalityI simp: gdecode_def GFun)
+qed
+
+definition gencode_impl :: "'f gterm option list \<Rightarrow> 'f option list gterm" where
+  "gencode_impl ts = glabel (\<lambda>p. map (\<lambda>t. t \<bind> (\<lambda>t. gfun_at t p)) ts) (gunions (map (case_option (GFun () []) gdomain) ts))"
+
+lemma gencode_code [code]:
+  "gencode ts = gencode_impl (map Some ts)"
+  by (auto simp: gencode_def gencode_impl_def comp_def)
+
+lemma gencode_singleton:
+  "gencode [t] = map_gterm (\<lambda>f. [Some f]) t"
+  using glabel_map_gterm_conv[unfolded comp_def, of "\<lambda>t. [t]" t]
+  by (simp add: gunions_def gencode_def)
+
+lemma gencode_pair:
+  "gencode [t, u] = map_gterm (\<lambda>(f, g). [f, g]) (gpair t u)"
+  by (simp add: gunions_def gencode_def gpair_def map_gterm_glabel comp_def)
+
+
+
+definition RR1_spec where
+  "RR1_spec A T \<longleftrightarrow> \<L> A = T"
+
+definition RR2_spec where
+  "RR2_spec A T \<longleftrightarrow> \<L> A = {gpair t u |t u. (t, u) \<in> T}"
+
+definition RRn_spec where
+  "RRn_spec n A R \<longleftrightarrow> \<L> A = gencode ` R \<and> (\<forall>ts \<in> R. length ts = n)"
+
+lemma RR1_to_RRn_spec:
+  assumes "RR1_spec A T"
+  shows "RRn_spec 1 (fmap_funs_reg (\<lambda>f. [Some f]) A) ((\<lambda>t. [t]) ` T)"
+proof -
+  have [simp]: "inj_on (\<lambda>f. [Some f]) X" for X by (auto simp: inj_on_def)
+  show ?thesis using assms
+    by (auto simp: RR1_spec_def RRn_spec_def fmap_funs_\<L> image_comp comp_def gencode_singleton)
+qed
+
+lemma RR2_to_RRn_spec:
+  assumes "RR2_spec A T"
+  shows "RRn_spec 2 (fmap_funs_reg (\<lambda>(f, g). [f, g]) A) ((\<lambda>(t, u). [t, u]) ` T)"
+proof -
+  have [simp]: "inj_on (\<lambda>(f, g). [f, g]) X" for X by (auto simp: inj_on_def)
+  show ?thesis using assms
+    by (auto simp: RR2_spec_def RRn_spec_def fmap_funs_\<L> image_comp comp_def prod.case_distrib gencode_pair)
+qed
+
+lemma RRn_to_RR2_spec:
+  assumes "RRn_spec 2 A T"
+  shows "RR2_spec (fmap_funs_reg (\<lambda> f. (f ! 0 ,  f ! 1)) A) ((\<lambda> f. (f ! 0, f ! 1)) ` T)" (is "RR2_spec ?A ?T")
+proof -
+  {fix xs assume "xs \<in> T" then have "length xs = 2" using assms by (auto simp: RRn_spec_def)
+    then obtain t u where *: "xs = [t, u]"
+      by (metis (no_types, lifting) One_nat_def Suc_1 length_0_conv length_Suc_conv)
+    have **: "(\<lambda>f. (f ! 0, f ! Suc 0)) \<circ> (\<lambda>(f, g). [f, g]) = id" by auto
+    have "map_gterm (\<lambda>f. (f ! 0, f ! Suc 0)) (gencode xs) = gpair t u"
+      unfolding * gencode_pair gterm.map_comp ** gterm.map_id ..
+    then have "\<exists> t u. xs = [t, u] \<and> map_gterm (\<lambda>f. (f ! 0, f ! Suc 0)) (gencode xs) = gpair t u"
+      using * by blast}
+  then show ?thesis using assms
+    by (force simp: RR2_spec_def RRn_spec_def fmap_funs_\<L> image_comp comp_def prod.case_distrib gencode_pair image_iff Bex_def)
+qed
+
+lemma relabel_RR1_spec [simp]:
+  "RR1_spec (relabel_reg A) T \<longleftrightarrow> RR1_spec A T"
+  by (simp add: RR1_spec_def)
+
+lemma relabel_RR2_spec [simp]:
+  "RR2_spec (relabel_reg A) T \<longleftrightarrow> RR2_spec A T"
+  by (simp add: RR2_spec_def)
+
+lemma relabel_RRn_spec [simp]:
+  "RRn_spec n (relabel_reg A) T \<longleftrightarrow> RRn_spec n A T"
+  by (simp add: RRn_spec_def)
+
+lemma trim_RR1_spec [simp]:
+  "RR1_spec (trim_reg A) T \<longleftrightarrow> RR1_spec A T"
+  by (simp add: RR1_spec_def \<L>_trim)
+
+lemma trim_RR2_spec [simp]:
+  "RR2_spec (trim_reg A) T \<longleftrightarrow> RR2_spec A T"
+  by (simp add: RR2_spec_def \<L>_trim)
+
+lemma trim_RRn_spec [simp]:
+  "RRn_spec n (trim_reg A) T \<longleftrightarrow> RRn_spec n A T"
+  by (simp add: RRn_spec_def \<L>_trim)
+
+lemma swap_RR2_spec:
+  assumes "RR2_spec A R"
+  shows "RR2_spec (fmap_funs_reg prod.swap A) (prod.swap ` R)" using assms
+  by (force simp add: RR2_spec_def fmap_funs_\<L> gpair_swap image_iff)
+
+
+lemma false_RRn_spec:
+  "RRn_spec n empty_reg {}"
+  by (auto simp: RRn_spec_def \<L>_epmty)
+
+lemma true_RR0_spec:
+  "RRn_spec 0 (Reg {|q|} (TA {|[] [] \<rightarrow> q|} {||})) {[]}"
+  by (auto simp: RRn_spec_def \<L>_def const_ta_lang gencode_def gunions_def)
+
+
+
+abbreviation "lift_Some_None s \<equiv> (Some s, None)"
+abbreviation "lift_None_Some s \<equiv> (None, Some s)"
+abbreviation "pair_eps A B \<equiv> (\<lambda> (p, q). ((Some (fst p), q), (Some (snd p), q))) |`| (eps A |\<times>| finsert None (Some |`| \<Q> B))"
+abbreviation "pair_rule \<equiv> (\<lambda> (ra, rb). TA_rule (Some (r_root ra), Some (r_root rb)) (zip_fill (r_lhs_states ra) (r_lhs_states rb)) (Some (r_rhs ra), Some (r_rhs rb)))"
+
+lemma lift_Some_None_pord_swap [simp]:
+  "prod.swap \<circ> lift_Some_None = lift_None_Some"
+  "prod.swap \<circ> lift_None_Some = lift_Some_None"
+  by auto
+
+lemma eps_to_pair_eps_Some_None:
+  "(p, q) |\<in>| eps \<A> \<Longrightarrow> (lift_Some_None p, lift_Some_None q) |\<in>| pair_eps \<A> \<B>"
+  by force
+
+definition pair_automaton :: "('p, 'f) ta \<Rightarrow> ('q, 'g) ta \<Rightarrow> ('p option \<times> 'q option, 'f option \<times> 'g option) ta" where
+  "pair_automaton A B = TA 
+    (map_ta_rule lift_Some_None lift_Some_None |`| rules A |\<union>|
+     map_ta_rule lift_None_Some lift_None_Some |`| rules B |\<union>|
+     pair_rule |`| (rules A |\<times>| rules B))
+    (pair_eps A B |\<union>| map_both prod.swap |`| (pair_eps B A))"
+
+definition pair_automaton_reg where
+  "pair_automaton_reg R L = Reg (Some |`| fin R |\<times>| Some |`| fin L) (pair_automaton (ta R) (ta L))"
+
+
+lemma pair_automaton_eps_simps:
+  "(lift_Some_None p, p') |\<in>| eps (pair_automaton A B) \<longleftrightarrow> (lift_Some_None p, p') |\<in>| pair_eps A B"
+  "(q , lift_Some_None q') |\<in>| eps (pair_automaton A B) \<longleftrightarrow> (q , lift_Some_None q') |\<in>| pair_eps A B"
+  by (auto simp: pair_automaton_def eps_to_pair_eps_Some_None)
+
+lemma pair_automaton_eps_Some_SomeD:
+  "((Some p, Some p'), r) |\<in>| eps (pair_automaton A B) \<Longrightarrow> fst r \<noteq> None \<and> snd r \<noteq> None \<and> (Some p = fst r \<or> Some p' = snd r) \<and>
+     (Some p \<noteq> fst r \<longrightarrow> (p, the (fst r)) |\<in>| (eps A)) \<and> (Some p' \<noteq> snd r \<longrightarrow> (p', the (snd r)) |\<in>| (eps B))"
+  by (auto simp: pair_automaton_def)
+
+lemma pair_automaton_eps_Some_SomeD2:
+  "(r, (Some p, Some p')) |\<in>| eps (pair_automaton A B) \<Longrightarrow> fst r \<noteq> None \<and> snd r \<noteq> None \<and> (fst r = Some p \<or> snd r = Some p') \<and>
+     (fst r \<noteq> Some p \<longrightarrow> (the (fst r), p) |\<in>| (eps A)) \<and> (snd r \<noteq> Some p' \<longrightarrow> (the (snd r), p') |\<in>| (eps B))"
+  by (auto simp: pair_automaton_def)
+
+lemma pair_eps_Some_None:
+  fixes p q q'
+  defines "l \<equiv> (p, q)" and "r \<equiv> lift_Some_None q'"
+  assumes "(l, r) |\<in>| (eps (pair_automaton A B))|\<^sup>+|"
+  shows "q = None \<and> p \<noteq> None \<and> (the p, q') |\<in>| (eps A)|\<^sup>+|" using assms(3, 1, 2)
+proof (induct arbitrary: q' q rule: ftrancl_induct)
+  case (Step b)
+  then show ?case unfolding pair_automaton_eps_simps
+    by (auto simp: pair_automaton_eps_simps)
+       (meson not_ftrancl_into)
+qed (auto simp: pair_automaton_def)
+
+lemma pair_eps_Some_Some:
+  fixes p q
+  defines "l \<equiv> (Some p, Some q)"
+  assumes "(l, r) |\<in>| (eps (pair_automaton A B))|\<^sup>+|"
+  shows "fst r \<noteq> None \<and> snd r \<noteq> None \<and>
+      (fst l \<noteq> fst r \<longrightarrow> (p, the (fst r)) |\<in>| (eps A)|\<^sup>+|) \<and>
+      (snd l \<noteq> snd r \<longrightarrow> (q, the (snd r)) |\<in>| (eps B)|\<^sup>+|)"
+  using assms(2, 1)
+proof (induct arbitrary: p q rule: ftrancl_induct)
+  case (Step b c)
+  then obtain r r' where *: "b = (Some r, Some r')" by (cases b) auto
+  show ?case using Step(2)
+    using pair_automaton_eps_Some_SomeD[OF  Step(3)[unfolded *]]
+    by (auto simp: *) (meson not_ftrancl_into)+

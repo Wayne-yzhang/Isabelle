@@ -1,0 +1,1423 @@
+theory Promela
+imports 
+  PromelaDatastructures
+  PromelaInvariants
+  PromelaStatistics
+begin
+
+
+lemma mod_integer_le:
+using that including integer.lifting proof transfer
+  fix a b x :: int
+    by simp
+qed
+
+lemma mod_integer_ge:
+using that including integer.lifting proof transfer
+  fix a b x :: int
+    by simp
+    by simp
+qed
+
+
+definition add_label :: "String.literal \<Rightarrow> labels \<Rightarrow> nat \<Rightarrow> labels" where
+  "add_label l lbls pos = (
+     case lm.lookup l lbls of 
+       None \<Rightarrow> lm.update l pos lbls
+     | Some _ \<Rightarrow> abortv STR ''Label given twice: '' l (\<lambda>_. lbls))"
+
+definition min_prio :: "edge list \<Rightarrow> integer \<Rightarrow> integer" where
+  "min_prio es start = Min ((prio ` set es) \<union> {start})"
+
+lemma min_prio_code [code]:
+  "min_prio es start = fold  (\<lambda>e pri. if prio e < pri then prio e else pri) es start"
+proof -
+  from Min.set_eq_fold have "Min (set (start # map prio es)) = fold min (map prio es) start" by metis
+  also have "... = fold (min \<circ> prio) es start" by (simp add: fold_map)
+  also have "... = fold  (\<lambda>e pri. if prio e < pri then prio e else pri) es start" by (auto intro!: fold_cong)
+  finally show ?thesis by (simp add: min_prio_def)
+qed
+  
+definition for_all :: "('a \<Rightarrow> bool) \<Rightarrow> 'a list \<Rightarrow> bool" where
+  "for_all f xs \<longleftrightarrow> (\<forall>x \<in> set xs. f x)"
+
+lemma for_all_code[code]:
+  "for_all f xs \<longleftrightarrow> foldli xs id (\<lambda>kv \<sigma>. f kv) True"
+  by (simp add: for_all_def foldli_conj)
+
+definition find_remove :: "('a \<Rightarrow> bool) \<Rightarrow> 'a list \<Rightarrow> 'a option \<times> 'a list" where
+  "find_remove P xs = (case List.find P xs of None \<Rightarrow> (None, xs)
+                                            | Some x \<Rightarrow> (Some x, List.remove1 x xs))"
+
+lemma find_remove_code [code]:
+  "find_remove P [] = (None, [])"
+  "find_remove P (x#xs) = (if P x then (Some x, xs)
+                           else apsnd (Cons x) (find_remove P xs))"
+  by (induct xs) (auto simp add: find_remove_def dest: find_SomeD split: option.split) 
+
+lemma find_remove_subset:
+  "find_remove P xs = (res, xs') \<Longrightarrow> set xs' \<subseteq> set xs"
+unfolding find_remove_def
+using set_remove1_subset
+by (force split: option.splits)
+
+lemma find_remove_length:
+  "find_remove P xs = (res, xs') \<Longrightarrow> length xs' \<le> length xs"
+unfolding find_remove_def
+by (induct xs arbitrary: res xs') (auto split: if_splits option.splits)
+
+
+
+fun lookupVar :: "variable \<Rightarrow> integer option \<Rightarrow> integer" where
+  "lookupVar (Var _ val) None = val"
+| "lookupVar (Var _ _) (Some _) = abort STR ''Array used on var'' (\<lambda>_.0)"
+| "lookupVar (VArray _ siz vals) (Some idx) = vals !! nat_of_integer idx"
+
+primrec checkVarValue :: "varType \<Rightarrow> integer \<Rightarrow> integer" where
+  "checkVarValue (VTBounded lRange hRange) val = (
+     if val \<le> hRange \<and> val \<ge> lRange then val
+        if lRange = 0 \<and> val > 0 
+        then val mod (hRange + 1)
+           abort STR ''Value overflow'' (\<lambda>_. lRange))"
+| "checkVarValue VTChan val = (
+     if val < min_var_value \<or> val > max_var_value 
+     then abort STR ''Value overflow'' (\<lambda>_. 0) 
+     else val)"
+
+lemma [simp]:
+  "variable_inv (Var VTChan 0)"
+by simp
+
+context
+  fixes type :: varType
+  assumes "varType_inv type"
+begin
+
+lemma checkVarValue_bounded:
+  "checkVarValue type val \<in> {min_var_value..max_var_value}"
+  by (cases type) (auto intro: mod_integer_le mod_integer_ge)
+
+lemma checkVarValue_bounds:
+  "min_var_value \<le> checkVarValue type val"
+  "checkVarValue type val \<le> max_var_value"
+  using checkVarValue_bounded [of val] by simp_all
+
+lemma checkVarValue_Var:
+  "variable_inv (Var type (checkVarValue type val))"
+
+end
+
+fun editVar :: "variable \<Rightarrow> integer option \<Rightarrow> integer \<Rightarrow> variable" where
+  "editVar (Var type _ ) None val = Var type (checkVarValue type val)"
+| "editVar (Var _ _) (Some _) _ = abort STR ''Array used on var'' (\<lambda>_. Var VTChan 0)"
+| "editVar (VArray type siz vals) None val = (
+     let lv = IArray.list_of vals in
+     let v' = lv[0:=checkVarValue type val] in
+     VArray type siz (IArray v'))"
+| "editVar (VArray type siz vals) (Some idx) val = (
+     let lv = IArray.list_of vals in
+     let v' = lv[(nat_of_integer idx):=checkVarValue type val] in
+     VArray type siz (IArray v'))"
+
+lemma editVar_variable_inv:
+  assumes "variable_inv v"
+  shows "variable_inv (editVar v idx val)"
+proof (cases v)
+  case (Var type val) with assms have "varType_inv type" by simp
+  with Var show ?thesis 
+    by (cases idx) 
+       (auto intro!: checkVarValue_Var 
+             simp del: checkVarValue.simps variable_inv.simps)
+next
+  case (VArray type siz vals) 
+  with assms have [simp, intro!]: "varType_inv type" by simp
+  
+  show ?thesis
+  proof (cases idx)
+    case None with assms VArray show ?thesis 
+      by (cases "IArray.list_of vals") (auto intro!: checkVarValue_bounds)
+  next
+    case (Some i)
+    note upd_cases = in_set_upd_cases[where l="IArray.list_of vals" and i="nat_of_integer i"]
+
+    from Some VArray assms show ?thesis
+      by (cases type)
+        (auto elim!: upd_cases intro!: mod_integer_le mod_integer_ge simp add: min_var_value_def)
+  qed
+qed
+
+definition getVar' 
+  :: "bool \<Rightarrow> String.literal \<Rightarrow> integer option 
+      \<Rightarrow> 'a gState_scheme \<Rightarrow> pState 
+      \<Rightarrow> integer option" 
+where
+  "getVar' gl v idx g p = (
+          let vars = if gl then gState.vars g else pState.vars p in
+          map_option (\<lambda>x. lookupVar x idx) (lm.lookup v vars))"
+
+definition setVar' 
+  :: "bool \<Rightarrow> String.literal \<Rightarrow> integer option 
+      \<Rightarrow> integer 
+      \<Rightarrow> 'a gState_scheme \<Rightarrow> pState 
+      \<Rightarrow> 'a gState_scheme * pState"
+ where
+  "setVar' gl v idx val g p = (
+     if gl then
+        else case lm.lookup v (gState.vars g) of
+               None \<Rightarrow> abortv STR ''Unknown global variable: '' v (\<lambda>_. (g,p))
+             | Some x \<Rightarrow> (g\<lparr>gState.vars := lm.update v (editVar x idx val) 
+                                                       (gState.vars g)\<rparr>
+                         , p)
+     else
+        case lm.lookup v (pState.vars p) of
+          None \<Rightarrow> abortv STR ''Unknown proc variable: '' v (\<lambda>_. (g,p))
+        | Some x \<Rightarrow> (g, p\<lparr>pState.vars := lm.update v (editVar x idx val) 
+                                                     (pState.vars p)\<rparr>))"
+
+lemma setVar'_gState_inv:
+  assumes "gState_inv prog g"
+  shows "gState_inv prog (fst (setVar' gl v idx val g p))"
+unfolding setVar'_def using assms
+by (auto simp add: gState_inv_def lm.correct 
+         intro: editVar_variable_inv 
+         split: option.splits)
+
+lemma setVar'_gState_progress_rel:
+  assumes "gState_inv prog g"
+  shows "(g, fst (setVar' gl v idx val g p)) \<in> gState_progress_rel prog"
+apply (intro gState_progress_relI)
+      apply (fact assms)
+    apply (fact setVar'_gState_inv[OF assms])
+  apply (auto simp: setVar'_def lm.correct split: option.splits)
+done
+
+lemma vardict_inv_process_names:
+  assumes "vardict_inv ss proc v"
+  and "lm.lookup k v = Some x"
+  shows "k \<in> process_names ss proc"
+using assms
+by (auto simp add: lm.correct vardict_inv_def)
+
+lemma vardict_inv_variable_inv:
+  assumes "vardict_inv ss proc v"
+  and "lm.lookup k v = Some x"
+  shows "variable_inv x"
+using assms
+by (auto simp add: lm.correct vardict_inv_def)
+
+lemma vardict_inv_updateI:
+  assumes "vardict_inv ss proc vs"
+  and "x \<in> process_names ss proc"
+  and "variable_inv v"
+  shows "vardict_inv ss proc (lm.update x v vs)"
+using assms
+by (auto simp add: lm.correct vardict_inv_def)
+
+lemma update_vardict_inv:
+  assumes "vardict_inv ss proc v"
+  and "lm.lookup k v = Some x"
+  and "variable_inv x'"
+  shows "vardict_inv ss proc (lm.update k x' v)"
+using assms
+by (auto intro!: vardict_inv_updateI vardict_inv_process_names)
+
+lemma setVar'_pState_inv:
+  assumes "pState_inv prog p"
+  shows "pState_inv prog (snd (setVar' gl v idx val g p))"
+unfolding setVar'_def using assms
+by (auto split: if_splits option.splits 
+         simp add: pState_inv_def
+         intro: update_vardict_inv editVar_variable_inv vardict_inv_variable_inv)
+
+lemma setVar'_cl_inv:
+  assumes "cl_inv (g,p)"
+  shows "cl_inv (setVar' gl v idx val g p)"
+unfolding setVar'_def using assms
+by (auto split: if_splits option.splits)
+
+definition withVar' 
+  :: "bool \<Rightarrow> String.literal \<Rightarrow> integer option 
+      \<Rightarrow> (integer \<Rightarrow> 'x) 
+      \<Rightarrow> 'a gState_scheme \<Rightarrow> pState 
+      \<Rightarrow> 'x"
+where
+  "withVar' gl v idx f g p = f (the (getVar' gl v idx g p))"
+
+definition withChannel' 
+  :: "bool \<Rightarrow> String.literal \<Rightarrow> integer option 
+      \<Rightarrow> (nat \<Rightarrow> channel \<Rightarrow> 'x) 
+      \<Rightarrow> 'a gState_scheme \<Rightarrow> pState 
+      \<Rightarrow> 'x"
+where
+  "withChannel' gl v idx f g p = ( 
+     let error = \<lambda>_. abortv STR ''Variable is not a channel: '' v 
+                                (\<lambda>_. f 0 InvChannel) in
+     let abort = \<lambda>_. abortv STR ''Channel already closed / invalid: '' v
+                                (\<lambda>_. f 0 InvChannel)
+     in withVar' gl v idx (\<lambda>i. let i = nat_of_integer i in 
+                               if i \<ge> length (channels g) then error () 
+                               else let c = channels g ! i in
+                                    case c of
+                                      InvChannel \<Rightarrow> abort ()
+                                    | _ \<Rightarrow> f i c) g p)"
+
+
+
+abbreviation "trivCond x \<equiv> if x then 1 else 0"
+
+fun exprArith :: "'a gState_scheme \<Rightarrow> pState \<Rightarrow> expr \<Rightarrow> integer"
+and pollCheck :: "'a gState_scheme \<Rightarrow> pState \<Rightarrow> channel \<Rightarrow> recvArg list \<Rightarrow> bool 
+                   \<Rightarrow> bool"
+and recvArgsCheck :: "'a gState_scheme \<Rightarrow> pState \<Rightarrow> recvArg list \<Rightarrow> integer list 
+                       \<Rightarrow> bool" 
+where
+  "exprArith g p (ExprConst x) = x"
+| "exprArith g p (ExprMConst x _) = x"
+
+| "exprArith g p ExprTimeOut = trivCond (timeout g)"
+
+| "exprArith g p (ExprLen (ChanRef (VarRef gl name None))) = 
+     withChannel' gl name None (
+       \<lambda>_ c. case c of 
+                Channel _ _ q \<Rightarrow> integer_of_nat (length q) 
+              | HSChannel _ \<Rightarrow> 0) g p"
+
+| "exprArith g p (ExprLen (ChanRef (VarRef gl name (Some idx)))) = 
+     withChannel' gl name (Some (exprArith g p idx)) (
+      \<lambda>_ c. case c of 
+              Channel _ _ q \<Rightarrow> integer_of_nat (length q) 
+            | HSChannel _ \<Rightarrow> 0) g p"
+
+| "exprArith g p (ExprEmpty (ChanRef (VarRef gl name None))) = 
+     trivCond (withChannel' gl name None (
+       \<lambda>_ c. case c of Channel _ _ q \<Rightarrow> (q = []) 
+                     | HSChannel _ \<Rightarrow> True) g p)"
+
+| "exprArith g p (ExprEmpty (ChanRef (VarRef gl name (Some idx)))) = 
+     trivCond (withChannel' gl name (Some (exprArith g p idx)) (
+       \<lambda>_ c. case c of Channel _ _ q \<Rightarrow> (q = []) 
+                     | HSChannel _ \<Rightarrow> True) g p)"
+
+| "exprArith g p (ExprFull (ChanRef(VarRef gl name None))) = 
+     trivCond (withChannel' gl name None (
+       \<lambda>_ c. case c of 
+               Channel cap _ q \<Rightarrow> integer_of_nat (length q) \<ge> cap 
+             | HSChannel _ \<Rightarrow> False) g p)"
+
+| "exprArith g p (ExprFull (ChanRef(VarRef gl name (Some idx)))) = 
+     trivCond (withChannel' gl name (Some (exprArith g p idx)) (
+       \<lambda>_ c. case c of 
+               Channel cap _ q \<Rightarrow> integer_of_nat (length q) \<ge> cap 
+             | HSChannel _ \<Rightarrow> False) g p)"
+
+| "exprArith g p (ExprVarRef (VarRef gl name None)) = 
+     withVar' gl name None id g p"
+
+| "exprArith g p (ExprVarRef (VarRef gl name (Some idx))) = 
+     withVar' gl name (Some (exprArith g p idx)) id g p"
+
+| "exprArith g p (ExprUnOp UnOpMinus expr) = 0 - exprArith g p expr"
+| "exprArith g p (ExprUnOp UnOpNeg expr) = ((exprArith g p expr) + 1) mod 2"
+
+| "exprArith g p (ExprBinOp BinOpAdd lexpr rexpr) = 
+     (exprArith g p lexpr) + (exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpSub lexpr rexpr) = 
+     (exprArith g p lexpr) - (exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpMul lexpr rexpr) = 
+     (exprArith g p lexpr) * (exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpDiv lexpr rexpr) = 
+     (exprArith g p lexpr) div (exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpMod lexpr rexpr) = 
+     (exprArith g p lexpr) mod (exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpGr lexpr rexpr) = 
+     trivCond (exprArith g p lexpr > exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpLe lexpr rexpr) = 
+     trivCond (exprArith g p lexpr < exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpGEq lexpr rexpr) = 
+     trivCond (exprArith g p lexpr \<ge> exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpLEq lexpr rexpr) = 
+     trivCond (exprArith g p lexpr \<le> exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpEq lexpr rexpr) = 
+     trivCond (exprArith g p lexpr = exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpNEq lexpr rexpr) = 
+     trivCond (exprArith g p lexpr \<noteq> exprArith g p rexpr)"
+
+| "exprArith g p (ExprBinOp BinOpAnd lexpr rexpr) = 
+     trivCond (exprArith g p lexpr \<noteq> 0 \<and> exprArith g p rexpr \<noteq> 0)"
+
+| "exprArith g p (ExprBinOp BinOpOr lexpr rexpr) = 
+     trivCond (exprArith g p lexpr \<noteq> 0 \<or> exprArith g p rexpr \<noteq> 0)"
+
+| "exprArith g p (ExprCond cexpr texpr fexpr) = 
+     (if exprArith g p cexpr \<noteq> 0 then exprArith g p texpr 
+      else exprArith g p fexpr)"
+
+| "exprArith g p (ExprPoll (ChanRef (VarRef gl name None)) rs srt) = 
+     trivCond (withChannel' gl name None (
+       \<lambda>_ c. pollCheck g p c rs srt) g p)"
+
+| "exprArith g p (ExprPoll (ChanRef (VarRef gl name (Some idx))) rs srt) = 
+     trivCond (withChannel' gl name (Some (exprArith g p idx)) (
+       \<lambda>_ c. pollCheck g p c rs srt) g p)"
+
+| "pollCheck g p InvChannel _ _ = 
+     abort STR ''Channel already closed / invalid.'' (\<lambda>_. False)"
+| "pollCheck g p (HSChannel _) _ _ = False"
+| "pollCheck g p (Channel _ _ q) rs srt = (
+     if q = [] then False
+     else if \<not> srt then recvArgsCheck g p rs (hd q)
+     else List.find (recvArgsCheck g p rs) q \<noteq> None)"
+
+| "recvArgsCheck _ _ [] [] = True"
+| "recvArgsCheck _ _ _  [] = 
+     abort STR ''Length mismatch on receiving.'' (\<lambda>_. False)"
+| "recvArgsCheck _ _ []  _ = 
+     abort STR ''Length mismatch on receiving.'' (\<lambda>_. False)"
+| "recvArgsCheck g p (r#rs) (v#vs) = ((
+       case r of 
+          RecvArgConst c \<Rightarrow> c = v
+        | RecvArgMConst c _ \<Rightarrow> c = v
+        | RecvArgVar var \<Rightarrow> True
+        | RecvArgEval e \<Rightarrow> exprArith g p e = v ) \<and> recvArgsCheck g p rs vs)"
+
+
+fun liftVar where
+  "liftVar f (VarRef gl v idx) argm g p = 
+      f gl v (map_option (exprArith g p) idx) argm g p"
+
+definition "getVar v = liftVar (\<lambda>gl v idx arg. getVar' gl v idx) v ()"
+definition "setVar = liftVar setVar'"
+definition "withVar = liftVar withVar'"
+
+primrec withChannel
+  where "withChannel (ChanRef v) = liftVar withChannel' v"
+
+lemma setVar_gState_progress_rel:
+  assumes "gState_inv prog g"
+  shows "(g, fst (setVar v val g p)) \<in> gState_progress_rel prog"
+unfolding setVar_def
+by (cases v) (simp add: setVar'_gState_progress_rel[OF assms])
+
+lemmas setVar_gState_inv = 
+  setVar_gState_progress_rel[THEN gState_progress_rel_gState_invI2]
+
+lemma setVar_pState_inv:
+  assumes "pState_inv prog p"
+  shows "pState_inv prog (snd (setVar v val g p))"
+unfolding setVar_def 
+by (cases v) (auto simp add: setVar'_pState_inv assms)
+
+lemma setVar_cl_inv:
+  assumes "cl_inv (g,p)"
+  shows "cl_inv (setVar v val g p)"
+unfolding setVar_def 
+by (cases v) (auto simp add: setVar'_cl_inv assms)
+
+
+lemma channel_inv_code [code]:
+  "channel_inv (Channel cap ts q) 
+  \<longleftrightarrow> cap \<le> max_array_size 
+    \<and> 0 \<le> cap 
+    \<and> for_all varType_inv ts 
+    \<and> length ts \<le> max_array_size 
+    \<and> length q \<le> max_array_size 
+    \<and> for_all (\<lambda>x. length x = length ts  
+                   \<and> for_all (\<lambda>y. y \<ge> min_var_value 
+                                 \<and> y \<le> max_var_value) x) q" 
+  "channel_inv (HSChannel ts) 
+  \<longleftrightarrow> for_all varType_inv ts \<and> length ts \<le> max_array_size"
+  by (auto simp add: for_all_def) force+
+
+primrec toVariable 
+  :: "'a gState_scheme \<Rightarrow> pState \<Rightarrow> varDecl \<Rightarrow> String.literal * variable * channels" 
+where
+  "toVariable g p (VarDeclNum lb hb name siz init) = (
+     let type = VTBounded lb hb in
+     if \<not> varType_inv type then abortv STR ''Invalid var def (varType_inv failed): '' name 
+                                       (\<lambda>_. (name, Var VTChan 0, []))
+     else
+       let 
+         init = checkVarValue type (case init of 
+                                      None \<Rightarrow> 0 
+                                    | Some e \<Rightarrow> exprArith g p e);
+         v = (case siz of 
+                None \<Rightarrow> Var type init 
+              | Some s \<Rightarrow> if nat_of_integer s \<le> max_array_size 
+                         then VArray type (nat_of_integer s) 
+                                          (IArray.tabulate (s, \<lambda>_. init))
+                         else abortv STR ''Invalid var def (array too large): '' name
+                                      (\<lambda>_. Var VTChan 0))
+        in
+           (name, v, []))"
+
+| "toVariable g p (VarDeclChan name siz types) = (
+     let 
+       size = (case siz of None \<Rightarrow> 1 | Some s \<Rightarrow> nat_of_integer s);
+       chans = (case types of 
+                  None \<Rightarrow> []
+                | Some (cap, tys) \<Rightarrow> 
+                    let C = (if cap = 0 then HSChannel tys 
+                             else Channel cap tys []) in
+                    if \<not> channel_inv C 
+                    then abortv STR ''Invalid var def (channel_inv failed): '' 
+                                name (\<lambda>_. [])
+                    else replicate size C);
+       cidx = (case types of 
+                 None \<Rightarrow> 0 
+               | Some _ \<Rightarrow> integer_of_nat (length (channels g)));
+       v = (case siz of 
+              None \<Rightarrow> Var VTChan cidx
+            | Some s \<Rightarrow> if nat_of_integer s \<le> max_array_size 
+                       then VArray VTChan (nat_of_integer s) 
+                                          (IArray.tabulate (s, 
+                                             \<lambda>i. if cidx = 0 then 0 
+                                                 else i + cidx))
+                       else abortv STR ''Invalid var def (array too large): '' 
+                                   name (\<lambda>_. Var VTChan 0))
+     in
+        (name, v, chans))"
+
+lemma toVariable_variable_inv:
+  assumes "gState_inv prog g"
+  shows "variable_inv (fst (snd (toVariable g p v)))"
+using assms
+apply (cases v)
+  apply (auto intro!: checkVarValue_Var 
+              simp del: variable_inv.simps checkVarValue.simps varType_inv.simps 
+              split: if_splits option.splits)
+      apply (auto intro!: mod_integer_ge mod_integer_le simp add: min_var_value_def)
+    apply (simp_all add: assms gState_inv_def 
+               max_channels_def max_var_value_def min_var_value_def max_array_size_def)
+    including integer.lifting
+    apply (transfer', simp)+
+done
+
+lemma toVariable_channels_inv:
+  shows "\<forall>x \<in> set (snd (snd (toVariable g p v))). channel_inv x"
+by (cases v) auto
+
+lemma toVariable_channels_inv':
+  shows "toVariable g p v = (a,b,c) \<Longrightarrow> \<forall>x \<in> set c. channel_inv x"
+using toVariable_channels_inv
+by (metis snd_conv)
+
+lemma toVariable_variable_inv':
+  shows "gState_inv prog g \<Longrightarrow> toVariable g p v = (a,b,c) \<Longrightarrow> variable_inv b"
+by (metis snd_conv fst_conv toVariable_variable_inv)
+
+definition mkChannels 
+  :: "'a gState_scheme \<Rightarrow> pState \<Rightarrow> channels \<Rightarrow> 'a gState_scheme * pState"
+ where
+  "mkChannels g p cs = (
+     if cs = [] then (g,p) else 
+     let l = length (channels g) in
+     if l + length cs > max_channels 
+     then abort STR ''Too much channels'' (\<lambda>_.  (g,p))
+     else let
+            cs\<^sub>p = map integer_of_nat [l..<l + length cs];
+            g' = g\<lparr>channels := channels g @ cs\<rparr>;
+            p' = p\<lparr>pState.channels := pState.channels p @ cs\<^sub>p\<rparr>
+          in 
+            (g', p'))"
+
+lemma mkChannels_gState_progress_rel:
+  "gState_inv prog g 
+   \<Longrightarrow> set cs \<subseteq> Collect channel_inv 
+   \<Longrightarrow> (g, fst (mkChannels g p cs)) \<in> gState_progress_rel prog"
+unfolding mkChannels_def
+by (intro gState_progress_relI) 
+   (auto simp add: gState_inv_def gState.defs cl_inv_def)
+
+lemmas mkChannels_gState_inv = 
+  mkChannels_gState_progress_rel[THEN gState_progress_rel_gState_invI2]
+
+lemma mkChannels_pState_inv:
+  "pState_inv prog p 
+   \<Longrightarrow> cl_inv (g,p) 
+   \<Longrightarrow> pState_inv prog (snd (mkChannels g p cs))"
+unfolding mkChannels_def
+including integer.lifting
+  apply (auto simp add: pState_inv_def pState.defs gState_inv_def dest!: cl_inv_lengthD)
+    apply (transfer', simp)+
+    done
+
+lemma mkChannels_cl_inv:
+  "cl_inv (g,p) \<Longrightarrow> cl_inv (mkChannels g p cs)"
+unfolding mkChannels_def
+by (auto simp add: pState.defs dest: cl_inv_lengthD intro!: cl_invI)
+
+definition mkVarChannel 
+  :: "varDecl 
+      \<Rightarrow> ((var_dict \<Rightarrow> var_dict) \<Rightarrow> 'a gState_scheme * pState 
+         \<Rightarrow> 'a gState_scheme * pState) 
+      \<Rightarrow> 'a gState_scheme \<Rightarrow> pState 
+      \<Rightarrow> 'a gState_scheme * pState" 
+where
+  "mkVarChannel v upd g p = (
+         let 
+             (k,v,cs) = toVariable g p v;
+             (g',p') = upd (lm.update k v) (g,p)
+         in
+            mkChannels g' p' cs)"
+
+lemma mkVarChannel_gState_inv:
+  assumes "gState_inv prog g"
+  and "\<And>k v' cs. toVariable g p v = (k,v',cs) 
+                 \<Longrightarrow> gState_inv prog (fst (upd (lm.update k v') (g,p)))"
+  shows "gState_inv prog (fst (mkVarChannel v upd g p))"
+using assms unfolding mkVarChannel_def
+by (force split: varDecl.split prod.split
+          intro!: mkChannels_gState_inv
+          dest: toVariable_channels_inv') 
+
+lemma mkVarChannel_gState_progress_rel:
+  assumes "gState_inv prog g"
+  and "\<And>k v' cs. toVariable g p v = (k,v',cs) 
+             \<Longrightarrow> (g, fst (upd (lm.update k v') (g,p))) \<in> gState_progress_rel prog"
+  shows "(g, fst (mkVarChannel v upd g p)) \<in> gState_progress_rel prog"
+proof -
+  obtain k v' cs where 1: "toVariable g p v = (k,v',cs)" by (metis prod.exhaust)
+  obtain g' p' where 2: "(g',p') = upd (lm.update k v') (g,p)" by (metis prod.exhaust)
+  with 1 assms have *: "(g, g') \<in> gState_progress_rel prog" by (metis fst_conv)
+
+  also from 1 2 have "(g', fst (mkChannels g' p' cs)) \<in> gState_progress_rel prog"
+    by (force intro!: mkChannels_gState_progress_rel gState_progress_rel_gState_invI2[OF *]
+              dest: toVariable_channels_inv')
+  finally have "(g, fst (mkChannels g' p' cs)) \<in> gState_progress_rel prog" .
+  thus ?thesis using 1 2 by (auto simp add: mkVarChannel_def split: prod.split)
+qed
+  
+lemma mkVarChannel_pState_inv:
+  assumes "pState_inv prog p"
+  and "cl_inv (g,p)"
+  and "\<And>k v' cs. toVariable g p v = (k,v',cs) 
+                  \<Longrightarrow> cl_inv (upd (lm.update k v') (g,p))"
+  and "\<And>k v' cs. toVariable g p v = (k,v',cs) 
+                  \<Longrightarrow> pState_inv prog (snd (upd (lm.update k v') (g,p)))"
+  shows "pState_inv prog (snd (mkVarChannel v upd g p))"
+using assms unfolding mkVarChannel_def
+by (force split: varDecl.split prod.split 
+          intro!: mkChannels_pState_inv)
+
+lemma mkVarChannel_cl_inv:
+  assumes "cl_inv (g,p)"
+  and "\<And>k v' cs. toVariable g p v = (k,v',cs) 
+                 \<Longrightarrow> cl_inv (upd (lm.update k v') (g,p))"
+  shows "cl_inv (mkVarChannel v upd g p)"
+using assms unfolding mkVarChannel_def
+by (force split: varDecl.split prod.splits 
+          intro!: mkChannels_cl_inv)
+
+definition mkVarChannelProc 
+  :: "procVarDecl \<Rightarrow> 'a gState_scheme \<Rightarrow> pState \<Rightarrow> 'a gState_scheme * pState" 
+where
+  "mkVarChannelProc v g p = (
+     let 
+       v' = case v of
+              ProcVarDeclNum lb hb name siz init \<Rightarrow> 
+                  VarDeclNum lb hb name siz init
+           | ProcVarDeclChan name siz \<Rightarrow> 
+                 VarDeclChan name siz None;
+       (k,v,cs) = toVariable g p v' 
+     in 
+       mkVarChannel v' (apsnd \<circ> pState.vars_update) g p)"
+
+lemma mkVarChannelProc_gState_progress_rel:
+  assumes "gState_inv prog g"
+  shows "(g, fst (mkVarChannelProc v g p)) \<in> gState_progress_rel prog"
+unfolding mkVarChannelProc_def
+using assms
+by (auto intro!: mkVarChannel_gState_progress_rel)
+
+lemmas mkVarChannelProc_gState_inv = 
+  mkVarChannelProc_gState_progress_rel[THEN gState_progress_rel_gState_invI2]
+
+lemma toVariable_name:
+  "toVariable g p (VarDeclNum lb hb name sz init) = (x,a,b) \<Longrightarrow> x = name"
+  "toVariable g p (VarDeclChan name sz t) = (x, a, b) \<Longrightarrow> x = name"
+by (auto split: if_splits)
+
+declare toVariable.simps[simp del]
+
+lemma statesDecls_process_names:
+  assumes "v \<in> statesDecls (states prog !! (pState.idx p))"
+  shows "procVarDeclName v \<in> process_names (states prog !! (pState.idx p)) 
+                                           (processes prog !! (pState.idx p))"
+using assms
+by (cases "processes prog !! (pState.idx p)") (auto simp add: statesNames_def)
+
+lemma mkVarChannelProc_pState_inv:
+  assumes "pState_inv prog p"
+  and "gState_inv prog g"
+  and "cl_inv (g, p)"
+  and decl: "v \<in> statesDecls (states prog !! (pState.idx p))"
+  shows "pState_inv prog (snd (mkVarChannelProc v g p))"
+unfolding mkVarChannelProc_def
+using assms statesDecls_process_names[OF decl]
+by (auto intro!: mkVarChannel_pState_inv)
+   (auto dest: toVariable_name 
+         split: procVarDecl.splits 
+         intro: toVariable_variable_inv' vardict_inv_updateI
+         simp add: pState_inv_def)
+
+lemma mkVarChannelProc_cl_inv:
+  assumes "cl_inv (g,p)"
+  shows "cl_inv (mkVarChannelProc v g p)"
+unfolding mkVarChannelProc_def using assms
+by (auto intro!: mkVarChannel_cl_inv)
+
+
+definition step_fold' where
+  "step_fold' g steps (lbls :: labels) pri pos 
+             (nxt :: edgeIndex) (onxt :: edgeIndex option) iB = 
+     foldr (\<lambda>step (pos, nxt, lbls, es). 
+              let (e,enxt,lbls) = g step (lbls, pri, pos, nxt, onxt, iB)
+              in (pos + length e, enxt, lbls, es@e)
+    ) steps (pos, nxt, lbls, [])"
+
+definition step_fold where
+  "step_fold g steps lbls pri pos nxt onxt iB = (
+         let (_,nxt,lbls,s) = step_fold' g steps lbls pri pos nxt onxt iB
+          in (s,nxt,lbls))"
+
+lemma step_fold'_cong:
+  assumes "lbls = lbls'"
+  and "pri = pri'"
+  and "pos = pos'"
+  and "steps = steps'"
+  and "nxt = nxt'"
+  and "onxt = onxt'"
+  and "iB = iB'"
+  and "\<And>x d. x \<in> set steps \<Longrightarrow> g x d = g' x d"
+  shows "step_fold' g steps lbls pri pos nxt onxt iB = 
+         step_fold' g' steps' lbls' pri' pos' nxt' onxt' iB'"
+unfolding step_fold'_def 
+by (auto intro: foldr_cong simp add: assms)
+
+lemma step_fold_cong[fundef_cong]:
+  assumes "lbls = lbls'"
+  and "pri = pri'"
+  and "pos = pos'"
+  and "steps = steps'"
+  and "nxt = nxt'"
+  and "onxt = onxt'"
+  and "iB = iB'"
+  and "\<And>x d. x \<in> set steps \<Longrightarrow> g x d = g' x d"
+  shows "step_fold g steps lbls pri pos nxt onxt iB = 
+         step_fold g' steps' lbls' pri' pos' nxt' onxt' iB'"
+unfolding step_fold_def
+by (auto simp: assms cong: step_fold'_cong)
+
+fun step_foldL_step where
+  "step_foldL_step _ _ _ [] (pos, nxt, lbls, es, is) = (pos, nxt, lbls, es, is)"
+| "step_foldL_step g pri onxt (s#steps) (pos, nxt, lbls, es, is) = (
+     let (pos', nxt', lbls', ss') = step_fold' g steps lbls pri pos nxt onxt False in 
+     let (s', nxt'', lbls'') = g s (lbls',pri,pos',nxt',onxt,True) in
+     let rs = butlast s'; s'' = last s' in
+     (pos' + length rs, nxt, lbls'', es@ss'@rs, s''#is))"
+
+definition step_foldL where
+  "step_foldL g stepss lbls pri pos nxt onxt = 
+     foldr (step_foldL_step g pri onxt) stepss (pos,nxt,lbls,[],[])"
+
+lemma step_foldL_step_cong:
+  assumes "pri = pri'"
+  and "onxt = onxt'"
+  and "s = s'"
+  and "d = d'"
+  and "\<And>x d. x \<in> set s \<Longrightarrow> g x d = g' x d"
+  shows "step_foldL_step g pri onxt s d = step_foldL_step g' pri' onxt' s' d'"
+using assms
+by (cases d', cases s') (simp_all cong: step_fold'_cong)
+  
+lemma step_foldL_cong[fundef_cong]:
+  assumes "lbls = lbls'"
+  and "pri = pri'"
+  and "pos = pos'"
+  and "stepss = stepss'"
+  and "nxt = nxt'"
+  and "onxt = onxt'"
+  and "\<And>x x' d. x \<in> set stepss \<Longrightarrow> x' \<in> set x \<Longrightarrow> g x' d = g' x' d"
+  shows "step_foldL g stepss lbls pri pos nxt onxt = 
+         step_foldL g' stepss' lbls' pri' pos' nxt' onxt'"
+unfolding step_foldL_def
+using assms
+apply (cases stepss')
+  apply simp
+  apply (force intro!: foldr_cong step_foldL_step_cong)
+done
+
+definition modProcArg 
+  :: "(procArg * integer) \<Rightarrow> String.literal * variable" 
+where
+  "modProcArg x = (
+     case x of 
+       (ProcArg ty name, val) \<Rightarrow> if varType_inv ty 
+                                then let init = checkVarValue ty val 
+                                     in (name, Var ty init)
+                                else abortv STR ''Invalid proc arg (varType_inv failed)'' 
+                                            name (\<lambda>_. (name, Var VTChan 0)))"
+
+definition emptyProc :: "pState"
+where
+  "emptyProc = \<lparr>pid = 0, vars = lm.empty (), pc = 0, channels = [], idx = 0 \<rparr>"
+
+lemma vardict_inv_empty:
+  "vardict_inv ss proc (lm.empty())"
+unfolding vardict_inv_def
+by (simp add: lm.correct)
+
+lemma emptyProc_cl_inv[simp]:
+  "cl_inv (g, emptyProc)"
+by (simp add: cl_inv_def emptyProc_def)
+
+lemma emptyProc_pState_inv:
+  assumes "program_inv prog"
+  shows "pState_inv prog emptyProc"
+proof -
+  from assms have "IArray.length (states prog !! 0) > 0"
+    by (intro program_inv_length_states) (auto simp add: program_inv_def)
+  with assms show ?thesis
+    unfolding pState_inv_def program_inv_def emptyProc_def
+    by (auto simp add: vardict_inv_empty)
+qed
+
+fun mkProc 
+  :: "'a gState_scheme \<Rightarrow> pState
+    \<Rightarrow> String.literal \<Rightarrow> expr list \<Rightarrow> process \<Rightarrow> nat 
+    \<Rightarrow> 'a gState_scheme * pState" 
+where
+  "mkProc g p name args (sidx, start, argDecls, decls) pidN = (
+     let start = case start of 
+                   Index x \<Rightarrow> x
+                 | _ \<Rightarrow> abortv STR ''Process start is not index: '' name (\<lambda>_. 0) 
+     in
+      if length args \<noteq> length argDecls 
+      then abortv STR ''Signature mismatch: '' name (\<lambda>_. (g,emptyProc))
+      else
+        let
+          eArgs = map (exprArith g p) args;
+        
+          argVars = map modProcArg (zip argDecls eArgs);
+        
+          pidI = integer_of_nat pidN;
+          argVars = (STR ''_pid'', Var (VTBounded 0 pidI) pidI)#argVars;
+          argVars = lm.to_map argVars;
+        
+          p = \<lparr> pid = pidN, vars = argVars, pc = start, channels = [], idx = sidx \<rparr>
+        in
+          foldl (\<lambda>(g,p) d. mkVarChannel d (apsnd \<circ> pState.vars_update) g p) 
+                (g,p) 
+                decls)"
+
+lemma mkProc_gState_progress_rel:
+  assumes "gState_inv prog g"
+  shows "(g, fst (mkProc g p name args (processes prog !! sidx) pidN)) \<in>  
+          gState_progress_rel prog"
+proof -
+  obtain sidx' start argDecls decls  where 
+    p: "processes prog !! sidx = (sidx', start, argDecls, decls)"
+    by (metis prod.exhaust)
+
+  from assms have 
+    "\<And>p. (g, fst (foldl (\<lambda>(g,p) d. mkVarChannel d (apsnd \<circ> pState.vars_update) g p) 
+                         (g,p) decls))
+          \<in> gState_progress_rel prog"
+  proof (induction decls arbitrary: g p)
+    case (Cons d decls)
+    obtain g' p' where 
+      new: "(g',p') = (mkVarChannel d (apsnd \<circ> pState.vars_update) g p)" 
+      by (metis prod.exhaust)
+    hence "g' = fst ..." by (metis fst_conv)
+    with Cons.prems have g_g': "(g,g') \<in> gState_progress_rel prog" 
+      by (auto intro: mkVarChannel_gState_progress_rel)
+    also note Cons.IH[OF g_g'[THEN gState_progress_rel_gState_invI2], of p']
+    finally show ?case by (auto simp add: o_def new)
+  qed simp
+  thus ?thesis using assms p by auto
+qed
+
+lemmas mkProc_gState_inv = 
+  mkProc_gState_progress_rel[THEN gState_progress_rel_gState_invI2]
+
+lemma mkProc_pState_inv:
+  assumes "program_inv prog"
+  and "gState_inv prog g"
+  and "pidN \<le> max_procs" and "pidN > 0"
+  and "sidx < IArray.length (processes prog)"
+  and "fst (processes prog !! sidx) = sidx"
+  shows "pState_inv prog (snd (mkProc g p name args (processes prog !! sidx) pidN))"
+proof -
+  obtain sidx' start argDecls decls  where 
+    "processes prog !! sidx = (sidx', start, argDecls, decls)"
+    by (metis prod.exhaust)
+  with assms have 
+    p_def: "processes prog !! sidx = (sidx, start, argDecls, decls)" 
+           "IArray.list_of (processes prog) ! sidx = (sidx, start, argDecls, decls)" 
+    by simp_all
+  with assms have "(sidx,start,argDecls,decls) \<in> set (IArray.list_of (processes prog))" 
+    by (force dest: nth_mem)
+  
+  with assms obtain s where s: "start = Index s" "s < IArray.length (states prog !! sidx)"
+    unfolding program_inv_def by auto
+  
+  hence P_inv: "pState_inv prog \<lparr>
+                   pid = pidN,
+                   vars = lm.to_map
+                          ((STR ''_pid'', Var (VTBounded 0 (integer_of_nat pidN)) 
+                             (integer_of_nat pidN)) 
+                          # map modProcArg (zip argDecls (map (exprArith g p) args))),
+                   pc = s, channels = [], idx = sidx\<rparr>"
+    unfolding pState_inv_def
+    using assms[unfolded program_inv_def]
+    including integer.lifting
+    apply (simp add: p_def)
+    apply (intro lm_to_map_vardict_inv)
+    apply auto
+              apply (simp add: max_procs_def max_var_value_def)
+              apply transfer'
+              apply simp
+            apply transfer'
+            apply simp
+          apply (simp add: min_var_value_def)
+          apply transfer'
+          apply simp
+        apply (simp add: max_var_value_def max_procs_def)
+        apply transfer'
+        apply simp
+      apply (drule set_zip_leftD)
+      apply (force simp add: modProcArg_def 
+                   split: procArg.splits if_splits 
+                   intro!: image_eqI)
+    apply (clarsimp simp add: modProcArg_def 
+                    split: procArg.splits if_splits 
+                    simp del: variable_inv.simps)
+    apply (intro checkVarValue_Var)
+    apply assumption
+    done
+
+  from p_def have 
+    "varDeclName ` set decls \<subseteq> 
+      process_names (states prog !! sidx) (processes prog !! sidx)" 
+    by auto
+    F_inv: "\<And>p. \<lbrakk> pState_inv prog p; sidx = pState.idx p; cl_inv (g,p) \<rbrakk>
+                \<Longrightarrow> pState_inv prog 
+                   (snd (foldl (\<lambda>(g,p) d. mkVarChannel d (apsnd \<circ> pState.vars_update) g p) 
+                               (g,p) decls))"
+  proof (induction decls arbitrary: g p)
+    case (Cons d ds) hence 
+      decl: "varDeclName d \<in> process_names (states prog !! pState.idx p) 
+                                           (processes prog !! pState.idx p)" 
+      by simp
+    
+    obtain g' p' where 
+      new: "(g',p') = (mkVarChannel d (apsnd \<circ> pState.vars_update) g p)" 
+      by (metis prod.exhaust)
+    hence p': "p' = snd ..." and g': "g' = fst ..." 
+      by (metis snd_conv fst_conv)+
+    with Cons.prems have "pState_inv prog p'" 
+      apply (auto intro!: mkVarChannel_pState_inv)
+      apply (simp add: pState_inv_def)
+      apply (intro vardict_inv_updateI)
+          apply simp
+        apply (cases d)
+          apply (force dest!: toVariable_name)
+        apply (force dest!: toVariable_name)
+      apply (intro toVariable_variable_inv')
+        apply assumption+
+      done
+    moreover 
+    from p' Cons.prems have "pState.idx p' = sidx" 
+      by (auto simp add: mkVarChannel_def mkChannels_def split: prod.split)
+    moreover 
+    from new Cons.prems have "cl_inv (g',p')" 
+      by (auto intro!: mkVarChannel_cl_inv)
+    moreover 
+    from g' Cons.prems have "gState_inv prog g'" 
+      by (auto intro!: mkVarChannel_gState_inv)
+    moreover 
+    from Cons.prems have 
+      "varDeclName ` set ds \<subseteq>
+          process_names (states prog !! sidx) (processes prog !! sidx)" 
+      by simp
+    ultimately 
+    have 
+      "pState_inv prog 
+         (snd (foldl (\<lambda>(g,p) d. mkVarChannel d (apsnd \<circ> pState.vars_update) g p) 
+                     (g',p') ds))"
+      using Cons.IH[of p' g'] by (simp add: o_def)
+    with new show ?case by (simp add: o_def)
+  qed simp
+
+  show ?thesis 
+    by (auto simp add: p_def s cl_inv_def 
+             intro: F_inv[OF P_inv]) 
+       (blast intro: emptyProc_pState_inv assms)
+qed
+
+lemma mkProc_cl_inv:
+  assumes "cl_inv (g,p)"
+  shows "cl_inv (mkProc g p name args (processes prog !! sidx) pidN)"
+proof -
+  note IArray.sub_def [simp del]
+  obtain sidx' start argDecls decls  
+    where [simp]: "processes prog !! sidx = (sidx', start, argDecls, decls)"
+    by (metis prod.exhaust)
+
+  have 
+    P_inv: "\<And>s v. cl_inv (g, \<lparr>pid = pidN, vars = v, pc = s, channels = [], idx = sidx' \<rparr>)" 
+    by (simp add: cl_inv_def)
+  
+  have 
+    "\<And>p. cl_inv(g,p) \<Longrightarrow> 
+         cl_inv (foldl (\<lambda>(g,p) d. mkVarChannel d (apsnd \<circ> pState.vars_update) g p) 
+                       (g,p) decls)"
+  proof (induction decls arbitrary: g p)
+    case (Cons d ds)
+    obtain g' p' where 
+      new: "(g',p') = (mkVarChannel d (apsnd \<circ> pState.vars_update) g p)" 
+      by (metis prod.exhaust)
+    with Cons.prems have "cl_inv (g',p')"
+      by (auto intro!: mkVarChannel_cl_inv)
+    
+    from Cons.IH[OF this] new show ?case by (simp add: o_def)
+  qed simp
+  
+  from this[OF P_inv] show ?thesis by auto
+qed
+
+declare mkProc.simps[simp del]
+
+definition runProc 
+  :: "String.literal \<Rightarrow> expr list \<Rightarrow> program 
+      \<Rightarrow> 'a gState_scheme \<Rightarrow> pState 
+      \<Rightarrow> 'a gState_scheme * pState" 
+where
+  "runProc name args prog g p = (
+     if length (procs g) \<ge> max_procs 
+     then abort STR ''Too many processes'' (\<lambda>_. (g,p))
+     else let pid = length (procs g) + 1 in
+          case lm.lookup name (proc_data prog) of 
+            None \<Rightarrow> abortv STR ''No such process: '' name 
+                          (\<lambda>_. (g,p))
+          | Some proc_idx \<Rightarrow> 
+               let (g', proc) = mkProc g p name args (processes prog !! proc_idx) pid
+               in (g'\<lparr>procs := procs g @ [proc]\<rparr>, p))"
+
+lemma runProc_gState_progress_rel:
+  assumes "program_inv prog"
+  and "gState_inv prog g"
+  and "pState_inv prog p"
+  and "cl_inv (g,p)"
+  shows "(g, fst (runProc name args prog g p)) \<in> gState_progress_rel prog"
+proof (cases "length (procs g) < max_procs")
+  note IArray.sub_def [simp del]
+
+  case True thus ?thesis
+  proof (cases "lm.lookup name (proc_data prog)")
+    case (Some proc_idx)
+    hence *: "proc_idx < IArray.length (processes prog)" 
+             "fst (processes prog !! proc_idx) = proc_idx"
+      using assms 
+      by (simp_all add: lm.correct program_inv_def)
+      
+    obtain g' p' where 
+      new: "(g',p') = mkProc g p name args (processes prog !! proc_idx) (length (procs g) + 1)"
+      by (metis prod.exhaust)
+    hence g': "g' = fst ..." and p': "p' = snd ..." 
+      by (metis snd_conv fst_conv)+
+    from assms g' have "(g, g') \<in> gState_progress_rel prog " 
+      by (auto intro!: mkProc_gState_progress_rel)
+
+    moreover 
+    from * assms True p' have "pState_inv prog p'" 
+      by (auto intro!: mkProc_pState_inv)
+    moreover 
+    from assms new have "cl_inv (g',p')" 
+      by (auto intro!: mkProc_cl_inv)
+    ultimately show ?thesis
+      using True Some new assms
+      unfolding runProc_def gState_progress_rel_def
+      by (clarsimp split: prod.split) 
+         (auto simp add: gState_inv_def cl_inv_def)
+  next
+    case None with assms show ?thesis by (auto simp add: runProc_def)
+  qed
+next
+  case False with assms show ?thesis by (auto simp add: runProc_def)
+qed
+
+lemmas runProc_gState_inv = 
+  runProc_gState_progress_rel[THEN gState_progress_rel_gState_invI2]
+
+lemma runProc_pState_id:
+  "snd (runProc name args prog g p) = p"
+unfolding runProc_def
+by (auto split: if_splits split: option.split prod.split)
+
+lemma runProc_pState_inv:
+  assumes "pState_inv prog p"
+  shows "pState_inv prog (snd (runProc name args prog g p))"
+by (simp add: assms runProc_pState_id)
+
+lemma runProc_cl_inv:
+  assumes "program_inv prog"
+  and "gState_inv prog g"
+  and "pState_inv prog p"
+  and "cl_inv (g,p)"
+  shows "cl_inv (runProc name args prog g p)"
+proof -
+  obtain g' p' where *: "runProc name args prog g p = (g',p')" 
+    by (metis prod.exhaust)
+  with runProc_gState_progress_rel[OF assms, of name args] have 
+    "length (channels g) \<le> length (channels g')" 
+    by (simp add: gState_progress_rel_def)
+  moreover from * runProc_pState_id have "p' = p" by (metis snd_conv)
+qed
+
+
+type_synonym ast = "AST.module list"
+
+
+definition atomize :: "nat \<Rightarrow> nat \<Rightarrow> edge list \<Rightarrow> edge list" where
+  "atomize lp hp es = fold (\<lambda>e es. 
+     let e' = case target e of
+                 LabelJump _ None \<Rightarrow> 
+                    e\<lparr> atomic := InAtomic \<rparr>
+                | LabelJump _ (Some via) \<Rightarrow> 
+                    if lp \<le> via \<and> hp \<ge> via then e\<lparr> atomic := Atomic \<rparr> 
+                    else e\<lparr> atomic := InAtomic \<rparr>
+                | Index p' \<Rightarrow> 
+                    if lp \<le> p' \<and> hp \<ge> p' then e\<lparr> atomic := Atomic \<rparr>
+                    else e\<lparr> atomic := InAtomic \<rparr>
+      in e'#es) es []"
+
+where 
+  "skip (lbls, pri, pos, nxt, _) = 
+  ([[\<lparr>cond = ECExpr (ExprConst 1), 
+       effect = EEId, target = nxt, prio = pri, 
+       atomic = NonAtomic\<rparr>]], Index pos, lbls)"
+
+
+fun stepToState 
+  :: "step 
+      \<Rightarrow> (labels * integer * nat * edgeIndex * edgeIndex option * bool) 
+      \<Rightarrow> edge list list * edgeIndex * labels"
+and stmntToState 
+  :: "stmnt 
+      \<Rightarrow> (labels * integer * nat * edgeIndex * edgeIndex option * bool) 
+      \<Rightarrow> edge list list * edgeIndex * labels"
+where
+  "stepToState (StepStmnt s None) data = stmntToState s data"
+| "stepToState (StepStmnt s (Some u)) (lbls, pri, pos, nxt, onxt, _) = (
+     let
+        (ues,_,lbls') = stmntToState u (lbls, pri, pos, nxt, onxt, True);
+        u = last ues; ues = butlast ues;
+        pos' = pos + length ues;
+    
+        pri = min_prio u pri;
+
+        (ses,spos,lbls'') = stmntToState s (lbls', pri - 1, pos', nxt, onxt, False);
+ 
+        ses = map (List.append u) ses
+     in
+        (ues@ses,spos,lbls''))"
+
+| "stepToState (StepDecl decls) (lbls, pri, pos, nxt, onxt, _) = ( 
+     let edgeF = \<lambda>d (lbls,pri,pos,nxt,_). 
+        ([[\<lparr>cond = ECTrue, effect = EEDecl d, target = nxt, 
+             prio = pri, atomic = NonAtomic\<rparr>]], Index pos, lbls)
+     in 
+        step_fold edgeF decls lbls pri pos nxt onxt False)"
+
+| "stepToState StepSkip (lbls,_,_,nxt,_) = ([],nxt,lbls)"
+
+| "stmntToState (StmntAtomic steps) (lbls, pri, pos, nxt, onxt, inBlock) = (
+    let (es,pos',lbls') = step_fold stepToState steps lbls pri pos nxt onxt inBlock in
+    let es' = map (atomize pos (pos + length es)) es in
+    (es', pos', lbls'))"
+
+| "stmntToState (StmntLabeled l s) (lbls, pri, pos, d) = (
+     let 
+         (es, pos', lbls) = stmntToState s (lbls, pri, pos, d);
+         
+         lpos = case pos' of Index p \<Rightarrow> p | _ \<Rightarrow> pos;
+         lbls' = add_label l lbls lpos
+     in
+       (es, pos', lbls'))"
+
+| "stmntToState (StmntDo stepss) (lbls, pri, pos, nxt, onxt, inBlock) = (
+    let
+       (_,_,lbls,es,is) = step_foldL stepToState stepss lbls pri 
+                                     (pos+1) (Index pos) (Some nxt);
+
+       es' = concat is # es
+    in
+      if inBlock then 
+           (es' @ [concat is], Index pos, lbls)
+      else 
+          (es', Index pos, lbls)
+   )"
+
+| "stmntToState (StmntIf stepss) (lbls, pri, pos, nxt, onxt, _) = (
+     let (pos,_,lbls,es,is) = step_foldL stepToState stepss lbls pri pos nxt onxt 
+     in (es @ [concat is], Index pos, lbls))"
+
+| "stmntToState (StmntSeq steps) (lbls, pri, pos, nxt, onxt, inBlock) = 
+     step_fold stepToState steps lbls pri pos nxt onxt inBlock"
+
+
+| "stmntToState (StmntAssign v e) (lbls, pri, pos, nxt, _) = 
+   ([[\<lparr>cond = ECTrue, effect = EEAssign v e, target = nxt, prio = pri, 
+        atomic = NonAtomic\<rparr>]], Index pos, lbls)"
+
+| "stmntToState (StmntAssert e) (lbls, pri, pos, nxt, _) =
+   ([[\<lparr>cond = ECTrue, effect = EEAssert e, target = nxt, prio = pri, 
+        atomic = NonAtomic\<rparr>]], Index pos, lbls)"
+
+| "stmntToState (StmntCond e) (lbls, pri, pos, nxt, _) = 
+   ([[\<lparr>cond = ECExpr e, effect = EEId, target = nxt, prio = pri, 
+        atomic = NonAtomic\<rparr>]], Index pos, lbls)"
+
+| "stmntToState StmntElse (lbls, pri, pos, nxt, _) =
+   ([[\<lparr>cond = ECElse, effect = EEId, target = nxt, prio = pri, 
+        atomic = NonAtomic \<rparr>]], Index pos, lbls)"
+
+| "stmntToState StmntBreak (lbls,pri,_,_,Some onxt,_) = 
+   ([[\<lparr>cond = ECTrue, effect = EEGoto, target = onxt, prio = pri, 
+        atomic = NonAtomic \<rparr>]], onxt, lbls)"
+| "stmntToState StmntBreak (_,_,_,_,None,_) = 
+   abort STR ''Misplaced break'' (\<lambda>_. ([],Index 0,lm.empty()))"
+
+| "stmntToState (StmntRun n args) (lbls, pri, pos, nxt, onxt, _) =
+   ([[\<lparr>cond = ECRun n, effect = EERun n args, target = nxt, prio = pri, 
+        atomic = NonAtomic \<rparr>]], Index pos,lbls)"
+
+| "stmntToState (StmntGoTo l) (lbls, pri, pos, _) = 
+   ([[\<lparr>cond = ECTrue, effect = EEGoto, target = LabelJump l None, prio = pri, 
+        atomic = NonAtomic \<rparr>]], LabelJump l (Some pos), lbls)"
+
+| "stmntToState (StmntSend v e srt) (lbls, pri, pos, nxt, _) =
+   ([[\<lparr>cond = ECSend v, effect = EESend v e srt, target = nxt, prio = pri, 
+        atomic = NonAtomic \<rparr>]], Index pos, lbls)"
+
+| "stmntToState (StmntRecv v r srt rem) (lbls, pri, pos, nxt, _) =
+   ([[\<lparr>cond = ECRecv v r srt, effect = EERecv v r srt rem, target = nxt, prio = pri, 
+        atomic = NonAtomic \<rparr>]], Index pos, lbls)"
+
+| "stmntToState StmntSkip d = skip d"
+
+definition endState :: "edge list" where
+  "endState = [\<lparr> cond = ECFalse, effect = EEEnd, target = Index 0, prio = 0, 
+                  atomic = NonAtomic\<rparr>]"
+
+definition resolveLabel :: "String.literal \<Rightarrow> labels \<Rightarrow> nat" where
+  "resolveLabel l lbls = (
+     case lm.lookup l lbls of 
+       None \<Rightarrow> abortv STR ''Unresolved label: '' l (\<lambda>_. 0)
+     | Some pos \<Rightarrow> pos)"
+
+primrec resolveLabels :: "edge list list \<Rightarrow> labels \<Rightarrow> edge list \<Rightarrow> edge list" where
+  "resolveLabels _ _ [] = []"
+| "resolveLabels edges lbls (e#es) = (
+    let check_atomic = \<lambda>pos. fold (\<lambda>e a. a \<and> inAtomic e) (edges ! pos) True in
+    case target e of 
+      Index _ \<Rightarrow> e 
+    | LabelJump l None \<Rightarrow> 
+         let pos = resolveLabel l lbls in
+           e\<lparr>target := Index pos, 
+              atomic := if inAtomic e then
+                           if check_atomic pos then Atomic 
+                           else InAtomic
+                        else NonAtomic \<rparr>
+     | LabelJump l (Some via) \<Rightarrow> 
+          let pos = resolveLabel l lbls in
+            e\<lparr>target := Index pos,
+               atomic := if isAtomic e then
+                            if check_atomic pos \<and> check_atomic via then Atomic
+                            else InAtomic
+                         else atomic e \<rparr>
+   ) # (resolveLabels edges lbls es)"
+
+definition calculatePrios :: "edge list list \<Rightarrow> (integer * edge list) list" where
+  "calculatePrios ess = map (\<lambda>es. (min_prio es 0, es)) ess"
+
+definition toStates :: "step list \<Rightarrow> states * edgeIndex * labels" where
+  "toStates steps = (
+    let 
+       (states,pos,lbls) = step_fold stepToState steps (lm.empty()) 
+                                     0 1 (Index 0) None False;
+       pos = (case pos of 
+                Index _ \<Rightarrow> pos 
+              | LabelJump l _ \<Rightarrow> Index (resolveLabel l lbls));
+       states = endState # states;
+       states = map (resolveLabels states lbls) states;
+       states = calculatePrios states
+    in
+    case pos of Index s \<Rightarrow> 
+          if s < length states then (IArray states, pos, lbls)
+          else abort STR ''Start index out of bounds'' (\<lambda>_. (IArray states, Index 0, lbls)))"
+
+lemma toStates_inv:
+  assumes "toStates steps = (ss,start,lbls)"
+  shows "\<exists>s. start = Index s \<and> s < IArray.length ss"
+    and "IArray.length ss > 0"
+  using assms
+  unfolding toStates_def calculatePrios_def
+  by (auto split: prod.splits edgeIndex.splits if_splits)
+
+primrec toProcess 
+  :: "nat \<Rightarrow> proc \<Rightarrow> states * nat * String.literal * (labels * process)"
+ where
+  "toProcess sidx (ProcType act name args decls steps) = (
+     let
+       (states, start, lbls) = toStates steps;
+       act = (case act of 
+                None \<Rightarrow> 0 
+              | Some None \<Rightarrow> 1 
+              | Some (Some x) \<Rightarrow> nat_of_integer x)
+     in
+        (states, act, name, lbls, sidx, start, args, decls))"
+| "toProcess sidx (Init decls steps) = (
+      let (states, start, lbls) = toStates steps in 
+      (states, 1, STR '':init:'', lbls, sidx, start, [], decls))"
+
+lemma toProcess_sidx:
+  "toProcess sidx p = (ss,a,n,l,idx,r) \<Longrightarrow> idx = sidx"
+by (cases p) (simp_all split: prod.splits)
+
+lemma toProcess_states_nonempty:
+  "toProcess sidx p = (ss,a,n,l,idx,r) \<Longrightarrow> IArray.length ss > 0"
+by (cases p) (force split: prod.splits dest: toStates_inv(2))+
+
+lemma toProcess_start:
+  "toProcess sidx p = (ss,a,n,l,idx,start,r) 
+   \<Longrightarrow> \<exists>s. start = Index s \<and> s < IArray.length ss"
+by (cases p) (force split: prod.splits dest: toStates_inv(1))+
+
+
+lemma toProcess_startE:
+  assumes "toProcess sidx p = (ss,a,n,l,idx,start,r)"
+  obtains s where "start = Index s" "s < IArray.length ss"
+  using toProcess_start[OF assms]
+  by blast
+
+
+definition setUp :: "ast \<Rightarrow> program \<times> gState" where
+  "setUp ast = (
+      let
+       (decls, procs, _) = preprocess ast;
+       assertVar = Var (VTBounded 0 1) 0;
+ 
+       pre_procs = map (case_prod toProcess) (List.enumerate 1 procs);
+
+       procs = IArray ((0, Index 0, [], []) # map (\<lambda>(_,_,_,_,p). p) pre_procs);
+       labels = IArray (lm.empty() # map (\<lambda>(_,_,_,l,_). l) pre_procs);
+       states = IArray (IArray [(0,[])] # map (\<lambda>(s,_). s) pre_procs);
+       names = IArray (STR ''invalid'' # map (\<lambda>(_,_,n,_). n) pre_procs);
+
+       proc_data = lm.to_map (map (\<lambda>(_,_,n,_,idx,_). (n,idx)) pre_procs);
+       
+       prog = \<lparr> processes = procs, labels = labels, states = states, 
+                 proc_names = names, proc_data = proc_data \<rparr>;
+     
+       g = \<lparr> vars = lm.sng (STR ''__assert__'') assertVar, 
+              channels = [InvChannel], timeout = False, procs = [] \<rparr>;
+       g' = foldl (\<lambda>g d. 
+                    fst (mkVarChannel d (apfst \<circ> gState.vars_update) g emptyProc)
+                  ) g decls;
+       g'' = foldl (\<lambda>g (_,a,name,_). 
+                    foldl (\<lambda>g name. 
+                              fst (runProc name [] prog g emptyProc)
+                          ) g (replicate a name)
+                   ) g' pre_procs
+      in
+       (prog, g''))"
+
+lemma setUp_program_inv':
+  "program_inv (fst (setUp ast))"
+proof (rule program_invI, goal_cases)
+  case 1 show ?case by (simp add: setUp_def split: prod.split)
+next
+  case 2 show ?case by (simp add: setUp_def split: prod.split)
+next
+  case 3 thus ?case
+    by (auto simp add: setUp_def o_def  
+             split: prod.splits 
+             dest!: toProcess_states_nonempty)
+next
+  case 4 thus ?case
+    unfolding setUp_def
+    by (auto simp add: lm.correct o_def in_set_enumerate_eq nth_enumerate_eq 
+            dest!: subsetD[OF Misc.ran_map_of] toProcess_sidx 
+            split: prod.splits)
+next
+  case 5 thus ?case
+    apply (auto simp add: setUp_def o_def split: prod.splits)
+    apply (frule toProcess_sidx)
+    apply (frule toProcess_start)
+    apply (auto simp: in_set_enumerate_eq nth_enumerate_eq)
+    done
+qed
+
+lemma setUp_program_inv:
+  assumes "setUp ast = (prog,g)"
+  shows "program_inv prog"
+using assms setUp_program_inv' 
+by (metis fst_conv)
+
+lemma setUp_gState_inv:
+  assumes "setUp ast = (prog, g)"
+  shows "gState_inv prog g"
+proof -
+  from assms have p_INV: "program_inv prog" by (fact setUp_program_inv)
+
+  {
+    fix prog :: program
+    assume *: "program_inv prog"
+    let ?g = "\<lparr> vars = lm.sng (STR ''__assert__'') (Var (VTBounded 0 1) 0), 
+                 channels = [InvChannel], timeout = False, procs = [] \<rparr>"
+
+    have g1: "gState_inv prog ?g"
+      by (simp add: gState_inv_def max_channels_def lm_correct max_var_value_def)
+    {
+      fix g decls
+      assume "gState_inv prog g"
+      hence "gState_inv prog (foldl (\<lambda>g d.  
+                   fst (mkVarChannel d (apfst \<circ> gState.vars_update) g emptyProc)
+                  ) g decls)"
+        apply (rule foldl_rule)
+        apply (intro mkVarChannel_gState_inv)
+          apply simp
+        apply (frule_tac g=\<sigma> in toVariable_variable_inv')
+          apply assumption
+        apply (auto simp add: gState_inv_def lm.correct)
+        done
+    }
+    note g2 = this[OF g1]
+
+    {
+      fix g :: "'a gState_scheme" and pre_procs
+      assume "gState_inv prog g"
+      hence "gState_inv prog (foldl (\<lambda>g (_,a,name,_). 
+                 foldl (\<lambda>g name. 
+                         fst (runProc name [] prog g emptyProc)
+                       ) g (replicate a name)
+              ) g pre_procs)"
+        apply (rule foldl_rule)
+        apply (clarsimp split: prod.splits)
+        apply (rule foldl_rule)
+          apply (auto intro!: runProc_gState_inv emptyProc_pState_inv *)
+(* TODO: Integrate such a concept into refine_transfer! *)
+(* Give a list of edges that lead from g\<^sub>1 to g\<^sub>2 *)
+(* Might go to another theory *)

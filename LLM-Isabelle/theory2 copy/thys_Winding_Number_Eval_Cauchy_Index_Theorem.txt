@@ -1,0 +1,1749 @@
+theory Cauchy_Index_Theorem imports 
+  "HOL-Complex_Analysis.Complex_Analysis"
+  "Sturm_Tarski.Sturm_Tarski"
+  "HOL-Computational_Algebra.Fundamental_Theorem_Algebra"
+  Missing_Transcendental
+  Missing_Algebraic
+  Missing_Analysis
+begin
+
+
+  
+lemma atMostAtLeast_subset_convex:
+  fixes C :: "real set"
+  assumes "convex C"
+    and "x \<in> C" "y \<in> C" 
+  shows "{x .. y} \<subseteq> C"
+proof safe
+  fix z assume z: "z \<in> {x .. y}"
+  have "z \<in> C" if *: "x < z" "z < y"
+  proof -
+    let ?\<mu> = "(y - z) / (y - x)"
+    have "0 \<le> ?\<mu>" "?\<mu> \<le> 1"
+      using assms * by (auto simp: field_simps)
+    then have comb: "?\<mu> * x + (1 - ?\<mu>) * y \<in> C"
+      using assms iffD1[OF convex_alt, rule_format, of C y x ?\<mu>]
+      by (simp add: algebra_simps)
+    have "?\<mu> * x + (1 - ?\<mu>) * y = (y - z) * x / (y - x) + (1 - (y - z) / (y - x)) * y"
+      by (auto simp: field_simps)
+    also have "\<dots> = ((y - z) * x + (y - x - (y - z)) * y) / (y - x)"
+      using * by (simp only: add_divide_distrib) (auto simp: field_simps)
+    also have "\<dots> = z"
+      using assms * by (auto simp: field_simps)
+    finally show ?thesis
+      using comb by auto
+  qed
+  then show "z \<in> C"
+    using z assms by (auto simp: le_less)
+qed
+  
+lemma arg_elim:
+  "f x \<Longrightarrow> x= y \<Longrightarrow> f y"
+  by auto
+ 
+lemma arg_elim2:
+  "f x1 x2 \<Longrightarrow> x1= y1 \<Longrightarrow>x2=y2 \<Longrightarrow> f y1 y2"
+  by auto
+ 
+lemma arg_elim3:
+  "\<lbrakk>f x1 x2 x3;x1= y1;x2=y2;x3=y3 \<rbrakk> \<Longrightarrow> f y1 y2 y3"
+  by auto  
+    
+lemma IVT_strict:
+  fixes f :: "'a::linear_continuum_topology \<Rightarrow> 'b::linorder_topology"
+  assumes "(f a > y \<and> y > f b) \<or> (f a < y \<and> y < f b)" "a<b" "continuous_on {a .. b} f"
+  shows "\<exists>x. a < x \<and> x < b \<and> f x = y"
+by (metis IVT' IVT2' assms(1) assms(2) assms(3) linorder_neq_iff order_le_less order_less_imp_le)    
+  
+lemma (in dense_linorder) atLeastAtMost_subseteq_greaterThanLessThan_iff:
+  "{a .. b} \<subseteq> { c <..< d } \<longleftrightarrow> (a \<le> b \<longrightarrow> c < a \<and> b < d)"
+  using dense[of "a" "min c b"] dense[of "max a d" "b"]
+  by (force simp: subset_eq Ball_def not_less[symmetric])    
+
+lemma Re_winding_number_half_right:
+  assumes "\<forall>p\<in>path_image \<gamma>. Re p \<ge> Re z" and "valid_path \<gamma>" and  "z\<notin>path_image \<gamma>"
+  shows "Re(winding_number \<gamma> z) = (Im (Ln (pathfinish \<gamma> - z)) - Im (Ln (pathstart \<gamma> - z)))/(2*pi)"
+proof -
+  define g where "g=(\<lambda>t. \<gamma> t - z)"
+  define st fi where "st\<equiv>pathstart g" and "fi\<equiv>pathfinish g"
+  have "valid_path g" "0\<notin>path_image g" and pos_img:"\<forall>p\<in>path_image g. Re p \<ge> 0" unfolding g_def 
+    subgoal using assms(2) by auto
+    subgoal using assms(3) by auto
+    subgoal using assms(1) by fastforce
+    done
+  have "(inverse has_contour_integral Ln fi - Ln st) g"
+    unfolding fi_def st_def
+    fix x::complex assume "x \<in> - \<real>\<^sub>\<le>\<^sub>0"
+    then have "(Ln has_field_derivative inverse x) (at x)" using has_field_derivative_Ln
+      by auto
+    then show "(Ln has_field_derivative inverse x) (at x within - \<real>\<^sub>\<le>\<^sub>0)"
+      using has_field_derivative_at_within by auto
+  next
+      by (metis ComplI antisym assms(3) complex_nonpos_Reals_iff complex_surj
+          subsetI zero_complex.code)
+  qed
+  then have winding_eq:"2*pi*\<i>*winding_number g 0 = (Ln fi - Ln st)"
+        ,simplified,folded inverse_eq_divide] has_contour_integral_unique 
+    by auto
+  have "Re(winding_number g 0) 
+      = (Im (Ln fi) - Im (Ln st))/(2*pi)"
+    (is "?L=?R")
+  proof -
+    have "?L = Re((Ln fi - Ln st)/(2*pi*\<i>))"
+      using winding_eq[symmetric] by auto
+    also have "... = ?R"
+      by (metis Im_divide_of_real Im_i_times complex_i_not_zero minus_complex.simps(2) 
+          mult.commute mult_divide_mult_cancel_left_if times_divide_eq_right)
+    finally show ?thesis .
+  qed
+  then show ?thesis unfolding g_def fi_def st_def using winding_number_offset by simp
+qed      
+  
+lemma Re_winding_number_half_upper:
+  assumes pimage:"\<forall>p\<in>path_image \<gamma>. Im p \<ge> Im z" and "valid_path \<gamma>" and "z\<notin>path_image \<gamma>"
+  shows "Re(winding_number \<gamma> z) = 
+            (Im (Ln (\<i>*z - \<i>*pathfinish \<gamma>)) - Im (Ln (\<i>*z - \<i>*pathstart \<gamma> )))/(2*pi)"
+proof -
+  define \<gamma>' where "\<gamma>'=(\<lambda>t. - \<i> * (\<gamma> t - z) + z)"
+  have "Re (winding_number \<gamma>' z) = (Im (Ln (pathfinish \<gamma>' - z)) - Im (Ln (pathstart \<gamma>' - z))) / (2 * pi)"
+    unfolding \<gamma>'_def
+    apply (rule Re_winding_number_half_right)
+    subgoal using pimage unfolding path_image_def by auto
+    subgoal 
+            , unfolded comp_def])
+      by (auto intro!:holomorphic_intros)
+    done
+  moreover have "winding_number \<gamma>' z = winding_number \<gamma> z"
+  proof -
+    define f where "f=(\<lambda>x. -\<i> * (x-z) + z)"
+    define c where "c= 1 / (complex_of_real (2 * pi) * \<i>)"
+    have "winding_number \<gamma>' z = winding_number (f o \<gamma>) z" 
+      unfolding \<gamma>'_def comp_def f_def by auto
+    also have "... = c * contour_integral \<gamma> (\<lambda>w. deriv f w / (f w - z))" unfolding c_def
+    proof (rule winding_number_comp[of UNIV])
+    also have "... = c * contour_integral \<gamma> (\<lambda>w.  1 / (w - z))"
+    proof -
+      have "deriv f x = -\<i>" for x
+        unfolding f_def
+        by (auto intro!:derivative_eq_intros DERIV_imp_deriv)
+      then show ?thesis    
+        unfolding f_def c_def 
+        by (auto simp add:field_simps divide_simps intro!:arg_cong2[where f=contour_integral])
+    qed
+    also have "... = winding_number \<gamma> z"
+    finally show ?thesis .
+  qed    
+  moreover have "pathfinish \<gamma>' = z+ \<i>*z -\<i>* pathfinish \<gamma>" "pathstart \<gamma>' = z+ \<i>*z -\<i>*pathstart \<gamma>"  
+    unfolding \<gamma>'_def path_defs by (auto simp add:algebra_simps)
+  ultimately show ?thesis by auto
+qed
+    
+lemma Re_winding_number_half_lower:
+  assumes pimage:"\<forall>p\<in>path_image \<gamma>. Im p \<le> Im z" and "valid_path \<gamma>" and "z\<notin>path_image \<gamma>"
+  shows "Re(winding_number \<gamma> z) = 
+             (Im (Ln ( \<i>*pathfinish \<gamma> - \<i>*z)) - Im (Ln (\<i>*pathstart \<gamma> - \<i>*z)))/(2*pi)"
+proof -
+  define \<gamma>' where "\<gamma>'=(\<lambda>t. \<i> * (\<gamma> t - z) + z)"
+  have "Re (winding_number \<gamma>' z) = (Im (Ln (pathfinish \<gamma>' - z)) - Im (Ln (pathstart \<gamma>' - z))) / (2 * pi)"
+    unfolding \<gamma>'_def
+    apply (rule Re_winding_number_half_right)
+    subgoal using pimage unfolding path_image_def by auto
+    subgoal 
+            , unfolded comp_def])
+      by (auto intro!:holomorphic_intros)
+    done
+  moreover have "winding_number \<gamma>' z = winding_number \<gamma> z"
+  proof -
+    define f where "f=(\<lambda>x. \<i> * (x-z) + z)"
+    define c where "c= 1 / (complex_of_real (2 * pi) * \<i>)"
+    have "winding_number \<gamma>' z = winding_number (f o \<gamma>) z" 
+      unfolding \<gamma>'_def comp_def f_def by auto
+    also have "... = c * contour_integral \<gamma> (\<lambda>w. deriv f w / (f w - z))" unfolding c_def
+    proof (rule winding_number_comp[of UNIV])
+    also have "... = c * contour_integral \<gamma> (\<lambda>w.  1 / (w - z))"
+    proof -
+      have "deriv f x = \<i>" for x
+        unfolding f_def
+        by (auto intro!:derivative_eq_intros DERIV_imp_deriv)
+      then show ?thesis    
+        unfolding f_def c_def 
+        by (auto simp add:field_simps divide_simps intro!:arg_cong2[where f=contour_integral])
+    qed
+    also have "... = winding_number \<gamma> z"
+    finally show ?thesis .
+  qed    
+  moreover have "pathfinish \<gamma>' = z+ \<i>* pathfinish \<gamma> - \<i>*z" "pathstart \<gamma>' = z+ \<i>*pathstart \<gamma> - \<i>*z"  
+    unfolding \<gamma>'_def path_defs by (auto simp add:algebra_simps)
+  ultimately show ?thesis by auto
+qed    
+    
+      
+lemma Re_winding_number_half_left:
+  assumes neg_img:"\<forall>p\<in>path_image \<gamma>. Re p \<le> Re z" and "valid_path \<gamma>" and "z\<notin>path_image \<gamma>"
+  shows "Re(winding_number \<gamma> z) = (Im (Ln (z - pathfinish \<gamma>)) - Im (Ln (z - pathstart \<gamma> )))/(2*pi)"
+proof -
+  define \<gamma>' where "\<gamma>'\<equiv>(\<lambda>t. 2*z - \<gamma> t)"
+  have "Re (winding_number \<gamma>' z) = (Im (Ln (pathfinish \<gamma>' - z)) - Im (Ln (pathstart \<gamma>' - z))) / (2 * pi)"
+    unfolding \<gamma>'_def
+    apply (rule Re_winding_number_half_right)
+    subgoal using neg_img unfolding path_image_def by auto
+    subgoal 
+            unfolded comp_def])
+      by (auto intro:holomorphic_intros)
+    done
+  moreover have "winding_number \<gamma>' z = winding_number \<gamma> z"
+  proof -
+    define f where "f=(\<lambda>t. 2*z-t)"
+    define c where "c= 1 / (complex_of_real (2 * pi) * \<i>)"
+    have "winding_number \<gamma>' z = winding_number (f o \<gamma>) z" 
+      unfolding \<gamma>'_def comp_def f_def by auto
+    also have "... = c * contour_integral \<gamma> (\<lambda>w. deriv f w / (f w - z))" unfolding c_def
+    proof (rule winding_number_comp[of UNIV])
+    also have "... = c * contour_integral \<gamma> (\<lambda>w.  1 / (w - z))" 
+      unfolding f_def c_def 
+      by (auto simp add:field_simps divide_simps intro!:arg_cong2[where f=contour_integral])
+    also have "... = winding_number \<gamma> z"
+    finally show ?thesis .
+  qed
+  moreover have "pathfinish \<gamma>' = 2*z - pathfinish \<gamma>" "pathstart \<gamma>' = 2*z - pathstart \<gamma>"  
+    unfolding \<gamma>'_def path_defs by auto 
+  ultimately show ?thesis by auto    
+qed 
+  
+lemma continuous_on_open_Collect_neq:
+  fixes f g :: "'a::topological_space \<Rightarrow> 'b::t2_space"
+  assumes f: "continuous_on S f" and g: "continuous_on S g" and "open S"
+  shows "open {x\<in>S. f x \<noteq> g x}"
+proof (rule topological_space_class.openI)
+  fix t
+  assume "t \<in> {x\<in>S. f x \<noteq> g x}"
+  then obtain U0 V0 where "open U0" "open V0" "f t \<in> U0" "g t \<in> V0" "U0 \<inter> V0 = {}" "t\<in>S"
+    by (auto simp add: separation_t2)
+  obtain U1 where "open U1" "t \<in> U1" "\<forall>y\<in>(S \<inter> U1). f y \<in> U0"
+  obtain V1 where "open V1" "t \<in> V1" "\<forall>y\<in>(S \<inter> V1). g y \<in> V0"
+  define T where "T=V1 \<inter> U1 \<inter> S"
+  moreover have "T \<subseteq> {x \<in> S. f x \<noteq> g x}" unfolding T_def
+  ultimately show "\<exists>T. open T \<and> t \<in> T \<and> T \<subseteq> {x \<in> S. f x \<noteq> g x}" by auto
+qed  
+    
+ 
+definition has_sgnx::"(real \<Rightarrow> real) \<Rightarrow> real \<Rightarrow> real filter \<Rightarrow> bool" 
+    (infixr "has'_sgnx" 55) where
+  "(f has_sgnx c) F= (eventually (\<lambda>x. sgn(f x) = c) F)"    
+  
+definition sgnx_able (infixr "sgnx'_able" 55) where
+  "(f sgnx_able F) = (\<exists>c. (f has_sgnx c) F)"
+  
+definition sgnx where
+  "sgnx f F = (SOME c. (f has_sgnx c) F)"
+  
+lemma has_sgnx_eq_rhs: "(f has_sgnx x) F \<Longrightarrow> x = y \<Longrightarrow> (f has_sgnx y) F"
+  by simp
+
+named_theorems sgnx_intros "introduction rules for has_sgnx"
+
+lemma sgnx_able_sgnx:"f sgnx_able F \<Longrightarrow> (f has_sgnx (sgnx f F)) F"
+  unfolding sgnx_able_def sgnx_def using someI_ex by metis    
+
+lemma has_sgnx_imp_sgnx_able[elim]:
+  "(f has_sgnx c) F \<Longrightarrow> f sgnx_able F"
+unfolding sgnx_able_def by auto
+
+lemma has_sgnx_unique:
+  assumes "F\<noteq>bot" "(f has_sgnx c1) F" "(f has_sgnx c2) F" 
+  shows "c1=c2"
+proof (rule ccontr)
+  assume "c1 \<noteq> c2 "
+  have "eventually (\<lambda>x. sgn(f x) = c1 \<and> sgn(f x) = c2) F" 
+    using assms  unfolding has_sgnx_def eventually_conj_iff by simp
+  then have "eventually (\<lambda>_. c1 = c2) F" by (elim eventually_mono,auto)
+qed
+
+lemma has_sgnx_imp_sgnx[elim]:
+  "(f has_sgnx c) F \<Longrightarrow>F\<noteq>bot \<Longrightarrow> sgnx f F = c"
+  using has_sgnx_unique sgnx_def by auto
+
+lemma has_sgnx_const[simp,sgnx_intros]:
+  "((\<lambda>_. c) has_sgnx sgn c) F"
+by (simp add: has_sgnx_def)
+
+lemma finite_sgnx_at_left_at_right:
+  assumes "finite {t. f t=0 \<and> a<t \<and> t<b}" "continuous_on ({a<..<b} - s) f" "finite s" 
+      and x:"x\<in>{a<..<b}"
+  shows "f sgnx_able (at_left x)" "sgnx f (at_left x)\<noteq>0"
+        "f sgnx_able (at_right x)" "sgnx f (at_right x)\<noteq>0"
+proof -
+  define ls where "ls \<equiv> {t. (f t=0 \<or> t\<in>s) \<and> a<t \<and>t<x }"
+  define l where "l\<equiv>(if ls = {} then (a+x)/2 else (Max ls + x)/2)" 
+  have "finite ls"
+  proof -
+    have "{t. f t=0 \<and> a<t \<and> t<x} \<subseteq> {t. f t=0 \<and> a<t \<and> t<b}" using x by auto
+    then have "finite {t. f t=0 \<and> a<t \<and> t<x}" using assms(1) 
+      using finite_subset by blast
+    moreover have "finite {t. t\<in>s \<and> a<t \<and> t<x}" using assms(3) by auto
+    moreover have "ls = {t. f t=0 \<and> a<t \<and> t<x} \<union> {t. t\<in>s \<and> a<t \<and> t<x}"
+      unfolding ls_def by auto
+    ultimately show ?thesis by auto
+  qed
+  have [simp]: "l<x" "a<l" "l<b"
+  proof -
+    have "l<x \<and> a<l \<and> l<b" when "ls = {}" 
+      using that x unfolding l_def by auto
+    moreover have "l<x \<and> a<l \<and> l<b" when "ls \<noteq>{}"
+    proof -
+        apply (intro linorder_class.Max_in)
+        by auto
+      then have "a<Max ls \<and> Max ls < x" unfolding ls_def by auto
+      then show ?thesis unfolding l_def using that x by auto
+    qed
+    ultimately show "l<x" "a<l" "l<b" by auto
+  qed  
+  have noroot:"f t\<noteq>0" when t:"t\<in>{l..<x}" for t
+  proof (cases "ls = {}")
+    case True
+    have False when "f t=0"
+    proof -
+      then have "t\<in>ls" using that t unfolding ls_def by auto
+      then show False using True by auto
+    qed
+    then show ?thesis by auto 
+  next
+    case False
+    have False when "f t=0" 
+    proof -
+      then have "t\<in>ls" using that t unfolding ls_def by auto
+    qed
+    then show ?thesis by auto
+  qed
+  have "(f has_sgnx sgn (f l)) (at_left x)" unfolding has_sgnx_def
+    fix t assume t:"t\<in>{l<..<x}"
+      by (meson greaterThanLessThan_iff less_trans)+
+    have False when "f t = 0" 
+      using noroot t that by auto
+    moreover have False when "f l=0" 
+      using noroot t that by auto
+    moreover have False when "f l>0 \<and> f t<0 \<or> f l <0 \<and> f t >0" 
+    proof -
+      have False when "{l..t} \<inter> s \<noteq>{}" 
+      proof -
+        obtain t' where t':"t'\<in>{l..t}" "t'\<in>s" 
+        then have "a<t' \<and> t'<x" 
+        moreover have "Max ls<l" 
+        ultimately show False using t'(1) by auto
+      qed
+      moreover have "{l..t} \<subseteq> {a<..<b}" 
+        by (intro atMostAtLeast_subset_convex,auto)
+      ultimately have "continuous_on {l..t} f" using assms(2) 
+        by (elim continuous_on_subset,auto) 
+      then have "\<exists>x>l. x < t \<and> f x = 0"
+        apply (intro IVT_strict)
+        using that t assms(2) by auto 
+      then obtain t' where "l<t'" "t'<t" "f t'=0" by auto
+      then have "t'\<in>{l..<x}" unfolding ls_def using t by auto
+    qed
+    ultimately show "sgn (f t) = sgn (f l)" 
+      by (metis le_less not_less sgn_if)
+  qed
+  then show "f sgnx_able (at_left x)" by auto   
+  show "sgnx f (at_left x)\<noteq>0" 
+    by (simp add: has_sgnx_imp_sgnx sgn_if)
+next
+  define rs where "rs \<equiv> {t. (f t=0 \<or> t\<in>s) \<and> x<t \<and> t<b}"
+  define r where "r\<equiv>(if rs = {} then (x+b)/2 else (Min rs + x)/2)" 
+  have "finite rs" 
+  proof -
+    have "{t. f t=0 \<and> x<t \<and> t<b} \<subseteq> {t. f t=0 \<and> a<t \<and> t<b}" using x by auto
+    then have "finite {t. f t=0 \<and> x<t \<and> t<b}" using assms(1) 
+      using finite_subset by blast
+    moreover have "finite {t. t\<in>s \<and> x<t \<and> t<b}" using assms(3) by auto
+    moreover have "rs = {t. f t=0 \<and> x<t \<and> t<b} \<union> {t. t\<in>s \<and> x<t \<and> t<b}"
+      unfolding rs_def by auto
+    ultimately show ?thesis by auto
+  qed  
+  
+  have [simp]: "r>x" "a<r" "r<b"
+  proof -
+    have "r>x \<and> a<r \<and> r<b" when "rs = {}" 
+      using that x unfolding r_def by auto
+    moreover have "r>x \<and> a<r \<and> r<b" when "rs \<noteq>{}"
+    proof -
+        apply (intro linorder_class.Min_in)
+        by auto
+      then have "x<Min rs \<and> Min rs < b" unfolding rs_def by auto
+      then show ?thesis unfolding r_def using that x by auto
+    qed
+    ultimately show "r>x" "a<r" "r<b" by auto
+  qed   
+  have noroot:"f t\<noteq>0" when t:"t\<in>{x<..r}" for t
+  proof (cases "rs = {}")
+    case True
+    have False when "f t=0"
+    proof -
+        using greaterThanAtMost_iff by fastforce 
+      then have "t\<in>rs" using that t unfolding rs_def by auto
+      then show False using True by auto
+    qed
+    then show ?thesis by auto
+  next
+    case False
+    have False when "f t=0" 
+    proof -
+      then have "t\<in>rs" using that t unfolding rs_def by auto
+    qed
+    then show ?thesis by auto
+  qed
+  have "(f has_sgnx sgn (f r)) (at_right x)" unfolding has_sgnx_def
+    fix t assume t:"t\<in>{x<..<r}"
+      by (meson greaterThanLessThan_iff less_trans)+
+    have False when "f t = 0" 
+      using noroot t that by auto
+    moreover have False when "f r=0" 
+      using noroot t that by auto
+    moreover have False when "f r>0 \<and> f t<0 \<or> f r <0 \<and> f t >0" 
+    proof -
+      have False when "{t..r} \<inter> s \<noteq>{}" 
+      proof -
+        obtain t' where t':"t'\<in>{t..r}" "t'\<in>s" 
+        then have "x<t' \<and> t'<b" 
+        moreover have "Min rs>r" 
+        ultimately show False using t'(1) by auto
+      qed
+      moreover have "{t..r} \<subseteq> {a<..<b}"
+        by (intro atMostAtLeast_subset_convex,auto)
+      ultimately have "continuous_on {t..r} f" using assms(2) by (elim continuous_on_subset,auto) 
+      then have "\<exists>x>t. x < r \<and> f x = 0"
+        apply (intro IVT_strict)
+        using that t assms(2) by auto
+      then obtain t' where "t<t'" "t'<r" "f t'=0" by auto
+      then have "t'\<in>{x<..r}" unfolding rs_def using t by auto
+    qed
+    ultimately show "sgn (f t) = sgn (f r)" 
+      by (metis le_less not_less sgn_if)
+  qed
+  then show "f sgnx_able (at_right x)" by auto   
+  show "sgnx f (at_right x)\<noteq>0" 
+    by (simp add: has_sgnx_imp_sgnx sgn_if)    
+qed
+
+lemma sgnx_able_poly[simp]:
+  "(poly p) sgnx_able (at_right a)"
+  "(poly p) sgnx_able (at_left a)"
+  "(poly p) sgnx_able at_top"
+  "(poly p) sgnx_able at_bot"
+proof -
+  show "(poly p) sgnx_able at_top"
+    using has_sgnx_def poly_sgn_eventually_at_top sgnx_able_def by blast
+  show "(poly p) sgnx_able at_bot"
+    using has_sgnx_def poly_sgn_eventually_at_bot sgnx_able_def by blast
+  show "(poly p) sgnx_able (at_right a)"
+  proof (cases "p=0")
+    case True
+    then show ?thesis unfolding sgnx_able_def has_sgnx_def eventually_at_right
+      using linordered_field_no_ub by force
+  next
+    case False
+    obtain ub where "ub>a" and ub:"\<forall>z. a<z\<and>z\<le>ub\<longrightarrow>poly p z\<noteq>0" 
+      using next_non_root_interval[OF False] by auto 
+    have "\<forall>z. a<z\<and>z\<le>ub\<longrightarrow>sgn(poly p z) = sgn (poly p ub)"
+    proof (rule ccontr)
+      assume "\<not> (\<forall>z. a < z \<and> z \<le> ub \<longrightarrow> sgn (poly p z) = sgn (poly p ub))"
+      then obtain z where "a<z" "z\<le>ub" "sgn(poly p z) \<noteq> sgn (poly p ub)" by auto
+      ultimately have "(poly p z>0 \<and> poly p ub<0) \<or> (poly p z<0 \<and> poly p ub>0)"
+        by (metis linorder_neqE_linordered_idom sgn_neg sgn_pos)
+      then have "\<exists>x>z. x < ub \<and> poly p x = 0" 
+    qed
+    then show ?thesis unfolding sgnx_able_def has_sgnx_def eventually_at_right
+      apply (rule_tac exI[where x="sgn(poly p ub)"])
+      apply (rule_tac exI[where x="ub"])
+  qed
+  show "(poly p) sgnx_able (at_left a)"
+  proof (cases "p=0")
+    case True
+    then show ?thesis unfolding sgnx_able_def has_sgnx_def eventually_at_right
+      using linordered_field_no_ub by force
+  next
+    case False
+    obtain lb where "lb<a" and ub:"\<forall>z. lb\<le>z\<and>z<a\<longrightarrow>poly p z\<noteq>0" 
+      using last_non_root_interval[OF False] by auto 
+    have "\<forall>z. lb\<le>z\<and>z<a\<longrightarrow>sgn(poly p z) = sgn (poly p lb)"
+    proof (rule ccontr)
+      assume "\<not> (\<forall>z. lb\<le>z\<and>z<a \<longrightarrow> sgn (poly p z) = sgn (poly p lb))"
+      then obtain z where "lb\<le>z" "z<a" "sgn(poly p z) \<noteq> sgn (poly p lb)" by auto
+      ultimately have "(poly p z>0 \<and> poly p lb<0) \<or> (poly p z<0 \<and> poly p lb>0)"
+        by (metis linorder_neqE_linordered_idom sgn_neg sgn_pos)
+      then have "\<exists>x>lb. x < z \<and> poly p x = 0" 
+    qed
+    then show ?thesis unfolding sgnx_able_def has_sgnx_def eventually_at_left
+      apply (rule_tac exI[where x="sgn(poly p lb)"])
+      apply (rule_tac exI[where x="lb"])
+  qed
+qed
+
+lemma has_sgnx_identity[intro,sgnx_intros]:
+  shows "x\<ge>0 \<Longrightarrow>((\<lambda>x. x) has_sgnx 1) (at_right x)" 
+        "x\<le>0 \<Longrightarrow> ((\<lambda>x. x) has_sgnx -1) (at_left x)"  
+proof -
+  show "x\<ge>0 \<Longrightarrow> ((\<lambda>x. x) has_sgnx 1) (at_right x)"
+    unfolding has_sgnx_def eventually_at_right
+    apply (intro exI[where x="x+1"])
+    by auto
+  show "x\<le>0 \<Longrightarrow> ((\<lambda>x. x) has_sgnx -1) (at_left x)"
+    unfolding has_sgnx_def eventually_at_left
+    apply (intro exI[where x="x-1"])
+    by auto
+qed
+    
+lemma has_sgnx_divide[sgnx_intros]:
+  assumes "(f has_sgnx c1) F" "(g has_sgnx c2) F"
+  shows "((\<lambda>x. f x / g x) has_sgnx c1 / c2) F"
+proof -
+  have "\<forall>\<^sub>F x in F. sgn (f x) = c1 \<and> sgn (g x) = c2" 
+    using assms unfolding has_sgnx_def by (intro eventually_conj,auto)
+  then have "\<forall>\<^sub>F x in F. sgn (f x / g x) = c1 / c2" 
+    apply (elim eventually_mono)
+    by (simp add: sgn_mult sgn_divide)
+  then show "((\<lambda>x. f x / g x) has_sgnx c1 / c2) F" unfolding has_sgnx_def by auto
+qed
+
+lemma sgnx_able_divide[sgnx_intros]:
+  assumes "f sgnx_able F" "g sgnx_able F"
+  shows "(\<lambda>x. f x / g x) sgnx_able F"  
+using has_sgnx_divide by (meson assms(1) assms(2) sgnx_able_def)   
+
+lemma sgnx_divide:
+  assumes "F\<noteq>bot" "f sgnx_able F" "g sgnx_able F"
+  shows "sgnx (\<lambda>x. f x / g x) F =sgnx f F / sgnx g F"
+proof -
+  obtain c1 c2 where c1:"(f has_sgnx c1) F" and c2:"(g has_sgnx c2) F"
+    using assms unfolding sgnx_able_def by auto
+  moreover have "((\<lambda>x. f x / g x) has_sgnx c1 / c2) F" 
+    using has_sgnx_divide[OF c1 c2] .
+  ultimately show ?thesis using assms(1) has_sgnx_imp_sgnx by blast
+qed
+  
+lemma has_sgnx_times[sgnx_intros]:
+  assumes "(f has_sgnx c1) F" "(g has_sgnx c2) F"
+  shows "((\<lambda>x. f x* g x) has_sgnx c1 * c2) F"
+proof -
+  have "\<forall>\<^sub>F x in F. sgn (f x) = c1 \<and> sgn (g x) = c2" 
+    using assms unfolding has_sgnx_def by (intro eventually_conj,auto)
+  then have "\<forall>\<^sub>F x in F. sgn (f x * g x) = c1 * c2" 
+    apply (elim eventually_mono)
+    by (simp add: sgn_mult)
+  then show "((\<lambda>x. f x* g x) has_sgnx c1 * c2) F" unfolding has_sgnx_def by auto
+qed
+
+lemma sgnx_able_times[sgnx_intros]:
+  assumes "f sgnx_able F" "g sgnx_able F"
+  shows "(\<lambda>x. f x * g x) sgnx_able F"  
+using has_sgnx_times by (meson assms(1) assms(2) sgnx_able_def)   
+
+lemma sgnx_times:
+  assumes "F\<noteq>bot" "f sgnx_able F" "g sgnx_able F"
+  shows "sgnx (\<lambda>x. f x * g x) F =sgnx f F * sgnx g F"
+proof -
+  obtain c1 c2 where c1:"(f has_sgnx c1) F" and c2:"(g has_sgnx c2) F"
+    using assms unfolding sgnx_able_def by auto
+  moreover have "((\<lambda>x. f x* g x) has_sgnx c1 * c2) F" 
+    using has_sgnx_times[OF c1 c2] .
+  ultimately show ?thesis using assms(1) has_sgnx_imp_sgnx by blast
+qed
+
+lemma tendsto_nonzero_has_sgnx:
+  assumes "(f \<longlongrightarrow> c) F" "c\<noteq>0"
+  shows "(f has_sgnx sgn c) F"
+proof (cases rule:linorder_cases[of c 0])
+  case less
+  then have "\<forall>\<^sub>F x in F. f x<0"
+    using order_topology_class.order_tendstoD[OF assms(1),of 0] by auto
+  then show ?thesis 
+    unfolding has_sgnx_def 
+    apply (elim eventually_mono)
+    using less by auto
+next
+  case equal
+next
+  case greater
+  then have "\<forall>\<^sub>F x in F. f x>0"
+    using order_topology_class.order_tendstoD[OF assms(1),of 0] by auto
+  then show ?thesis 
+    unfolding has_sgnx_def 
+    apply (elim eventually_mono)
+    using greater by auto
+qed
+
+lemma tendsto_nonzero_sgnx:
+  assumes "(f \<longlongrightarrow> c) F" "F\<noteq>bot" "c\<noteq>0"
+  shows "sgnx f F = sgn c"
+  using tendsto_nonzero_has_sgnx
+by (simp add: assms has_sgnx_imp_sgnx)
+
+
+lemma filterlim_divide_at_bot_at_top_iff:
+  assumes "(f \<longlongrightarrow> c) F" "c\<noteq>0" 
+  shows 
+    "(LIM x F. f x / g x :> at_bot) \<longleftrightarrow> (g \<longlongrightarrow> 0) F 
+      \<and> ((\<lambda>x. g x) has_sgnx - sgn c) F"
+    "(LIM x F. f x / g x :> at_top) \<longleftrightarrow> (g \<longlongrightarrow> 0) F 
+      \<and> ((\<lambda>x. g x) has_sgnx sgn c) F"
+proof -
+  show "(LIM x F. f x / g x :> at_bot) \<longleftrightarrow> ((g \<longlongrightarrow> 0) F )  
+    \<and> ((\<lambda>x. g x) has_sgnx - sgn c) F"
+  proof 
+    assume asm:"LIM x F. f x / g x :> at_bot"
+    then have "filterlim g (at 0) F" 
+      using filterlim_at_infinity_divide_iff[OF assms(1,2),of g] 
+      at_bot_le_at_infinity filterlim_mono by blast
+    then have "(g \<longlongrightarrow> 0) F" using filterlim_at by blast
+    moreover have "(g has_sgnx - sgn c) F"
+    proof -
+      have "((\<lambda>x. sgn c * inverse (f x)) \<longlongrightarrow> sgn c * inverse c) F"
+        using assms(1,2) by (auto intro:tendsto_intros)
+      then have "LIM x F. sgn c * inverse (f x) * (f x / g x) :> at_bot"
+        apply (elim filterlim_tendsto_pos_mult_at_bot[OF _ _ asm])
+      then have "LIM x F. sgn c / g x :> at_bot"
+        apply (elim filterlim_mono_eventually)
+        using eventually_times_inverse_1[OF assms] by (auto elim:eventually_mono)
+      then have "\<forall>\<^sub>F x in F. sgn c / g x < 0" 
+        using filterlim_at_bot_dense[of "\<lambda>x. sgn c/g x" F] by auto
+      then show ?thesis unfolding has_sgnx_def
+        apply (elim eventually_mono)
+        by (metis add.inverse_inverse divide_less_0_iff sgn_neg sgn_pos sgn_sgn)
+    qed  
+    ultimately show "(g \<longlongrightarrow> 0) F \<and> (g has_sgnx - sgn c) F" by auto
+  next
+    assume "(g \<longlongrightarrow> 0) F \<and> (g has_sgnx - sgn c) F"
+    then have asm:"(g \<longlongrightarrow> 0) F" "(g has_sgnx - sgn c) F" by auto
+    have "LIM x F. inverse (g x * sgn c) :> at_bot"
+    proof (rule filterlim_inverse_at_bot)
+      show "((\<lambda>x. g x * sgn c) \<longlongrightarrow> 0) F"  
+        apply (rule tendsto_mult_left_zero)
+        using asm(1) by blast
+    next
+      show "\<forall>\<^sub>F x in F. g x * sgn c < 0" using asm(2) unfolding has_sgnx_def
+        apply (elim eventually_mono)
+        by (metis add.inverse_inverse assms(2) linorder_neqE_linordered_idom mult_less_0_iff 
+            neg_0_less_iff_less sgn_greater sgn_zero_iff)
+    qed
+    moreover have "((\<lambda>x. f x * sgn c) \<longlongrightarrow> c * sgn c) F"
+      apply (intro tendsto_intros)
+      by (auto simp add:sgn_zero_iff)
+    ultimately have "LIM x F. (f x * sgn c) *inverse (g x * sgn c) :> at_bot"
+      using filterlim_tendsto_pos_mult_at_bot by blast
+    then show "LIM x F. f x / g x :> at_bot" 
+  qed
+  show "(LIM x F. f x / g x :> at_top) \<longleftrightarrow> ((g \<longlongrightarrow> 0) F )  
+    \<and> ((\<lambda>x. g x) has_sgnx sgn c) F"
+  proof 
+    assume asm:"LIM x F. f x / g x :> at_top"
+    then have "filterlim g (at 0) F" 
+      using filterlim_at_infinity_divide_iff[OF assms(1,2),of g] 
+      at_top_le_at_infinity filterlim_mono by blast
+    then have "(g \<longlongrightarrow> 0) F" using filterlim_at by blast
+    moreover have "(g has_sgnx sgn c) F"
+    proof -
+      have "((\<lambda>x. sgn c * inverse (f x)) \<longlongrightarrow> sgn c * inverse c) F"
+        using assms(1,2) by (auto intro:tendsto_intros)
+      then have "LIM x F. sgn c * inverse (f x) * (f x / g x) :> at_top"
+        apply (elim filterlim_tendsto_pos_mult_at_top[OF _ _ asm])
+      then have "LIM x F. sgn c / g x :> at_top"
+        apply (elim filterlim_mono_eventually)
+        using eventually_times_inverse_1[OF assms] by (auto elim:eventually_mono)
+      then have "\<forall>\<^sub>F x in F. sgn c / g x > 0" 
+        using filterlim_at_top_dense[of "\<lambda>x. sgn c/g x" F] by auto
+      then show ?thesis unfolding has_sgnx_def
+        apply (elim eventually_mono)
+        by (metis sgn_greater sgn_less sgn_neg sgn_pos zero_less_divide_iff)
+    qed  
+    ultimately show "(g \<longlongrightarrow> 0) F \<and> (g has_sgnx sgn c) F" by auto
+  next
+    assume "(g \<longlongrightarrow> 0) F \<and> (g has_sgnx sgn c) F"
+    then have asm:"(g \<longlongrightarrow> 0) F" "(g has_sgnx sgn c) F" by auto
+    have "LIM x F. inverse (g x * sgn c) :> at_top"
+    proof (rule filterlim_inverse_at_top)
+      show "((\<lambda>x. g x * sgn c) \<longlongrightarrow> 0) F"  
+        apply (rule tendsto_mult_left_zero)
+        using asm(1) by blast
+    next
+      show "\<forall>\<^sub>F x in F. g x * sgn c > 0" using asm(2) unfolding has_sgnx_def
+        apply (elim eventually_mono)
+        by (metis assms(2) sgn_1_neg sgn_greater sgn_if zero_less_mult_iff)
+    qed
+    moreover have "((\<lambda>x. f x * sgn c) \<longlongrightarrow> c * sgn c) F"
+      apply (intro tendsto_intros)
+      by (auto simp add:sgn_zero_iff)
+    ultimately have "LIM x F. (f x * sgn c) *inverse (g x * sgn c) :> at_top"
+      using filterlim_tendsto_pos_mult_at_top by blast
+    then show "LIM x F. f x / g x :> at_top" 
+  qed    
+qed 
+
+
+lemma poly_sgnx_left_right:
+  fixes c a::real and p::"real poly"
+  assumes "p\<noteq>0"
+  shows "sgnx (poly p) (at_left a) = (if even (order a p) 
+            then sgnx (poly p) (at_right a)
+            else -sgnx (poly p) (at_right a))"
+  using assms
+proof (induction "degree p" arbitrary: p rule: less_induct)
+  case less
+  have ?case when "poly p a\<noteq>0" 
+  proof -
+    have "sgnx (poly p) (at_left a) = sgn (poly p a)" 
+      by (simp add: has_sgnx_imp_sgnx tendsto_nonzero_has_sgnx that)
+    moreover have "sgnx (poly p) (at_right a) = sgn (poly p a)"
+      by (simp add: has_sgnx_imp_sgnx tendsto_nonzero_has_sgnx that)
+    moreover have "order a p = 0" using that by (simp add: order_0I)
+    ultimately show ?thesis by auto
+  qed
+  moreover have ?case when "poly p a=0"
+  proof -
+    obtain q where pq:"p= [:-a,1:] * q" 
+    then have "degree q < degree p" unfolding pq by (subst degree_mult_eq,auto)
+    have "sgnx (poly p) (at_left a) = - sgnx (poly q) (at_left a)" 
+    proof -
+      have "sgnx (\<lambda>x. poly p x) (at_left a) 
+          = sgnx (poly q) (at_left a) * sgnx (poly [:-a,1:]) (at_left a)"
+        unfolding pq
+        apply (subst poly_mult)
+        apply (subst sgnx_times)
+        by auto
+      moreover have "sgnx (\<lambda>x. poly [:-a,1:] x) (at_left a) = -1"
+        apply (intro has_sgnx_imp_sgnx)
+        unfolding has_sgnx_def eventually_at_left
+        by (auto simp add: linordered_field_no_lb)
+      ultimately show ?thesis by auto
+    qed
+    moreover have "sgnx (poly p) (at_right a) = sgnx (poly q) (at_right a)" 
+    proof -
+      have "sgnx (\<lambda>x. poly p x) (at_right a) 
+          = sgnx (poly q) (at_right a) * sgnx (poly [:-a,1:]) (at_right a)"
+        unfolding pq
+        apply (subst poly_mult)
+        apply (subst sgnx_times)
+        by auto
+      moreover have "sgnx (\<lambda>x. poly [:-a,1:] x) (at_right a) = 1"
+        apply (intro has_sgnx_imp_sgnx)
+        unfolding has_sgnx_def eventually_at_right
+        by (auto simp add: linordered_field_no_ub)
+      ultimately show ?thesis by auto
+    qed
+    moreover have "even (order a p) \<longleftrightarrow> odd (order a q)"
+      unfolding pq 
+    ultimately show ?thesis by auto
+  qed
+  ultimately show ?case by blast
+qed
+
+lemma poly_has_sgnx_left_right:
+  fixes c a::real and p::"real poly"
+  assumes "p\<noteq>0"
+  shows "(poly p has_sgnx c) (at_left a) \<longleftrightarrow> (if even (order a p) 
+            then (poly p has_sgnx c) (at_right a)
+            else (poly p has_sgnx -c) (at_right a))"
+using poly_sgnx_left_right 
+by (metis (no_types, opaque_lifting) add.inverse_inverse assms has_sgnx_unique 
+     sgnx_able_poly sgnx_able_sgnx trivial_limit_at_left_real trivial_limit_at_right_real)    
+    
+    
+lemma sign_r_pos_sgnx_iff:
+  "sign_r_pos p a \<longleftrightarrow> sgnx (poly p) (at_right a) > 0"
+proof 
+  assume asm:"0 < sgnx (poly p) (at_right a)"
+  obtain c where c_def:"(poly p has_sgnx c) (at_right a)"
+    using sgnx_able_poly(1) sgnx_able_sgnx by blast
+  then have "c>0" using asm 
+    using has_sgnx_imp_sgnx trivial_limit_at_right_real by blast
+  then show "sign_r_pos p a" using c_def unfolding sign_r_pos_def has_sgnx_def
+    apply (elim eventually_mono)
+    by force
+next
+  assume asm:"sign_r_pos p a"
+  define c where "c = sgnx (poly p) (at_right a)"
+  then have "(poly p has_sgnx c) (at_right a)" 
+    by (simp add: sgnx_able_sgnx)
+  then have "(\<forall>\<^sub>F x in (at_right a). poly p x>0 \<and> sgn (poly p x) = c)"
+    using asm unfolding has_sgnx_def sign_r_pos_def
+    by (simp add:eventually_conj_iff)
+  then have "\<forall>\<^sub>F x in (at_right a). c > 0"
+    apply (elim eventually_mono)
+    by fastforce
+  then show "c>0" by auto
+qed
+
+lemma sgnx_values:
+  assumes "f sgnx_able F" "F \<noteq> bot"
+  shows "sgnx f F = -1 \<or> sgnx f F = 0 \<or> sgnx f F = 1"
+proof -
+  obtain c where c_def:"(f has_sgnx c) F" 
+    using assms(1) unfolding sgnx_able_def by auto
+  then obtain x where "sgn(f x) = c" 
+    unfolding has_sgnx_def using assms(2) eventually_happens 
+    by blast
+  then have "c=-1 \<or> c=0 \<or> c=1" using sgn_if by metis
+  moreover have "sgnx f F = c" using c_def by (simp add: assms(2) has_sgnx_imp_sgnx)
+  ultimately show ?thesis by auto
+qed
+  
+lemma has_sgnx_poly_at_top:
+    "(poly p has_sgnx  sgn_pos_inf p) at_top"
+  using has_sgnx_def poly_sgn_eventually_at_top by blast
+
+lemma has_sgnx_poly_at_bot:
+    "(poly p has_sgnx  sgn_neg_inf p) at_bot"
+  using has_sgnx_def poly_sgn_eventually_at_bot by blast
+    
+lemma sgnx_poly_at_top:
+  "sgnx (poly p) at_top = sgn_pos_inf p"
+by (simp add: has_sgnx_def has_sgnx_imp_sgnx poly_sgn_eventually_at_top)
+    
+lemma sgnx_poly_at_bot:
+  "sgnx (poly p) at_bot = sgn_neg_inf p"
+by (simp add: has_sgnx_def has_sgnx_imp_sgnx poly_sgn_eventually_at_bot)  
+  
+lemma poly_has_sgnx_values:
+  assumes "p\<noteq>0"
+  shows 
+    "(poly p has_sgnx 1) (at_left a) \<or> (poly p has_sgnx - 1) (at_left a)"
+    "(poly p has_sgnx 1) (at_right a) \<or> (poly p has_sgnx - 1) (at_right a)"
+    "(poly p has_sgnx 1) at_top \<or> (poly p has_sgnx - 1) at_top"
+    "(poly p has_sgnx 1) at_bot \<or> (poly p has_sgnx - 1) at_bot"
+proof -
+  have "sgn_pos_inf p = 1 \<or> sgn_pos_inf p = -1"
+    unfolding sgn_pos_inf_def by (simp add: assms sgn_if)
+  then show "(poly p has_sgnx 1) at_top \<or> (poly p has_sgnx - 1) at_top"
+    using has_sgnx_poly_at_top by metis
+next
+  have "sgn_neg_inf p = 1 \<or> sgn_neg_inf p = -1"
+    unfolding sgn_neg_inf_def by (simp add: assms sgn_if)
+  then show "(poly p has_sgnx 1) at_bot \<or> (poly p has_sgnx - 1) at_bot"
+    using has_sgnx_poly_at_bot by metis
+next
+  obtain c where c_def:"(poly p has_sgnx c) (at_left a)" 
+    using sgnx_able_poly(2) sgnx_able_sgnx by blast
+  then have "sgnx (poly p) (at_left a) = c" using assms by auto
+  then have "c=-1 \<or> c=0 \<or> c=1"
+    using sgnx_values sgnx_able_poly(2) trivial_limit_at_left_real by blast
+  moreover have False when "c=0" 
+  proof -
+    have "(poly p has_sgnx 0) (at_left a)" using c_def that by auto
+    then obtain lb where "lb<a" "\<forall>y. (lb<y \<and> y < a) \<longrightarrow> poly p y = 0"
+      unfolding has_sgnx_def eventually_at_left sgn_if
+      by (metis one_neq_zero zero_neq_neg_one)
+    then have "{lb<..<a} \<subseteq> proots p" unfolding proots_within_def by auto
+    then have "infinite (proots p)"
+      apply (elim infinite_super)
+    ultimately show False by auto
+  qed
+  ultimately have "c=-1 \<or> c=1" by auto
+  then show "(poly p has_sgnx 1) (at_left a) \<or> (poly p has_sgnx - 1) (at_left a)"
+    using c_def by auto
+next
+  obtain c where c_def:"(poly p has_sgnx c) (at_right a)" 
+    using sgnx_able_poly(1) sgnx_able_sgnx by blast
+  then have "sgnx (poly p) (at_right a) = c" using assms by auto
+  then have "c=-1 \<or> c=0 \<or> c=1"
+    using sgnx_values sgnx_able_poly(1) trivial_limit_at_right_real by blast
+  moreover have False when "c=0" 
+  proof -
+    have "(poly p has_sgnx 0) (at_right a)" using c_def that by auto
+    then obtain ub where "ub>a" "\<forall>y. (a<y \<and> y < ub) \<longrightarrow> poly p y = 0"
+      unfolding has_sgnx_def eventually_at_right sgn_if
+      by (metis one_neq_zero zero_neq_neg_one)
+    then have "{a<..<ub} \<subseteq> proots p" unfolding proots_within_def by auto
+    then have "infinite (proots p)"
+      apply (elim infinite_super)
+    ultimately show False by auto
+  qed
+  ultimately have "c=-1 \<or> c=1" by auto
+  then show "(poly p has_sgnx 1) (at_right a) \<or> (poly p has_sgnx - 1) (at_right a)"
+    using c_def by auto
+qed
+
+lemma poly_sgnx_values:
+  assumes "p\<noteq>0"
+  shows "sgnx (poly p) (at_left a) = 1 \<or> sgnx (poly p) (at_left a) = -1"
+        "sgnx (poly p) (at_right a) = 1 \<or> sgnx (poly p) (at_right a) = -1" 
+    trivial_limit_at_right_real by blast+
+ 
+lemma has_sgnx_inverse: "(f has_sgnx c) F \<longleftrightarrow> ((inverse o f) has_sgnx (inverse c)) F"
+  unfolding has_sgnx_def comp_def
+  apply (rule eventually_subst)  
+  apply (rule always_eventually)
+  by (metis inverse_inverse_eq sgn_inverse)
+
+
+lemma has_sgnx_derivative_at_left:
+  assumes g_deriv:"(g has_field_derivative c) (at x)" and "g x=0" and "c\<noteq>0" 
+  shows "(g has_sgnx - sgn c) (at_left x)" 
+proof -
+  have "(g has_sgnx -1) (at_left x)" when "c>0"
+  proof -
+    obtain d1 where "d1>0" and d1_def:"\<forall>h>0. h < d1 \<longrightarrow> g (x - h) < g x"
+    have "(g has_sgnx -1) (at_left x)" 
+      unfolding has_sgnx_def eventually_at_left
+      apply (intro exI[where x="x-d1"])
+      by (metis (no_types, opaque_lifting) add.commute add_uminus_conv_diff assms(2) diff_add_cancel 
+          diff_strict_left_mono diff_zero minus_diff_eq sgn_neg)  
+    thus ?thesis by auto 
+  qed
+  moreover have "(g has_sgnx 1) (at_left x)" when "c<0"
+  proof -
+    obtain d1 where "d1>0" and d1_def:"\<forall>h>0. h < d1 \<longrightarrow> g (x - h) > g x"
+    have "(g has_sgnx 1) (at_left x)" 
+        unfolding has_sgnx_def eventually_at_left
+        apply (intro exI[where x="x-d1"])
+        by (metis (no_types, opaque_lifting) add.commute add_uminus_conv_diff assms(2) diff_add_cancel
+            diff_zero less_diff_eq minus_diff_eq sgn_pos)
+  qed
+qed
+
+lemma has_sgnx_derivative_at_right:
+  assumes g_deriv:"(g has_field_derivative c) (at x)" and "g x=0" and "c\<noteq>0"
+  shows "(g has_sgnx sgn c) (at_right x)"  
+proof -
+  have "(g has_sgnx 1) (at_right x)" when "c>0"
+  proof -
+    obtain d2 where "d2>0" and d2_def:"\<forall>h>0. h < d2 \<longrightarrow> g x < g (x + h)"
+    have "(g has_sgnx 1) (at_right x)" 
+      unfolding has_sgnx_def eventually_at_right
+      apply (intro exI[where x="x+d2"])
+      by (metis add.commute assms(2) diff_add_cancel diff_less_eq less_add_same_cancel1 sgn_pos)
+  qed
+  moreover have "(g has_sgnx -1) (at_right x)" when "c<0"
+  proof -
+    obtain d2 where "d2>0" and d2_def:"\<forall>h>0. h < d2 \<longrightarrow> g x > g (x + h)"
+    have "(g has_sgnx -1) (at_right x)" 
+      unfolding has_sgnx_def eventually_at_right
+      apply (intro exI[where x="x+d2"])
+      by (metis (no_types, opaque_lifting) add.commute add.right_inverse add_uminus_conv_diff assms(2) 
+          diff_add_cancel diff_less_eq sgn_neg)
+  qed
+qed  
+
+lemma has_sgnx_split:
+  "(f has_sgnx c) (at x) \<longleftrightarrow> (f has_sgnx c) (at_left x) \<and> (f has_sgnx c) (at_right x)"
+unfolding has_sgnx_def using eventually_at_split by auto    
+        
+lemma sgnx_at_top_IVT:
+  assumes "sgnx (poly p) (at_right a) \<noteq> sgnx (poly p) at_top"
+  shows "\<exists>x>a. poly p x=0"
+proof (cases "p=0")
+  case True
+  then show ?thesis using gt_ex[of a] by simp
+next
+  case False
+  from poly_has_sgnx_values[OF this] 
+  have "(poly p has_sgnx 1) (at_right a) \<or> (poly p has_sgnx - 1) (at_right a)"
+    "(poly p has_sgnx 1) at_top \<or> (poly p has_sgnx - 1) at_top"
+    by auto
+  moreover have ?thesis when has_r:"(poly p has_sgnx 1) (at_right a)" 
+      and has_top:"(poly p has_sgnx -1) at_top"
+  proof -
+    obtain b where "b>a" "poly p b>0"
+    proof -
+      obtain a' where "a'>a" and a'_def:"\<forall>y>a. y < a' \<longrightarrow> sgn (poly p y) = 1"
+        using has_r[unfolded has_sgnx_def eventually_at_right] by auto
+      define b where "b=(a+a')/2"
+      moreover have "poly p b>0"
+      ultimately show ?thesis using that by auto
+    qed
+    moreover obtain c where "c>b" "poly p c<0"
+    proof -
+      obtain b' where b'_def:"\<forall>n\<ge>b'. sgn (poly p n) = - 1"
+        using has_top[unfolded has_sgnx_def eventually_at_top_linorder] by auto
+      define c where "c=1+max b b'"
+      moreover have "poly p c<0"
+      ultimately show ?thesis using that by auto
+    qed
+    ultimately show ?thesis using poly_IVT_neg[of b c p] not_less by fastforce
+  qed
+  moreover have ?thesis when has_r:"(poly p has_sgnx -1) (at_right a)" 
+      and has_top:"(poly p has_sgnx 1) at_top"
+  proof -
+    obtain b where "b>a" "poly p b<0"
+    proof -
+      obtain a' where "a'>a" and a'_def:"\<forall>y>a. y < a' \<longrightarrow> sgn (poly p y) = -1"
+        using has_r[unfolded has_sgnx_def eventually_at_right] by auto
+      define b where "b=(a+a')/2"
+      moreover have "poly p b<0"
+      ultimately show ?thesis using that by auto
+    qed
+    moreover obtain c where "c>b" "poly p c>0"
+    proof -
+      obtain b' where b'_def:"\<forall>n\<ge>b'. sgn (poly p n) = 1"
+        using has_top[unfolded has_sgnx_def eventually_at_top_linorder] by auto
+      define c where "c=1+max b b'"
+      moreover have "poly p c>0"
+      ultimately show ?thesis using that by auto
+    qed
+    ultimately show ?thesis using poly_IVT_pos[of b c p] not_less by fastforce
+  qed
+  moreover have ?thesis when 
+    "(poly p has_sgnx 1) (at_right a) \<and> (poly p has_sgnx 1) at_top
+     \<or> (poly p has_sgnx - 1) (at_right a) \<and> (poly p has_sgnx -1) at_top" 
+  proof -
+    have "sgnx (poly p) (at_right a) = sgnx (poly p) at_top"
+      using that has_sgnx_imp_sgnx by auto
+    then have False using assms by simp
+    then show ?thesis by auto
+  qed
+  ultimately show ?thesis by blast
+qed
+  
+lemma sgnx_at_left_at_right_IVT:
+  assumes "sgnx (poly p) (at_right a) \<noteq> sgnx (poly p) (at_left b)" "a<b"
+  shows "\<exists>x. a<x \<and> x<b \<and> poly p x=0"
+proof (cases "p=0")
+  case True
+next
+  case False
+  from poly_has_sgnx_values[OF this]
+  have "(poly p has_sgnx 1) (at_right a) \<or> (poly p has_sgnx - 1) (at_right a)"
+    "(poly p has_sgnx 1) (at_left b) \<or> (poly p has_sgnx - 1) (at_left b)"
+    by auto
+  moreover have ?thesis when has_r:"(poly p has_sgnx 1) (at_right a)" 
+      and has_l:"(poly p has_sgnx -1) (at_left b)"
+  proof -
+    obtain c where "a<c" "c<b" "poly p c>0"
+    proof -
+      obtain a' where "a'>a" and a'_def:"\<forall>y>a. y < a' \<longrightarrow> sgn (poly p y) = 1"
+        using has_r[unfolded has_sgnx_def eventually_at_right] by auto
+      define c where "c=(a+min a' b)/2"
+      moreover have "poly p c>0"
+      ultimately show ?thesis using that by auto
+    qed
+    moreover obtain d where "c<d""d<b" "poly p d<0"
+    proof -
+      obtain b' where "b'<b" and b'_def:"\<forall>y>b'. y < b \<longrightarrow> sgn (poly p y) = - 1"
+        using has_l[unfolded has_sgnx_def eventually_at_left] by auto
+      define d where "d=(b+max b' c)/2"
+      have "b'<d" "d<b" "d>c" 
+      moreover have "poly p d<0"
+      ultimately show ?thesis using that by auto
+    qed
+    ultimately obtain x where "c<x" "x<d" "poly p x=0"
+      using poly_IVT_neg[of c d p] by auto
+  qed
+  moreover have ?thesis when has_r:"(poly p has_sgnx -1) (at_right a)" 
+      and has_l:"(poly p has_sgnx 1) (at_left b)"
+  proof -
+    obtain c where "a<c" "c<b" "poly p c<0"
+    proof -
+      obtain a' where "a'>a" and a'_def:"\<forall>y>a. y < a' \<longrightarrow> sgn (poly p y) = -1"
+        using has_r[unfolded has_sgnx_def eventually_at_right] by auto
+      define c where "c=(a+min a' b)/2"
+      moreover have "poly p c<0"
+      ultimately show ?thesis using that by auto
+    qed
+    moreover obtain d where "c<d""d<b" "poly p d>0"
+    proof -
+      obtain b' where "b'<b" and b'_def:"\<forall>y>b'. y < b \<longrightarrow> sgn (poly p y) = 1"
+        using has_l[unfolded has_sgnx_def eventually_at_left] by auto
+      define d where "d=(b+max b' c)/2"
+      have "b'<d" "d<b" "d>c" 
+      moreover have "poly p d>0"
+      ultimately show ?thesis using that by auto
+    qed
+    ultimately obtain x where "c<x" "x<d" "poly p x=0"
+      using poly_IVT_pos[of c d p] by auto
+  qed
+  moreover have ?thesis when 
+    "(poly p has_sgnx 1) (at_right a) \<and> (poly p has_sgnx 1) (at_left b)
+     \<or> (poly p has_sgnx - 1) (at_right a) \<and> (poly p has_sgnx -1) (at_left b)" 
+  proof -
+    have "sgnx (poly p) (at_right a) = sgnx (poly p) (at_left b)"
+      using that has_sgnx_imp_sgnx by auto
+    then have False using assms by simp
+    then show ?thesis by auto
+  qed
+  ultimately show ?thesis by blast
+qed
+   
+lemma sgnx_at_bot_IVT:
+  assumes "sgnx (poly p) (at_left a) \<noteq> sgnx (poly p) at_bot"
+  shows "\<exists>x<a. poly p x=0"
+proof (cases "p=0")
+  case True
+  then show ?thesis using lt_ex[of a] by simp
+next
+  case False
+  from poly_has_sgnx_values[OF this] 
+  have "(poly p has_sgnx 1) (at_left a) \<or> (poly p has_sgnx - 1) (at_left a)"
+    "(poly p has_sgnx 1) at_bot \<or> (poly p has_sgnx - 1) at_bot"
+    by auto
+  moreover have ?thesis when has_l:"(poly p has_sgnx 1) (at_left a)" 
+      and has_bot:"(poly p has_sgnx -1) at_bot"
+  proof -
+    obtain b where "b<a" "poly p b>0"
+    proof -
+      obtain a' where "a'<a" and a'_def:"\<forall>y>a'. y < a \<longrightarrow> sgn (poly p y) = 1"
+        using has_l[unfolded has_sgnx_def eventually_at_left] by auto
+      define b where "b=(a+a')/2"
+      moreover have "poly p b>0"
+      ultimately show ?thesis using that by auto
+    qed
+    moreover obtain c where "c<b" "poly p c<0"
+    proof -
+      obtain b' where b'_def:"\<forall>n\<le>b'. sgn (poly p n) = - 1"
+        using has_bot[unfolded has_sgnx_def eventually_at_bot_linorder] by auto
+      define c where "c=min b b'- 1"
+      moreover have "poly p c<0"
+      ultimately show ?thesis using that by auto
+    qed
+    ultimately show ?thesis using poly_IVT_pos[of c b p] using not_less by fastforce
+  qed
+  moreover have ?thesis when has_l:"(poly p has_sgnx -1) (at_left a)" 
+      and has_bot:"(poly p has_sgnx 1) at_bot"
+  proof -
+    obtain b where "b<a" "poly p b<0"
+    proof -
+      obtain a' where "a'<a" and a'_def:"\<forall>y>a'. y < a \<longrightarrow> sgn (poly p y) = -1"
+        using has_l[unfolded has_sgnx_def eventually_at_left] by auto
+      define b where "b=(a+a')/2"
+      moreover have "poly p b<0"
+      ultimately show ?thesis using that by auto
+    qed
+    moreover obtain c where "c<b" "poly p c>0"
+    proof -
+      obtain b' where b'_def:"\<forall>n\<le>b'. sgn (poly p n) = 1"
+        using has_bot[unfolded has_sgnx_def eventually_at_bot_linorder] by auto
+      define c where "c=min b b'- 1"
+      moreover have "poly p c>0"
+      ultimately show ?thesis using that by auto
+    qed
+    ultimately show ?thesis using poly_IVT_neg[of c b p] using not_less by fastforce
+  qed
+  moreover have ?thesis when 
+    "(poly p has_sgnx 1) (at_left a) \<and> (poly p has_sgnx 1) at_bot
+     \<or> (poly p has_sgnx - 1) (at_left a) \<and> (poly p has_sgnx -1) at_bot" 
+  proof -
+    have "sgnx (poly p) (at_left a) = sgnx (poly p) at_bot"
+      using that has_sgnx_imp_sgnx by auto
+    then have False using assms by simp
+    then show ?thesis by auto
+  qed
+  ultimately show ?thesis by blast
+qed    
+
+lemma sgnx_poly_nz:
+  assumes "poly p x\<noteq>0"
+  shows "sgnx (poly p) (at_left x) = sgn (poly p x)"
+        "sgnx (poly p) (at_right x) = sgn (poly p x)"
+proof -
+  have "(poly p has_sgnx sgn(poly p x)) (at x)"
+    apply (rule tendsto_nonzero_has_sgnx)
+    using assms by auto
+  then show "sgnx (poly p) (at_left x) = sgn (poly p x)"
+        "sgnx (poly p) (at_right x) = sgn (poly p x)"
+    unfolding has_sgnx_split by auto
+qed
+  
+
+inductive finite_Psegments::"(real \<Rightarrow> bool) \<Rightarrow> real \<Rightarrow> real \<Rightarrow> bool" for P where
+  emptyI: "a\<ge>b \<Longrightarrow> finite_Psegments P a b"|
+  insertI_1: "\<lbrakk>s\<in>{a..<b};s=a\<or>P s;\<forall>t\<in>{s<..<b}. P t; finite_Psegments P a s\<rbrakk> 
+        \<Longrightarrow> finite_Psegments P a b"|
+  insertI_2: "\<lbrakk>s\<in>{a..<b};s=a\<or>P s;(\<forall>t\<in>{s<..<b}. \<not>P t);finite_Psegments P a s\<rbrakk> 
+        \<Longrightarrow> finite_Psegments P a b" 
+
+lemma finite_Psegments_pos_linear:
+  assumes "finite_Psegments P (b*lb+c) (b*ub+c) " and "b>0"
+  shows "finite_Psegments (P o (\<lambda>t. b*t+c)) lb ub" 
+proof -    
+  show ?thesis 
+  proof (rule finite_Psegments.induct[OF assms(1),
+        of "\<lambda>lb' ub'. finite_Psegments (P o (\<lambda>t. b*t+c)) ((lb'-c)/b) ((ub'-c)/b)",simplified])
+    fix lb ub f assume "(lb::real)\<le>ub"  
+    then have "(lb - c) / b \<le> (ub - c) / b" 
+    then show "finite_Psegments (f \<circ> (\<lambda>t. b * t + c)) ((ub - c) / b) ((lb - c) / b)"
+      by (rule finite_Psegments.emptyI)
+  next
+    fix s lb ub P
+    assume asm: "lb \<le> s \<and> s < ub" 
+       "\<forall>t\<in>{s<..<ub}. P t" 
+       "finite_Psegments (P \<circ> (\<lambda>t. b * t + c)) ((lb - c) / b) ((s - c) / b)"
+       "s = lb \<or> P s"
+    show "finite_Psegments (P \<circ> (\<lambda>t. b * t + c)) ((lb - c) / b) ((ub - c) / b)"
+      apply (rule finite_Psegments.insertI_1[of "(s-c)/b"])
+  next
+    fix s lb ub P
+    assume asm: "lb \<le> s \<and> s < ub" 
+       "\<forall>t\<in>{s<..<ub}. \<not> P t" 
+       "finite_Psegments (P \<circ> (\<lambda>t. b * t + c)) ((lb - c) / b) ((s - c) / b)" 
+       "s=lb \<or> P s"
+    show "finite_Psegments (P \<circ> (\<lambda>t. b * t + c)) ((lb - c) / b) ((ub - c) / b)"
+      apply (rule finite_Psegments.insertI_2[of "(s-c)/b"])
+  qed
+qed  
+
+lemma finite_Psegments_congE:
+  assumes "finite_Psegments Q lb ub" 
+    "\<And>t. \<lbrakk>lb<t;t<ub\<rbrakk> \<Longrightarrow> Q t \<longleftrightarrow> P t "
+  shows "finite_Psegments P lb ub" using assms
+proof (induct rule:finite_Psegments.induct)
+  case (emptyI a b)
+  then show ?case using finite_Psegments.emptyI by auto
+next
+  case (insertI_1 s a b)
+  show ?case 
+  proof (rule finite_Psegments.insertI_1[of s])
+    have "P s" when "s\<noteq>a"
+    proof -
+      then show ?thesis using insertI_1 by auto
+    qed
+    then show "s = a \<or> P s" by auto
+  next
+    show "s \<in> {a..<b}" " \<forall>t\<in>{s<..<b}. P t" "finite_Psegments P a s" using insertI_1 by auto
+  qed  
+next
+  case (insertI_2 s a b)
+  show ?case 
+  proof (rule finite_Psegments.insertI_2[of s]) 
+    have "P s" when "s\<noteq>a"
+    proof -
+      then show ?thesis using insertI_2 by auto
+    qed
+    then show "s = a \<or> P s" by auto
+  next
+    show "s \<in> {a..<b}" " \<forall>t\<in>{s<..<b}. \<not> P t" "finite_Psegments P a s" using insertI_2 by auto
+  qed   
+qed
+  
+lemma finite_Psegments_constI:
+  assumes "\<And>t. \<lbrakk>a<t;t<b\<rbrakk> \<Longrightarrow> P t = c"
+  shows "finite_Psegments P a b"
+proof -
+  have "finite_Psegments (\<lambda>_. c) a b"
+  proof -
+    have ?thesis when "a\<ge>b"
+      using that finite_Psegments.emptyI by auto
+    moreover have ?thesis when "a<b" "c"
+      apply (rule finite_Psegments.insertI_1[of a])
+      using that by (auto intro: finite_Psegments.emptyI)
+    moreover have ?thesis when "a<b" "\<not>c"
+      apply (rule finite_Psegments.insertI_2[of a])
+      using that by (auto intro: finite_Psegments.emptyI)
+    ultimately show ?thesis by argo
+  qed
+  then show ?thesis
+    apply (elim finite_Psegments_congE)
+    using assms by auto
+qed    
+
+context 
+begin  
+
+private lemma finite_Psegments_less_eq1:
+  assumes "finite_Psegments P a c" "b\<le>c"
+  shows "finite_Psegments P a b" using assms
+proof (induct arbitrary: b rule:finite_Psegments.induct)
+  case (emptyI a c)
+  then show ?case using finite_Psegments.emptyI by auto
+next
+  case (insertI_1 s a c)  
+  have ?case when "b\<le>s" using insertI_1 that by auto
+  moreover have ?case when "b>s" 
+  proof -
+    ultimately show ?case 
+  qed
+  ultimately show ?case by fastforce
+next
+  case (insertI_2 s a c)
+  have ?case when "b\<le>s" using insertI_2 that by auto
+  moreover have ?case when "b>s" 
+  proof -
+    ultimately show ?case 
+  qed
+  ultimately show ?case by fastforce
+qed  
+ 
+  
+private lemma finite_Psegments_less_eq2:
+  assumes "finite_Psegments P a c" "a\<le>b"
+  shows "finite_Psegments P b c" using assms  
+proof (induct arbitrary:  rule:finite_Psegments.induct)
+  case (emptyI a c)
+  then show ?case using finite_Psegments.emptyI by auto 
+next
+  case (insertI_1 s a c)
+  have ?case when "s\<le>b"
+  proof -
+    have "\<forall>t\<in>{b<..<c}. P t" using insertI_1 that by auto
+    then show ?thesis by (simp add: finite_Psegments_constI)
+  qed
+  moreover have ?case when "s>b"
+    apply (rule finite_Psegments.insertI_1[where s=s])
+    using insertI_1 that by auto
+  ultimately show ?case by linarith
+next
+  case (insertI_2 s a c)
+  have ?case when "s\<le>b"
+  proof -
+    have "\<forall>t\<in>{b<..<c}. \<not> P t" using insertI_2 that by auto
+    then show ?thesis by (metis finite_Psegments_constI greaterThanLessThan_iff)
+  qed
+  moreover have ?case when "s>b"
+    apply (rule finite_Psegments.insertI_2[where s=s])
+    using insertI_2 that by auto
+  ultimately show ?case by linarith
+qed  
+
+
+lemma finite_Psegments_included:
+  assumes "finite_Psegments P a d" "a\<le>b" "c\<le>d"
+  shows "finite_Psegments P b c"  
+  using finite_Psegments_less_eq2 finite_Psegments_less_eq1 assms by blast      
+end      
+
+lemma finite_Psegments_combine:
+  assumes "finite_Psegments P a b" "finite_Psegments P b c" "b\<in>{a..c}" "closed ({x. P x} \<inter> {a..c})" 
+  shows "finite_Psegments P a c"  using assms(2,1,3,4)
+proof (induct rule:finite_Psegments.induct)
+  case (emptyI b c)
+  then show ?case using finite_Psegments_included by auto
+next
+  case (insertI_1 s b c)
+  have "P s" 
+  proof -
+    have "s<c" using insertI_1 by auto
+    define S where "S = {x. P x} \<inter> {s..(s+c)/2}"
+    have "closed S"
+    proof -
+      have "closed ({a. P a} \<inter> {a..c})" using insertI_1(8) .
+      moreover have "S = ({a. P a} \<inter> {a..c}) \<inter> {s..(s+c)/2}"
+        using insertI_1(1,7) unfolding S_def by (auto simp add:field_simps)
+      ultimately show ?thesis
+        using closed_Int[of "{a. P a} \<inter> {a..c}" "{s..(s+c)/2}"] by blast
+    qed
+    moreover have "\<exists>y\<in>S. dist y s < e" when "e>0" for e 
+    proof -
+      define y where "y = min ((s+c)/2) (e/2+s)"
+      have "y\<in>S"
+      proof -
+        have "y\<in>{s..(s+c)/2}" unfolding y_def
+        moreover have "P y" 
+          apply (rule insertI_1(3)[rule_format])
+          unfolding y_def
+          by (auto simp add:algebra_simps min_mult_distrib_left min_less_iff_disj)
+        ultimately show ?thesis unfolding S_def by auto   
+      qed
+      moreover have "dist y s <e"
+        by (auto simp add:algebra_simps min_mult_distrib_left min_less_iff_disj dist_real_def)
+      ultimately show ?thesis by auto
+    qed
+    ultimately have "s\<in>S" using closed_approachable by auto
+    then show ?thesis unfolding S_def by auto
+  qed
+  show ?case 
+  proof (rule finite_Psegments.insertI_1[of s])
+    show " s \<in> {a..<c}" "s = a \<or> P s" "\<forall>t\<in>{s<..<c}. P t"
+  next
+    have "closed ({a. P a} \<inter> {a..s})" 
+      apply (elim arg_elim[of closed])
+    then show "finite_Psegments P a s" using insertI_1 by auto
+  qed
+next
+  case (insertI_2 s b c)
+  have ?case when "P s"
+  proof (rule finite_Psegments.insertI_2[of s])
+    show "s \<in> {a..<c}" "s = a \<or> P s" "\<forall>t\<in>{s<..<c}. \<not> P t" using that insertI_2 by auto
+  next
+    have "closed ({a. P a} \<inter> {a..s})" 
+      apply (elim arg_elim[of closed])
+    then show "finite_Psegments P a s" using insertI_2 by auto
+  qed  
+  proof (cases rule:finite_Psegments.cases)
+    case emptyI
+    then show ?thesis using insertI_2 that 
+      by (metis antisym_conv atLeastAtMost_iff finite_Psegments.insertI_2)
+  next
+    case (insertI_1 s0)
+    have "P s" 
+    proof -
+      have "s0<s" using insertI_1 atLeastLessThan_iff that(2) by blast    
+      define S where "S = {x. P x} \<inter> {(s0+s)/2..s}"
+      have "closed S"
+        apply (elim arg_elim[of closed])
+      moreover have "\<exists>y\<in>S. dist y s < e" when "e>0" for e 
+      proof -
+        define y where "y = max ((s+s0)/2) (s-e/2)"
+        have "y\<in>S"
+        proof -
+          have "y\<in>{(s0+s)/2..s}" unfolding y_def
+          moreover have "P y" 
+            apply (rule insertI_1(3)[rule_format])
+            unfolding y_def
+            by (auto simp add:field_simps max_mult_distrib_left less_max_iff_disj)
+          ultimately show ?thesis unfolding S_def by auto   
+        qed
+        moreover have "dist y s <e"
+          by (auto simp add:algebra_simps max_mult_distrib_left less_max_iff_disj dist_real_def 
+              max_add_distrib_right)
+        ultimately show ?thesis by auto
+      qed
+      ultimately have "s\<in>S" using closed_approachable by auto
+      then show ?thesis unfolding S_def by auto
+    qed  
+    then show ?thesis by simp
+  next
+    case (insertI_2 s0)
+    have *: "\<forall>t\<in>{s0<..<c}. \<not> P t" 
+      by force
+    show ?thesis 
+      apply (rule finite_Psegments.insertI_2[of s0])
+      subgoal using insertI_2.prems(2) local.insertI_2(1) by auto   
+      subgoal using * .
+      done
+  qed
+  ultimately show ?case by auto
+qed
+ 
+
+definition finite_ReZ_segments::"(real \<Rightarrow> complex) \<Rightarrow> complex \<Rightarrow> bool" where
+  "finite_ReZ_segments g z = finite_Psegments (\<lambda>t. Re (g t - z) = 0) 0 1"    
+
+lemma finite_ReZ_segments_joinpaths:
+  assumes g1:"finite_ReZ_segments g1 z" and g2: "finite_ReZ_segments g2 z" and
+    "path g1" "path g2" "pathfinish g1=pathstart g2"
+  shows "finite_ReZ_segments (g1+++g2) z" 
+proof -
+  define P where "P = (\<lambda>t. (Re ((g1 +++ g2) t - z) = 0 \<and> 0<t \<and> t<1) \<or> t=0 \<or> t=1)"
+  have "finite_Psegments P 0 (1/2)" 
+  proof -
+    have "finite_Psegments (\<lambda>t. Re (g1 t - z) = 0) 0 1" 
+      using g1 unfolding finite_ReZ_segments_def .
+    then have "finite_Psegments (\<lambda>t. Re (g1 (2 * t) - z) = 0) 0 (1/2)" 
+      apply (drule_tac finite_Psegments_pos_linear[of _ 2 0 0 "1/2",simplified])
+      by (auto simp add:comp_def)
+    then show ?thesis
+      unfolding P_def joinpaths_def
+      by (elim finite_Psegments_congE,auto)
+  qed
+  moreover have "finite_Psegments P (1/2) 1" 
+  proof -
+    have "finite_Psegments (\<lambda>t. Re (g2 t - z) = 0) 0 1" 
+      using g2 unfolding finite_ReZ_segments_def .
+    then have "finite_Psegments (\<lambda>t. Re (g2 (2 * t-1) - z) = 0) (1/2) 1"  
+      apply (drule_tac finite_Psegments_pos_linear[of _ 2 "1/2" "-1" 1,simplified])
+      by (auto simp add:comp_def)
+    then show ?thesis
+      unfolding P_def joinpaths_def
+      apply (elim finite_Psegments_congE)
+      by auto
+  qed  
+  moreover have "closed {x. P x}"
+  proof -
+    define Q where "Q=(\<lambda>t. Re ((g1 +++ g2) t - z) = 0)"
+    have "continuous_on {0<..<1} (g1+++g2)"
+      unfolding path_def by (auto elim:continuous_on_subset)
+    from continuous_on_Re[OF this] have "continuous_on {0<..<1} (\<lambda>x. Re ((g1 +++ g2) x))" .
+    from continuous_on_open_Collect_neq[OF this,of "\<lambda>_. Re z",OF continuous_on_const,simplified]
+    have "open {t. Re ((g1 +++ g2) t - z) \<noteq> 0 \<and> 0<t \<and> t<1}" 
+       by (elim arg_elim[where f="open"],auto)
+    from closed_Diff[of "{0::real..1}",OF _ this,simplified]
+    show "closed {x. P x}" 
+      apply (elim arg_elim[where f=closed])
+      by (auto simp add:P_def)
+  qed
+  ultimately have "finite_Psegments P 0 1"
+    using finite_Psegments_combine[of _ 0 "1/2" 1] by auto
+  then show ?thesis 
+    unfolding finite_ReZ_segments_def P_def
+    by (elim finite_Psegments_congE,auto)
+qed
+      
+lemma finite_ReZ_segments_congE:
+  assumes "finite_ReZ_segments p1 z1" 
+    "\<And>t. \<lbrakk>0<t;t<1\<rbrakk> \<Longrightarrow>  Re(p1 t- z1) = Re(p2 t - z2)"
+  shows "finite_ReZ_segments p2 z2"      
+  using assms unfolding finite_ReZ_segments_def
+  apply (elim finite_Psegments_congE)
+  by auto 
+       
+lemma finite_ReZ_segments_constI:
+  assumes "\<forall>t. 0<t\<and>t<1 \<longrightarrow> g t = c"
+  shows "finite_ReZ_segments g z" 
+proof -
+  have "finite_ReZ_segments (\<lambda>_. c) z" 
+    unfolding finite_ReZ_segments_def 
+    by (rule finite_Psegments_constI,auto)
+  then show ?thesis using assms
+    by (elim finite_ReZ_segments_congE,auto)
+qed 
+
+lemma finite_ReZ_segment_cases [consumes 1, case_names subEq subNEq,cases pred:finite_ReZ_segments]:
+  assumes "finite_ReZ_segments g z"
+    and subEq:"(\<And>s. \<lbrakk>s \<in> {0..<1};s=0\<or>Re (g s) = Re z;
+          \<forall>t\<in>{s<..<1}. Re (g t) = Re z;finite_ReZ_segments (subpath 0 s g) z\<rbrakk> \<Longrightarrow> P)" 
+    and subNEq:"(\<And>s. \<lbrakk>s \<in> {0..<1};s=0\<or>Re (g s) = Re z;
+          \<forall>t\<in>{s<..<1}. Re (g t) \<noteq> Re z;finite_ReZ_segments (subpath 0 s g) z\<rbrakk> \<Longrightarrow> P)"
+  shows "P"  
+using assms(1) unfolding finite_ReZ_segments_def
+proof (cases rule:finite_Psegments.cases)
+  case emptyI
+  then show ?thesis by auto
+next
+  case (insertI_1 s)
+  have "finite_ReZ_segments (subpath 0 s g) z" 
+  proof (cases "s=0")
+    case True
+    show ?thesis
+      apply (rule finite_ReZ_segments_constI)
+      using True unfolding subpath_def by auto
+  next
+    case False
+    from finite_Psegments_pos_linear[OF _ this,of _ 0 0 1] insertI_1(4)
+    show "finite_ReZ_segments (subpath 0 s g) z"
+      unfolding finite_ReZ_segments_def comp_def subpath_def by auto
+  qed  
+  then show ?thesis using subEq insertI_1 by force
+next
+  case (insertI_2 s)
+  have "finite_ReZ_segments (subpath 0 s g) z" 
+  proof (cases "s=0")
+    case True
+    show ?thesis
+      apply (rule finite_ReZ_segments_constI)
+      using True unfolding subpath_def by auto
+  next
+    case False
+    from finite_Psegments_pos_linear[OF _ this,of _ 0 0 1] insertI_2(4)
+    show "finite_ReZ_segments (subpath 0 s g) z"
+      unfolding finite_ReZ_segments_def comp_def subpath_def by auto
+  qed
+  then show ?thesis using subNEq insertI_2 by force
+qed         
+  
+lemma finite_ReZ_segments_induct [case_names sub0 subEq subNEq, induct pred:finite_ReZ_segments]:
+  assumes "finite_ReZ_segments g z"
+  assumes  sub0:"\<And>g z. (P (subpath 0 0 g) z)" 
+    and subEq:"(\<And>s g z. \<lbrakk>s \<in> {0..<1};s=0\<or>Re (g s) = Re z;
+          \<forall>t\<in>{s<..<1}. Re (g t) = Re z;finite_ReZ_segments (subpath 0 s g) z; 
+          P (subpath 0 s g) z\<rbrakk> \<Longrightarrow> P g z)" 
+    and subNEq:"(\<And>s g z. \<lbrakk>s \<in> {0..<1};s=0\<or>Re (g s) = Re z;
+          \<forall>t\<in>{s<..<1}. Re (g t) \<noteq> Re z;finite_ReZ_segments (subpath 0 s g) z;
+          P (subpath 0 s g) z\<rbrakk> \<Longrightarrow> P g z)"
+  shows "P g z" 
+proof -
+  have "finite_Psegments (\<lambda>t. Re (g t - z) = 0) 0 1" 
+    using assms(1) unfolding finite_ReZ_segments_def by auto
+  then have "(0::real)\<le>1 \<longrightarrow> P (subpath 0 1 g) z"
+  proof (induct rule: finite_Psegments.induct[of _ 0 1 "\<lambda>a b. b\<ge>a \<longrightarrow> P (subpath a b g) z"] )
+    case (emptyI a b)
+    then show ?case using sub0[of "subpath a b g"] unfolding subpath_def by auto 
+  next
+    case (insertI_1 s a b)
+    have ?case when "a=b"
+      using sub0[of "subpath a b g"] that unfolding subpath_def by auto        
+    moreover have ?case when "a\<noteq>b"
+    proof -
+      define s'::real where "s'=(s-a)/(b-a)"  
+      have "P (subpath a b g) z" 
+      proof (rule subEq[of s' "subpath a b g"])
+        show "\<forall>t\<in>{s'<..<1}. Re (subpath a b g t) = Re z" 
+        proof 
+          fix t assume "t \<in> {s'<..<1}"
+          then have "(b - a) * t + a\<in>{s<..<b}" 
+            apply (auto simp add:field_simps)
+            by (sos "((((A<0 * (A<1 * A<2)) * R<1) + (((A<=1 * (A<0 * R<1)) * (R<1 * [1]^2))
+               + ((A<=0 * (A<0 * (A<1 * R<1))) * (R<1 * [1]^2)))))")  
+          then have "Re (g ((b - a) * t + a) - z) = 0"
+            using insertI_1(3)[rule_format,of "(b - a) * t + a"] by auto
+          then show "Re (subpath a b g t) = Re z" 
+            unfolding subpath_def by auto
+        qed
+        show "finite_ReZ_segments (subpath 0 s' (subpath a b g)) z"
+        proof (cases "s=a")
+          case True
+          then show ?thesis unfolding s'_def subpath_def 
+            by (auto intro:finite_ReZ_segments_constI)
+        next
+          case False
+          have "finite_Psegments (\<lambda>t. Re (g t - z) = 0) a s"
+            using insertI_1(4) unfolding finite_ReZ_segments_def by auto
+          then have "finite_Psegments ((\<lambda>t. Re (g t - z) = 0) \<circ> (\<lambda>t. (s - a) * t + a)) 0 1" 
+            apply (elim finite_Psegments_pos_linear[of _ "s-a" 0 a 1,simplified])
+          then show ?thesis 
+            by auto
+        qed
+        show "s' \<in> {0..<1}"
+          by (auto simp add:field_simps)
+        show "P (subpath 0 s' (subpath a b g)) z"
+        proof -
+          have "P (subpath a s g) z" using insertI_1(1,5) by auto
+          then show ?thesis 
+        qed
+        show "s' = 0 \<or> Re (subpath a b g s') = Re z"
+        proof -
+          have ?thesis when "s=a"
+            using that unfolding s'_def by auto
+          moreover have ?thesis when "Re (g s - z) = 0"
+            using that unfolding s'_def subpath_def by auto
+        qed
+      qed
+    qed
+    ultimately show ?case by auto
+  next
+    case (insertI_2 s a b)
+    have ?case when "a=b"
+      using sub0[of "subpath a b g"] that unfolding subpath_def by auto        
+    moreover have ?case when "a\<noteq>b"
+    proof -
+      define s'::real where "s'=(s-a)/(b-a)"  
+      have "P (subpath a b g) z" 
+      proof (rule subNEq[of s' "subpath a b g"])
+        show "\<forall>t\<in>{s'<..<1}. Re (subpath a b g t) \<noteq> Re z" 
+        proof 
+          fix t assume "t \<in> {s'<..<1}"
+          then have "(b - a) * t + a\<in>{s<..<b}" 
+            apply (auto simp add:field_simps)
+            by (sos "((((A<0 * (A<1 * A<2)) * R<1) + (((A<=1 * (A<0 * R<1)) * (R<1 * [1]^2)) + 
+              ((A<=0 * (A<0 * (A<1 * R<1))) * (R<1 * [1]^2)))))")  
+          then have "Re (g ((b - a) * t + a) - z) \<noteq> 0"
+            using insertI_2(3)[rule_format,of "(b - a) * t + a"] by auto
+          then show "Re (subpath a b g t) \<noteq> Re z" 
+            unfolding subpath_def by auto
+        qed
+        show "finite_ReZ_segments (subpath 0 s' (subpath a b g)) z"
+        proof (cases "s=a")
+          case True
+          then show ?thesis unfolding s'_def subpath_def 
+            by (auto intro:finite_ReZ_segments_constI)
+        next
+          case False
+          have "finite_Psegments (\<lambda>t. Re (g t - z) = 0) a s"
+            using insertI_2(4) unfolding finite_ReZ_segments_def by auto
+          then have "finite_Psegments ((\<lambda>t. Re (g t - z) = 0) \<circ> (\<lambda>t. (s - a) * t + a)) 0 1" 
+            apply (elim finite_Psegments_pos_linear[of _ "s-a" 0 a 1,simplified])
+          then show ?thesis 
+            by auto
+        qed
+        show "s' \<in> {0..<1}"
+          by (auto simp add:field_simps)
+        show "P (subpath 0 s' (subpath a b g)) z"
+        proof -
+          have "P (subpath a s g) z" using insertI_2(1,5) by auto
+          then show ?thesis 
+        qed
+        show "s' = 0 \<or> Re (subpath a b g s') = Re z"
+        proof -
+          have ?thesis when "s=a"
+            using that unfolding s'_def by auto
+          moreover have ?thesis when "Re (g s - z) = 0"
+            using that unfolding s'_def subpath_def by auto
+        qed
+      qed
+    qed
+    ultimately show ?case by auto
+  qed
+  then show ?thesis by auto
+qed
+
+lemma finite_ReZ_segments_shiftpah:
+  assumes "finite_ReZ_segments g z" "s\<in>{0..1}" "path g" and loop:"pathfinish g = pathstart g" 
+  shows "finite_ReZ_segments (shiftpath s g) z"
+proof -
+  have "finite_Psegments (\<lambda>t. Re (shiftpath s g t - z) = 0) 0 (1-s)"
+  proof -
+    have "finite_Psegments (\<lambda>t. Re (g t) = Re z) s 1" 
+      using assms finite_Psegments_included[of _ 0 1 s] unfolding finite_ReZ_segments_def  
+      by force   
+    then have "finite_Psegments (\<lambda>t. Re (g (s + t) - z) = 0) 0 (1-s)" 
+      using finite_Psegments_pos_linear[of "\<lambda>t. Re (g t - z) =0" 1 0 s "1-s",simplified]
+      unfolding comp_def by (auto simp add:algebra_simps)
+    then show ?thesis unfolding shiftpath_def
+      apply (elim finite_Psegments_congE)
+  qed
+  moreover have "finite_Psegments (\<lambda>t. Re (shiftpath s g t - z) = 0) (1-s) 1"  
+  proof -
+    have "finite_Psegments (\<lambda>t. Re (g t) = Re z) 0 s " 
+      using assms finite_Psegments_included unfolding finite_ReZ_segments_def  
+      by force   
+    then have "finite_Psegments (\<lambda>t. Re (g (s + t - 1) - z) = 0) (1-s) 1" 
+      using finite_Psegments_pos_linear[of "\<lambda>t. Re (g t - z) =0" 1 "1-s" "s-1" 1,simplified]
+      unfolding comp_def by (auto simp add:algebra_simps)
+    then show ?thesis unfolding shiftpath_def
+      apply (elim finite_Psegments_congE)
+  qed
+  moreover have "closed ({x. Re (shiftpath s g x - z) = 0} \<inter> {0..1})"
+  proof -
+    let ?f = "\<lambda>x. Re (shiftpath s g x - z)"  
+    have "continuous_on {0..1} ?f"
+      by (auto intro: continuous_intros)
+    from continuous_closed_preimage_constant[OF this,of 0,simplified] 
+    show ?thesis 
+      apply (elim arg_elim[of closed])
+      by force
+  qed
+  ultimately show ?thesis unfolding finite_ReZ_segments_def 
+    by (rule finite_Psegments_combine[where b="1-s"])  
+qed
+     
+lemma finite_imp_finite_ReZ_segments:
+  assumes "finite {t. Re (g t - z) = 0 \<and> 0 \<le> t \<and> t\<le>1}"
+  shows "finite_ReZ_segments g z"
+proof -
+  define P where "P = (\<lambda>t. Re (g t - z) = 0)"
+  define rs where "rs=(\<lambda>b. {t. P t \<and> 0 < t \<and> t<b})"
+  have "finite_Psegments P 0 b" when "finite (rs b)" "b>0" for b
+  using that
+  proof (induct "card (rs b)" arbitrary:b rule:nat_less_induct)
+    case ind:1
+    have ?case when "rs b= {}"
+      apply (rule finite_Psegments.intros(3)[of 0])
+    moreover have ?case when "rs b\<noteq>{}"
+    proof -
+      define lj where "lj = Max (rs b)" 
+      have "0<lj" "lj<b" "P lj"
+        unfolding rs_def by auto
+      show ?thesis 
+      proof (rule finite_Psegments.intros(3)[of lj])
+        show "lj \<in> {0..<b}" " lj = 0 \<or> P lj" 
+        show "\<forall>t\<in>{lj<..<b}. \<not> P t"
+        proof (rule ccontr)
+          assume " \<not> (\<forall>t\<in>{lj<..<b}. \<not> P t) "
+          then obtain t where t:"P t" "lj < t" "t < b" by auto
+        qed
+        show "finite_Psegments P 0 lj"
+        proof (rule ind.hyps[rule_format,of "card (rs lj)" lj,simplified])
+          show "finite (rs lj)"
+            by (auto elim!:rev_finite_subset )
+          show "card (rs lj) < card (rs b)"
+        qed
+      qed
+    qed
+    ultimately show ?case by auto 
+  qed
+  moreover have "finite (rs 1)"
+    using assms unfolding rs_def P_def
+    by (auto elim:rev_finite_subset)
+  ultimately have "finite_Psegments P 0 1" by auto
+  then show ?thesis unfolding P_def finite_ReZ_segments_def .
+qed
+  
+lemma finite_ReZ_segments_poly_linepath:
+  shows "finite_ReZ_segments (poly p o linepath a b) z" 
+proof -
+  define P where "P=map_poly Re (pcompose (p-[:z:]) [:a,b-a:])"
+  have *:"Re ((poly p \<circ> linepath a b) t - z) = 0 \<longleftrightarrow> poly P t=0" for t
+    unfolding inner_complex_def P_def linepath_def comp_def
+    apply (subst Re_poly_of_real[symmetric])
+    by (auto simp add: algebra_simps poly_pcompose scaleR_conv_of_real)
+  have ?thesis when "P\<noteq>0"
+  proof -
+    have "finite {t. poly P t=0}" using that poly_roots_finite by auto
+    then have "finite {t. Re ((poly p \<circ> linepath a b) t - z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+      using *
+      by auto
+    then show ?thesis   
+      using finite_imp_finite_ReZ_segments[of "poly p o linepath a b" z] by auto
+  qed
+  moreover have ?thesis when "P=0"
+    unfolding finite_ReZ_segments_def
+    apply (rule finite_Psegments_constI[where c=True])  
+    apply (subst *)
+    have "?l1s = ((*) (1/2)) ` ?ls l1" by (auto intro:rev_image_eqI)
+    show " \<forall>\<^sub>F x in at_right 0. (?h \<circ> (*) 2) x =?f x"
+      have "cindexE 0 (1/2) (f (g1+++g2)) = cindexE 0 (1/2) (f g1 o ((*) 2))"

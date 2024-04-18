@@ -1,0 +1,105 @@
+theory
+  LTL_alike 
+  imports 
+    Main
+begin
+
+
+fun nxt :: "('\<alpha> list \<Rightarrow> bool) \<Rightarrow> '\<alpha> list \<Rightarrow> bool" ("N")
+where 
+   "nxt p [] = False"
+|  "nxt p (a # S) = (p S)"
+
+
+fun atom :: "('\<alpha> \<Rightarrow> bool) \<Rightarrow> '\<alpha> list \<Rightarrow> bool" ("\<guillemotleft>_\<guillemotright>")
+where 
+   "atom p [] = False"
+|  "atom p (a # S) = (p a)"
+
+lemma holds_mono : "\<guillemotleft>q\<guillemotright> s \<Longrightarrow> \<guillemotleft>q\<guillemotright> (s @ t)"
+  by(cases "s",simp_all)
+
+
+fun always :: "('\<alpha> list \<Rightarrow> bool) \<Rightarrow> '\<alpha> list \<Rightarrow> bool" ("\<box>")
+where 
+   "always p [] = True"
+|  "always p (a # S) = ((p (a # S)) \<and> always p S)"
+
+lemma always_is_listall : "(\<box> \<guillemotleft>p\<guillemotright>) (t) = list_all (p) (t)"
+  by(induct "t", simp_all)
+
+fun eventually :: "('\<alpha> list \<Rightarrow> bool) \<Rightarrow> '\<alpha> list \<Rightarrow> bool" ("\<diamondsuit>")
+where 
+   "eventually p [] = False"
+|  "eventually p (a # S) = ((p (a # S)) \<or> eventually p S)"
+
+
+lemma eventually_is_listex : "(\<diamondsuit> \<guillemotleft>p\<guillemotright>) (t) = list_ex (p) (t)"
+  by(induct "t", simp_all)
+
+
+fun before :: "('\<alpha> \<Rightarrow> bool) \<Rightarrow> ('\<alpha> \<Rightarrow> bool) \<Rightarrow> '\<alpha> list \<Rightarrow> bool" 
+where 
+  "before p q [] = False"
+| "before p q (a # S) = (q a \<or> (p a \<and> (before p q S)))"
+
+
+fun not_before :: "('\<alpha> \<Rightarrow> bool) \<Rightarrow> ('\<alpha> \<Rightarrow> bool) \<Rightarrow> '\<alpha> list \<Rightarrow> bool" 
+where  
+  "not_before p q [] = False"
+| "not_before p q (a # S) = (q a \<or> (\<not> (p a) \<and> (not_before p q S)))"
+
+lemma not_before_superfluous: 
+  "not_before p q = before (Not o p) q"
+  apply(rule ext) 
+  subgoal for n 
+    apply(induct_tac "n")
+     apply(simp_all)
+    done
+  done
+    
+fun until :: "('\<alpha> list \<Rightarrow> bool) \<Rightarrow> ('\<alpha> list \<Rightarrow> bool) \<Rightarrow> '\<alpha> list \<Rightarrow> bool" (infixl "U" 66)
+where 
+  "until p q [] = False"
+| "until p q (a # S) = (\<exists> s t. a # S= s @ t \<and> p s \<and>  q t)"
+
+lemma before_vs_until: 
+"(before p q) = ((\<box>\<guillemotleft>p\<guillemotright>) U \<guillemotleft>q\<guillemotright>)"
+proof -
+  have A:"\<And>a. q a \<Longrightarrow> (\<exists>s t. [a] = s @ t \<and> \<box> \<guillemotleft>p\<guillemotright> s \<and> \<guillemotleft>q\<guillemotright> t)" 
+    apply(rule_tac x="[]" in exI)
+    apply(rule_tac x="[a]" in exI, simp)
+    done
+  have B:"\<And>a. (\<exists>s t. [a] = s @ t \<and> \<box> \<guillemotleft>p\<guillemotright> s \<and> \<guillemotleft>q\<guillemotright> t) \<Longrightarrow> q a"
+    apply auto
+    apply(case_tac "t=[]", auto simp:List.neq_Nil_conv)
+    apply(case_tac "s=[]", auto simp:List.neq_Nil_conv)
+    done
+  have C:"\<And>a aa list.(q a \<or> p a \<and> (\<exists>s t. aa # list = s @ t \<and> \<box> \<guillemotleft>p\<guillemotright> s \<and> \<guillemotleft>q\<guillemotright> t)) 
+                         \<Longrightarrow> (\<exists>s t. a # aa # list = s @ t \<and> \<box> \<guillemotleft>p\<guillemotright> s \<and> \<guillemotleft>q\<guillemotright> t)"
+    apply auto[1]
+     apply(rule_tac x="[]" in exI)
+     apply(rule_tac x="a # aa # list" in exI, simp)
+    apply(rule_tac x="a # s" in exI)
+    apply(rule_tac x="t" in exI,simp)
+    done
+  have D:"\<And>a aa list.(\<exists>s t. a # aa # list = s @ t \<and> \<box> \<guillemotleft>p\<guillemotright> s \<and> \<guillemotleft>q\<guillemotright> t)
+                         \<Longrightarrow> (q a \<or> p a \<and> (\<exists>s t. aa # list = s @ t \<and> \<box> \<guillemotleft>p\<guillemotright> s \<and> \<guillemotleft>q\<guillemotright> t))"
+    apply auto[1]
+     apply(case_tac "s", auto simp:List.neq_Nil_conv)
+    apply(case_tac "s", auto simp:List.neq_Nil_conv)
+    done
+  show ?thesis
+    apply(rule ext)
+    subgoal for n
+      apply(induct_tac "n")
+       apply(simp)
+        subgoal for x xs
+          apply(case_tac "xs")
+           apply(simp,rule iffI,erule A, erule B)
+          apply(simp,rule iffI,erule C, erule D)
+          done
+        done
+      done
+  qed
+end

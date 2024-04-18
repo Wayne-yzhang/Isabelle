@@ -1,0 +1,106 @@
+theory Constructive_Cryptography imports
+  Wiring
+begin
+
+definition "advantage \<A> res1 res2 = \<bar>spmf (connect \<A> res1) True - spmf (connect \<A> res2) True\<bar>"
+
+locale constructive_security_aux =
+  fixes real_resource :: "security \<Rightarrow> ('a + 'e, 'b + 'f) resource"
+    and ideal_resource :: "security \<Rightarrow> ('c + 'e, 'd + 'f) resource"
+    and sim :: "security \<Rightarrow> ('a, 'b, 'c, 'd) converter"
+    and \<I>_real :: "security \<Rightarrow> ('a, 'b) \<I>"
+    and \<I>_ideal :: "security \<Rightarrow> ('c, 'd) \<I>"
+    and \<I>_common :: "security \<Rightarrow> ('e, 'f) \<I>"
+    and bound :: "security \<Rightarrow> enat"
+    and lossless :: "bool"
+  assumes WT_real [WT_intro]: "\<And>\<eta>. \<I>_real \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>res real_resource \<eta> \<surd>"
+    and WT_ideal [WT_intro]: "\<And>\<eta>. \<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>res ideal_resource \<eta> \<surd>"
+    and WT_sim [WT_intro]: "\<And>\<eta>. \<I>_real \<eta>, \<I>_ideal \<eta> \<turnstile>\<^sub>C sim \<eta> \<surd>"
+    and adv: "\<And>\<A> :: security \<Rightarrow> ('a + 'e, 'b + 'f) distinguisher. 
+    \<lbrakk> \<And>\<eta>. \<I>_real \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>g \<A> \<eta> \<surd>; 
+      \<And>\<eta>. interaction_bounded_by (\<lambda>_. True) (\<A> \<eta>) (bound \<eta>);
+      \<And>\<eta>. lossless \<Longrightarrow> plossless_gpv (\<I>_real \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta>) (\<A> \<eta>) \<rbrakk>
+    \<Longrightarrow> negligible (\<lambda>\<eta>. advantage (\<A> \<eta>) (sim \<eta> |\<^sub>= 1\<^sub>C \<rhd> ideal_resource \<eta>) (real_resource \<eta>))"
+
+
+locale constructive_security =
+  constructive_security_aux real_resource ideal_resource sim \<I>_real \<I>_ideal \<I>_common bound lossless
+  for real_resource :: "security \<Rightarrow> ('a + 'e, 'b + 'f) resource"
+    and ideal_resource :: "security \<Rightarrow> ('c + 'e, 'd + 'f) resource"
+    and sim :: "security \<Rightarrow> ('a, 'b, 'c, 'd) converter"
+    and \<I>_real :: "security \<Rightarrow> ('a, 'b) \<I>"
+    and \<I>_ideal :: "security \<Rightarrow> ('c, 'd) \<I>"
+    and \<I>_common :: "security \<Rightarrow> ('e, 'f) \<I>"
+    and bound :: "security \<Rightarrow> enat"
+    and lossless :: "bool"
+    and w :: "security \<Rightarrow> ('c, 'd, 'a, 'b) wiring"
+  +
+  assumes correct: "\<exists>cnv. \<forall>\<D> :: security \<Rightarrow> ('c + 'e, 'd + 'f) distinguisher.
+    (\<forall>\<eta>. \<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>g \<D> \<eta> \<surd>) 
+  \<longrightarrow> (\<forall>\<eta>. interaction_bounded_by (\<lambda>_. True) (\<D> \<eta>) (bound \<eta>))
+  \<longrightarrow> (\<forall>\<eta>. lossless \<longrightarrow> plossless_gpv (\<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta>) (\<D> \<eta>))
+  \<longrightarrow> (\<forall>\<eta>. wiring (\<I>_ideal \<eta>) (\<I>_real \<eta>) (cnv \<eta>) (w \<eta>)) \<and>
+       negligible (\<lambda>\<eta>. advantage (\<D> \<eta>) (ideal_resource \<eta>) (cnv \<eta> |\<^sub>= 1\<^sub>C \<rhd> real_resource \<eta>))"
+
+locale constructive_security2 =
+  constructive_security_aux real_resource ideal_resource sim \<I>_real \<I>_ideal \<I>_common bound lossless
+  for real_resource :: "security \<Rightarrow> ('a + 'e, 'b + 'f) resource"
+    and ideal_resource :: "security \<Rightarrow> ('c + 'e, 'd + 'f) resource"
+    and sim :: "security \<Rightarrow> ('a, 'b, 'c, 'd) converter"
+    and \<I>_real :: "security \<Rightarrow> ('a, 'b) \<I>"
+    and \<I>_ideal :: "security \<Rightarrow> ('c, 'd) \<I>"
+    and \<I>_common :: "security \<Rightarrow> ('e, 'f) \<I>"
+    and bound :: "security \<Rightarrow> enat"
+    and lossless :: "bool"
+    and w :: "security \<Rightarrow> ('c, 'd, 'a, 'b) wiring"
+  +
+  assumes sim: "\<exists>cnv. \<forall>\<eta>. wiring (\<I>_ideal \<eta>) (\<I>_real \<eta>) (cnv \<eta>) (w \<eta>) \<and> wiring (\<I>_ideal \<eta>) (\<I>_ideal \<eta>) (cnv \<eta> \<odot> sim \<eta>) (id, id)"
+begin
+
+lemma constructive_security:
+  "constructive_security real_resource ideal_resource sim \<I>_real \<I>_ideal \<I>_common bound lossless w"
+proof
+  from sim obtain cnv
+    where w: "\<And>\<eta>. wiring (\<I>_ideal \<eta>) (\<I>_real \<eta>) (cnv \<eta>) (w \<eta>)"
+      and inverse: "\<And>\<eta>. wiring (\<I>_ideal \<eta>) (\<I>_ideal \<eta>) (cnv \<eta> \<odot> sim \<eta>) (id, id)"
+    by blast
+  show "\<exists>cnv. \<forall>\<D>. (\<forall>\<eta>. \<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>g \<D> \<eta> \<surd>)
+    \<longrightarrow> (\<forall>\<eta>. interaction_any_bounded_by (\<D> \<eta>) (bound \<eta>))
+    \<longrightarrow> (\<forall>\<eta>. lossless \<longrightarrow> plossless_gpv (\<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta>) (\<D> \<eta>))
+    \<longrightarrow> (\<forall>\<eta>. wiring (\<I>_ideal \<eta>) (\<I>_real \<eta>) (cnv \<eta>) (w \<eta>)) \<and>
+        negligible (\<lambda>\<eta>. advantage (\<D> \<eta>) (ideal_resource \<eta>) (cnv \<eta> |\<^sub>= 1\<^sub>C \<rhd> real_resource \<eta>))"
+  proof(intro strip exI conjI)
+    fix \<D> :: "security \<Rightarrow> ('c + 'e, 'd + 'f) distinguisher"
+    assume WT_D [rule_format, WT_intro]: "\<forall>\<eta>. \<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>g \<D> \<eta> \<surd>"
+      and bound [rule_format, interaction_bound]: "\<forall>\<eta>. interaction_bounded_by (\<lambda>_. True) (\<D> \<eta>) (bound \<eta>)"
+      and lossless [rule_format]: "\<forall>\<eta>. lossless \<longrightarrow> plossless_gpv (\<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta>) (\<D> \<eta>)"
+    
+    show "wiring (\<I>_ideal \<eta>) (\<I>_real \<eta>) (cnv \<eta>) (w \<eta>)" for \<eta> by fact
+
+    let ?A = "\<lambda>\<eta>. outs_\<I> (\<I>_ideal \<eta>)"
+    let ?cnv = "\<lambda>\<eta>. restrict_converter (?A \<eta>) (\<I>_real \<eta>) (cnv \<eta>)"
+    let ?\<A> = "\<lambda>\<eta>. absorb (\<D> \<eta>) (?cnv \<eta> |\<^sub>= 1\<^sub>C)"
+
+    have eq: "advantage (\<D> \<eta>) (ideal_resource \<eta>) (cnv \<eta> |\<^sub>= 1\<^sub>C \<rhd> real_resource \<eta>) =
+    advantage (?\<A> \<eta>) (sim \<eta> |\<^sub>= 1\<^sub>C \<rhd> ideal_resource \<eta>) (real_resource \<eta>)" for \<eta>
+    proof -
+      from w[of \<eta>] have [WT_intro]: "\<I>_ideal \<eta>, \<I>_real \<eta> \<turnstile>\<^sub>C cnv \<eta> \<surd>" by cases
+      have "\<I>_ideal \<eta>, \<I>_ideal \<eta> \<turnstile>\<^sub>C ?cnv \<eta> \<odot> sim \<eta> \<sim> cnv \<eta> \<odot> sim \<eta>"
+        by(rule eq_\<I>_comp_cong eq_\<I>_restrict_converter WT_intro order_refl eq_\<I>_converter_reflI)+
+      also from inverse[of \<eta>] have "\<I>_ideal \<eta>, \<I>_ideal \<eta> \<turnstile>\<^sub>C cnv \<eta> \<odot> sim \<eta> \<sim> 1\<^sub>C" by cases simp
+      finally have inverse': "\<I>_ideal \<eta>, \<I>_ideal \<eta> \<turnstile>\<^sub>C ?cnv \<eta> \<odot> sim \<eta> \<sim> 1\<^sub>C" .
+      hence "\<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta>, \<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>\<^sub>C ?cnv \<eta> \<odot> sim \<eta> |\<^sub>= 1\<^sub>C \<sim> 1\<^sub>C |\<^sub>= 1\<^sub>C"
+        by(rule parallel_converter2_eq_\<I>_cong)(intro eq_\<I>_converter_reflI WT_intro)
+      also have "\<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta>, \<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>\<^sub>C 1\<^sub>C |\<^sub>= 1\<^sub>C \<sim> 1\<^sub>C"
+        by(rule parallel_converter2_id_id)
+      also
+      have eq1: "connect (\<D> \<eta>) (?cnv \<eta> |\<^sub>= 1\<^sub>C \<rhd> sim \<eta> |\<^sub>= 1\<^sub>C \<rhd> ideal_resource \<eta>) = 
+        connect (\<D> \<eta>) (1\<^sub>C \<rhd> ideal_resource \<eta>)"
+        unfolding attach_compose[symmetric] comp_converter_parallel2 comp_converter_id_right
+        by(rule connect_eq_resource_cong WT_intro eq_\<I>_attach_on' calculation)+(fastforce intro: WT_intro)+
+
+      have *: "\<I>_ideal \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta>, \<I>_real \<eta> \<oplus>\<^sub>\<I> \<I>_common \<eta> \<turnstile>\<^sub>C ?cnv \<eta> |\<^sub>= 1\<^sub>C \<sim> cnv \<eta> |\<^sub>= 1\<^sub>C"
+        by(rule parallel_converter2_eq_\<I>_cong eq_\<I>_restrict_converter)+(auto intro: WT_intro eq_\<I>_converter_reflI)
+      have eq2: "connect (\<D> \<eta>) (?cnv \<eta> |\<^sub>= 1\<^sub>C \<rhd> real_resource \<eta>) = connect (\<D> \<eta>) (cnv \<eta> |\<^sub>= 1\<^sub>C \<rhd> real_resource \<eta>)"
+        by(rule connect_eq_resource_cong WT_intro eq_\<I>_attach_on' *)+(auto intro: WT_intro)
+    (* TODO: add symmetric case for lossless1/2 *)

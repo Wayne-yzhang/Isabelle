@@ -1,0 +1,336 @@
+theory Determinant
+imports 
+  Missing_Misc
+  Column_Operations
+  Polynomial_Interpolation.Ring_Hom
+  Polynomial_Interpolation.Missing_Unsorted
+begin
+
+definition det:: "'a mat \<Rightarrow> 'a :: comm_ring_1" where
+  "det A = (if dim_row A = dim_col A then (\<Sum> p \<in> {p. p permutes {0 ..< dim_row A}}. 
+     signof p * (\<Prod> i = 0 ..< dim_row A. A $$ (i, p i))) else 0)"
+
+lemma(in ring_hom) hom_signof[simp]: "hom (signof p) = signof p"
+  by (simp add: hom_uminus sign_def)
+
+lemma(in comm_ring_hom) hom_det[simp]: "det (map_mat hom A) = hom (det A)"
+  unfolding det_def by (auto simp: hom_distribs)
+
+lemma det_def': "A \<in> carrier_mat n n \<Longrightarrow> 
+  det A = (\<Sum> p \<in> {p. p permutes {0 ..< n}}. 
+     signof p * (\<Prod> i = 0 ..< n. A $$ (i, p i)))" unfolding det_def by auto
+
+lemma det_smult[simp]: "det (a \<cdot>\<^sub>m A) = a ^ dim_col A * det A"
+proof -
+  have [simp]: "(\<Prod>i = 0..<dim_col A. a) = a ^ dim_col A" by(subst prod_constant;simp)
+  show ?thesis
+  unfolding det_def
+  unfolding index_smult_mat
+  by (auto intro: sum.cong simp: sum_distrib_left prod.distrib)
+qed
+
+lemma det_transpose: assumes A: "A \<in> carrier_mat n n"
+  shows "det (transpose_mat A) = det A"
+proof -
+  let ?di = "\<lambda>A i j. A $$ (i,j)"
+  let ?U = "{0 ..< n}"
+  have fU: "finite ?U" by simp
+  let ?inv = "Hilbert_Choice.inv"
+  {
+    fix p
+    assume p: "p \<in> {p. p permutes ?U}"
+    from p have pU: "p permutes ?U"
+      by blast
+    have sth: "signof (?inv p) = signof p"
+      by (rule signof_inv[OF _ pU], simp)
+    from permutes_inj[OF pU]
+    have pi: "inj_on p ?U"
+      by (blast intro: subset_inj_on)
+    let ?f = "\<lambda>i. transpose_mat A $$ (i, ?inv p i)"
+    note pU_U = permutes_image[OF pU]
+    note [simp] = permutes_less[OF pU]
+    have "prod ?f ?U = prod ?f (p ` ?U)"
+      using pU_U by simp
+    also have "\<dots> = prod (?f \<circ> p) ?U"
+      by (rule prod.reindex[OF pi])
+    also have "\<dots> = prod (\<lambda>i. A $$ (i, p i)) ?U"
+      by (rule prod.cong, insert A, auto)
+    finally have "signof (?inv p) * prod ?f ?U =
+      signof p * prod (\<lambda>i. A $$ (i, p i)) ?U"
+      unfolding sth by simp
+  }
+  then show ?thesis
+    unfolding det_def using A
+    by (simp, subst sum_permutations_inverse, intro sum.cong, auto)
+qed
+
+lemma det_col:
+  assumes A: "A \<in> carrier_mat n n"
+  shows "det A = (\<Sum> p | p permutes {0 ..< n}. signof p * (\<Prod>j<n. A $$ (p j, j)))"
+    (is "_ = (sum (\<lambda>p. _ * ?prod p) ?P)")
+proof -
+  let ?i = "Hilbert_Choice.inv"
+  let ?N = "{0 ..< n}"
+  let ?f = "\<lambda>p. signof p * ?prod p"
+  let ?prod' = "\<lambda>p. \<Prod>j<n. A $$ (j, ?i p j)"
+  let ?prod'' = "\<lambda>p. \<Prod>j<n. A $$ (j, p j)"
+  let ?f' = "\<lambda>p. signof (?i p) * ?prod' p"
+  let ?f'' = "\<lambda>p. signof p * ?prod'' p"
+  let ?P' = "{ ?i p | p. p permutes ?N }"
+  have [simp]: "{0..<n} = {..<n}" by auto
+  have "sum ?f ?P = sum ?f' ?P"
+  proof (rule sum.cong[OF refl],unfold mem_Collect_eq)
+      fix p assume p: "p permutes ?N"
+      have [simp]: "?prod p = ?prod' p"
+        using permutes_prod[OF p, of "\<lambda>x y. A $$ (x,y)"] by auto
+      have [simp]: "signof p = signof (?i p)"
+        apply(rule signof_inv[symmetric]) using p by auto
+      show "?f p = ?f' p" by auto
+  qed
+  also have "... = sum ?f' ?P'"
+    by (rule sum.cong[OF image_inverse_permutations[symmetric]],auto)
+  also have "... = sum ?f'' ?P"
+    unfolding sum.reindex[OF inv_inj_on_permutes,unfolded image_Collect]
+    unfolding o_def
+    apply (rule sum.cong[OF refl])
+    using inv_inv_eq[OF permutes_bij] by force
+  finally show ?thesis unfolding det_def'[OF A] by auto
+qed
+
+lemma mat_det_left_def: assumes A: "A \<in> carrier_mat n n"
+  shows "det A = (\<Sum>p\<in>{p. p permutes {0..<dim_row A}}. signof p * (\<Prod>i = 0 ..< dim_row A. A $$ (p i, i)))"
+proof -
+  have cong: "\<And> a b c. b = c \<Longrightarrow> a * b = a * c" by simp
+  show ?thesis
+  unfolding det_transpose[OF A, symmetric]
+  unfolding det_def index_transpose_mat using A by simp
+qed
+
+lemma det_upper_triangular:
+  assumes ut: "upper_triangular A"
+  and m: "A \<in> carrier_mat n n"
+  shows "det A = prod_list (diag_mat A)"
+proof -
+  note det_def = det_def'[OF m]
+  let ?U = "{0..<n}"
+  let ?PU = "{p. p permutes ?U}"
+  let ?pp = "\<lambda>p. signof p * (\<Prod> i = 0 ..< n. A $$ (i, p i))"
+  have fU: "finite ?U"
+    by simp
+  from finite_permutations[OF fU] have fPU: "finite ?PU" .
+  have id0: "{id} \<subseteq> ?PU"
+    by (auto simp add: permutes_id)
+  {
+    fix p
+    assume p: "p \<in> ?PU - {id}"
+    from p have pU: "p permutes ?U" and pid: "p \<noteq> id"
+      by blast+
+    from permutes_natset_ge[OF pU] pid obtain i where i: "p i < i" and "i < n" 
+      by fastforce
+    have ex:"\<exists>i \<in> ?U. A $$ (i,p i) = 0" by auto
+    have "(\<Prod> i = 0 ..< n. A $$ (i, p i)) = 0" 
+      by (rule prod_zero[OF fU ex])
+    hence "?pp p = 0" by simp
+  }
+  then have p0: "\<And> p. p \<in> ?PU - {id} \<Longrightarrow> ?pp p = 0"
+    by blast
+  from m have dim: "dim_row A = n" by simp
+  have "det A = (\<Sum> p \<in> ?PU. ?pp p)" unfolding det_def by auto
+  also have "\<dots> = ?pp id + (\<Sum> p \<in> ?PU - {id}. ?pp p)"
+    by (rule sum.remove, insert id0 fPU m, auto simp: p0)
+  also have "(\<Sum> p \<in> ?PU - {id}. ?pp p) = 0"
+    by (rule sum.neutral, insert fPU, auto simp: p0)
+  finally show ?thesis using m by (auto simp: prod_list_diag_prod)
+qed
+
+lemma det_single: assumes "A \<in> carrier_mat 1 1" 
+  shows "det A = A $$ (0,0)" 
+  by (subst det_upper_triangular[of _ 1], insert assms, auto simp: diag_mat_def)
+
+lemma det_one[simp]: "det (1\<^sub>m n) = 1"
+proof -
+  have "det (1\<^sub>m n) = prod_list (diag_mat (1\<^sub>m n))"
+    by (rule det_upper_triangular[of _ n], auto)
+  also have "\<dots> = 1" by (induct n, auto)
+  finally show ?thesis .
+qed
+
+lemma det_zero[simp]: assumes "n > 0" shows "det (0\<^sub>m n n) = 0"
+proof -
+  have "det (0\<^sub>m n n) = prod_list (diag_mat (0\<^sub>m n n))"
+    by (rule det_upper_triangular[of _ n], auto)
+  finally show ?thesis .
+qed
+
+lemma det_dim_zero[simp]: "A \<in> carrier_mat 0 0 \<Longrightarrow> det A = 1"
+  unfolding det_def carrier_mat_def sign_def by auto
+
+lemma det_lower_triangular:
+  assumes ld: "\<And>i j. i < j \<Longrightarrow> j < n \<Longrightarrow> A $$ (i,j) = 0"
+  and m: "A \<in> carrier_mat n n"
+  shows "det A = prod_list (diag_mat A)"
+proof -
+  have "det A = det (transpose_mat A)" using det_transpose[OF m] by simp
+  also have "\<dots> = prod_list (diag_mat (transpose_mat A))"
+    by (rule det_upper_triangular, insert m ld, auto)
+  finally show ?thesis using m by simp
+qed
+
+lemma det_permute_rows: assumes A: "A \<in> carrier_mat n n"
+  and p: "p permutes {0 ..< (n :: nat)}"
+  shows "det (mat n n (\<lambda> (i,j). A $$ (p i, j))) = signof p * det A"
+proof -
+  let ?U = "{0 ..< (n :: nat)}"
+  have cong: "\<And> a b c. b = c \<Longrightarrow> a * b = a * c" by auto
+  have "det (mat n n (\<lambda> (i,j). A $$ (p i, j))) = 
+    (\<Sum> q \<in> {q . q permutes ?U}. signof q * (\<Prod> i \<in> ?U. A $$ (p i, q i)))"
+    unfolding det_def using A p by auto
+  also have "\<dots> = (\<Sum> q \<in> {q . q permutes ?U}. signof (q \<circ> p) * (\<Prod> i \<in> ?U. A $$ (p i, (q \<circ> p) i)))"
+    by (rule sum_permutations_compose_right[OF p])
+  finally have 1: "det (mat n n (\<lambda> (i,j). A $$ (p i, j)))
+    = (\<Sum> q \<in> {q . q permutes ?U}. signof (q \<circ> p) * (\<Prod> i \<in> ?U. A $$ (p i, (q \<circ> p) i)))" .
+  have 2: "signof p * det A = 
+    (\<Sum> q\<in>{q. q permutes ?U}. signof p * signof q * (\<Prod>i\<in> ?U. A $$ (i, q i)))"
+    unfolding det_def'[OF A] sum_distrib_left by (simp add: ac_simps)
+  show ?thesis unfolding 1 2
+  proof (rule sum.cong, insert p A, auto)
+    fix q
+    assume q: "q permutes ?U"
+    let ?inv = "Hilbert_Choice.inv"
+    from permutes_inv[OF p] have ip: "?inv p permutes ?U" .
+    have "prod (\<lambda>i. A $$ (p i, (q \<circ> p) i)) ?U = 
+      prod (\<lambda>i. A $$ ((p \<circ> ?inv p) i, (q \<circ> (p \<circ> ?inv p)) i)) ?U" unfolding o_def
+      by (rule trans[OF prod.permute[OF ip] prod.cong], insert A p q, auto)
+    also have "\<dots> = prod (\<lambda>i. A$$(i,q i)) ?U"
+      by (simp only: o_def permutes_inverses[OF p])
+    finally have thp: "prod (\<lambda>i. A $$ (p i, (q \<circ> p) i)) ?U = prod (\<lambda>i. A$$(i,q i)) ?U" .      
+    show "signof (q \<circ> p) * (\<Prod>i\<in>{0..<n}. A $$ (p i, q (p i))) =
+         signof p * signof q * (\<Prod>i\<in>{0..<n}. A $$ (i, q i))"
+      unfolding thp[symmetric] signof_compose[OF q p]
+      by (simp add: ac_simps)
+  qed
+qed
+
+lemma det_multrow_mat: assumes k: "k < n"
+  shows "det (multrow_mat n k a) = a"
+proof (rule trans[OF det_lower_triangular[of n]], unfold prod_list_diag_prod)
+  let ?f = "\<lambda> i. multrow_mat n k a $$ (i, i)"
+  have "(\<Prod>i\<in>{0..<n}. ?f i) = ?f k * (\<Prod>i\<in>{0..<n} - {k}. ?f i)"
+    by (rule prod.remove, insert k, auto)
+  also have "(\<Prod>i\<in>{0..<n} - {k}. ?f i) = 1" 
+    by (rule prod.neutral, auto)
+  finally show "(\<Prod>i\<in>{0..<dim_row (multrow_mat n k a)}. ?f i) = a" using k by simp
+qed (insert k, auto)
+
+lemma swap_rows_mat_eq_permute: 
+  "k < n \<Longrightarrow> l < n \<Longrightarrow> swaprows_mat n k l = mat n n (\<lambda>(i, j). 1\<^sub>m n $$ (transpose k l i, j))"
+  by (rule eq_matI) (auto simp add: transpose_def)
+
+lemma det_swaprows_mat: assumes k: "k < n" and l: "l < n" and kl: "k \<noteq> l"
+  shows "det (swaprows_mat n k l) = - 1"
+proof -
+  let ?n = "{0 ..< (n :: nat)}"
+  let ?p = "transpose k l"
+  have p: "?p permutes ?n"
+    by (rule permutes_swap_id, insert k l, auto)
+  show ?thesis
+    by (rule trans[OF trans[OF _ det_permute_rows[OF one_carrier_mat[of n] p]]],
+    subst swap_rows_mat_eq_permute[OF k l], auto simp: sign_swap_id kl)
+qed
+  
+lemma det_addrow_mat: 
+  assumes l: "k \<noteq> l"
+  shows "det (addrow_mat n a k l) = 1"
+proof -
+  have "det (addrow_mat n a k l) = prod_list (diag_mat (addrow_mat n a k l))"
+  proof (cases "k < l")
+    case True
+    show ?thesis
+      by (rule det_upper_triangular[of _ n], insert True, auto intro!: upper_triangularI)
+  next
+    case False
+    show ?thesis
+      by (rule det_lower_triangular[of n], insert False, auto)
+  qed
+  also have "\<dots> = 1" unfolding prod_list_diag_prod
+    by (rule prod.neutral, insert l, auto)
+  finally show ?thesis .
+qed
+
+
+lemma det_identical_rows:
+  assumes A: "A \<in> carrier_mat n n"  
+    and ij: "i \<noteq> j"
+    and i: "i < n" and j: "j < n"
+    and r: "row A i = row A j"
+  shows "det A = 0"
+proof-
+  let ?p = "transpose i j"
+  let ?n = "{0 ..< n}"
+  have sp: "signof ?p = - 1" "sign ?p = (- 1 :: int)" using ij
+    by (auto simp add: sign_swap_id)
+  let ?f = "\<lambda> p. signof p * (\<Prod>i\<in>?n. A $$ (p i, i))"
+  let ?all = "{p. p permutes ?n}"
+  let ?one = "{p. p permutes ?n \<and> sign p = (1 :: int)}"
+  let ?none = "{p. p permutes ?n \<and> sign p \<noteq> (1 :: int)}"
+  let ?pone = "(\<lambda> p. ?p o p) ` ?one"
+  have split: "?one \<union> ?none = ?all" by auto
+  have p: "?p permutes ?n" by (rule permutes_swap_id, insert i j, auto)
+  from permutes_inj[OF p] have injp: "inj ?p" by auto
+  {
+    fix q
+    assume q: "q permutes ?n"
+    have "(\<Prod>k\<in>?n. A $$ (?p (q k), k)) = (\<Prod>k\<in>?n. A $$ (q k, k))"
+    proof (rule prod.cong)
+      fix k
+      assume k: "k \<in> ?n"
+      from r have row: "row A i $ k = row A j $ k" by simp
+      hence "A $$ (i,k) = A $$ (j,k)" using k i j A by auto
+      thus "A $$ (?p (q k), k) = A $$ (q k, k)"
+        by (cases "q k = i", auto, cases "q k = j", auto)
+    qed (insert A q, auto)
+  } note * = this
+  have pp: "\<And> q. q permutes ?n \<Longrightarrow> permutation q" unfolding 
+    permutation_permutes by auto
+  have "det A = (\<Sum>p\<in> ?one \<union> ?none. ?f p)"
+    using A unfolding mat_det_left_def[OF A] split by simp
+  also have "\<dots> = (\<Sum>p\<in> ?one. ?f p) + (\<Sum>p\<in> ?none. ?f p)"
+    by (rule sum.union_disjoint, insert A, auto simp: finite_permutations)
+  also have "?none = ?pone" 
+  proof -
+    {
+      fix q
+      assume "q \<in> ?none"
+      hence q: "q permutes ?n" and sq: "sign q = (- 1 :: int)" unfolding sign_def by auto
+      from permutes_compose[OF q p] sign_compose[OF pp[OF p] pp[OF q], unfolded sp sq]
+      have "?p o q \<in> ?one" by auto
+      hence "?p o (?p o q) \<in> ?pone" by auto
+      also have "?p o (?p o q) = q"
+        by (auto simp: swap_id_eq)
+      finally have "q \<in> ?pone" .
+    }
+    moreover
+    {
+      fix pq
+      assume "pq \<in> ?pone"
+      then obtain q where q: "q \<in> ?one" and pq: "pq = ?p o q" by auto
+      from q have q: "q permutes ?n" and sq: "sign q = (1 :: int)" by auto
+      from sign_compose[OF pp[OF p] pp[OF q], unfolded sq sp]
+      have spq: "sign pq = (- 1 :: int)" unfolding pq by auto
+      from permutes_compose[OF q p] have pq: "pq permutes ?n" unfolding pq by auto
+      from pq spq have "pq \<in> ?none" by auto
+    }
+    ultimately
+    show ?thesis by blast
+  qed  
+  also have "(\<Sum>p\<in> ?pone. ?f p) = (\<Sum>p\<in> ?one. ?f (?p o p))"
+  proof (rule trans[OF sum.reindex])
+    show "inj_on ((\<circ>) ?p) ?one" 
+      using fun.inj_map[OF injp] unfolding inj_on_def by auto
+  qed simp
+  also have "(\<Sum>p\<in> ?one. ?f p) + (\<Sum>p\<in> ?one. ?f (?p o p))
+    = (\<Sum>p\<in> ?one. ?f p + ?f (?p o p))"
+    by (rule sum.distrib[symmetric])
+  also have "\<dots> = 0"
+    by (rule sum.neutral, insert A, auto simp: 
+      sp sign_compose[OF pp[OF p] pp] ij finite_permutations *)

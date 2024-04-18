@@ -1,0 +1,1264 @@
+theory VEBT_Delete imports VEBT_Pred VEBT_Succ
+begin
+
+
+
+context begin
+  interpretation VEBT_internal .
+
+fun vebt_delete :: "VEBT \<Rightarrow> nat \<Rightarrow> VEBT" where
+  "vebt_delete (Leaf a b) 0 = Leaf False b"|
+  "vebt_delete (Leaf a b) (Suc 0) = Leaf a False"|
+  "vebt_delete (Leaf a b) (Suc (Suc n)) = Leaf a b"|
+  "vebt_delete (Node None deg treeList summary) _ = (Node None deg treeList summary)"|
+  "vebt_delete (Node (Some (mi, ma)) 0 trLst smry) x = (Node (Some (mi, ma)) 0 trLst smry) "|
+  "vebt_delete (Node (Some (mi, ma)) (Suc 0) tr sm) x = (Node (Some (mi, ma)) (Suc 0) tr sm) "|
+  "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =( 
+           if (x < mi \<or> x > ma) then (Node (Some (mi, ma)) deg treeList summary)
+           else if (x = mi \<and> x = ma) then (Node None deg treeList summary)
+           else let xn = (if x = mi 
+                          then the (vebt_mint summary) * 2^(deg div 2) 
+                                + the (vebt_mint (treeList ! the (vebt_mint summary))) 
+                           else x);
+                     minn = (if x = mi then xn else mi);
+                     l = low xn (deg div 2);
+                     h = high xn (deg div 2) in
+                     if h < length treeList 
+                     then(
+                          let newnode = vebt_delete (treeList ! h) l;
+                              newlist = treeList[h:= newnode]in
+                              if minNull newnode 
+                              then( let sn = vebt_delete summary h in(
+                                   Node (Some (minn, if xn  = ma then 
+                                                       (let maxs = vebt_maxt sn in (
+                                                        if maxs = None 
+                                                        then minn 
+                                                        else 2^(deg div 2) * the maxs 
+                                                           + the (vebt_maxt (newlist ! the maxs))))
+                                                     else ma)) deg newlist sn))
+                              else (Node (Some (minn, (if xn = ma 
+                                               then h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                               else ma))) deg newlist summary ))
+                     else (Node (Some (mi, ma)) deg treeList summary))"
+
+end
+
+
+
+context VEBT_internal begin
+
+context begin
+
+lemma delt_out_of_range: 
+  assumes "x < mi \<or> x > ma" and "deg \<ge> 2" 
+  shows
+  "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =(Node (Some (mi, ma)) deg treeList summary)" 
+  using vebt_delete.simps(7)[of mi ma "deg-2" treeList summary x]
+  by (metis add_2_eq_Suc assms(1) assms(2) le_add_diff_inverse)
+
+lemma del_single_cont: 
+  assumes "x = mi \<and> x = ma" and "deg \<ge> 2" 
+  shows  "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = (Node None deg treeList summary)" 
+  using vebt_delete.simps(7)[of mi ma "deg-2" treeList summary x]
+  by (metis add_2_eq_Suc assms(1) assms(2) le_add_diff_inverse nat_less_le)
+
+lemma del_in_range: 
+  assumes "x \<ge> mi \<and> x \<le> ma" and "mi \<noteq> ma" and "deg \<ge> 2" 
+  shows
+  " vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = ( let xn = (if x = mi 
+                             then the (vebt_mint summary) * 2^(deg div 2) 
+                                      + the (vebt_mint (treeList ! the (vebt_mint summary))) 
+                             else x);
+                   minn = (if x = mi then xn else mi);
+                   l = low xn (deg div 2);
+                   h = high xn (deg div 2) in
+                    if h < length treeList 
+                       then(
+                          let newnode = vebt_delete (treeList ! h) l;
+                              newlist = treeList[h:= newnode] in
+                             if minNull newnode 
+                             then(   
+                                let sn = vebt_delete summary h in
+                               (Node (Some (minn, if xn  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then minn 
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)) 
+                                      deg newlist sn)
+                             )else 
+                               (Node (Some (minn, (if xn = ma then
+                                                    h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                                            else ma)))
+                                 deg newlist summary )
+                       )else 
+                        (Node (Some (mi, ma)) deg treeList summary))"
+  using vebt_delete.simps(7)[of mi ma "deg-2" treeList summary x] 
+  by (smt (z3) add_2_eq_Suc assms(1) assms(2) assms(3) leD le_add_diff_inverse)
+
+lemma del_x_not_mia:
+  assumes "x > mi \<and> x \<le> ma" and "mi \<noteq> ma"  and "deg \<ge> 2"  and "high x (deg div 2) = h" and
+  "low x (deg div 2) = l"and  "high x (deg div 2) < length treeList"
+  shows
+  " vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = (
+                  let  newnode = vebt_delete (treeList ! h) l;
+                              newlist = treeList[h:= newnode] in
+                             if minNull newnode 
+                             then(   
+                                let sn = vebt_delete summary h in
+                               (Node (Some (mi, if x  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then mi
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)) 
+                                      deg newlist sn)
+                             )else 
+                               (Node (Some (mi, (if x = ma then
+                                                    h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                                            else ma)))
+                                 deg newlist summary )
+)"
+  using del_in_range[of mi x ma deg treeList summary] unfolding Let_def
+  using assms(1) assms(2) assms(3) assms(4) assms(5) assms(6) nat_less_le by fastforce
+
+lemma del_x_not_mi: 
+  assumes "x > mi \<and> x \<le> ma" and "mi \<noteq> ma"  and "deg \<ge> 2"  and "high x (deg div 2) = h" and
+  "low x (deg div 2) = l"and " newnode = vebt_delete (treeList ! h) l" 
+  and "newlist = treeList[h:= newnode]" and "high x (deg div 2) < length treeList"
+  shows
+  " vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = (
+                  if minNull newnode 
+                             then(   
+                                let sn = vebt_delete summary h in
+                               (Node (Some (mi, if x  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then mi
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)) 
+                                      deg newlist sn)
+                             )else 
+                               (Node (Some (mi, (if x = ma then
+                                                    h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                                            else ma)))
+                                 deg newlist summary )
+)" using del_x_not_mia[of mi x ma deg h l treeList summary]
+  by (smt (z3) assms(1) assms(2) assms(3) assms(4) assms(5) assms(6) assms(7) assms(8))
+
+lemma del_x_not_mi_new_node_nil: 
+  assumes "x > mi \<and> x \<le> ma" and "mi \<noteq> ma"  and "deg \<ge> 2"  and "high x (deg div 2) = h" and
+    "low x (deg div 2) = l"and " newnode = vebt_delete (treeList ! h) l" and "minNull newnode " and 
+    "sn = vebt_delete summary h"  and "newlist =treeList[h:= newnode]" and  "high x (deg div 2) < length treeList"
+  shows
+  " vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =  (Node (Some (mi, if x  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then mi
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma))  deg newlist sn)"
+  using del_x_not_mi[of mi x ma deg h l newnode treeList] 
+  by (metis assms(1) assms(10) assms(2) assms(3) assms(4) assms(5) assms(6) assms(7) assms(8) assms(9))
+
+lemma del_x_not_mi_newnode_not_nil:
+  assumes "x > mi \<and> x \<le> ma" and "mi \<noteq> ma"  and "deg \<ge> 2"  and "high x (deg div 2) = h" and
+    "low x (deg div 2) = l"and " newnode = vebt_delete (treeList ! h) l" and "\<not>  minNull newnode " and
+     "newlist = treeList[h:= newnode]" and"high x (deg div 2) < length treeList"
+  shows
+  " vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =
+                               (Node (Some (mi, (if x = ma then
+                                                    h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                                            else ma)))
+                                 deg newlist summary )" 
+  using del_x_not_mi[of mi x ma deg h l newnode treeList newlist summary] 
+  using assms(1) assms(2) assms(3) assms(4) assms(5) assms(6) assms(7) assms(8) assms(9) by auto
+
+lemma del_x_mia: assumes "x = mi \<and> x < ma" and "mi \<noteq> ma"  and "deg \<ge> 2" 
+  shows "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =( 
+              let xn = the (vebt_mint summary) * 2^(deg div 2) 
+                                      + the (vebt_mint (treeList ! the (vebt_mint summary))); 
+                                             minn = xn;
+                   l = low xn (deg div 2);
+                   h = high xn (deg div 2) in
+                    if h < length treeList 
+                       then(
+                          let newnode = vebt_delete (treeList ! h) l;
+                              newlist = treeList[h:= newnode]in
+                             if minNull newnode 
+                             then(   
+                                let sn = vebt_delete summary h in
+                               (Node (Some (minn, if xn  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then minn 
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)) 
+                                      deg newlist sn)
+                             )else 
+                               (Node (Some (minn, (if xn = ma then
+                                                    h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                                            else ma)))
+                                 deg newlist summary )
+                       )else 
+                        (Node (Some (mi, ma)) deg treeList summary)
+           )"
+  using del_in_range[of mi x ma deg treeList summary]
+  using assms(1) assms(3) nat_less_le order_refl by fastforce
+
+lemma del_x_mi: 
+  assumes "x = mi \<and> x < ma" and "mi \<noteq> ma"  and "deg \<ge> 2"  and "high xn (deg div 2) = h" and
+    "xn =  the (vebt_mint summary) * 2^(deg div 2) + the (vebt_mint (treeList ! the (vebt_mint summary))) "
+    "low xn (deg div 2) = l"and  "high xn (deg div 2) < length treeList"
+  shows
+  "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =( 
+                          let newnode = vebt_delete (treeList ! h) l;
+                              newlist = treeList[h:= newnode]in
+                             if minNull newnode 
+                             then(   
+                                let sn = vebt_delete summary h in
+                               (Node (Some (xn, if xn  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then xn
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)) 
+                                      deg newlist sn)
+                             )else 
+                               (Node (Some (xn, (if xn = ma then
+                                                    h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                                            else ma)))
+                                 deg newlist summary ))
+          "
+  using del_x_mia[of x mi ma deg treeList summary]
+  by (smt (z3) assms(1) assms(2) assms(3) assms(4) assms(5) assms(6) assms(7))
+
+lemma del_x_mi_lets_in: 
+  assumes "x = mi \<and> x < ma" and "mi \<noteq> ma"  and "deg \<ge> 2"  and "high xn (deg div 2) = h" and
+    "xn =  the (vebt_mint summary) * 2^(deg div 2) + the (vebt_mint (treeList ! the (vebt_mint summary))) "
+    "low xn (deg div 2) = l"and  "high xn (deg div 2) < length treeList" and
+    " newnode = vebt_delete (treeList ! h) l" and " newlist = treeList[h:= newnode]" 
+  shows  "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =(      if minNull newnode 
+                             then(   
+                                let sn = vebt_delete summary h in
+                               (Node (Some (xn, if xn  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then xn
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)) 
+                                      deg newlist sn)
+                             )else 
+                               (Node (Some (xn, (if xn = ma then
+                                                    h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                                            else ma)))
+                                 deg newlist summary ))"
+  using del_x_mi[of x mi ma deg xn h summary treeList l]
+  by (smt (z3) assms(1) assms(2) assms(3) assms(4) assms(5) assms(6) assms(7) assms(8) assms(9))
+
+lemma del_x_mi_lets_in_minNull: 
+  assumes "x = mi \<and> x < ma" and "mi \<noteq> ma"  and "deg \<ge> 2"  and "high xn (deg div 2) = h" and
+    "xn =  the (vebt_mint summary) * 2^(deg div 2) + the (vebt_mint (treeList ! the (vebt_mint summary))) "
+    "low xn (deg div 2) = l"and  "high xn (deg div 2) < length treeList" and
+    "newnode = vebt_delete (treeList ! h) l" and " newlist =treeList[h:= newnode]" and
+    "minNull newnode " and " sn = vebt_delete summary h"
+  shows
+  "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =
+                               (Node (Some (xn, if xn  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then xn
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma))   deg newlist sn)"
+  using del_x_mi_lets_in[of x mi ma deg xn h summary treeList l newnode newlist]
+  by (metis assms(1) assms(10) assms(11) assms(2) assms(3) assms(4) assms(5) assms(6) assms(7) assms(8) assms(9))
+
+lemma del_x_mi_lets_in_not_minNull: 
+  assumes "x = mi \<and> x < ma" and "mi \<noteq> ma"  and "deg \<ge> 2"  and "high xn (deg div 2) = h" and
+    "xn =  the (vebt_mint summary) * 2^(deg div 2) + the (vebt_mint (treeList ! the (vebt_mint summary))) "
+    "low xn (deg div 2) = l"and  "high xn (deg div 2) < length treeList" and
+    " newnode = vebt_delete (treeList ! h) l" and " newlist = treeList[h:= newnode]" and
+    "\<not>minNull newnode "
+  shows
+  "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =
+                               (Node (Some (xn, (if xn = ma then
+                                                    h * 2^(deg div 2) + the( vebt_maxt (newlist ! h))
+                                                            else ma)))
+                                 deg newlist summary )" 
+  using del_x_mi_lets_in[of x mi ma deg xn h summary treeList l newnode newlist] 
+  by (meson assms(1) assms(10) assms(2) assms(3) assms(4) assms(5) assms(6) assms(7) assms(8) assms(9))
+
+theorem dele_bmo_cont_corr:"invar_vebt t n \<Longrightarrow> (both_member_options (vebt_delete t x) y \<longleftrightarrow> x \<noteq> y \<and> both_member_options t y)"
+proof(induction t n arbitrary: x y rule: invar_vebt.induct)
+  case (1 a b)
+  have "(both_member_options (vebt_delete (Leaf a b) x) y) \<Longrightarrow> (x \<noteq> y \<and> both_member_options (Leaf a b) y)"
+    by (metis One_nat_def both_member_options_def vebt_buildup.cases vebt_delete.simps(1) vebt_delete.simps(2) vebt_delete.simps(3) membermima.simps(1) naive_member.simps(1))
+  moreover have "(x \<noteq> y \<and> both_member_options (Leaf a b) y) \<Longrightarrow>(both_member_options (vebt_delete (Leaf a b) x) y)" 
+    by (metis One_nat_def both_member_options_def vebt_buildup.cases vebt_delete.simps(1) vebt_delete.simps(2) vebt_delete.simps(3) membermima.simps(1) naive_member.simps(1))
+  ultimately show ?case by blast
+next
+  case (2 treeList n summary m deg)
+  hence "deg \<ge> 2" 
+    by (metis Suc_leI deg_not_0 dual_order.strict_trans2 less_add_same_cancel1 numerals(2))
+  hence " (vebt_delete (Node None deg treeList summary) x) = (Node None deg treeList summary)" by simp
+  moreover have "\<not>vebt_member (Node None deg treeList summary) y" by simp
+  moreover hence "\<not>both_member_options (Node None deg treeList summary) y" 
+    using invar_vebt.intros(2)[of treeList n summary m deg] 2 
+    by (metis valid_member_both_member_options)
+  moreover hence "\<not>both_member_options (vebt_delete (Node None deg treeList summary) x) y" by simp
+  ultimately show ?case 
+    by force
+next
+  case (3 treeList n summary m deg)
+  hence "deg \<ge> 2" 
+    by (metis One_nat_def add_mono le_add1 numeral_2_eq_2 plus_1_eq_Suc set_n_deg_not_0)
+  hence " (vebt_delete (Node None deg treeList summary) x) = (Node None deg treeList summary)" by simp
+  moreover have "\<not>vebt_member (Node None deg treeList summary) y" by simp
+  moreover hence "\<not>both_member_options (Node None deg treeList summary) y" 
+    using invar_vebt.intros(3)[of treeList n summary m deg] 3
+    by (metis valid_member_both_member_options)
+  moreover hence "\<not>both_member_options (vebt_delete (Node None deg treeList summary) x) y" by simp
+  ultimately show ?case 
+    by force
+next
+  case (4 treeList n summary m deg mi ma)
+  hence tvalid: "invar_vebt (Node (Some (mi, ma)) deg treeList summary) deg" 
+    using invar_vebt.intros(4)[of treeList n summary m deg mi ma] by simp
+  hence "mi \<le> ma" and "deg div 2 = n" and "ma \<le> 2^deg" using 4 
+    by  (auto simp add: "4.hyps"(3) "4.hyps"(4))
+  hence dp:"deg \<ge> 2"
+    using "4.hyps"(1) "4.hyps"(3) deg_not_0 div_greater_zero_iff by blast
+  then show ?case proof(cases "x <mi \<or> x > ma")
+    case True
+    hence "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = (Node (Some (mi, ma)) deg treeList summary)" 
+    then show ?thesis 
+      by (metis "4.hyps"(7) True tvalid leD member_inv not_less_iff_gr_or_eq valid_member_both_member_options)
+  next
+    case False
+    hence "mi \<le> x \<and> x \<le> ma" by simp
+    hence "x < 2^deg"
+      using "4.hyps"(8) order.strict_trans1 by blast
+    then show ?thesis 
+    proof(cases "x = mi \<and> x = ma")
+      case True
+      hence "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = (Node None deg treeList summary)"
+      moreover hence "invar_vebt (Node None deg treeList summary) deg" 
+        using "4"(4) "4.IH"(1) "4.hyps"(1) "4.hyps"(3) "4.hyps"(4) True mi_eq_ma_no_ch tvalid invar_vebt.intros(2) by force
+      moreover hence "\<not> vebt_member (Node None deg treeList summary) y" by simp
+      moreover hence "\<not>both_member_options (Node None deg treeList summary) y" 
+        using calculation(2) valid_member_both_member_options by blast
+      then show ?thesis 
+        by (metis True calculation(1) member_inv not_less_iff_gr_or_eq tvalid valid_member_both_member_options)
+    next
+      case False
+      hence mimapr:"mi < ma"
+      then show ?thesis 
+      proof(cases "x \<noteq> mi")
+        case True
+        hence xmi:"x \<noteq> mi" by simp
+        let ?h ="high x n"
+        let ?l = "low x n"
+        have "?h < length treeList"
+        let ?newnode = "vebt_delete (treeList ! ?h) ?l" 
+        let ?newlist = "treeList[?h:= ?newnode]"
+        have "length treeList = length ?newlist" by simp
+        hence hprolist: "?newlist ! ?h = ?newnode" 
+        have nothprolist: "i \<noteq> ?h \<and> i < 2^m \<Longrightarrow> ?newlist ! i = treeList ! i" for i by auto
+        then show ?thesis 
+        proof(cases "minNull ?newnode")
+          case True
+          let ?sn = "vebt_delete summary ?h"
+          let ?newma= "(if x  = ma then (let maxs = vebt_maxt ?sn in  (if maxs = None 
+                                                                         then mi
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (?newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)"
+          let ?delsimp =" (Node (Some (mi, ?newma))  deg ?newlist ?sn)" 
+          have "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =  ?delsimp"
+            using del_x_not_mi_new_node_nil[of mi x ma deg ?h ?l ?newnode treeList ?sn summary ?newlist]
+          moreover have "both_member_options (?delsimp) y \<Longrightarrow> (x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)"
+          proof-
+            assume "both_member_options (?delsimp) y"
+            hence "y = mi \<or> y = ?newma \<or> 
+                (both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist)" 
+              using both_member_options_from_complete_tree_to_child[of deg mi ?newma ?newlist ?sn y] dp 
+              by (smt (z3) Suc_1 Suc_le_D both_member_options_def membermima.simps(4) naive_member.simps(3))
+            moreover have "y = mi \<Longrightarrow> ?thesis"
+            moreover have "y = ?newma \<Longrightarrow> ?thesis"
+            proof-
+              assume "y = ?newma"
+              show ?thesis
+              proof(cases "x =  ma")
+                case True
+                let ?maxs = "vebt_maxt ?sn"
+                have "?newma = (if ?maxs = None then mi
+                                else 2 ^ (deg div 2) * the ?maxs +   the (vebt_maxt
+                   ((treeList[(high x n):= vebt_delete (treeList !  (high  x n)) (low x n)]) !
+                    the ?maxs)))"   using True by force
+                then show ?thesis 
+                proof(cases "?maxs = None ")
+                  case True
+                  then show ?thesis 
+                next
+                  case False
+                  then obtain maxs where "Some maxs = ?maxs" by force
+                  hence "both_member_options ?sn maxs" 
+                    by (simp add: maxbmo)
+                  hence "both_member_options summary maxs \<and> maxs \<noteq> ?h"
+                    using "4.IH"(2) by blast
+                  hence "?newlist ! the ?maxs = treeList ! maxs" 
+                  have "maxs < 2^m" 
+                  hence "the (vebt_maxt  (?newlist ! the ?maxs)) = the (vebt_maxt (treeList ! maxs))" 
+                  have "\<exists> z. both_member_options(treeList ! maxs) z" 
+                  moreover have "invar_vebt (treeList ! maxs) n" using 4 
+                  ultimately obtain maxi where "Some maxi  = (vebt_maxt (treeList ! maxs))" 
+                    by (metis empty_Collect_eq maxt_corr_help_empty not_None_eq set_vebt'_def valid_member_both_member_options)
+                  hence "maxi < 2^n" 
+                  hence "both_member_options (treeList ! maxs) maxi" 
+                  hence "2 ^ (deg div 2) * the ?maxs +  the
+                   (vebt_maxt (?newlist !  the ?maxs)) = 2^n * maxs + maxi "
+                  hence "y =  2^n * maxs + maxi" 
+                  hence "both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+                  moreover hence "y \<noteq> x" 
+                  ultimately show ?thesis by force
+                qed
+              next
+                case False
+                hence "?newma = ma" by simp
+                moreover hence "y \<noteq> x" 
+                then show ?thesis 
+              qed
+            qed
+            moreover have "(both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist) \<Longrightarrow> ?thesis"
+            proof-
+              assume assm:"both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist"
+              show ?thesis
+              proof(cases "(high  y (deg div 2)) = ?h")
+                case True
+                hence "both_member_options ?newnode (low y (deg div 2)) " using hprolist   by (metis assm) 
+                moreover hence "invar_vebt (treeList ! (high y (deg div 2))) n" 
+                ultimately have "both_member_options (treeList ! ?h) (low y (deg div 2)) \<and> (low y (deg div 2)) \<noteq> (low x (deg div 2))"
+                then show ?thesis 
+              next
+                case False
+                hence "x \<noteq> y"  
+                moreover hence "(?newlist ! (high  y (deg div 2))) = treeList ! (high y (deg div 2))" using nothprolist 
+                moreover hence "both_member_options (treeList ! (high y (deg div 2)) ) (low y (deg div 2))" 
+                  using assm by presburger
+                moreover hence "both_member_options (Node (Some (mi, ma)) deg treeList summary) y" 
+                ultimately show ?thesis by blast
+              qed
+            qed
+            ultimately show ?thesis by fastforce
+          qed
+          moreover have " (x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y) \<Longrightarrow> both_member_options (?delsimp) y"
+          proof-
+            assume "(x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)"
+            hence aa:"x \<noteq> y" and bb:"y = mi \<or> y = ma \<or> (both_member_options (treeList ! (high y n)) (low y n) \<and> high y n < length treeList)" 
+            show "both_member_options (?delsimp) y"
+            proof-
+              have "y = mi \<Longrightarrow>both_member_options (?delsimp) y"
+                by (metis Suc_1 Suc_le_D both_member_options_def dp membermima.simps(4))
+              moreover have "y = ma \<Longrightarrow> both_member_options (?delsimp) y"
+                using aa maxbmo vebt_maxt.simps(3) by presburger
+              moreover have "both_member_options (treeList ! (high y n)) (low y n) \<Longrightarrow>both_member_options (?delsimp) y "
+              proof-
+                assume assmy: "both_member_options (treeList ! (high y n)) (low y n)" 
+                then show "both_member_options (?delsimp) y "
+                proof(cases "high y n = ?h")
+                  case True
+                  moreover hence "?newlist ! (high y n) = ?newnode" 
+                    using hprolist by auto
+                  hence 0:"invar_vebt (treeList !(high y n)) n" using 4 
+                  moreover have 1:"low y n \<noteq> low x n" 
+                    by (metis True aa bit_split_inv)
+                  moreover have 11:" (treeList !(high y n)) \<in> set treeList"
+                  ultimately have "  (\<forall> xa. both_member_options ?newnode xa = 
+                         ((low x n) \<noteq> xa \<and> both_member_options (treeList ! ?h) xa))"
+                    by (simp add: "4.IH"(1)) 
+                  hence "((low x n) \<noteq> xa \<and> both_member_options (treeList ! ?h) xa) \<Longrightarrow>  both_member_options ?newnode xa" for xa  by blast
+                  moreover have "((low x n) \<noteq> (low y n) \<and> both_member_options (treeList ! ?h) (low y n))" using 1 
+                    using True assmy by presburger
+                  ultimately have "both_member_options ?newnode (low y n)" by blast
+                  then show ?thesis 
+                next
+                  case False
+                  hence "?newlist ! (high y n) = treeList ! (high y n)" by auto
+                  hence "both_member_options (?newlist !(high y n)) (low y n)" 
+                    using assmy by presburger
+                  then show ?thesis 
+                qed
+              qed
+              ultimately show ?thesis using bb by fastforce
+            qed
+          qed
+          ultimately show ?thesis by metis
+        next
+          case False
+          hence notemp:"\<exists> z. both_member_options ?newnode z" 
+            using not_min_Null_member by auto
+          let ?newma = "(if x = ma then
+                                                    ?h * 2^(deg div 2) + the( vebt_maxt (?newlist ! ?h))
+                                                            else ma)"
+          let ?delsimp =" (Node (Some (mi, ?newma))  deg ?newlist summary)" 
+          have "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = ?delsimp"
+            using del_x_not_mi_newnode_not_nil[of mi x ma deg ?h ?l ?newnode treeList ?newlist summary] False xmi mimapr 
+          moreover have "both_member_options ?delsimp y 
+                      \<Longrightarrow> x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+          proof-
+            assume ssms: "both_member_options ?delsimp y "
+            hence aaaa: "y = mi \<or> y = ?newma \<or> (both_member_options (?newlist ! (high y n)) (low y n) \<and> high y n < length ?newlist)"
+            show " x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+            proof-
+              have "y = mi \<Longrightarrow>?thesis"
+                by (metis Suc_1 Suc_le_D both_member_options_def dp membermima.simps(4) xmi)
+              moreover have " y = ?newma \<Longrightarrow> ?thesis"
+              proof-
+                assume "y = ?newma"
+                show ?thesis
+                proof(cases "x = ma")
+                  case True
+                  hence "?newma =?h * 2 ^ (deg div 2) +the(vebt_maxt(?newlist ! ?h))" 
+                    by metis
+                  have "?newlist ! ?h = ?newnode"   using hprolist by blast
+                  obtain maxi where maxidef:"Some maxi = vebt_maxt(?newlist ! ?h)"
+                    by (metis False hprolist vebt_maxt.elims minNull.simps(1) minNull.simps(4))
+                  have aa:"invar_vebt (treeList ! ?h) n" 
+                  moreover hence ab:"maxi \<noteq> ?l \<and> both_member_options ?newnode maxi" 
+                  ultimately have ac:"maxi \<noteq> ?l \<and> both_member_options (treeList ! ?h)  maxi" 
+                  hence ad:"maxi < 2^n" 
+                  then show ?thesis
+                next
+                  case False
+                  then show ?thesis
+                qed
+              qed
+              moreover have "both_member_options (?newlist ! (high y n)) (low y n) \<Longrightarrow> ?thesis"
+              proof-
+                assume assmy:"both_member_options (?newlist ! (high y n)) (low y n)"
+                then show ?thesis
+                proof(cases "high y n = ?h")
+                  case True
+                  hence "?newlist ! (high y n) = ?newnode" 
+                    using hprolist by presburger
+                  have "invar_vebt (treeList ! ?h) n"
+                  hence "low y n \<noteq> ?l \<and> both_member_options (treeList ! ?h ) (low y n)" 
+                  then show ?thesis 
+                next
+                  case False
+                  hence "?newlist ! (high y n) = treeList !(high y n)" by auto
+                  then show ?thesis 
+                qed
+              qed
+              ultimately show ?thesis 
+                using aaaa by fastforce
+            qed
+          qed
+
+          moreover have "(x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)\<Longrightarrow>
+                                both_member_options ?delsimp y"
+          proof-
+            assume assm: "x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+            hence abcv:"y = mi \<or> y = ma \<or> ( high y n < length treeList \<and> both_member_options (treeList ! (high y n)) (low y n))" 
+            thus " both_member_options ?delsimp y"
+            proof-
+              have "y = mi \<Longrightarrow> ?thesis"
+                by (metis Suc_1 Suc_le_D both_member_options_def dp membermima.simps(4))
+              moreover have " y = ma \<Longrightarrow> ?thesis" 
+                using assm maxbmo vebt_maxt.simps(3) by presburger
+              moreover have " both_member_options (treeList ! (high y n)) (low y n) \<Longrightarrow> ?thesis"
+              proof-
+                assume myass: "both_member_options (treeList ! (high y n)) (low y n) "
+                thus ?thesis
+                proof(cases "high y n = ?h")
+                  case True
+                  hence "low y n \<noteq> ?l" 
+                    by (metis assm bit_split_inv)
+                  hence pp:"?newlist ! ?h = ?newnode" 
+                    using hprolist by blast
+                  hence "invar_vebt (treeList ! ?h) n"
+                  hence "both_member_options ?newnode (low y n)" 
+                  then show ?thesis 
+                next
+                  case False
+                  hence pp:"?newlist ! (high y n) = treeList ! (high y n)" using nothprolist by auto
+                  then show ?thesis 
+                qed
+              qed 
+              then show ?thesis
+            qed
+          qed
+          ultimately show ?thesis by metis
+        qed
+      next
+        case False
+        hence "x = mi" by simp
+        have "both_member_options summary (high ma n)" 
+          by (metis "4"(10) "4"(11) "4"(7) "4.hyps"(4) div_eq_0_iff Suc_leI Suc_le_D div_exp_eq dual_order.irrefl high_def mimapr nat.simps(3))
+        hence "vebt_member summary (high ma n)" 
+          using "4.hyps"(1) valid_member_both_member_options by blast
+        obtain summin where "Some summin = vebt_mint summary" 
+        hence "\<exists> z . both_member_options (treeList ! summin) z"
+          by (metis "4.hyps"(1) "4.hyps"(5) both_member_options_equiv_member member_bound mint_member)
+        moreover have "invar_vebt (treeList ! summin) n"
+        ultimately obtain lx where "Some lx = vebt_mint (treeList ! summin)" 
+          by (metis empty_Collect_eq mint_corr_help_empty not_None_eq set_vebt'_def valid_member_both_member_options)
+        let ?xn = "summin*2^n + lx" 
+        have "?xn =  (if x = mi 
+                             then the (vebt_mint summary) * 2^(deg div 2) 
+                                      + the (vebt_mint (treeList ! the (vebt_mint summary))) 
+                             else x)" 
+        have "vebt_member (treeList ! summin) lx"  
+        moreover have "summin < 2^m" 
+        ultimately have xnin: "both_member_options (Node (Some (mi, ma)) deg treeList summary) ?xn"
+        let ?h ="high ?xn n"
+        let ?l = "low ?xn n"
+        have "?xn < 2^deg"
+        hence "?h < length treeList" 
+        let ?newnode = "vebt_delete (treeList ! ?h) ?l" 
+        let ?newlist = "treeList[?h:= ?newnode]"
+        have "length treeList = length ?newlist" by simp
+        hence hprolist: "?newlist ! ?h = ?newnode"
+        have nothprolist: "i \<noteq> ?h \<and> i < 2^m \<Longrightarrow> ?newlist ! i = treeList ! i" for i by simp
+        have firstsimp: "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =(
+                          let newnode = vebt_delete (treeList ! ?h) ?l;
+                              newlist = (take ?h treeList @ [ newnode]@drop (?h+1) treeList)in
+                             if minNull newnode 
+                             then(   
+                                let sn = vebt_delete summary ?h in
+                               (Node (Some (?xn, if ?xn  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then ?xn
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)) 
+                                      deg newlist sn)
+                             )else 
+                               (Node (Some (?xn, (if ?xn = ma then
+                                                    ?h * 2^(deg div 2) + the( vebt_maxt (newlist ! ?h))
+                                                            else ma)))
+                                 deg newlist summary ))" 
+          using del_x_mi[of x mi ma deg ?xn ?h summary treeList ?l] 
+        have minxnrel: "?xn \<noteq> mi" 
+        then show ?thesis
+        proof(cases "minNull ?newnode")
+          case True
+          let ?sn = "vebt_delete summary ?h"
+          let ?newma= "(if ?xn= ma then (let maxs = vebt_maxt ?sn in 
+                                                                      (if maxs = None 
+                                                                         then ?xn
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (?newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)"
+          let ?delsimp =" (Node (Some (?xn, ?newma))  deg ?newlist ?sn)" 
+          have "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =  ?delsimp"
+          moreover have "both_member_options (?delsimp) y \<Longrightarrow> (x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)"
+          proof-
+            assume "both_member_options (?delsimp) y"
+            hence "y = ?xn \<or> y = ?newma \<or> 
+                (both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist)" 
+              using both_member_options_from_complete_tree_to_child[of deg mi ?newma ?newlist ?sn y] dp 
+              by (smt (z3) Suc_1 Suc_le_D both_member_options_def membermima.simps(4) naive_member.simps(3))
+            moreover have "y = ?xn \<Longrightarrow> ?thesis" 
+            moreover have "y = ?newma \<Longrightarrow> ?thesis"
+            proof-
+              assume asmt: "y = ?newma"
+              show ?thesis
+              proof(cases "?xn =  ma")
+                case True
+                let ?maxs = "vebt_maxt ?sn"
+                have newmaext:"?newma = (if ?maxs = None then ?xn
+                                else 2 ^ (deg div 2) * the ?maxs +   the (vebt_maxt
+                  ( ?newlist ! the ?maxs)))"   using True by force
+                then show ?thesis 
+                proof(cases "?maxs = None ")
+                  case True
+                  hence aa:"?newma = ?xn" using newmaext by auto
+                  hence bb: "?newma \<noteq> x" 
+                    using False minxnrel by presburger
+                  hence "both_member_options (Node (Some (mi, ma)) deg treeList summary) ?xn"
+                    using xnin newmaext minxnrel asmt by simp
+                  moreover have "?xn = y" using aa asmt by simp
+                  ultimately have "both_member_options (Node (Some (mi, ma)) deg treeList summary) y" by simp
+                  then show ?thesis using bb
+                next
+                  case False
+                  then obtain maxs where "Some maxs = ?maxs" by force
+                  hence "both_member_options ?sn maxs" 
+                    by (simp add: maxbmo)
+                  hence "both_member_options summary maxs \<and> maxs \<noteq> ?h"
+                    using "4.IH"(2) by blast
+                  hence "?newlist ! the ?maxs = treeList ! maxs"
+                  have "maxs < 2^m"
+                  hence "the (vebt_maxt  (?newlist ! the ?maxs)) = the (vebt_maxt (treeList ! maxs))" 
+                  have "\<exists> z. both_member_options(treeList ! maxs) z" 
+                  moreover have "invar_vebt (treeList ! maxs) n" using 4 
+                  ultimately obtain maxi where "Some maxi  = (vebt_maxt (treeList ! maxs))" 
+                    by (metis empty_Collect_eq maxt_corr_help_empty not_None_eq set_vebt'_def valid_member_both_member_options)
+                  hence "maxi < 2^n" 
+                  hence "both_member_options (treeList ! maxs) maxi" 
+                  hence "2 ^ (deg div 2) * the ?maxs +  the
+                   (vebt_maxt (?newlist !  the ?maxs)) = 2^n * maxs + maxi "
+                  hence "?newma =  2^n * maxs + maxi" 
+                    using False True by auto
+                  hence "y =   2^n * maxs + maxi" using asmt by simp 
+                  hence "both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+                  moreover hence "y \<noteq> x" 
+                  ultimately show ?thesis by force
+                qed
+              next
+                case False
+                hence "?newma = ma" by simp
+                moreover hence "mi \<noteq> ma" 
+                  using mimapr by blast
+                moreover hence "y \<noteq> x"  
+                then show ?thesis 
+              qed
+            qed
+            moreover have "(both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist) \<Longrightarrow> ?thesis"
+            proof-
+              assume assm:"both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist"
+              show ?thesis
+              proof(cases "(high  y (deg div 2)) = ?h")
+                case True
+                hence 000:"both_member_options ?newnode (low y (deg div 2)) " using hprolist   by (metis assm) 
+                hence 001:"invar_vebt (treeList ! (high y (deg div 2))) n" 
+                then show ?thesis
+                proof(cases "low y n = ?l")
+                  case True
+                  hence "y = ?xn" 
+                  then show ?thesis
+                    using calculation(2) by blast
+                next
+                  case False 
+                  hence "both_member_options (treeList ! ?h) (low y (deg div 2)) \<and> (low y (deg div 2)) \<noteq> (low ?xn (deg div 2))"
+                    by (metis "000")
+                  then show ?thesis 
+                qed
+              next
+                case False
+                hence "x \<noteq> y" 
+                moreover hence "(?newlist ! (high  y (deg div 2))) = treeList ! (high y (deg div 2))" using nothprolist 
+                moreover hence "both_member_options (treeList ! (high y (deg div 2)) ) (low y (deg div 2))" 
+                  using assm by presburger
+                moreover hence "both_member_options (Node (Some (mi, ma)) deg treeList summary) y" 
+                ultimately show ?thesis by blast
+              qed
+            qed
+            ultimately show ?thesis by fastforce
+          qed
+          moreover have "(x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)\<Longrightarrow>
+                                both_member_options ?delsimp y"
+          proof-
+            assume assm: "x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+            hence abcv:"y = mi \<or> y = ma \<or> ( high y n < length treeList \<and> both_member_options (treeList ! (high y n)) (low y n))" 
+            thus " both_member_options ?delsimp y"
+            proof-
+              have "y = mi \<Longrightarrow> ?thesis" 
+                using False assm by force
+              moreover have " y = ma \<Longrightarrow> ?thesis" 
+                by (smt (z3) Suc_le_D both_member_options_def dp membermima.simps(4) nat_1_add_1 plus_1_eq_Suc)
+              moreover have " both_member_options (treeList ! (high y n)) (low y n) \<Longrightarrow> ?thesis"
+              proof-
+                assume myass: "both_member_options (treeList ! (high y n)) (low y n) "
+                thus ?thesis
+                proof(cases "high y n = ?h")
+                  case True
+                  hence "high y n = ?h" by simp
+                  then show ?thesis 
+                  proof(cases "low y n = ?l")
+                    case True
+                    hence "y = ?xn" 
+                    then show ?thesis 
+                      by (metis Suc_le_D both_member_options_def dp membermima.simps(4) nat_1_add_1 plus_1_eq_Suc)
+                  next
+                    case False
+                    hence "low y n \<noteq> ?l" 
+                      by (metis assm bit_split_inv)
+                    hence pp:"?newlist ! ?h = ?newnode" 
+                      using hprolist by blast
+                    hence "invar_vebt (treeList ! ?h) n"
+                    hence "both_member_options ?newnode (low y n)" 
+                    then show ?thesis  
+                  qed
+                next
+                  case False
+                  hence pp:"?newlist ! (high y n) = treeList ! (high y n)" using nothprolist abcv
+                    by (metis "4.hyps"(1) "4.hyps"(3) "4.hyps"(4) assm deg_not_0 exp_split_high_low(1) member_bound tvalid valid_member_both_member_options)          
+                  then show ?thesis 
+                qed
+              qed 
+              then show ?thesis 
+                using abcv calculation(1) calculation(2) by fastforce
+            qed
+          qed
+          ultimately show ?thesis by metis
+        next
+          case False
+          hence notemp:"\<exists> z. both_member_options ?newnode z" 
+            using not_min_Null_member by auto
+          let ?newma = "(if ?xn = ma then
+                                                    ?h * 2^(deg div 2) + the( vebt_maxt (?newlist ! ?h))
+                                                            else ma)"
+          let ?delsimp =" (Node (Some (?xn, ?newma))  deg ?newlist summary)" 
+          have "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = ?delsimp" 
+            using del_x_mi_lets_in_not_minNull[of x mi ma deg ?xn ?h summary treeList ?l ?newnode ?newlist] 
+          moreover have "both_member_options ?delsimp y 
+                      \<Longrightarrow> x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+          proof-
+            assume ssms: "both_member_options ?delsimp y "
+            hence aaaa: "y = ?xn \<or> y = ?newma \<or> (both_member_options (?newlist ! (high y n)) (low y n) \<and> high y n < length ?newlist)"
+            show " x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+            proof-
+              have "y = ?xn \<Longrightarrow>?thesis"
+              moreover have " y = ?newma \<Longrightarrow> ?thesis"
+              proof-
+                assume "y = ?newma"
+                show ?thesis
+                proof(cases "?xn = ma")
+                  case True
+                  hence aaa:"?newma =?h * 2 ^ (deg div 2) +the(vebt_maxt(?newlist ! ?h))" 
+                    by metis
+                  have "?newlist ! ?h = ?newnode"   using hprolist by blast
+                  obtain maxi where maxidef:"Some maxi = vebt_maxt(?newlist ! ?h)"
+                    by (metis False hprolist vebt_maxt.elims minNull.simps(1) minNull.simps(4))
+                  have aa:"invar_vebt (treeList ! ?h) n" 
+                  moreover hence ab:"maxi \<noteq> ?l \<and> both_member_options ?newnode maxi" 
+                  ultimately have ac:"maxi \<noteq> ?l \<and> both_member_options (treeList ! ?h)  maxi" 
+                  hence ad:"maxi < 2^n" 
+                    by (meson aa member_bound valid_member_both_member_options)
+                next
+                  case False
+                  then show ?thesis 
+                qed
+              qed
+              moreover have "(both_member_options (?newlist ! (high y n)) (low y n)\<and> high y n < length ?newlist) \<Longrightarrow> ?thesis"
+              proof-
+                assume assmy:"(both_member_options (?newlist ! (high y n)) (low y n)\<and> high y n < length ?newlist)"
+                then show ?thesis
+                proof(cases "high y n = ?h")
+                  case True
+                  hence "?newlist ! (high y n) = ?newnode" 
+                    using hprolist by presburger
+                  have "invar_vebt (treeList ! ?h) n"
+                  then show ?thesis
+                  proof(cases "low y n= ?l")
+                    case True
+                    hence "y = ?xn"
+                    then show ?thesis 
+                      using calculation(1) by blast
+                  next
+                    case False 
+                    hence "low y n \<noteq> ?l \<and> both_member_options (treeList ! ?h ) (low y n)" using assmy 
+                    then show ?thesis 
+                  qed
+                next
+                  case False
+                  hence "?newlist ! (high y n) = treeList !(high y n)" 
+                  hence "both_member_options (treeList !(high y n)) (low y n)" 
+                    using assmy by presburger 
+                  moreover have "x \<noteq> y" 
+                  moreover have "high y n < length ?newlist"  using assmy by blast
+                  moreover hence "high y n < length treeList" 
+                  ultimately show ?thesis 
+                qed
+              qed
+              ultimately show ?thesis 
+                using aaaa by fastforce
+            qed
+          qed
+
+          moreover have "(x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)\<Longrightarrow>
+                                both_member_options ?delsimp y"
+          proof-
+            assume assm: "x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+            hence abcv:"y = mi \<or> y = ma \<or> ( high y n < length treeList \<and> both_member_options (treeList ! (high y n)) (low y n))" 
+            thus " both_member_options ?delsimp y"
+            proof-
+              have "y = mi \<Longrightarrow> ?thesis" 
+              moreover have " y = ma \<Longrightarrow> ?thesis" 
+                by (smt (z3) Suc_1 Suc_le_D both_member_options_def dp membermima.simps(4))
+              moreover have " ( high y n < length treeList \<and> both_member_options (treeList ! (high y n)) (low y n))
+                                  \<Longrightarrow> ?thesis"
+              proof-
+                assume myass: "(  high y n < length treeList \<and> both_member_options (treeList ! (high y n)) (low y n)) "
+                thus ?thesis
+                proof(cases "high y n = ?h")
+                  case True
+                  then show ?thesis
+                  proof(cases "low y n = ?l")
+                    case True
+                    then show ?thesis
+                  next
+                    case False
+                    hence "low y n \<noteq> ?l" by simp
+                    hence pp:"?newlist ! ?h = ?newnode" 
+                      using hprolist by blast
+                    hence "invar_vebt (treeList ! ?h) n"
+                    hence "both_member_options ?newnode (low y n)" 
+                    then show ?thesis 
+                  qed
+                next
+                  case False
+                  have pp:"?newlist ! (high y n) = treeList ! (high y n)"
+                    using nothprolist[of "high y n"] False 
+                    by (metis "4.hyps"(1) "4.hyps"(3) "4.hyps"(4) assm deg_not_0 exp_split_high_low(1) member_bound tvalid valid_member_both_member_options)
+                  then show ?thesis 
+                qed
+              qed 
+              then show ?thesis 
+                using abcv calculation(1) calculation(2) by fastforce
+            qed
+          qed
+          ultimately show ?thesis by metis
+        qed
+      qed
+    qed
+  qed
+next
+  case (5 treeList n summary m deg mi ma)
+  hence tvalid: "invar_vebt (Node (Some (mi, ma)) deg treeList summary) deg" 
+    using invar_vebt.intros(5)[of treeList n summary m deg mi ma] by simp
+  hence "mi \<le> ma" and "deg div 2 = n" and "ma \<le> 2^deg" using 5 
+    by  (auto simp add: "5.hyps"(3) "5.hyps"(4))
+  hence dp:"deg \<ge> 2" 
+    by (meson vebt_maxt.simps(3) maxt_member member_inv tvalid)
+  hence nmpr:"n\<ge> 1 \<and> m = Suc n" 
+  then show ?case proof(cases "x <mi \<or> x > ma")
+    case True
+    hence "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = (Node (Some (mi, ma)) deg treeList summary)" 
+    then show ?thesis 
+      by (metis "5.hyps"(7) True tvalid leD member_inv not_less_iff_gr_or_eq valid_member_both_member_options)
+  next
+    case False
+    hence "mi \<le> x \<and> x \<le> ma" by simp
+    hence xdegrel:"x < 2^deg"
+      using "5.hyps"(8) order.strict_trans1 by blast
+    then show ?thesis 
+    proof(cases "x = mi \<and> x = ma")
+      case True
+      hence "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = (Node None deg treeList summary)"
+      moreover hence "invar_vebt (Node None deg treeList summary) deg" 
+        using "5"(4) "5.IH"(1) "5.hyps"(1) "5.hyps"(3) "5.hyps"(4) True mi_eq_ma_no_ch
+          tvalid invar_vebt.intros(3) by force
+      moreover hence "\<not> vebt_member (Node None deg treeList summary) y" by simp
+      moreover hence "\<not>both_member_options (Node None deg treeList summary) y" 
+        using calculation(2) valid_member_both_member_options by blast
+      then show ?thesis 
+        by (metis True calculation(1) member_inv not_less_iff_gr_or_eq tvalid valid_member_both_member_options)
+    next
+      case False
+      hence mimapr:"mi < ma"
+      then show ?thesis 
+      proof(cases "x \<noteq> mi")
+        case True
+        hence xmi:"x \<noteq> mi" by simp
+        let ?h ="high x n"
+        let ?l = "low x n"
+        have "?h < length treeList" using xdegrel 5 
+        let ?newnode = "vebt_delete (treeList ! ?h) ?l" 
+        let ?newlist = "treeList[?h:=?newnode]"
+        have "length treeList = length ?newlist" by simp
+        hence hprolist: "?newlist ! ?h = ?newnode"
+        have nothprolist: "i \<noteq> ?h \<and> i < 2^m \<Longrightarrow> ?newlist ! i = treeList ! i" for i by simp
+        then show ?thesis 
+        proof(cases "minNull ?newnode")
+          case True
+          let ?sn = "vebt_delete summary ?h"
+          let ?newma= "(if x  = ma then (let maxs = vebt_maxt ?sn in 
+                                                                      (if maxs = None 
+                                                                         then mi
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (?newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)"
+          let ?delsimp =" (Node (Some (mi, ?newma))  deg ?newlist ?sn)" 
+          have "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =  ?delsimp"
+            using del_x_not_mi_new_node_nil[of mi x ma deg ?h ?l ?newnode treeList ?sn summary ?newlist]
+          moreover have "both_member_options (?delsimp) y \<Longrightarrow> (x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)"
+          proof-
+            assume "both_member_options (?delsimp) y"
+            hence "y = mi \<or> y = ?newma \<or> 
+                (both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist)" 
+              using both_member_options_from_complete_tree_to_child[of deg mi ?newma ?newlist ?sn y] dp 
+              by (smt (z3) Suc_1 Suc_le_D both_member_options_def membermima.simps(4) naive_member.simps(3))
+            moreover have "y = mi \<Longrightarrow> ?thesis"
+            moreover have "y = ?newma \<Longrightarrow> ?thesis"
+            proof-
+              assume "y = ?newma"
+              show ?thesis
+              proof(cases "x =  ma")
+                case True
+                let ?maxs = "vebt_maxt ?sn"
+                have newmapropy:"?newma = (if ?maxs = None then mi
+                                else 2 ^ (deg div 2) * the ?maxs +   the (vebt_maxt
+                   (?newlist !
+                    the ?maxs)))"   using True by force
+                then show ?thesis 
+                proof(cases "?maxs = None ")
+                  case True
+                  then show ?thesis 
+                next
+                  case False
+                  then obtain maxs where "Some maxs = ?maxs" by force
+                  hence "both_member_options ?sn maxs" 
+                    by (simp add: maxbmo)
+                  hence "both_member_options summary maxs \<and> maxs \<noteq> ?h"
+                    using "5.IH"(2) by blast
+                  hence "?newlist ! the ?maxs = treeList ! maxs" 
+                  have "maxs < 2^m" 
+                  hence "the (vebt_maxt  (?newlist ! the ?maxs)) = the (vebt_maxt (treeList ! maxs))" 
+                  have "\<exists> z. both_member_options(treeList ! maxs) z" 
+                  moreover have "invar_vebt (treeList ! maxs) n" using 5 
+                  ultimately obtain maxi where "Some maxi  = (vebt_maxt (treeList ! maxs))" 
+                    by (metis empty_Collect_eq maxt_corr_help_empty not_None_eq set_vebt'_def valid_member_both_member_options)
+                  hence "maxi < 2^n" 
+                  hence "both_member_options (treeList ! maxs) maxi" 
+                  hence "2 ^ (deg div 2) * the ?maxs +  the
+                   (vebt_maxt (?newlist !  the ?maxs)) = 2^n * maxs + maxi "
+                  hence "y =  2^n * maxs + maxi" 
+                  hence "both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+                  moreover hence "y \<noteq> x" 
+                  ultimately show ?thesis by force
+                qed
+              next
+                case False
+                hence "?newma = ma" by simp
+                moreover hence "y \<noteq> x" 
+                then show ?thesis 
+              qed
+            qed
+            moreover have "(both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist) \<Longrightarrow> ?thesis"
+            proof-
+              assume assm:"both_member_options (?newlist ! (high  y (deg div 2))) (low y (deg div 2)) \<and> (high y (deg div 2)) < length ?newlist"
+              show ?thesis
+              proof(cases "(high  y (deg div 2)) = ?h")
+                case True
+                hence "both_member_options ?newnode (low y (deg div 2)) " using hprolist   by (metis assm) 
+                moreover hence "invar_vebt (treeList ! (high y (deg div 2))) n" 
+                ultimately have "both_member_options (treeList ! ?h) (low y (deg div 2)) \<and> (low y (deg div 2)) \<noteq> (low x (deg div 2))"
+                then show ?thesis 
+              next
+                case False
+                hence "x \<noteq> y"  
+                moreover hence "(?newlist ! (high  y (deg div 2))) = treeList ! (high y (deg div 2))" using nothprolist 
+                moreover hence "both_member_options (treeList ! (high y (deg div 2)) ) (low y (deg div 2))" 
+                  using assm by presburger
+                moreover hence "both_member_options (Node (Some (mi, ma)) deg treeList summary) y" 
+                ultimately show ?thesis by blast
+              qed
+            qed
+            ultimately show ?thesis by fastforce
+          qed
+          moreover have " (x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y) \<Longrightarrow> both_member_options (?delsimp) y"
+          proof-
+            assume "(x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)"
+            hence aa:"x \<noteq> y" and bb:"y = mi \<or> y = ma \<or> (both_member_options (treeList ! (high y n)) (low y n) \<and> high y n < length treeList)" 
+            show "both_member_options (?delsimp) y"
+            proof-
+              have "y = mi \<Longrightarrow>both_member_options (?delsimp) y"
+                by (metis Suc_1 Suc_le_D both_member_options_def dp membermima.simps(4))
+              moreover have "y = ma \<Longrightarrow> both_member_options (?delsimp) y"
+                using aa maxbmo vebt_maxt.simps(3) by presburger
+              moreover have "both_member_options (treeList ! (high y n)) (low y n) \<Longrightarrow>both_member_options (?delsimp) y "
+              proof-
+                assume assmy: "both_member_options (treeList ! (high y n)) (low y n)" 
+                then show "both_member_options (?delsimp) y "
+                proof(cases "high y n = ?h")
+                  case True
+                  moreover hence "?newlist ! (high y n) = ?newnode" 
+                    using hprolist by auto
+                  hence 0:"invar_vebt (treeList !(high y n)) n" using 5 
+                  moreover have 1:"low y n \<noteq> low x n" 
+                    by (metis True aa bit_split_inv)
+                  moreover have 11:" (treeList !(high y n)) \<in> set treeList"
+                  ultimately have "  (\<forall> xa. both_member_options ?newnode xa = 
+                         ((low x n) \<noteq> xa \<and> both_member_options (treeList ! ?h) xa))"
+                    by (simp add: "5.IH"(1)) 
+                  hence "((low x n) \<noteq> xa \<and> both_member_options (treeList ! ?h) xa) \<Longrightarrow>  both_member_options ?newnode xa" for xa  by blast
+                  moreover have "((low x n) \<noteq> (low y n) \<and> both_member_options (treeList ! ?h) (low y n))" using 1 
+                    using True assmy by presburger
+                  ultimately have "both_member_options ?newnode (low y n)" by blast
+                  then show ?thesis 
+                next
+                  case False
+                  hence "?newlist ! (high y n) = treeList ! (high y n)" by auto
+                  hence "both_member_options (?newlist !(high y n)) (low y n)" 
+                    using assmy by presburger
+                  then show ?thesis 
+                qed
+              qed
+              ultimately show ?thesis using bb by fastforce
+            qed
+          qed
+          ultimately show ?thesis by metis
+        next
+          case False
+          hence notemp:"\<exists> z. both_member_options ?newnode z" 
+            using not_min_Null_member by auto
+          let ?newma = "(if x = ma then
+                                                    ?h * 2^(deg div 2) + the( vebt_maxt (?newlist ! ?h))
+                                                            else ma)"
+          let ?delsimp =" (Node (Some (mi, ?newma))  deg ?newlist summary)" 
+          have "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x = ?delsimp"
+            using del_x_not_mi_newnode_not_nil[of mi x ma deg ?h ?l ?newnode treeList ?newlist summary] False xmi mimapr 
+          moreover have "both_member_options ?delsimp y 
+                      \<Longrightarrow> x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+          proof-
+            assume ssms: "both_member_options ?delsimp y "
+            hence aaaa: "y = mi \<or> y = ?newma \<or> (both_member_options (?newlist ! (high y n)) (low y n) \<and> high y n < length ?newlist)"
+            show " x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+            proof-
+              have "y = mi \<Longrightarrow>?thesis"
+                by (metis Suc_1 Suc_le_D both_member_options_def dp membermima.simps(4) xmi)
+              moreover have " y = ?newma \<Longrightarrow> ?thesis"
+              proof-
+                assume "y = ?newma"
+                show ?thesis
+                proof(cases "x = ma")
+                  case True
+                  hence "?newma =?h * 2 ^ (deg div 2) +the(vebt_maxt(?newlist ! ?h))" 
+                    by metis
+                  have "?newlist ! ?h = ?newnode"   using hprolist by blast
+                  obtain maxi where maxidef:"Some maxi = vebt_maxt(?newlist ! ?h)"
+                    by (metis False hprolist vebt_maxt.elims minNull.simps(1) minNull.simps(4))
+                  have aa:"invar_vebt (treeList ! ?h) n" 
+                  moreover hence ab:"maxi \<noteq> ?l \<and> both_member_options ?newnode maxi" 
+                  ultimately have ac:"maxi \<noteq> ?l \<and> both_member_options (treeList ! ?h)  maxi" 
+                  hence ad:"maxi < 2^n" 
+                  then show ?thesis
+                next
+                  case False
+                  then show ?thesis
+                qed
+              qed
+              moreover have "both_member_options (?newlist ! (high y n)) (low y n) \<Longrightarrow> ?thesis"
+              proof-
+                assume assmy:"both_member_options (?newlist ! (high y n)) (low y n)"
+                then show ?thesis
+                proof(cases "high y n = ?h")
+                  case True
+                  hence "?newlist ! (high y n) = ?newnode" 
+                    using hprolist by presburger
+                  have "invar_vebt (treeList ! ?h) n"
+                  hence "low y n \<noteq> ?l \<and> both_member_options (treeList ! ?h ) (low y n)" 
+                  then show ?thesis 
+                next
+                  case False
+                  hence "?newlist ! (high y n) = treeList !(high y n)" by auto
+                  then show ?thesis 
+                qed
+              qed 
+              ultimately show ?thesis 
+                using aaaa by fastforce
+            qed
+          qed
+          moreover have "(x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y)\<Longrightarrow>
+                                both_member_options ?delsimp y"
+          proof-
+            assume assm: "x \<noteq> y \<and> both_member_options (Node (Some (mi, ma)) deg treeList summary) y"
+            hence abcv:"y = mi \<or> y = ma \<or> ( high y n < length treeList \<and> both_member_options (treeList ! (high y n)) (low y n))" 
+            thus " both_member_options ?delsimp y"
+            proof-
+              have "y = mi \<Longrightarrow> ?thesis"
+                by (metis Suc_1 Suc_le_D both_member_options_def dp membermima.simps(4))
+              moreover have " y = ma \<Longrightarrow> ?thesis" 
+                using assm maxbmo vebt_maxt.simps(3) by presburger
+              moreover have " both_member_options (treeList ! (high y n)) (low y n) \<Longrightarrow> ?thesis"
+              proof-
+                assume myass: "both_member_options (treeList ! (high y n)) (low y n) "
+                thus ?thesis
+                proof(cases "high y n = ?h")
+                  case True
+                  hence "low y n \<noteq> ?l" 
+                    by (metis assm bit_split_inv)
+                  hence pp:"?newlist ! ?h = ?newnode" 
+                    using hprolist by blast
+                  hence "invar_vebt (treeList ! ?h) n"
+                  hence "both_member_options ?newnode (low y n)" 
+                  then show ?thesis 
+                next
+                  case False
+                  hence pp:"?newlist ! (high y n) = treeList ! (high y n)" using nothprolist abcv by auto
+                  then show ?thesis 
+                qed
+              qed 
+              then show ?thesis 
+                using abcv calculation(1) calculation(2) by fastforce
+            qed
+          qed
+          ultimately show ?thesis by metis
+        qed
+      next
+        case False
+        hence "x = mi" by simp
+        have "both_member_options summary (high ma n)" 
+          by (metis "5"(10) "5"(11) "5"(7) "5.hyps"(4) div_eq_0_iff Suc_leI Suc_le_D div_exp_eq dual_order.irrefl high_def mimapr nat.simps(3))
+        hence "vebt_member summary (high ma n)" 
+          using "5.hyps"(1) valid_member_both_member_options by blast
+        obtain summin where "Some summin = vebt_mint summary" 
+        hence "\<exists> z . both_member_options (treeList ! summin) z"
+          by (metis "5.hyps"(1) "5.hyps"(5) both_member_options_equiv_member member_bound mint_member)
+        moreover have "invar_vebt (treeList ! summin) n" 
+        ultimately obtain lx where "Some lx = vebt_mint (treeList ! summin)" 
+          by (metis empty_Collect_eq mint_corr_help_empty not_None_eq set_vebt'_def valid_member_both_member_options)
+        let ?xn = "summin*2^n + lx" 
+        have "?xn =  (if x = mi 
+                             then the (vebt_mint summary) * 2^(deg div 2) 
+                                      + the (vebt_mint (treeList ! the (vebt_mint summary))) 
+                             else x)" 
+        have "vebt_member (treeList ! summin) lx"  
+        moreover have "summin < 2^m" 
+        ultimately have xnin: "both_member_options (Node (Some (mi, ma)) deg treeList summary) ?xn"
+        let ?h ="high ?xn n"
+        let ?l = "low ?xn n"
+        have "?xn < 2^deg"
+        hence "?h < length treeList"
+        let ?newnode = "vebt_delete (treeList ! ?h) ?l" 
+        let ?newlist = "treeList[?h:= ?newnode]"
+        have "length treeList = length ?newlist" by simp
+        hence hprolist: "?newlist ! ?h = ?newnode" 
+        have nothprolist: "i \<noteq> ?h \<and> i < 2^m \<Longrightarrow> ?newlist ! i = treeList ! i" for i by simp
+        have firstsimp: "vebt_delete (Node (Some (mi, ma)) deg treeList summary) x =(
+                          let newnode = vebt_delete (treeList ! ?h) ?l;
+                              newlist = treeList[?h:= ?newnode] in
+                             if minNull newnode 
+                             then(   
+                                let sn = vebt_delete summary ?h in
+                               (Node (Some (?xn, if ?xn  = ma then (let maxs = vebt_maxt sn in 
+                                                                      (if maxs = None 
+                                                                         then ?xn
+                                                                         else 2^(deg div 2) * the maxs 
+                                                                               + the (vebt_maxt (newlist ! the maxs))
+                                                                       )
+                                                                   )
+                                                              else ma)) 
+                                      deg newlist sn)
+                             )else 
+                               (Node (Some (?xn, (if ?xn = ma then
+                                                    ?h * 2^(deg div 2) + the( vebt_maxt (newlist ! ?h))
+                                                            else ma)))
+                                 deg newlist summary ))" 
+          using del_x_mi[of x mi ma deg ?xn ?h summary treeList ?l] 

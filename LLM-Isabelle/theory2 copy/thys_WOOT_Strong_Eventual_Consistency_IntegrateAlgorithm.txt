@@ -1,0 +1,71 @@
+theory IntegrateAlgorithm
+  imports BasicAlgorithms Data
+begin
+
+fun fromSome :: "'a option \<Rightarrow> error + 'a"
+  where
+    "fromSome (Some x) = return x" |
+    "fromSome None = error (STR ''Expected Some'')"
+
+lemma fromSome_ok_simp [simp]: "(fromSome x = Inr y) = (x = Some y)"
+  by (cases x, simp+)
+
+fun substr :: "'a list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> 'a list" where
+  "substr s l u = take (u - (Suc l)) (drop l s)"
+
+fun concurrent ::
+  "('\<I>, '\<Sigma>) woot_character list
+  \<Rightarrow> nat
+  \<Rightarrow> nat
+  \<Rightarrow> ('\<I>, '\<Sigma>) woot_character
+  \<Rightarrow> error + ('\<I> extended list)"
+  where
+    "concurrent s l u w =
+      do {
+        p_pos \<leftarrow> idx s (P w);
+        s_pos \<leftarrow> idx s (S w);
+        return (if (p_pos \<le> l \<and> s_pos \<ge> u) then [\<lbrakk>I w\<rbrakk>] else [])
+      }"
+
+function integrate_insert
+  where
+    "integrate_insert m w p s =
+      do {
+        l \<leftarrow> idx w p;
+        u \<leftarrow> idx w s;
+        assert (l < u);
+        if Suc l = u then
+          return ((take l w)@[to_woot_char m]@(drop l w))
+        else do {
+          d \<leftarrow> mapM (concurrent w l u) (substr w l u);
+          assert (concat d \<noteq> []);
+          (p', s') \<leftarrow> fromSome (find ((\<lambda>x.\<lbrakk>I m\<rbrakk> < x \<or> x = s) \<circ> snd) 
+                        (zip (p#concat d) (concat d@[s])));
+          integrate_insert m w p' s'
+        }
+      }"
+  by fastforce+
+
+fun integrate_delete ::
+  "('\<I> :: linorder) delete_message
+  \<Rightarrow> ('\<I>, '\<Sigma>) woot_character list
+  \<Rightarrow> error + ('\<I>, '\<Sigma>) woot_character list"
+  where
+    "integrate_delete (DeleteMessage i) s =
+      do {
+        k \<leftarrow> idx s \<lbrakk>i\<rbrakk>;
+        w \<leftarrow> nth s k;
+        list_update s k 
+          (case w of (InsertMessage p i u _) \<Rightarrow> InsertMessage p i u None)
+      }"
+
+fun integrate ::
+  "('\<I>, '\<Sigma>) woot_character list
+  \<Rightarrow> ('\<I> :: linorder, '\<Sigma>) message
+  \<Rightarrow> error + ('\<I>, '\<Sigma>) woot_character list"
+  where
+    "integrate s (Insert m) = integrate_insert m s (P m) (S m)" |
+    "integrate s (Delete m) = integrate_delete m s"
+
+
+end

@@ -1,0 +1,445 @@
+theory Dirichlet_L_Functions
+imports 
+  Dirichlet_Characters
+  "HOL-Library.Landau_Symbols"
+  "Zeta_Function.Zeta_Function"
+begin
+
+
+bundle vec_lambda_notation
+begin
+notation vec_lambda (binder "\<chi>" 10)
+end
+
+bundle no_vec_lambda_notation
+begin
+no_notation vec_lambda (binder "\<chi>" 10)
+end
+
+
+
+context
+  includes no_vec_lambda_notation
+begin
+
+definition Dirichlet_L :: "nat \<Rightarrow> (nat \<Rightarrow> complex) \<Rightarrow> complex \<Rightarrow> complex" where
+  "Dirichlet_L m \<chi> s = 
+     (if s = 1 then 
+        if \<chi> = principal_dchar m then 0 else eval_fds (fds \<chi>) 1
+      else 
+        of_nat m powr - s * (\<Sum>k = 1..m. \<chi> k * hurwitz_zeta (real k / real m) s))"
+
+lemma Dirichlet_L_conv_hurwitz_zeta_nonprincipal:
+  assumes "s \<noteq> 1"
+  shows   "Dirichlet_L n \<chi> s =
+             of_nat n powr -s * (\<Sum>k = 1..n. \<chi> k * hurwitz_zeta (real k / real n) s)"
+  using assms by (simp add: Dirichlet_L_def)
+
+lemma holomorphic_Dirichlet_L_weak:
+  assumes "m > 0" "1 \<notin> A"
+  shows   "Dirichlet_L m \<chi> holomorphic_on A"
+proof -
+  have "(\<lambda>s. of_nat m powr - s * (\<Sum>k = 1..m. \<chi> k * hurwitz_zeta (real k / real m) s))
+           holomorphic_on A"
+    using assms unfolding Dirichlet_L_def by (intro holomorphic_intros) auto
+  also have "?this \<longleftrightarrow> ?thesis"
+    using assms by (intro holomorphic_cong refl) (auto simp: Dirichlet_L_def)
+  finally show ?thesis .
+qed
+
+end
+
+
+context dcharacter
+begin
+context
+  includes no_vec_lambda_notation dcharacter_syntax
+begin
+
+lemma
+  fixes s :: complex
+  assumes s: "Re s > 1"
+  shows   abs_summable_Dirichlet_L:  "summable (\<lambda>n. norm (\<chi> n * of_nat n powr -s))"
+    and   summable_Dirichlet_L:      "summable (\<lambda>n. \<chi> n * of_nat n powr -s)"
+    and   sums_Dirichlet_L:          "(\<lambda>n. \<chi> n * n powr -s) sums Dirichlet_L n \<chi> s"
+    and   Dirichlet_L_conv_eval_fds_weak: "Dirichlet_L n \<chi> s = eval_fds (fds \<chi>) s"
+proof -
+  define L where "L = (\<Sum>n. \<chi> n * of_nat n powr -s)"
+  show "summable (\<lambda>n. norm (\<chi> n * of_nat n powr -s))"
+    by (subst summable_Suc_iff [symmetric], 
+        rule summable_comparison_test [OF _ summable_zeta_real[of "Re s"]])
+        (insert s norm, auto intro!: exI[of _ 0] simp: norm_mult norm_powr_real_powr)
+  thus summable: "summable (\<lambda>n. \<chi> n * of_nat n powr -s)"
+    by (rule summable_norm_cancel)
+
+  hence "(\<lambda>n. \<chi> n * of_nat n powr -s) sums L" by (simp add: L_def sums_iff)
+  from this have "(\<lambda>m. \<Sum>k = m * n..<m * n + n. \<chi> k * of_nat k powr - s) sums L"
+    by (rule sums_group) (use n in auto)
+  also have "(\<lambda>m. \<Sum>k = m * n..<m * n + n. \<chi> k * of_nat k powr - s) = 
+               (\<lambda>m. of_nat n powr -s * (\<Sum>k = 1..n. \<chi> k * (of_nat m + of_nat k / of_nat n) powr - s))"
+  proof (rule ext, goal_cases)
+    case (1 m)
+    have "(\<Sum>k = m * n..<m * n + n. \<chi> k * of_nat k powr - s) = 
+            (\<Sum>k=0..<n. \<chi> (k + m * n) * of_nat (m * n + k) powr - s)"
+      by (intro sum.reindex_bij_witness[of _ "\<lambda>k. k + m * n" "\<lambda>k. k - m * n"]) auto
+    also have "\<dots> = (\<Sum>k=0..<n. \<chi> k * of_nat (m * n + k) powr - s)"
+      by (simp add: periodic_mult)
+    also have "\<dots> = (\<Sum>k=0..<n. \<chi> k * (of_nat m + of_nat k / of_nat n) powr - s * of_nat n powr -s)"
+    proof (intro sum.cong refl, goal_cases)
+      case (1 k)
+      have "of_nat (m * n + k) = (of_nat m + of_nat k / of_nat n :: complex) * of_nat n"
+        using n by (simp add: divide_simps del: div_mult_self1 div_mult_self2 div_mult_self3 div_mult_self4)
+      also have "\<dots> powr -s = (of_nat m + of_nat k / of_nat n) powr -s * of_nat n powr -s"
+        by (rule powr_times_real) auto
+      finally show ?case by simp
+    qed
+    also have "\<dots> = of_nat n powr -s * (\<Sum>k=0..<n. \<chi> k * (of_nat m + of_nat k / of_nat n) powr - s)"
+      by (subst sum_distrib_left) (simp_all add: mult_ac)
+    also have "(\<Sum>k = 0..<n. \<chi> k * (of_nat m + of_nat k / of_nat n) powr - s) =
+                 (\<Sum>k = 1..<n. \<chi> k * (of_nat m + of_nat k / of_nat n) powr - s)"
+      by (intro sum.mono_neutral_right) (auto simp: Suc_le_eq)
+    also have "\<dots> = (\<Sum>k = 1..n. \<chi> k * (of_nat m + of_nat k / of_nat n) powr - s)"
+      using periodic_mult[of 0 1] by (intro sum.mono_neutral_left) auto
+    finally show ?case .
+  qed
+  finally have "\<dots> sums L" .
+  moreover have "(\<lambda>m. of_nat n powr - s * (\<Sum>k=1..n. \<chi> k * (of_nat m + of_real (of_nat k / of_nat n)) powr - s)) sums
+                   (of_nat n powr - s * (\<Sum>k=1..n. \<chi> k * hurwitz_zeta (of_nat k / of_nat n) s))"
+    using s by (intro sums_sum sums_mult sums_hurwitz_zeta) auto
+  ultimately have "L = \<dots>"
+    by (simp add: sums_iff)
+  also have "\<dots> = Dirichlet_L n \<chi> s" using assms by (auto simp: Dirichlet_L_def)
+  finally have "Dirichlet_L n \<chi> s = (\<Sum>n. \<chi> n * of_nat n powr -s)"
+    by (simp add: L_def)
+  with summable show "(\<lambda>n. \<chi> n * n powr -s) sums Dirichlet_L n \<chi> s"
+    by (simp add: sums_iff L_def)
+  thus "Dirichlet_L n \<chi> s = eval_fds (fds \<chi>) s"
+    by (simp add: eval_fds_def sums_iff powr_minus field_simps fds_nth_fds')
+qed
+
+lemma fds_abs_converges_weak: "Re s > 1 \<Longrightarrow> fds_abs_converges (fds \<chi>) s"
+  using abs_summable_Dirichlet_L[of s]
+  by (simp add: fds_abs_converges_def powr_minus divide_simps fds_nth_fds')
+
+lemma abs_conv_abscissa_weak: "abs_conv_abscissa (fds \<chi>) \<le> 1"
+proof (rule abs_conv_abscissa_leI, goal_cases)
+  case (1 c)
+  thus ?case
+    by (intro exI[of _ "of_real c"] conjI fds_abs_converges_weak) auto
+qed
+
+
+lemma
+  fixes s :: complex assumes s: "Re s > 1"
+  shows   Dirichlet_L_euler_product_LIMSEQ:
+            "(\<lambda>n. \<Prod>p\<le>n. if prime p then inverse (1 - \<chi> p / nat_power p s) else 1)
+                \<longlonglongrightarrow> Dirichlet_L n \<chi> s" (is ?th1)
+    and   Dirichlet_L_abs_convergent_euler_product:
+            "abs_convergent_prod (\<lambda>p. if prime p  then inverse (1 - \<chi> p / p powr s) else 1)" 
+            (is ?th2)
+proof -
+  have mult: "completely_multiplicative_function (fds_nth (fds \<chi>))"
+    using mult.completely_multiplicative_function_axioms by (simp add: fds_nth_fds')
+  have conv: "fds_abs_converges (fds \<chi>) s"
+    using abs_summable_Dirichlet_L[OF s]
+    by (simp add: fds_abs_converges_def fds_nth_fds' powr_minus divide_simps)
+  have "(\<lambda>n. \<Prod>p\<le>n. if prime p then inverse (1 - \<chi> p / nat_power p s) else 1)
+          \<longlonglongrightarrow> eval_fds (fds \<chi>) s"
+    using fds_euler_product_LIMSEQ' [OF mult conv] by (simp add: fds_nth_fds' cong: if_cong)
+  also have "eval_fds (fds \<chi>) s = Dirichlet_L n \<chi> s"
+    using sums_Dirichlet_L[OF s] unfolding eval_fds_def
+    by (simp add: sums_iff fds_nth_fds' powr_minus divide_simps)
+  finally show ?th1 .
+  from fds_abs_convergent_euler_product' [OF mult conv] show ?th2
+      by (simp add: fds_nth_fds cong: if_cong)
+  qed
+  
+lemma Dirichlet_L_Re_gt_1_nonzero:
+  assumes "Re s > 1"
+  shows   "Dirichlet_L n \<chi> s \<noteq> 0"
+proof -
+  have "completely_multiplicative_function (fds_nth (fds \<chi>))"
+    by (simp add: fds_nth_fds' mult.completely_multiplicative_function_axioms)
+  moreover have "fds_abs_converges (fds \<chi>) s"
+    using abs_summable_Dirichlet_L[OF assms] 
+    by (simp add: fds_abs_converges_def fds_nth_fds' powr_minus divide_simps)
+  ultimately have "(eval_fds (fds \<chi>) s = 0) \<longleftrightarrow> (\<exists>p. prime p \<and> fds_nth (fds \<chi>) p = nat_power p s)"
+    by (rule fds_abs_convergent_zero_iff)
+  also have "eval_fds (fds \<chi>) s = Dirichlet_L n \<chi> s"
+    using Dirichlet_L_conv_eval_fds_weak[OF assms] by simp
+  also have "\<not>(\<exists>p. prime p \<and> fds_nth (fds \<chi>) p = nat_power p s)"
+  proof safe
+    fix p :: nat assume p: "prime p" "fds_nth (fds \<chi>) p = nat_power p s"
+    from p have "real 1 < real p" by (subst of_nat_less_iff) (auto simp: prime_gt_Suc_0_nat)
+    also have "\<dots> = real p powr 1" by simp
+    also from p and assms have "real p powr 1 \<le> real p powr Re s" 
+      by (intro powr_mono) (auto simp: real_of_nat_ge_one_iff prime_ge_Suc_0_nat)
+    also have "\<dots> = norm (nat_power p s)" by (simp add: norm_nat_power norm_powr_real_powr)
+    also have "nat_power p s = fds_nth (fds \<chi>) p" using p by simp
+    also have "norm \<dots> \<le> 1" by (auto simp: fds_nth_fds' norm)
+    finally show False by simp
+  qed
+  finally show ?thesis .
+qed
+
+lemma sum_dcharacter_antimono_bound:
+  fixes x0 a b :: real and f f' :: "real \<Rightarrow> real"
+  assumes nonprincipal: "\<chi> \<noteq> \<chi>\<^sub>0"
+  assumes x0: "x0 \<ge> 0" and ab: "x0 \<le> a" "a < b"
+  assumes f': "\<And>x. x \<ge> x0 \<Longrightarrow> (f has_field_derivative f' x) (at x)"
+  assumes f_nonneg: "\<And>x. x \<ge> x0 \<Longrightarrow> f x \<ge> 0"
+  assumes f'_nonpos: "\<And>x. x \<ge> x0 \<Longrightarrow> f' x \<le> 0"
+  shows   "norm (\<Sum>n\<in>real -` {a<..b}. \<chi> n * (f (real n))) \<le> 2 * real (totient n) * f a"
+proof -
+  note deriv = has_field_derivative_at_within [OF f']
+  let ?A = "sum_upto \<chi>"
+  have cont: "continuous_on {a..b} f"
+    by (rule DERIV_continuous_on[OF deriv]) (use ab in auto)
+  have I': "(f' has_integral (f b - f a)) {a..b}"
+    using ab deriv by (intro fundamental_theorem_of_calculus)
+                      (auto simp: has_real_derivative_iff_has_vector_derivative [symmetric])
+
+  define I where "I = integral {a..b} (\<lambda>t. ?A t * of_real (f' t))"
+  define C where "C = real (totient n)"
+  have C_nonneg: "C \<ge> 0" by (simp add: C_def)
+  have C: "norm (?A x) \<le> C" for x
+  proof -
+    have "?A x = (\<Sum>k\<le>nat \<lfloor>x\<rfloor>. \<chi> k)" unfolding sum_upto_altdef
+      by (intro sum.mono_neutral_left) auto
+    also have "norm \<dots> \<le> C" unfolding C_def using nonprincipal
+      by (rule sum_dcharacter_atMost_le)
+    finally show ?thesis .
+  qed
+    
+  have I: "((\<lambda>t. ?A t * f' t) has_integral ?A b * f b - ?A a * f a - 
+             (\<Sum>n\<in>real -` {a<..b}. \<chi> n * f (real n))) {a..b}" using ab x0 cont f'
+    by (intro partial_summation_strong[of "{}"] has_vector_derivative_of_real) auto
+  hence "(\<Sum>n\<in>real -` {a<..b}. \<chi> n * f (real n)) = ?A b * f b - ?A a * f a - I"
+    by (simp add: has_integral_iff I_def)
+  also have "norm \<dots> \<le> norm (?A b) * norm (f b) + norm (?A a) * norm (f a) + norm I"
+    by (rule order.trans[OF norm_triangle_ineq4] add_mono)+ (simp_all add: norm_mult)
+  also have "norm I \<le> integral {a..b} (\<lambda>t. of_real (-C) * of_real (f' t))" 
+    unfolding I_def using I I' f'_nonpos ab C
+    by (intro integral_norm_bound_integral integrable_on_cmult_left)
+       (simp_all add: has_integral_iff norm_mult mult_right_mono_neg)
+  also have "\<dots> = - (C * (f b - f a))"
+    using integral_linear[OF _ bounded_linear_of_real, of f' "{a..b}"] I'
+    by (simp add: has_integral_iff o_def )
+  also have "\<dots> = C * (f a - f b)" by (simp add: algebra_simps)
+  also have "norm (sum_upto \<chi> b) \<le> C" by (rule C)
+  also have "norm (sum_upto \<chi> a) \<le> C" by (rule C)
+  also have "C * norm (f b) + C * norm (f a) + C * (f a - f b) = 2 * C * f a"
+    using f_nonneg[of a] f_nonneg[of b] ab by (simp add: algebra_simps)
+  finally show ?thesis by (simp add: mult_right_mono C_def)
+qed
+
+lemma summable_dcharacter_antimono:
+  fixes x0 a b :: real and f f' :: "real \<Rightarrow> real"
+  assumes nonprincipal: "\<chi> \<noteq> \<chi>\<^sub>0"
+  assumes f': "\<And>x. x \<ge> x0 \<Longrightarrow> (f has_field_derivative f' x) (at x)"
+  assumes f_nonneg: "\<And>x. x \<ge> x0 \<Longrightarrow> f x \<ge> 0"
+  assumes f'_nonpos: "\<And>x. x \<ge> x0 \<Longrightarrow> f' x \<le> 0"
+  assumes lim: "(f \<longlongrightarrow> 0) at_top"
+  shows   "summable (\<lambda>n. \<chi> n * f n)"
+proof (rule summable_bounded_partials [where ?g = "\<lambda>x. 2 * real (totient n) * f x"], goal_cases)
+  case 1
+  from eventually_ge_at_top[of "nat \<lceil>x0\<rceil>"] show ?case
+  proof eventually_elim
+    case (elim x)
+    show ?case
+    proof (safe, goal_cases)
+      case (1 a b)
+      with elim have *: "max 0 x0 \<ge> 0" "max 0 x0 \<le> a" "real a < real b" 
+        by (simp_all add: nat_le_iff ceiling_le_iff)
+      have "(\<Sum>n\<in>{a<..b}. \<chi> n * complex_of_real (f (real n))) =
+              (\<Sum>n\<in>real -` {real a<..real b}. \<chi> n * complex_of_real (f (real n)))"
+        by (intro sum.cong refl) auto
+      also have "norm \<dots> \<le> 2 * real (totient n) * f a"
+        using nonprincipal * f' f_nonneg f'_nonpos by (rule sum_dcharacter_antimono_bound) simp_all
+      finally show ?case .
+    qed
+  qed
+qed (auto intro!: tendsto_mult_right_zero filterlim_compose[OF lim] filterlim_real_sequentially)
+
+lemma conv_abscissa_le_0:
+  fixes s :: real
+  assumes nonprincipal: "\<chi> \<noteq> \<chi>\<^sub>0"
+  shows  "conv_abscissa (fds \<chi>) \<le> 0"
+proof (rule conv_abscissa_leI)
+  fix s assume s: "0 < ereal s"
+  have "summable (\<lambda>n. \<chi> n * of_real (n powr -s))"
+  proof (rule summable_dcharacter_antimono[of 1])
+    fix x :: real assume "x \<ge> 1"
+    thus "((\<lambda>x. x powr -s) has_field_derivative (-s * x powr (-s-1))) (at x)"
+      by (auto intro!: derivative_eq_intros)
+  qed (insert s assms, auto intro!: tendsto_neg_powr filterlim_ident)
+  thus "\<exists>s'::complex. s' \<bullet> 1 = s \<and> fds_converges (fds \<chi>) s'" using s
+    by (intro exI[of _ "of_real s"]) 
+       (auto simp: fds_converges_def powr_minus divide_simps powr_of_real [symmetric] fds_nth_fds')
+qed
+
+lemma summable_Dirichlet_L':
+  assumes nonprincipal: "\<chi> \<noteq> \<chi>\<^sub>0"
+  assumes s: "Re s > 0"
+  shows  "summable (\<lambda>n. \<chi> n * of_nat n powr -s)"
+proof -
+  from assms have "fds_converges (fds \<chi>) s"
+    by (intro fds_converges le_less_trans[OF conv_abscissa_le_0]) auto
+  thus ?thesis by (simp add: fds_converges_def powr_minus divide_simps fds_nth_fds')
+qed
+
+lemma 
+  assumes "\<chi> \<noteq> \<chi>\<^sub>0"
+  shows   Dirichlet_L_conv_eval_fds: "\<And>s. Re s > 0 \<Longrightarrow> Dirichlet_L n \<chi> s = eval_fds (fds \<chi>) s"
+    and   holomorphic_Dirichlet_L:   "Dirichlet_L n \<chi> holomorphic_on A"
+proof -
+  show eq: "Dirichlet_L n \<chi> s = eval_fds (fds \<chi>) s" (is "?f s = ?g s") if "Re s > 0" for s
+  proof (cases "s = 1")
+    case False
+    show ?thesis
+    proof (rule analytic_continuation_open[where ?f = ?f and ?g = ?g])
+      show "{s. Re s > 1} \<subseteq> {s. Re s > 0} - {1}" by auto
+      show "connected ({s. 0 < Re s} - {1})"
+        using aff_dim_halfspace_gt[of 0 "1::complex"]
+        by (intro connected_punctured_convex convex_halfspace_Re_gt) auto
+    qed (insert that n assms False, 
+         auto intro!: convex_halfspace_Re_gt open_halfspace_Re_gt exI[of _ 2] 
+                      holomorphic_intros holomorphic_Dirichlet_L_weak
+                      Dirichlet_L_conv_eval_fds_weak le_less_trans[OF conv_abscissa_le_0])
+  qed (insert assms, simp_all add: Dirichlet_L_def)
+
+  have "Dirichlet_L n \<chi> holomorphic_on UNIV"
+  proof (rule no_isolated_singularity')
+    from n show "Dirichlet_L n \<chi> holomorphic_on (UNIV - {1})"
+      by (intro holomorphic_Dirichlet_L_weak) auto
+  next
+    fix s :: complex assume s: "s \<in> {1}"
+    show "Dirichlet_L n \<chi> \<midarrow>s\<rightarrow> Dirichlet_L n \<chi> s"
+    proof (rule Lim_transform_eventually)
+      from assms have "continuous_on {s. Re s > 0} (eval_fds (fds \<chi>))"
+        by (intro holomorphic_fds_eval holomorphic_on_imp_continuous_on)
+          (auto intro: le_less_trans[OF conv_abscissa_le_0])
+      hence "eval_fds (fds \<chi>) \<midarrow>s\<rightarrow> eval_fds (fds \<chi>) s" using s
+        by (subst (asm) continuous_on_eq_continuous_at) (auto simp: open_halfspace_Re_gt isCont_def)
+      also have "eval_fds (fds \<chi>) s = Dirichlet_L n \<chi> s"
+        using assms s by (simp add: Dirichlet_L_def)
+      finally show "eval_fds (fds \<chi>) \<midarrow>s\<rightarrow> Dirichlet_L n \<chi> s" .
+    next
+      have "eventually (\<lambda>z. z \<in> {z. Re z > 0}) (nhds s)" using s
+        by (intro eventually_nhds_in_open) (auto simp: open_halfspace_Re_gt)
+      hence "eventually (\<lambda>z. z \<in> {z. Re z > 0}) (at s)"
+        unfolding eventually_at_filter by eventually_elim auto
+      then show "eventually (\<lambda>z. eval_fds (fds \<chi>) z = Dirichlet_L n \<chi> z) (at s)"
+        by eventually_elim (auto intro!: eq [symmetric])
+    qed
+  qed auto
+  thus "Dirichlet_L n \<chi> holomorphic_on A" by (rule holomorphic_on_subset) auto
+qed
+
+lemma cnj_Dirichlet_L: 
+  "cnj (Dirichlet_L n \<chi> s) = Dirichlet_L n (inv_character \<chi>) (cnj s)"
+proof -
+  {
+    assume *: "\<chi> \<noteq> \<chi>\<^sub>0" "s = 1"
+    with summable_Dirichlet_L'[of 1] have "(\<lambda>n. \<chi> n / n) sums eval_fds (fds \<chi>) 1"
+      by (simp add: eval_fds_def fds_nth_fds' powr_minus sums_iff divide_simps)
+    hence "(\<lambda>n. inv_character \<chi> n / n) sums cnj (eval_fds (fds \<chi>) 1)"
+      by (subst (asm) sums_cnj [symmetric]) (simp add: inv_character_def)
+    hence "eval_fds (fds (inv_character \<chi>)) 1 = cnj (eval_fds (fds \<chi>) 1)"
+      by (simp add: eval_fds_def fds_nth_fds' inv_character_def sums_iff)
+  }
+  thus ?thesis by (auto simp add: Dirichlet_L_def cnj_powr eval_inv_character)
+qed
+
+end
+end
+
+context
+  includes no_vec_lambda_notation
+begin
+
+lemma holomorphic_Dirichlet_L [holomorphic_intros]:
+  assumes "n > 1" "\<chi> \<noteq> principal_dchar n \<and> dcharacter n \<chi> \<or> \<chi> = principal_dchar n \<and> 1 \<notin> A"
+  shows   "Dirichlet_L n \<chi> holomorphic_on A"
+  using assms(2)
+proof
+  assume "\<chi> = principal_dchar n \<and> 1 \<notin> A"
+  with holomorphic_Dirichlet_L_weak[of n A "principal_dchar n"] assms(1) show ?thesis by auto
+qed (insert dcharacter.holomorphic_Dirichlet_L[of n \<chi> A], auto)
+
+lemma holomorphic_Dirichlet_L' [holomorphic_intros]:
+  assumes "n > 1" "f holomorphic_on A" 
+          "\<chi> \<noteq> principal_dchar n \<and> dcharacter n \<chi> \<or> \<chi> = principal_dchar n \<and> (\<forall>x\<in>A. f x \<noteq> 1)"
+  shows   "(\<lambda>s. Dirichlet_L n \<chi> (f s)) holomorphic_on A"
+  using holomorphic_on_compose[OF assms(2) holomorphic_Dirichlet_L[OF assms(1), of \<chi>]] assms
+  by (auto simp: o_def image_iff)
+
+lemma continuous_on_Dirichlet_L:
+  assumes "n > 1" "\<chi> \<noteq> principal_dchar n \<and> dcharacter n \<chi> \<or> \<chi> = principal_dchar n \<and> 1 \<notin> A"
+  shows   "continuous_on A (Dirichlet_L n \<chi>)"
+  using assms by (intro holomorphic_on_imp_continuous_on holomorphic_intros)
+
+lemma continuous_on_Dirichlet_L' [continuous_intros]:
+  assumes "continuous_on A f" "n > 1" 
+      and "\<chi> \<noteq> principal_dchar n \<and> dcharacter n \<chi> \<or> \<chi> = principal_dchar n \<and> (\<forall>x\<in>A. f x \<noteq> 1)"
+  shows   "continuous_on A (\<lambda>x. Dirichlet_L n \<chi> (f x))"
+  using continuous_on_compose2[OF continuous_on_Dirichlet_L[of n \<chi> "f ` A"] assms(1)] assms
+  by (auto simp: image_iff)
+
+corollary continuous_Dirichlet_L [continuous_intros]:
+  "n > 1 \<Longrightarrow> \<chi> \<noteq> principal_dchar n \<and> dcharacter n \<chi> \<or> \<chi> = principal_dchar n \<and> s \<noteq> 1 \<Longrightarrow> 
+     continuous (at s within A) (Dirichlet_L n \<chi>)"
+  by (rule continuous_within_subset[of _ UNIV])
+     (insert continuous_on_Dirichlet_L[of n \<chi> "(if \<chi> = principal_dchar n then -{1} else UNIV)"],
+      auto simp: continuous_on_eq_continuous_at open_Compl)
+
+corollary continuous_Dirichlet_L' [continuous_intros]:
+  "n > 1 \<Longrightarrow> continuous (at s within A) f \<Longrightarrow>
+     \<chi> \<noteq> principal_dchar n \<and> dcharacter n \<chi> \<or> \<chi> = principal_dchar n \<and> f s \<noteq> 1 \<Longrightarrow> 
+     continuous (at s within A) (\<lambda>x. Dirichlet_L n \<chi> (f x))"
+  by (rule continuous_within_compose3[OF continuous_Dirichlet_L]) auto
+
+end
+
+
+context residues_nat
+begin
+context
+includes no_vec_lambda_notation dcharacter_syntax
+begin
+
+lemma Dirichlet_L_principal:
+  fixes s :: complex
+  shows   "Dirichlet_L n \<chi>\<^sub>0 s = (\<Prod>p | prime p \<and> p dvd n. (1 - 1 / p powr s)) * zeta s"
+            (is "?f s = ?g s")
+proof (cases "s = 1")
+  case False
+  show ?thesis
+  proof (rule analytic_continuation_open[where ?f = ?f and ?g = ?g])
+    show "{s. Re s > 1} \<subseteq> - {1}" by auto
+    show "?f s = ?g s" if "s \<in> {s. Re s > 1}" for s
+    proof -
+      from that have s: "Re s > 1" by simp
+      let ?P = "(\<Prod>p | prime p \<and> p dvd n. (1 - 1 / p powr s))"
+      have "(\<lambda>n. \<Prod>p\<le>n. if prime p then inverse (1 - \<chi>\<^sub>0 p / nat_power p s) else 1)
+                    \<longlonglongrightarrow> Dirichlet_L n \<chi>\<^sub>0 s"
+        using s by (rule principal.Dirichlet_L_euler_product_LIMSEQ)
+      also have "?this \<longleftrightarrow> (\<lambda>n. ?P * (\<Prod>p\<le>n. if prime p then inverse (1 - 1 / of_nat p powr s) else 1)) 
+                             \<longlonglongrightarrow> Dirichlet_L n \<chi>\<^sub>0 s" (is "_ = filterlim ?g _ _")
+      proof (intro tendsto_cong eventually_mono [OF eventually_ge_at_top, of n], goal_cases)
+        case (1 m)
+        let ?f = "\<lambda>p. inverse (1 - 1 / p powr s)"
+        have "(\<Prod>p\<le>m. if prime p then inverse (1 - \<chi>\<^sub>0 p / nat_power p s) else 1) =
+                (\<Prod>p | p \<le> m \<and> prime p \<and> coprime p n. ?f p)" (is "_ = prod _ ?A")
+          by (intro prod.mono_neutral_cong_right) (auto simp: principal_dchar_def)
+        also have "?A = {p. p \<le> m \<and> prime p} - {p. prime p \<and> p dvd n}"
+          (is "_ = ?B - ?C") using n by (auto dest: prime_imp_coprime simp: coprime_absorb_left)
+        also {
+          have *: "(\<Prod>p\<in>?B. ?f p) = (\<Prod>p\<in>?B - ?C. ?f p) * (\<Prod>p\<in>?C. ?f p)"
+            using 1 n by (intro prod.subset_diff) (auto dest: dvd_imp_le)
+          have "(\<Prod>p\<in>?B. ?f p) * ?P = (\<Prod>p\<in>?B - ?C. ?f p) * ((\<Prod>p\<in>?C. ?f p) * ?P)"
+            by (subst *) (simp add: mult_ac)
+(*<*)
+(*>*)
+(*<*)
+(*>*)

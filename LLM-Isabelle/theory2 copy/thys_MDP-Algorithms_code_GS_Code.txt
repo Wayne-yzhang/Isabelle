@@ -1,0 +1,124 @@
+theory GS_Code
+  imports 
+    "Code_Setup"
+    "../Splitting_Methods_Fin" 
+    "HOL-Library.Code_Target_Numeral"
+    "HOL-Data_Structures.Array_Braun"
+begin
+
+context MDP_nat_disc begin
+
+lemma \<L>\<^sub>b_split_zero:
+  assumes "\<And>s. s \<ge> states \<Longrightarrow> apply_bfun v s = 0"
+  shows "GS.\<L>\<^sub>b_split v s = GS_rec_upto states v 0 s"
+proof (cases "s < states")
+  case True
+  then show ?thesis using GS_rec_upto_correct by auto
+next
+  case False
+  have aux: "s \<ge> states \<Longrightarrow> apply_bfun (GS.\<L>\<^sub>b_split v) s = 0" for s
+  proof (induction s rule: less_induct)
+    case (less x)
+    have "r (x, a) = 0" if "a \<in> A x" for a
+      by (simp add: less.prems reward_zero_outside)
+    moreover have "measure_pmf.expectation (K (x, a)) ((bfun_if (\<lambda>s'. s' < x) (GS.\<L>\<^sub>b_split v) v)) = 0" for a
+      using K_closed_compl assms less
+      by (fastforce simp: bfun_if.rep_eq intro!: AE_pmfI integral_eq_zero_AE)
+    ultimately show ?case
+      by (auto simp: A_ne \<L>\<^sub>b_split_GS)
+  qed
+  then show ?thesis
+    by (metis False GS_rec_upto_ge assms not_less)
+qed
+end
+
+context MDP_Code begin
+
+function GS_iter_aux :: "nat \<Rightarrow> 'tv \<Rightarrow> real \<Rightarrow> ('tv \<times> real)" where
+  "GS_iter_aux s v md = ( 
+  if s \<ge> states 
+  then (v, md)
+  else (
+    let vs_old = v_lookup v s;
+        vs_new = \<L>_GS_code (s_lookup mdp s) v;
+        vs_diff = abs (vs_old - vs_new);
+        v' = v_update s vs_new v
+    in
+        GS_iter_aux (Suc s) v' (max md vs_diff)))"
+  by auto
+termination
+  by (relation "Wellfounded.measure (\<lambda>(n, _). states - n)") auto
+
+definition "GS_iter v = GS_iter_aux 0 v 0"
+
+lemmas GS_iter_aux.simps[simp del]
+
+lemma GS_iter_aux_fst_correct:
+  assumes "v_len v = states" "v_invar v"
+  shows "s < states \<longrightarrow> v_lookup (fst (GS_iter_aux n v md)) s = MDP.GS_rec_upto states (V_Map.map_to_bfun v) n s \<and> v_invar (fst (GS_iter_aux n v md))"
+  using assms unfolding GS_iter_def
+proof (induction n v md rule: GS_iter_aux.induct)
+  case (1 s v md)
+  show ?case
+    unfolding GS_iter_aux.simps[of s] MDP.GS_rec_upto.simps[of _ _ s]
+    apply (auto simp add: "1.prems" assms(1) intro!: v_lookup_map_to_bfun)
+     apply (simp add: 1 \<L>_GS_code_correct)
+    using "1.IH"
+     apply (smt (verit) "1.IH" "1.prems"(1) "1.prems"(2) Sup.SUP_cong V_Map.invar_update V_Map.map_to_bfun_update \<L>_GS_code_correct linorder_le_less_linear v_len_update)
+    by (auto simp add: "1.IH" \<L>_GS_code_correct 1 V_Map.map_to_bfun_update v_lookup_map_to_bfun v_len_update V_Map.invar_update)
+qed
+
+lemma snd_GS_iter_aux_correct:
+  assumes "v_len v = states" "v_invar v"
+  shows "snd (GS_iter_aux n v md) = Max (Set.insert md ((\<lambda>s. abs (MDP.GS_rec_upto states (V_Map.map_to_bfun v) n s - (V_Map.map_to_bfun v) s)) `  {n..<states}))"
+  using assms unfolding GS_iter_def
+proof (induction n v md rule: GS_iter_aux.induct)
+  case (1 s' v md)
+  {
+    assume s'_le: "s' < states"
+    have "snd (GS_iter_aux s' v md) = (snd (GS_iter_aux (Suc s') (v_update s' (\<L>_GS_code (s_lookup mdp s') v) v) (max md \<bar>v_lookup v s' - \<L>_GS_code (s_lookup mdp s') v\<bar>)))"
+      unfolding GS_iter_aux.simps[of s'] 
+      using s'_le
+      by auto
+    also have "\<dots> = Max (Set.insert (max md \<bar>v_lookup v s' - \<L>_GS_code (s_lookup mdp s') v\<bar>)
+          ((\<lambda>s. \<bar>MDP.GS_rec_upto states (apply_bfun (V_Map.map_to_bfun (v_update s' (\<L>_GS_code (s_lookup mdp s') v) v)))  (Suc s') s - apply_bfun (V_Map.map_to_bfun (v_update s' (\<L>_GS_code (s_lookup mdp s') v) v)) s\<bar>) ` {Suc s'..<states}))"
+      apply (subst "1.IH")
+      subgoal using s'_le by auto
+      using s'_le v_len_update
+      by (auto simp add: "1.prems" V_Map.invar_update s'_le)
+    also have "\<dots> = Max (Set.insert (max md \<bar>v_lookup v s' - \<L>_GS_code (s_lookup mdp s') v\<bar>)
+          ((\<lambda>s. \<bar>MDP.GS_rec_upto states ((V_Map.map_to_bfun v)(s' := (\<L>_GS_code (s_lookup mdp s') v))) (Suc s') s - apply_bfun (V_Map.map_to_bfun (v_update s' (\<L>_GS_code (s_lookup mdp s') v) v)) s\<bar>) ` {Suc s'..<states}))"
+      using "1.prems"(1) "1.prems"(2) V_Map.map_to_bfun_update s'_le by presburger
+    also have "\<dots> = Max (Set.insert (max md \<bar>v_lookup v s' - \<L>_GS_code (s_lookup mdp s') v\<bar>)
+          ((\<lambda>s. \<bar>MDP.GS_rec_upto states ((V_Map.map_to_bfun v)(s' := \<Squnion>a\<in>MDP_A s'. MDP.L\<^sub>a a (V_Map.map_to_bfun v) s')) (Suc s') s - ((V_Map.map_to_bfun v) (s' := \<Squnion>a\<in>MDP_A s'. MDP.L\<^sub>a a (V_Map.map_to_bfun v) s')) s \<bar>) ` {Suc s'..<states}))"
+      using "1.prems"(1) "1.prems"(2) MDP.SUP_L\<^sub>a_eq_det MDP.\<L>\<^sub>b_eq_SUP_L\<^sub>a V_Map.map_to_fun_update \<L>_code_correct \<L>_code_lookup map_to_bfun_eq_fun by auto
+
+    also have "\<dots> = Max (Set.insert (max md \<bar>v_lookup v s' - \<L>_GS_code (s_lookup mdp s') v\<bar>)
+          ((\<lambda>s. \<bar>MDP.GS_rec_upto states ((V_Map.map_to_bfun v)(s' := \<Squnion>a\<in>MDP_A s'. MDP.L\<^sub>a a (V_Map.map_to_bfun v) s')) (Suc s') s - V_Map.map_to_bfun v s \<bar>) ` {Suc s'..<states}))"
+      using "1.prems"(1) "1.prems"(2) MDP.SUP_L\<^sub>a_eq_det MDP.\<L>\<^sub>b_eq_SUP_L\<^sub>a V_Map.map_to_fun_update \<L>_code_correct \<L>_code_lookup map_to_bfun_eq_fun by auto
+    also have "\<dots> = Max (Set.insert (max md \<bar>v_lookup v s' - \<L>_GS_code (s_lookup mdp s') v\<bar>)
+          ((\<lambda>s. \<bar>MDP.GS_rec_upto states (apply_bfun (V_Map.map_to_bfun v))  s' s - V_Map.map_to_bfun v s\<bar>) ` {Suc s'..<states}))"
+      using s'_le MDP.GS_rec_upto.simps[symmetric, of states "s'" "(apply_bfun (V_Map.map_to_bfun v))"]
+      by presburger
+    also have "\<dots> = max md (Max (Set.insert (\<bar>v_lookup v s' - \<L>_GS_code (s_lookup mdp s') v\<bar>)
+          ((\<lambda>s. \<bar>MDP.GS_rec_upto states (apply_bfun (V_Map.map_to_bfun v))  s' s - V_Map.map_to_bfun v s\<bar>) ` {Suc s'..<states})))"
+    proof -
+      have *: "Max (Set.insert (max x y) X) = max x (Max (Set.insert y X))" if "finite X" for X x y
+        by (metis Max_insert Max_singleton max.assoc that)
+      thus ?thesis
+        by blast
+    qed
+    also have "\<dots> = max md (Max (Set.insert (\<bar>\<L>_GS_code (s_lookup mdp s') v - V_Map.map_to_bfun v s'\<bar>)
+          ((\<lambda>s. \<bar>MDP.GS_rec_upto states (apply_bfun (V_Map.map_to_bfun v))  s' s - V_Map.map_to_bfun v s\<bar>) ` {Suc s'..<states})))"
+      by (smt (verit, best) "1.prems"(1) "1.prems"(2) v_lookup_map_to_bfun s'_le)
+    also have "\<dots> = max md (Max ((\<lambda>s. (\<bar>MDP.GS_rec_upto states (apply_bfun (V_Map.map_to_bfun v))  s' s - V_Map.map_to_bfun v s\<bar>)) ` {s'} \<union>
+          ((\<lambda>s. \<bar>MDP.GS_rec_upto states (apply_bfun (V_Map.map_to_bfun v))  s' s - V_Map.map_to_bfun v s\<bar>) ` {Suc s'..<states})))"
+    proof -
+      have * :"\<L>_GS_code (s_lookup mdp s') v = MDP.GS_rec_upto states (apply_bfun (V_Map.map_to_bfun v))  s' s'"
+        apply (subst MDP.GS_rec_upto_eq)
+        using s'_le 
+         apply blast
+        using \<L>_GS_code_correct 1 s'_le
+        by presburger
+      show ?thesis
+        by (auto simp: *)

@@ -1,0 +1,149 @@
+theory Distributed_WebApp
+imports "../TopoS_Impl"
+begin
+
+
+
+definition policy :: "string list_graph" where
+    "policy \<equiv> \<lparr> nodesL = [''WebFrnt'', ''DB'', ''Log'', ''WebApp'', ''INET''],
+                edgesL = [] \<rparr>"
+
+lemma "wf_list_graph policy" by eval
+
+
+definition LogSink_m::"(string SecurityInvariant)" where
+  "LogSink_m \<equiv> new_configured_list_SecurityInvariant SINVAR_LIB_Sink \<lparr> 
+          node_properties = [''Log'' \<mapsto> Sink]
+          \<rparr> ''No information must leave the logging server''"
+
+definition BLP_m::"(string SecurityInvariant)" where
+    "BLP_m \<equiv> new_configured_list_SecurityInvariant SINVAR_LIB_BLPtrusted \<lparr> 
+          node_properties = [''DB'' \<mapsto> \<lparr> security_level = 1, trusted = False \<rparr>,
+                             ''Log'' \<mapsto> \<lparr> security_level = 1, trusted = False \<rparr>,
+                             ''WebApp'' \<mapsto> \<lparr> security_level = 0, trusted = True \<rparr> 
+                             ]
+          \<rparr> ''The database and the logging server have confidential information''"
+
+definition Subnet_m::"(string SecurityInvariant)" where
+    "Subnet_m \<equiv> new_configured_list_SecurityInvariant SINVAR_LIB_SubnetsInGW \<lparr> 
+          node_properties = [''DB'' \<mapsto> Member,
+                             ''Log'' \<mapsto> Member,
+                             ''WebApp'' \<mapsto> Member,
+                             ]
+          \<rparr> ''internal/DMZ structure''"
+
+
+definition DBACL_m::"(string SecurityInvariant)" where
+    "DBACL_m \<equiv> new_configured_list_SecurityInvariant SINVAR_LIB_CommunicationPartners \<lparr> 
+          node_properties = [''DB'' \<mapsto> Master [''WebApp''],
+                             ''WebApp'' \<mapsto> Care
+                             ]
+          \<rparr> ''ACL of db''"
+
+definition "security_invariants = [Subnet_m, BLP_m, LogSink_m, DBACL_m]"
+
+lemma "all_security_requirements_fulfilled security_invariants policy" by eval
+
+lemma "implc_get_offending_flows security_invariants policy = []" by eval
+
+
+definition "max_policy = generate_valid_topology security_invariants \<lparr>nodesL = nodesL policy, edgesL = List.product (nodesL policy) (nodesL policy) \<rparr>"
+
+
+value "max_policy"
+lemma "max_policy = 
+   \<lparr>nodesL = [''WebFrnt'', ''DB'', ''Log'', ''WebApp'', ''INET''],
+    edgesL = [(''WebFrnt'', ''WebFrnt''), (''WebFrnt'', ''Log''), (''WebFrnt'', ''WebApp''), (''WebFrnt'', ''INET''), (''DB'', ''DB''),
+              (''DB'', ''Log''), (''DB'', ''WebApp''), (''Log'', ''Log''), (''WebApp'', ''WebFrnt''), (''WebApp'', ''DB''),
+              (''WebApp'', ''Log''), (''WebApp'', ''WebApp''), (''WebApp'', ''INET''), (''INET'', ''WebFrnt''), (''INET'', ''INET'')]\<rparr>"
+
+
+lemma "all_security_requirements_fulfilled security_invariants max_policy" by eval
+
+definition "my_policy = \<lparr>nodesL = [''WebFrnt'', ''DB'', ''Log'', ''WebApp'', ''INET''],
+    edgesL = [(''WebFrnt'', ''WebFrnt''), (''WebFrnt'', ''Log''), (''WebFrnt'', ''WebApp''), (''DB'', ''DB''), (''DB'', ''Log''),
+              (''DB'', ''WebApp''), (''Log'', ''Log''), (''WebApp'', ''WebFrnt''), (''WebApp'', ''DB''), (''WebApp'', ''Log''), (''WebApp'', ''WebApp''),
+              (''WebApp'', ''INET''), (''INET'', ''WebFrnt''), (''INET'', ''INET'')]\<rparr>"
+lemma "all_security_requirements_fulfilled security_invariants my_policy" by eval
+lemma "set (edgesL my_policy) \<subset> set (edgesL max_policy)" by eval
+
+
+
+
+definition "stateful_policy = generate_valid_stateful_policy_IFSACS my_policy security_invariants"
+value "stateful_policy"
+
+
+  lemma "all_security_requirements_fulfilled (get_IFS security_invariants) (stateful_list_policy_to_list_graph stateful_policy)" by eval
+  
+  lemma "\<forall> F \<in> set (implc_get_offending_flows (get_ACS security_invariants) (stateful_list_policy_to_list_graph stateful_policy)).
+            set F \<subseteq> set (backlinks (flows_stateL stateful_policy)) - (set (flows_fixL stateful_policy))" by eval
+
+
+
+
+
+
+
+
+
+
+lemma "set (flows_stateL stateful_policy) \<subseteq> set (flows_fixL stateful_policy)" by eval
+
+definition stateful_flows :: "(string \<times> string) list" where
+  "stateful_flows \<equiv> [(src, dst) \<leftarrow> flows_stateL stateful_policy. src \<noteq> dst]"
+value "stateful_flows"
+
+definition stateless_flows :: "(string \<times> string) list" where
+  "stateless_flows \<equiv> [(src, dst) \<leftarrow> flows_fixL stateful_policy. src \<noteq> dst \<and> (src, dst) \<notin> set stateful_flows]"
+value "stateless_flows"
+
+
+
+export_code
+  security_invariants
+  policy
+  all_security_requirements_fulfilled
+  implc_get_offending_flows
+  max_policy
+  my_policy
+  generate_valid_stateful_policy_IFSACS
+  stateful_policy
+  stateful_flows
+  stateless_flows
+in Scala
+
+
+
+
+
+
+
+
+definition dockermynet4policy :: "string list_graph" where
+    "dockermynet4policy \<equiv> \<lparr> nodesL = [''WebFrnt'', ''DB'', ''Log'', ''WebApp'', ''INET''],
+                edgesL = [(''INET'',''INET''),
+                          (''INET'',''WebFrnt''),
+                          (''WebApp'',''INET''),
+                          (''WebApp'',''WebApp''),
+                          (''WebApp'',''DB''),
+                          (''WebApp'',''Log''),
+                          (''WebApp'',''WebFrnt''),
+                          (''DB'',''WebApp''),
+                          (''DB'',''DB''),
+                          (''DB'',''Log''),
+                          (''Log'',''Log''),
+                          (''Log'',''WebFrnt''),
+                          (''WebFrnt'',''WebApp''),
+                          (''WebFrnt'',''Log''),
+                          (''WebFrnt'',''WebFrnt'')] \<rparr>"
+
+lemma "wf_list_graph dockermynet4policy" by eval
+
+
+
+
+
+
+
+end

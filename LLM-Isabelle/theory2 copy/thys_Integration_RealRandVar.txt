@@ -1,0 +1,127 @@
+theory RealRandVar
+imports Measure "HOL-Library.Countable"
+begin
+
+  
+
+definition
+  Borelsets:: "real set set" ("\<bool>") where
+  "\<bool> = sigma {S. \<exists>u. S={..u}}"
+
+definition
+  rv:: "('a set set * ('a set \<Rightarrow> real)) \<Rightarrow> ('a \<Rightarrow> real) set" where
+  "rv M = {f. measure_space M \<and> f \<in> measurable (measurable_sets M) \<bool>}"
+
+
+definition
+  distribution:: 
+  "('a set set * ('a set \<Rightarrow> real)) \<Rightarrow> ('a \<Rightarrow> real) \<Rightarrow> (real set \<Rightarrow> real)" ("law") where
+  "f \<in> rv M \<Longrightarrow> law M f \<equiv> (measure M) \<circ> (vimage f)"
+
+definition
+  "\<chi> A x \<equiv> if x \<in> A then 1 else 0" 
+
+lemma char_empty: "\<chi> {} = (\<lambda>t. 0)"
+proof (rule ext)
+  fix t
+  show "\<chi> {} t = 0" by (simp add: characteristic_function_def)
+qed
+
+
+lemma assumes sigma: "sigma_algebra S"
+  shows const_measurable: "(\<lambda>x. (c::real)) \<in> measurable S X"
+proof (unfold measurable_def, rule, rule)
+  fix g
+  show "(\<lambda>x. c) -` g \<in> S"
+  proof (cases "c \<in> g")
+    case True 
+    hence "(\<lambda>x::'a. c) -` g = UNIV" 
+      by blast
+    moreover from sigma have "UNIV \<in> S" 
+      by (rule sigma_algebra_UNIV)
+    ultimately show ?thesis by simp
+  next
+    case False
+    hence "(\<lambda>x::'a. c) -` g = {}" 
+      by blast
+    moreover from sigma have "{} \<in> S" 
+      by (simp only: sigma_algebra_def)
+    ultimately show ?thesis by simp
+  qed                     
+qed                       
+
+theorem assumes ms: "measure_space M"
+  shows const_rv: "(\<lambda>x. c) \<in> rv M" using ms
+  by (auto simp only: measure_space_def const_measurable rv_def)
+
+
+lemma assumes a: "a \<in> S" and sigma: "sigma_algebra S" shows 
+char_measurable : "\<chi> a \<in> measurable S x"
+  {fix g
+    have "\<chi> a -` g \<in> S"
+    proof (cases "1 \<in> g")
+      case True
+      show ?thesis
+      proof (cases "0 \<in> g") 
+        case True
+        with sigma show ?thesis by (auto simp add: sigma_algebra_UNIV) 
+      next
+        case False 
+          by (auto simp add: vimage_def characteristic_function_def)
+        with a show ?thesis by simp
+      qed
+      
+    next
+      case False
+      show ?thesis
+      proof (cases "0 \<in> g")
+        case True
+          by (auto simp add: vimage_def characteristic_function_def)
+        with a sigma show ?thesis by (simp add: sigma_algebra_def)
+      next
+        case False
+        moreover from sigma have "{} \<in> S" by  (simp only: sigma_algebra_def)
+        ultimately show ?thesis by simp
+      qed
+    qed}
+  thus ?thesis by (unfold measurable_def) blast
+
+
+theorem assumes ms: "measure_space M" and A: "A \<in> measurable_sets M"
+  shows char_rv: "\<chi> A \<in> rv M" using ms A
+  by (auto simp only: measure_space_def char_measurable rv_def)  
+
+
+theorem assumes ms: "measure_space M" shows 
+  rv_le_iff: "(f \<in> rv M) = (\<forall>a. {w. f w \<le> a} \<in> measurable_sets M)"
+proof - 
+  
+  have "f \<in> rv M \<Longrightarrow> \<forall>a. {w. f w \<le> a} \<in> measurable_sets M"
+  proof 
+    { fix a 
+      assume "f \<in> measurable (measurable_sets M) \<bool>"
+      hence "\<forall>b\<in>\<bool>. f -` b \<in> measurable_sets M"
+        by (unfold measurable_def) blast
+      also have "{..a} \<in> \<bool>" 
+        by (simp only: Borelsets_def) (rule sigma.basic, blast)
+      ultimately have "{w. f w \<le> a} \<in> measurable_sets M" 
+        by (auto simp add: vimage_def) 
+    }
+    thus "\<And>a. f \<in> rv M \<Longrightarrow> {w. f w \<le> a} \<in> measurable_sets M" 
+      by (simp add: rv_def)
+  qed
+  
+  also have "\<forall>a. {w. f w \<le> a} \<in> measurable_sets M \<Longrightarrow> f \<in> rv M"
+  proof -
+    assume "\<forall>a. {w. f w \<le> a} \<in> measurable_sets M"
+    hence "f \<in> measurable (measurable_sets M){S. \<exists>u. S={..u}}" 
+      by (auto simp add: measurable_def vimage_def)
+    with ms have "f \<in> measurable (measurable_sets M) \<bool>" 
+      by (simp only: Borelsets_def measure_space_def measurable_lift)
+    with ms show ?thesis 
+      by (auto simp add: rv_def)
+  qed
+  ultimately show ?thesis by rule 
+qed 
+
+ 

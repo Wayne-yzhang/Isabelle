@@ -1,0 +1,77 @@
+While both the models for undirected and directed protocols import assumptions from the theory
+@{text "Network_Assumptions"}, they differ in strength: the assumptions made by undirected protocols
+are strictly weaker, since the entire forwarding path is authorized by each AS, and not only the 
+future path from the perspective of each AS. 
+In addition, the specific conditions that instances have to verify differs between the undirected
+and the directed setting (compare the locales @{text "dataplane_3_undirected"} and 
+@{text "dataplane_3_directed"}).
+
+This explains the need to split up the verification of the attacker event into two theories. Despite
+the differences that concrete protocols may exhibit, these two theories suffice to show the crux
+of the refinement proof. The instances merely have to show a set of static conditions\<close>
+subsection \<open>Hop validation check, authorized segments, and path extraction.\<close>
+text\<open>First we define a locale that requires a number of functions. We will later extend this
+to a locale @{text "dataplane_3_directed"}, which makes assumptions on how these functions operate. 
+We separate the assumptions in order to make use of some auxiliary definitions defined in this locale. \<close>
+\<comment> \<open>@{text "hf_valid"} is the check that every hop performs on its own and next hop field as well as on
+ainfo and uinfo. Note that this includes checking the validity of the info fields. \<close>
+\<comment> \<open>We need @{text "auth_restrict"} to further restrict the set of authorized segments. For instance,
+   we need it for the empty segment (ainfo, []) since according to the definition any such
+   ainfo will be contained in the intruder knowledge. With @{text "auth_restrict"} we can restrict this.\<close>
+\<comment> \<open>extr extracts from a given hop validation field (HVF hf) the entire authenticated future path that 
+is embedded in the HVF.\<close>
+\<comment> \<open>@{text "extr_ainfo"} extracts the authenticated info field (ainfo) from a given hop validation field.\<close>
+\<comment> \<open>@{text "term_ainfo"} extracts what msgterms the intruder can learn from analyzing a given 
+authenticated info field.\<close>
+\<comment> \<open>@{text "terms_hf"} extracts what msgterms the intruder can learn from analyzing a given hop field; for instance,
+the hop validation field HVF hf and the segment identifier UHI hf.\<close>
+\<comment> \<open>@{text "terms_uinfo"} extracts what msgterms the intruder can learn from analyzing a given uinfo field.\<close>
+\<comment> \<open>@{text "upd_uinfo"} returns the updated uinfo field of a packet.\<close>
+\<comment> \<open>As @{text "ik_oracle"} (defined below) gives the attacker direct access to hop validation fields 
+that could be used to break the property, we have to either restrict the scope of the property, or 
+restrict the attacker such that he cannot use the oracle-obtained hop validation fields in packets 
+whose path origin matches the path origin of the oracle query. We choose the latter approach and 
+fix a predicate @{text "no_oracle"} that tells us if the oracle has not been queried for a path 
+origin (ainfo, uinfo combination). This is a prophecy variable.\<close>
+\<comment> \<open>@{text "ik_add"} is Additional Intruder Knowledge, such as hop authenticators in EPIC L1.\<close>
+\<comment> \<open>@{text "ik_oracle"} is another type of additional Intruder Knowledge. We use it to model the attacker's
+ability to brute-force individual hop validation fields and segment identifiers.\<close>
+subsection \<open>Conditions of the parametrized model\<close>
+text\<open>We now list the assumptions of this parametrized model. \<close>
+\<comment> \<open>A valid validation field that is contained in ik corresponds to an authorized hop field.
+   (The notable exceptions being oracle-obtained validation fields.)
+   This relates the result of @{text "terms_hf"} to its argument. @{text "terms_hf"} has to produce a msgterm that is either
+   unique for each given hop field x, or it is only produced by an 'equivalence class' of hop fields
+   such that either all of the hop fields of the class are authorized, or none are.
+   While the extr function (constrained by assumptions below) also binds the hop information to the
+   validation field, it does so only for AHI and AInfo, but not for UHI.\<close>
+\<comment> \<open>A valid validation field that can be synthesized from the initial intruder knowledge is already
+    contained in the initial intruder knowledge if it belongs to an honest AS. This can be combined
+   with the previous assumption.\<close> 
+\<comment> \<open>Extracting the path from the validation field of the first hop field of some path l
+    returns an extension of the AHI-level path of the valid prefix of l.\<close> 
+\<comment> \<open>Extracting the path from the validation field of the first hop field of a completely valid path l
+    returns a prefix of the AHI-level path of l. Together with @{thm "COND_path_prefix_extr"}, this implies
+    that extr of a completely valid path l is exactly the same AHI-level path as l (see lemma below).\<close> 
+\<comment> \<open>A valid hop field is only valid for one specific uinfo.\<close>
+\<comment> \<open>Updating a uinfo field does not reveal anything novel to the attacker.\<close>
+\<comment> \<open>The determination of whether a packet is an oracle packet is invariant under uinfo field updates.\<close>
+\<comment> \<open>The restriction on authorized paths is invariant under uinfo field updates.\<close>
+subsection \<open>Lemmas that are needed for the refinement proof\<close>
+subsubsection \<open>Fragment is extendable\<close>
+text \<open>makes sure that: the segment is terminated, i.e. the leaf AS's HF has Eo = None\<close>
+text \<open>This lemma proves that an attacker-derivable segment that starts with an attacker hop field,
+and has a next hop field which belongs to an honest AS, when restricted to its valid prefix, is
+authorized. Essentially this is the case because the hop field of the honest AS already contains
+an interface identifier DownIF that points to the attacker-controlled AS. Thus, there must have been
+some attacker-owned hop field on the original authorized path. Given the assumptions we make in the
+directed setting, the attacker can make take a suffix of an authorized path, such that his hop field
+is first on the path, and he can change his own hop field if his hop field is the first on the path,
+thus, that segment is also authorized.\<close>
+subsubsection \<open>A1 and A2 collude to make a wormhole\<close>
+text \<open>We lift @{text "extend_pfragment0"} to DP2.\<close>
+text\<open>This is the central lemma that we need to prove to show the refinement between this model and 
+dp1. It states: If an attacker can synthesize a segment from his knowledge, and does not use a path
+origin that was used to query the oracle, then the valid prefix of the segment is authorized. Thus,
+the attacker cannot create any valid but unauthorized segments.\<close>
+        using 4(1,3-5) \<open>no_oracle ainfo uinfo\<close> by(auto intro: hf1bad hf2bad)

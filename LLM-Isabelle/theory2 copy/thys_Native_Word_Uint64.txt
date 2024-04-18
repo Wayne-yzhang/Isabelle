@@ -1,0 +1,510 @@
+theory Uint64 imports
+  Word_Type_Copies
+  Code_Target_Integer_Bit
+begin
+
+
+
+
+global_interpretation uint64: word_type_copy Abs_uint64 Rep_uint64
+  using type_definition_uint64 by (rule word_type_copy.intro)
+
+setup_lifting type_definition_uint64
+
+declare uint64.of_word_of [code abstype]
+
+declare Quotient_uint64 [transfer_rule]
+
+begin
+
+lift_definition zero_uint64 :: uint64 is 0 .
+lift_definition one_uint64 :: uint64 is 1 .
+
+global_interpretation uint64: word_type_copy_ring Abs_uint64 Rep_uint64
+  by standard (fact zero_uint64.rep_eq one_uint64.rep_eq
+    plus_uint64.rep_eq uminus_uint64.rep_eq minus_uint64.rep_eq
+    times_uint64.rep_eq divide_uint64.rep_eq modulo_uint64.rep_eq
+    equal_uint64.rep_eq less_eq_uint64.rep_eq less_uint64.rep_eq)+
+
+instance proof -
+    by (rule uint64.of_class_comm_ring_1)
+    by (fact uint64.of_class_semiring_modulo)
+    by (fact uint64.of_class_equal)
+    by (fact uint64.of_class_linorder)
+qed
+
+end
+
+instantiation uint64 :: ring_bit_operations
+begin
+
+
+global_interpretation uint64: word_type_copy_bits Abs_uint64 Rep_uint64 signed_drop_bit_uint64
+  by standard (fact bit_uint64.rep_eq not_uint64.rep_eq and_uint64.rep_eq or_uint64.rep_eq xor_uint64.rep_eq
+    mask_uint64.rep_eq push_bit_uint64.rep_eq drop_bit_uint64.rep_eq signed_drop_bit_uint64.rep_eq take_bit_uint64.rep_eq
+    set_bit_uint64.rep_eq unset_bit_uint64.rep_eq flip_bit_uint64.rep_eq)+
+
+instance
+  by (fact uint64.of_class_ring_bit_operations)
+
+end
+
+  is word_of_nat .
+
+  is unat .
+
+  is word_of_int .
+
+  is uint .
+
+context
+  includes integer.lifting
+begin
+
+  is word_of_int .
+
+  is uint .
+
+end
+
+global_interpretation uint64: word_type_copy_more Abs_uint64 Rep_uint64 signed_drop_bit_uint64
+  uint64_of_nat nat_of_uint64 uint64_of_int int_of_uint64 Uint64 integer_of_uint64
+  apply standard
+       apply (simp_all add: uint64_of_nat.rep_eq nat_of_uint64.rep_eq
+         uint64_of_int.rep_eq int_of_uint64.rep_eq
+         Uint64.rep_eq integer_of_uint64.rep_eq integer_eq_iff)
+  done
+
+instantiation uint64 :: "{size, msb, lsb, set_bit, bit_comprehension}"
+begin
+
+
+
+
+
+context
+  includes lifting_syntax
+begin
+
+lemma set_bit_uint64_transfer [transfer_rule]:
+  by (simp only: set_bit_eq [abs_def] set_bit_uint64_eq [abs_def]) transfer_prover
+
+end
+
+
+global_interpretation uint64: word_type_copy_misc Abs_uint64 Rep_uint64 signed_drop_bit_uint64
+  uint64_of_nat nat_of_uint64 uint64_of_int int_of_uint64 Uint64 integer_of_uint64 64 set_bits_aux_uint64
+  by (standard; transfer) simp_all
+
+instance using uint64.of_class_bit_comprehension
+  uint64.of_class_set_bit uint64.of_class_lsb
+  by simp_all standard
+
+end
+
+
+code_reserved SML Uint64
+
+
+code_printing code_module Uint64 \<rightharpoonup> (Haskell)
+code_reserved Haskell Uint64
+
+code_printing code_module "Uint64" \<rightharpoonup> (OCaml)
+code_reserved OCaml Uint64
+
+code_printing code_module Uint64 \<rightharpoonup> (Scala)
+code_reserved Scala Uint64
+
+
+context
+  includes bit_operations_syntax
+begin
+
+definition Uint64_signed :: "integer \<Rightarrow> uint64" 
+where "Uint64_signed i = (if i < -(0x8000000000000000) \<or> i \<ge> 0x8000000000000000 then undefined Uint64 i else Uint64 i)"
+
+lemma Uint64_code [code]:
+  "Uint64 i = 
+  (let i' = i AND 0xFFFFFFFFFFFFFFFF
+   in if bit i' 63 then Uint64_signed (i' - 0x10000000000000000) else Uint64_signed i')"
+  including undefined_transfer integer.lifting unfolding Uint64_signed_def
+  apply transfer
+  apply (subst word_of_int_via_signed)
+     apply (auto simp add: push_bit_of_1 mask_eq_exp_minus_1 word_of_int_via_signed cong del: if_cong)
+  done
+
+lemma Uint64_signed_code [code]:
+  "Rep_uint64 (Uint64_signed i) = 
+  (if i < -(0x8000000000000000) \<or> i \<ge> 0x8000000000000000 then Rep_uint64 (undefined Uint64 i) else word_of_int (int_of_integer_symbolic i))"
+unfolding Uint64_signed_def Uint64_def int_of_integer_symbolic_def
+by(simp add: Abs_uint64_inverse)
+
+end
+
+
+definition Rep_uint64' where [simp]: "Rep_uint64' = Rep_uint64"
+
+lemma Rep_uint64'_transfer [transfer_rule]:
+  "rel_fun cr_uint64 (=) (\<lambda>x. x) Rep_uint64'"
+unfolding Rep_uint64'_def by(rule uint64.rep_transfer)
+
+lemma Rep_uint64'_code [code]: "Rep_uint64' x = (BITS n. bit x n)"
+  by transfer (simp add: set_bits_bit_eq)
+
+lift_definition Abs_uint64' :: "64 word \<Rightarrow> uint64" is "\<lambda>x :: 64 word. x" .
+
+lemma Abs_uint64'_code [code]:
+  "Abs_uint64' x = Uint64 (integer_of_int (uint x))"
+including integer.lifting by transfer simp
+
+declare [[code drop: "term_of_class.term_of :: uint64 \<Rightarrow> _"]]
+
+lemma term_of_uint64_code [code]:
+  defines "TR \<equiv> typerep.Typerep" and "bit0 \<equiv> STR ''Numeral_Type.bit0''" 
+  shows
+  "term_of_class.term_of x = 
+   Code_Evaluation.App (Code_Evaluation.Const (STR ''Uint64.uint64.Abs_uint64'') (TR (STR ''fun'') [TR (STR ''Word.word'') [TR bit0 [TR bit0 [TR bit0 [TR bit0 [TR bit0 [TR bit0 [TR (STR ''Numeral_Type.num1'') []]]]]]]], TR (STR ''Uint64.uint64'') []]))
+       (term_of_class.term_of (Rep_uint64' x))"
+by(simp add: term_of_anything)
+
+code_printing
+  type_constructor uint64 \<rightharpoonup>
+  (SML) "Uint64.uint64" and
+  (Haskell) "Uint64.Word64" and
+  (OCaml) "int64" and
+  (Scala) "Long"
+| constant Uint64 \<rightharpoonup>
+  (SML) "Uint64.fromInt" and
+  (Haskell) "(Prelude.fromInteger _ :: Uint64.Word64)" and
+  (Haskell_Quickcheck) "(Prelude.fromInteger (Prelude.toInteger _) :: Uint64.Word64)" and
+  (Scala) "_.longValue"
+| constant Uint64_signed \<rightharpoonup>
+  (OCaml) "Z.to'_int64"
+| constant "0 :: uint64" \<rightharpoonup>
+  (SML) "Uint64.zero" and
+  (Haskell) "(0 :: Uint64.Word64)" and
+  (OCaml) "Int64.zero" and
+  (Scala) "0"
+| constant "1 :: uint64" \<rightharpoonup>
+  (SML) "Uint64.one" and
+  (Haskell) "(1 :: Uint64.Word64)" and
+  (OCaml) "Int64.one" and
+  (Scala) "1"
+| constant "plus :: uint64 \<Rightarrow> _ " \<rightharpoonup>
+  (SML) "Uint64.plus" and
+  (Haskell) infixl 6 "+" and
+  (OCaml) "Int64.add" and
+  (Scala) infixl 7 "+"
+| constant "uminus :: uint64 \<Rightarrow> _" \<rightharpoonup>
+  (SML) "Uint64.negate" and
+  (Haskell) "negate" and
+  (OCaml) "Int64.neg" and
+  (Scala) "!(- _)"
+| constant "minus :: uint64 \<Rightarrow> _" \<rightharpoonup>
+  (SML) "Uint64.minus" and
+  (Haskell) infixl 6 "-" and
+  (OCaml) "Int64.sub" and
+  (Scala) infixl 7 "-"
+| constant "times :: uint64 \<Rightarrow> _ \<Rightarrow> _" \<rightharpoonup>
+  (SML) "Uint64.times" and
+  (Haskell) infixl 7 "*" and
+  (OCaml) "Int64.mul" and
+  (Scala) infixl 8 "*"
+| constant "HOL.equal :: uint64 \<Rightarrow> _ \<Rightarrow> bool" \<rightharpoonup>
+  (SML) "!((_ : Uint64.uint64) = _)" and
+  (Haskell) infix 4 "==" and
+  (OCaml) "(Int64.compare _ _ = 0)" and
+  (Scala) infixl 5 "=="
+| class_instance uint64 :: equal \<rightharpoonup>
+  (Haskell) -
+| constant "less_eq :: uint64 \<Rightarrow> _ \<Rightarrow> bool" \<rightharpoonup>
+  (SML) "Uint64.less'_eq" and
+  (Haskell) infix 4 "<=" and
+  (OCaml) "Uint64.less'_eq" and
+  (Scala) "Uint64.less'_eq"
+| constant "less :: uint64 \<Rightarrow> _ \<Rightarrow> bool" \<rightharpoonup>
+  (SML) "Uint64.less" and
+  (Haskell) infix 4 "<" and
+  (OCaml) "Uint64.less" and
+  (Scala) "Uint64.less"
+| constant "Bit_Operations.not :: uint64 \<Rightarrow> _" \<rightharpoonup>
+  (SML) "Uint64.notb" and
+  (Haskell) "Data'_Bits.complement" and
+  (OCaml) "Int64.lognot" and
+  (Scala) "_.unary'_~"
+| constant "Bit_Operations.and :: uint64 \<Rightarrow> _" \<rightharpoonup>
+  (SML) "Uint64.andb" and
+  (Haskell) infixl 7 "Data_Bits..&." and
+  (OCaml) "Int64.logand" and
+  (Scala) infixl 3 "&"
+| constant "Bit_Operations.or :: uint64 \<Rightarrow> _" \<rightharpoonup>
+  (SML) "Uint64.orb" and
+  (Haskell) infixl 5 "Data_Bits..|." and
+  (OCaml) "Int64.logor" and
+  (Scala) infixl 1 "|"
+| constant "Bit_Operations.xor :: uint64 \<Rightarrow> _" \<rightharpoonup>
+  (SML) "Uint64.xorb" and
+  (Haskell) "Data'_Bits.xor" and
+  (OCaml) "Int64.logxor" and
+  (Scala) infixl 2 "^"
+
+definition uint64_divmod :: "uint64 \<Rightarrow> uint64 \<Rightarrow> uint64 \<times> uint64" where
+  "uint64_divmod x y = 
+  (if y = 0 then (undefined ((div) :: uint64 \<Rightarrow> _) x (0 :: uint64), undefined ((mod) :: uint64 \<Rightarrow> _) x (0 :: uint64)) 
+  else (x div y, x mod y))"
+
+definition uint64_div :: "uint64 \<Rightarrow> uint64 \<Rightarrow> uint64" 
+where "uint64_div x y = fst (uint64_divmod x y)"
+
+definition uint64_mod :: "uint64 \<Rightarrow> uint64 \<Rightarrow> uint64" 
+where "uint64_mod x y = snd (uint64_divmod x y)"
+
+lemma div_uint64_code [code]: "x div y = (if y = 0 then 0 else uint64_div x y)"
+including undefined_transfer unfolding uint64_divmod_def uint64_div_def
+by transfer (simp add: word_div_def)
+
+lemma mod_uint64_code [code]: "x mod y = (if y = 0 then x else uint64_mod x y)"
+including undefined_transfer unfolding uint64_mod_def uint64_divmod_def
+by transfer (simp add: word_mod_def)
+
+definition uint64_sdiv :: "uint64 \<Rightarrow> uint64 \<Rightarrow> uint64"
+where [code del]:
+  "uint64_sdiv x y =
+   (if y = 0 then undefined ((div) :: uint64 \<Rightarrow> _) x (0 :: uint64)
+    else Abs_uint64 (Rep_uint64 x sdiv Rep_uint64 y))"
+
+definition div0_uint64 :: "uint64 \<Rightarrow> uint64"
+where [code del]: "div0_uint64 x = undefined ((div) :: uint64 \<Rightarrow> _) x (0 :: uint64)"
+declare [[code abort: div0_uint64]]
+
+definition mod0_uint64 :: "uint64 \<Rightarrow> uint64"
+where [code del]: "mod0_uint64 x = undefined ((mod) :: uint64 \<Rightarrow> _) x (0 :: uint64)"
+declare [[code abort: mod0_uint64]]
+
+lemma uint64_divmod_code [code]:
+  "uint64_divmod x y =
+  (if 0x8000000000000000 \<le> y then if x < y then (0, x) else (1, x - y)
+   else if y = 0 then (div0_uint64 x, mod0_uint64 x)
+   else let q = push_bit 1 (uint64_sdiv (drop_bit 1 x) y);
+            r = x - q * y
+        in if r \<ge> y then (q + 1, r - y) else (q, r))"
+  including undefined_transfer unfolding uint64_divmod_def uint64_sdiv_def div0_uint64_def mod0_uint64_def
+    less_eq_uint64.rep_eq
+  apply transfer
+  apply (simp add: divmod_via_sdivmod push_bit_eq_mult)
+  done
+
+lemma uint64_sdiv_code [code]:
+  "Rep_uint64 (uint64_sdiv x y) =
+   (if y = 0 then Rep_uint64 (undefined ((div) :: uint64 \<Rightarrow> _) x (0 :: uint64))
+    else Rep_uint64 x sdiv Rep_uint64 y)"
+unfolding uint64_sdiv_def by(simp add: Abs_uint64_inverse)
+
+
+code_printing
+  constant uint64_div \<rightharpoonup>
+  (SML) "Uint64.divide" and
+  (Haskell) "Prelude.div"
+| constant uint64_mod \<rightharpoonup>
+  (SML) "Uint64.modulus" and
+  (Haskell) "Prelude.mod"
+| constant uint64_divmod \<rightharpoonup>
+  (Haskell) "divmod"
+| constant uint64_sdiv \<rightharpoonup>
+  (OCaml) "Int64.div" and
+  (Scala) "_ '/ _"
+
+definition uint64_test_bit :: "uint64 \<Rightarrow> integer \<Rightarrow> bool"
+where [code del]:
+  "uint64_test_bit x n =
+  (if n < 0 \<or> 63 < n then undefined (bit :: uint64 \<Rightarrow> _) x n
+   else bit x (nat_of_integer n))"
+
+lemma bit_uint64_code [code]:
+  "bit x n \<longleftrightarrow> n < 64 \<and> uint64_test_bit x (integer_of_nat n)"
+  including undefined_transfer integer.lifting unfolding uint64_test_bit_def
+  by transfer (auto dest: bit_imp_le_length)
+
+lemma uint64_test_bit_code [code]:
+  "uint64_test_bit w n =
+  (if n < 0 \<or> 63 < n then undefined (bit :: uint64 \<Rightarrow> _) w n else bit (Rep_uint64 w) (nat_of_integer n))"
+  unfolding uint64_test_bit_def by(simp add: bit_uint64.rep_eq)
+
+code_printing constant uint64_test_bit \<rightharpoonup>
+  (SML) "Uint64.test'_bit" and
+  (Haskell) "Data'_Bits.testBitBounded" and
+  (OCaml) "Uint64.test'_bit" and
+  (Scala) "Uint64.test'_bit" and
+  (Eval) "(fn x => fn i => if i < 0 orelse i >= 64 then raise (Fail \"argument to uint64'_test'_bit out of bounds\") else Uint64.test'_bit x i)"
+
+definition uint64_set_bit :: "uint64 \<Rightarrow> integer \<Rightarrow> bool \<Rightarrow> uint64"
+where [code del]:
+  "uint64_set_bit x n b =
+  (if n < 0 \<or> 63 < n then undefined (set_bit :: uint64 \<Rightarrow> _) x n b
+   else set_bit x (nat_of_integer n) b)"
+
+lemma set_bit_uint64_code [code]:
+  "set_bit x n b = (if n < 64 then uint64_set_bit x (integer_of_nat n) b else x)"
+including undefined_transfer integer.lifting unfolding uint64_set_bit_def
+by(transfer)(auto cong: conj_cong simp add: not_less set_bit_beyond word_size)
+
+lemma uint64_set_bit_code [code]:
+  "Rep_uint64 (uint64_set_bit w n b) = 
+  (if n < 0 \<or> 63 < n then Rep_uint64 (undefined (set_bit :: uint64 \<Rightarrow> _) w n b)
+   else set_bit (Rep_uint64 w) (nat_of_integer n) b)"
+including undefined_transfer unfolding uint64_set_bit_def by transfer simp
+
+code_printing constant uint64_set_bit \<rightharpoonup>
+  (SML) "Uint64.set'_bit" and
+  (Haskell) "Data'_Bits.setBitBounded" and
+  (OCaml) "Uint64.set'_bit" and
+  (Scala) "Uint64.set'_bit" and
+  (Eval) "(fn x => fn i => fn b => if i < 0 orelse i >= 64 then raise (Fail \"argument to uint64'_set'_bit out of bounds\") else Uint64.set'_bit x i b)"
+
+definition uint64_shiftl :: "uint64 \<Rightarrow> integer \<Rightarrow> uint64"
+where [code del]:
+  "uint64_shiftl x n = (if n < 0 \<or> 64 \<le> n then undefined (push_bit :: nat \<Rightarrow> uint64 \<Rightarrow> _) x n else push_bit (nat_of_integer n) x)"
+
+lemma shiftl_uint64_code [code]: "push_bit n x = (if n < 64 then uint64_shiftl x (integer_of_nat n) else 0)"
+  including undefined_transfer integer.lifting unfolding uint64_shiftl_def
+  by transfer simp
+
+lemma uint64_shiftl_code [code]:
+  "Rep_uint64 (uint64_shiftl w n) =
+  (if n < 0 \<or> 64 \<le> n then Rep_uint64 (undefined (push_bit :: nat \<Rightarrow> uint64 \<Rightarrow> _) w n) else push_bit (nat_of_integer n) (Rep_uint64 w))"
+including undefined_transfer unfolding uint64_shiftl_def by transfer simp
+
+code_printing constant uint64_shiftl \<rightharpoonup>
+  (SML) "Uint64.shiftl" and
+  (Haskell) "Data'_Bits.shiftlBounded" and
+  (OCaml) "Uint64.shiftl" and
+  (Scala) "Uint64.shiftl" and
+  (Eval) "(fn x => fn i => if i < 0 orelse i >= 64 then raise (Fail \"argument to uint64'_shiftl out of bounds\") else Uint64.shiftl x i)"
+
+definition uint64_shiftr :: "uint64 \<Rightarrow> integer \<Rightarrow> uint64"
+where [code del]:
+  "uint64_shiftr x n = (if n < 0 \<or> 64 \<le> n then undefined (drop_bit :: nat \<Rightarrow> uint64 \<Rightarrow> _) x n else drop_bit (nat_of_integer n) x)"
+
+lemma shiftr_uint64_code [code]: "drop_bit n x = (if n < 64 then uint64_shiftr x (integer_of_nat n) else 0)"
+  including undefined_transfer integer.lifting unfolding uint64_shiftr_def
+  by transfer simp
+
+lemma uint64_shiftr_code [code]:
+  "Rep_uint64 (uint64_shiftr w n) =
+  (if n < 0 \<or> 64 \<le> n then Rep_uint64 (undefined (drop_bit :: nat \<Rightarrow> uint64 \<Rightarrow> _) w n) else drop_bit (nat_of_integer n) (Rep_uint64 w))"
+  including undefined_transfer unfolding uint64_shiftr_def by transfer simp
+
+code_printing constant uint64_shiftr \<rightharpoonup>
+  (SML) "Uint64.shiftr" and
+  (Haskell) "Data'_Bits.shiftrBounded" and
+  (OCaml) "Uint64.shiftr" and
+  (Scala) "Uint64.shiftr" and
+  (Eval) "(fn x => fn i => if i < 0 orelse i >= 64 then raise (Fail \"argument to uint64'_shiftr out of bounds\") else Uint64.shiftr x i)"
+
+definition uint64_sshiftr :: "uint64 \<Rightarrow> integer \<Rightarrow> uint64"
+where [code del]:
+  "uint64_sshiftr x n =
+  (if n < 0 \<or> 64 \<le> n then undefined signed_drop_bit_uint64 n x else signed_drop_bit_uint64 (nat_of_integer n) x)"
+
+lemma sshiftr_uint64_code [code]:
+  "signed_drop_bit_uint64 n x = 
+  (if n < 64 then uint64_sshiftr x (integer_of_nat n) else if bit x 63 then - 1 else 0)"
+  including undefined_transfer integer.lifting unfolding uint64_sshiftr_def
+  by transfer (simp add: not_less signed_drop_bit_beyond)
+
+lemma uint64_sshiftr_code [code]:
+  "Rep_uint64 (uint64_sshiftr w n) =
+  (if n < 0 \<or> 64 \<le> n then Rep_uint64 (undefined signed_drop_bit_uint64 n w) else signed_drop_bit (nat_of_integer n) (Rep_uint64 w))"
+including undefined_transfer unfolding uint64_sshiftr_def by transfer simp
+
+code_printing constant uint64_sshiftr \<rightharpoonup>
+  (SML) "Uint64.shiftr'_signed" and
+  (Haskell) 
+    "(Prelude.fromInteger (Prelude.toInteger (Data'_Bits.shiftrBounded (Prelude.fromInteger (Prelude.toInteger _) :: Uint64.Int64) _)) :: Uint64.Word64)" and
+  (OCaml) "Uint64.shiftr'_signed" and
+  (Scala) "Uint64.shiftr'_signed" and
+  (Eval) "(fn x => fn i => if i < 0 orelse i >= 64 then raise (Fail \"argument to uint64'_shiftr'_signed out of bounds\") else Uint64.shiftr'_signed x i)"
+
+context
+  includes bit_operations_syntax
+begin
+
+lemma uint64_msb_test_bit: "msb x \<longleftrightarrow> bit (x :: uint64) 63"
+  by transfer (simp add: msb_word_iff_bit)
+
+lemma msb_uint64_code [code]: "msb x \<longleftrightarrow> uint64_test_bit x 63"
+  by (simp add: uint64_test_bit_def uint64_msb_test_bit)
+
+lemma uint64_of_int_code [code]:
+  "uint64_of_int i = Uint64 (integer_of_int i)"
+  including integer.lifting by transfer simp
+
+lemma int_of_uint64_code [code]:
+  "int_of_uint64 x = int_of_integer (integer_of_uint64 x)"
+  including integer.lifting by transfer simp
+
+lemma uint64_of_nat_code [code]:
+  "uint64_of_nat = uint64_of_int \<circ> int"
+  by transfer (simp add: fun_eq_iff)
+
+lemma nat_of_uint64_code [code]:
+  "nat_of_uint64 x = nat_of_integer (integer_of_uint64 x)"
+  unfolding integer_of_uint64_def including integer.lifting by transfer simp
+
+definition integer_of_uint64_signed :: "uint64 \<Rightarrow> integer"
+where
+  "integer_of_uint64_signed n = (if bit n 63 then undefined integer_of_uint64 n else integer_of_uint64 n)"
+
+lemma integer_of_uint64_signed_code [code]:
+  "integer_of_uint64_signed n =
+  (if bit n 63 then undefined integer_of_uint64 n else integer_of_int (uint (Rep_uint64' n)))"
+  by (simp add: integer_of_uint64_signed_def integer_of_uint64_def)
+
+lemma integer_of_uint64_code [code]:
+  "integer_of_uint64 n =
+  (if bit n 63 then integer_of_uint64_signed (n AND 0x7FFFFFFFFFFFFFFF) OR 0x8000000000000000 else integer_of_uint64_signed n)"
+proof -
+    by (simp add: take_bit_eq_mask set_bit_eq_or push_bit_eq_mult mask_eq_exp_minus_1)
+  proof (rule bit_eqI)
+    fix m
+      including integer.lifting by transfer (auto simp add: bit_simps dest: bit_imp_le_length)
+  qed
+  ultimately show ?thesis
+    by simp (simp add: integer_of_uint64_signed_def bit_simps)
+qed
+
+end
+
+code_printing
+  constant "integer_of_uint64" \<rightharpoonup>
+  (SML) "Uint64.toInt" and
+  (Haskell) "Prelude.toInteger"
+| constant "integer_of_uint64_signed" \<rightharpoonup>
+  (OCaml) "Z.of'_int64" and
+  (Scala) "BigInt"
+
+
+definition uint64_of_natural :: "natural \<Rightarrow> uint64"
+where "uint64_of_natural x \<equiv> Uint64 (integer_of_natural x)"
+
+instantiation uint64 :: "{random, exhaustive, full_exhaustive}" begin
+definition "random_uint64 \<equiv> qc_random_cnv uint64_of_natural"
+definition "exhaustive_uint64 \<equiv> qc_exhaustive_cnv uint64_of_natural"
+definition "full_exhaustive_uint64 \<equiv> qc_full_exhaustive_cnv uint64_of_natural"
+instance ..
+end
+
+instantiation uint64 :: narrowing begin
+
+interpretation quickcheck_narrowing_samples
+  "\<lambda>i. let x = Uint64 i in (x, 0xFFFFFFFFFFFFFFFF - x)" "0"
+  "Typerep.Typerep (STR ''Uint64.uint64'') []" .
+
+definition "narrowing_uint64 d = qc_narrowing_drawn_from (narrowing_samples d) d"
+declare [[code drop: "partial_term_of :: uint64 itself \<Rightarrow> _"]]
+lemmas partial_term_of_uint64 [code] = partial_term_of_code
+
+instance ..
+end
+
+end

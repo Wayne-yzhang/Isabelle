@@ -1,0 +1,268 @@
+theory Kyber_gpv_IND_CPA
+
+
+imports "Game_Based_Crypto.CryptHOL_Tutorial"
+        Correct_new
+
+begin
+unbundle %invisible lifting_syntax
+declare %invisible [[names_short]]
+
+
+
+locale kyber_new_security =  kyber_cor_new _ _ _ _ _ _ "TYPE('a::qr_spec)" "TYPE('k::finite)" +
+  ro: random_oracle len_plain
+for len_plain :: nat +
+fixes type_a :: "('a :: qr_spec) itself" 
+  and type_k :: "('k ::finite) itself"
+begin
+
+
+definition bitstring_to_int:
+"bitstring_to_int msg = (\<Sum>i<length msg. if msg!i then  2^i else 0)"
+       
+definition plain_to_msg :: "bitstring \<Rightarrow> 'a qr" where
+"plain_to_msg msg = to_module (bitstring_to_int msg)"
+
+definition msg_to_plain :: "'a qr \<Rightarrow> bitstring" where
+"msg_to_plain msg = map (\<lambda>i. i=0) (coeffs (of_qr msg))"
+
+
+
+  define game\<^sub>3 where
+  "game\<^sub>3 f = do {
+    b \<leftarrow> coin_spmf;
+    A' \<leftarrow> spmf_of_set (UNIV :: (('a qr,'k) vec, 'k option) vec set);
+    let A = transpose (vec_lambda (\<lambda> i. vec_nth A' (Some i)));
+    let t = vec_nth A' None;
+    (((msg1, msg2), \<sigma>),s) \<leftarrow> exec_gpv ro.oracle (\<A>\<^sub>1 (A,t)) ro.initial;
+    if valid_plains msg1 msg2
+    then do {
+      let msg = (if b then msg1 else msg2);
+      c \<leftarrow> f A';
+      let (u :: ('a qr, 'k) vec) = vec_lambda (\<lambda> i. (vec_nth c (Some i)));
+      let (v :: 'a qr) = (vec_nth c None +
+      to_module (round((real_of_int q)/2)) * (plain_to_msg msg));
+      (b', s1) \<leftarrow> exec_gpv ro.oracle (\<A>\<^sub>2 (compress_vec du u, compress_poly dv v) \<sigma>) s;
+      return_spmf (b' = b)
+    } 
+  else  coin_spmf
+  }" for f
+
+
+  define is_encrypt' where
+  "is_encrypt' A' = bind_spmf (spmf_of_pmf mlwe.beta_vec)
+    (\<lambda>r. bind_spmf (mlwe.beta_vec')
+    (\<lambda>e. return_spmf (A' *v r + e)))" for A' ::"(('a qr,'k) vec,'k option) vec"
+
+
+
+  have e_distrib: "do {
+    e1 \<leftarrow> spmf_of_pmf mlwe.beta_vec;
+    e2 \<leftarrow> spmf_of_pmf mlwe.beta;
+    let (e' :: ('a qr, 'k option) vec) = 
+      (\<chi> i. if i = None then e2 else vec_nth e1 (the i)); 
+    return_spmf e'
+  } = mlwe.beta_vec'" 
+  unfolding mlwe.beta_vec' mlwe.beta_vec_def replicate_spmf_def
+  by (simp add: bind_commute_pmf[of "mlwe.beta"] bind_assoc_pmf bind_pmf_return_spmf 
+    bind_return_pmf)
+
+
+  have pk_distrib: "do {
+    A \<leftarrow> spmf_of_set (UNIV);
+    t \<leftarrow> spmf_of_set (UNIV);
+    let (A' :: (('a qr,'k) vec, 'k option) vec) = 
+      (\<chi> i. if i = None then t else transpose A $ (the i));
+    return_spmf A'} = 
+    spmf_of_set (UNIV)"
+  proof (intro spmf_eqI, goal_cases)
+    case (1 A')
+    let ?P = "(\<lambda> (A,t). (\<chi> i. if i = None then t else transpose A $ (the i)))
+      :: ((('a qr, 'k) vec, 'k) vec \<times> ('a qr, 'k) vec) \<Rightarrow> (('a qr, 'k) vec, 'k option) vec"
+    define a where "a = transpose (\<chi> i. vec_nth A' (Some i))"
+    define b where "b = A' $ None"
+    have "(\<chi> i. if i = None then b else transpose a $ the i) = A'" 
+      unfolding a_def b_def 
+      by (smt (verit, ccfv_SIG) Cart_lambda_cong Option.option.collapse 
+        transpose_transpose vec_lambda_eta vector_component_simps(5))
+    moreover have "aa = a \<and> bb = b" if "(\<chi> i. if i = None then bb else transpose aa $ the i) = A'" 
+      for aa bb using a_def b_def that by force
+    ultimately have "\<exists>! (A, t). ?P(A,t) = A'"
+      unfolding Ex1_def by (auto simp add: split_def)
+    then have "(\<Sum>x \<in> UNIV. indicat_real {Some A'} (Some (?P (fst x, snd x)))) = 1"
+      by (subst indicator_def, subst ex1_sum, simp_all add: split_def finite_Prod_UNIV)
+    then have "(\<Sum>A\<in>UNIV. \<Sum>t\<in>UNIV. indicat_real {Some A'} 
+      (Some (?P (A,t)))) = 1" 
+    by (subst sum_cartesian_product'[symmetric]) (simp add: split_def )
+    then show ?case by (simp add: spmf_bind spmf_of_set integral_spmf_of_set)
+  qed
+
+  have game\<^sub>2_eq_game\<^sub>3_is_encrypt: 
+    "?sample (game\<^sub>2 is_encrypt) = game\<^sub>3 (is_encrypt')"
+  proof -
+    have "?sample (game\<^sub>2 is_encrypt) = 
+      (spmf_of_set UNIV \<bind>
+      (\<lambda>A. spmf_of_set UNIV \<bind>
+      (\<lambda>t. let  A' = \<chi> i. if i = None then t else transpose A $ the i in
+        return_spmf A'))) \<bind> 
+       (\<lambda>A'. let A = transpose (\<chi> i. vec_nth A' (Some i));
+                t = A' $ None
+        in coin_spmf \<bind>
+      (\<lambda>b. exec_gpv ro.oracle (\<A>\<^sub>1 (A, t)) ro.initial \<bind>
+      (\<lambda>(((msg1, msg2), \<sigma>), s). if valid_plains msg1 msg2
+          then let msg = if b then msg1 else msg2
+               in spmf_of_pmf mlwe.beta_vec \<bind>
+                  (\<lambda>r. spmf_of_pmf mlwe.beta_vec \<bind>
+                  (\<lambda>e1. spmf_of_pmf mlwe.beta \<bind>
+                  (\<lambda>e2. let e = \<chi> i. if i = None then e2 else e1 $ the i;
+                            c = A' *v r + e; u = compress_vec du (\<chi> i. c $ Some i);
+                            v = compress_poly dv (c $ None + to_module 
+                                (round (real_of_int q / 2)) * plain_to_msg msg)
+                         in return_spmf (u, v)))) \<bind>
+                            (\<lambda>c. exec_gpv ro.oracle (\<A>\<^sub>2 c \<sigma>) s \<bind> 
+                            (\<lambda>(b', s1). return_spmf (b' = b)))
+          else coin_spmf)))"
+    unfolding is_encrypt1 unfolding game\<^sub>2_def is_encrypt1_def Let_def by simp
+    also have " \<dots> = spmf_of_set UNIV \<bind>
+      (\<lambda>A'. let A = transpose (\<chi> i. vec_nth A' (Some i));
+                t = A' $ None
+        in coin_spmf \<bind>
+      (\<lambda>b. exec_gpv ro.oracle (\<A>\<^sub>1 (A, t)) ro.initial \<bind>
+      (\<lambda>(((msg1, msg2), \<sigma>), s). if valid_plains msg1 msg2
+          then let msg = if b then msg1 else msg2
+               in spmf_of_pmf mlwe.beta_vec \<bind>
+                  (\<lambda>r. 
+            (spmf_of_pmf mlwe.beta_vec \<bind>
+            (\<lambda>e1. spmf_of_pmf mlwe.beta \<bind>
+            (\<lambda>e2. let e = \<chi> i. if i = None then e2 else e1 $ the i 
+            in return_spmf e))) \<bind>
+                  (\<lambda>e. let c = A' *v r + e; u = compress_vec du (\<chi> i. c $ Some i);
+                           v = compress_poly dv (c $ None + to_module 
+                                (round (real_of_int q / 2)) * plain_to_msg msg)
+                         in return_spmf (u, v))) \<bind>
+                            (\<lambda>c. exec_gpv ro.oracle (\<A>\<^sub>2 c \<sigma>) s \<bind> 
+                            (\<lambda>(b', s1). return_spmf (b' = b)))
+          else coin_spmf)))"
+      by (subst pk_distrib) (simp add: Let_def del: bind_spmf_of_pmf)
+    also have " \<dots> = spmf_of_set UNIV \<bind>
+      (\<lambda>A'. let A = transpose (\<chi> i. vec_nth A' (Some i));
+                t = A' $ None
+        in coin_spmf \<bind>
+      (\<lambda>b. exec_gpv ro.oracle (\<A>\<^sub>1 (A, t)) ro.initial \<bind>
+      (\<lambda>(((msg1, msg2), \<sigma>),s). if valid_plains msg1 msg2
+          then let msg = if b then msg1 else msg2
+               in spmf_of_pmf mlwe.beta_vec \<bind>
+                  (\<lambda>r. mlwe.beta_vec' \<bind>
+                  (\<lambda>e. let c = A' *v r + e; u = compress_vec du (\<chi> i. c $ Some i);
+                           v = compress_poly dv (c $ None + to_module 
+                                (round (real_of_int q / 2)) * plain_to_msg msg)
+                         in return_spmf (u, v))) \<bind>
+                            (\<lambda>c. exec_gpv ro.oracle (\<A>\<^sub>2 c \<sigma>) s \<bind> 
+                            (\<lambda>(b', s1). return_spmf (b' = b)))
+          else coin_spmf)))"
+      unfolding e_distrib by simp
+    also have "\<dots> = game\<^sub>3 is_encrypt'"
+      unfolding game\<^sub>3_def is_encrypt'_def 
+      by (simp add: bind_commute_spmf[of "coin_spmf"]  bind_spmf_pmf_assoc)
+    finally show ?thesis
+      by blast
+  qed
+
+
+  have cipher_distrib:
+    "do{
+      u \<leftarrow> spmf_of_set (UNIV:: ('a qr, 'k) vec set);
+      v \<leftarrow> spmf_of_set (UNIV:: 'a qr set);
+      return_spmf (u, v)
+    } = do{
+      c \<leftarrow> spmf_of_set (UNIV:: ('a qr, 'k option) vec set);
+      let u = \<chi> i. c $ Some i;
+          v = c $ None in
+      return_spmf (u,v)
+    }" for msg :: bitstring
+  proof (intro spmf_eqI, unfold Let_def, goal_cases)
+    case (1 w)
+    have "(\<Sum>x\<in>UNIV. \<Sum>xa\<in>UNIV. indicat_real {Some w} (Some (x, xa))) = 1" 
+    proof -
+      have "(\<Sum>x\<in>UNIV. \<Sum>xa\<in>UNIV. indicat_real {Some w} (Some (x, xa))) = 
+            (\<Sum>x\<in>UNIV. indicat_real {Some w} (Some x))"
+      by (subst sum_cartesian_product'[symmetric]) simp
+      also have "\<dots> = 1" unfolding indicator_def 
+        using finite_cartesian_product[OF finite_UNIV_vec finite_qr]
+        by (subst ex1_sum) simp_all
+      finally show ?thesis by blast
+    qed
+    moreover have "(\<Sum>x\<in>UNIV. indicat_real {Some w} (Some (\<chi> i. x $ Some i, x $ None))) = 1" 
+    proof (unfold indicator_def, subst ex1_sum, goal_cases)
+      case 1
+      define x where "x = (\<chi> i. if i = None then snd w else fst w $ (the i))"
+      have "Some (\<chi> i. x $ Some i, x $ None) \<in> {Some w}" by (simp add: x_def)
+      moreover have "(\<forall>y. Some (\<chi> i. y $ Some i, y $ None) \<in> {Some w} \<longrightarrow> y = x)"
+      by (metis (mono_tags) Option.option.exhaust Option.option.sel Product_Type.prod.sel(1) 
+        Product_Type.prod.sel(2) calculation singletonD vec_lambda_unique)
+      ultimately show ?case unfolding Ex1_def by (intro exI) simp
+    qed  simp_all
+    ultimately show ?case 
+      by (simp add: spmf_bind integral_spmf_of_set)
+  qed
+
+  have game\<^sub>2_eq_game\<^sub>3_rand_encrypt: 
+    "?sample (game\<^sub>2 rand_encrypt) = game\<^sub>3 (\<lambda>_. spmf_of_set UNIV)"
+  proof -
+    have "?sample (game\<^sub>2 rand_encrypt) = 
+      (spmf_of_set UNIV \<bind>
+      (\<lambda>A. spmf_of_set UNIV \<bind>
+      (\<lambda>t. let  A' = \<chi> i. if i = None then t else transpose A $ the i in
+        return_spmf A'))) \<bind> 
+       (\<lambda>A'. let A = transpose (\<chi> i. vec_nth A' (Some i));
+                t = A' $ None
+        in coin_spmf \<bind>
+      (\<lambda>b. exec_gpv ro.oracle (\<A>\<^sub>1 (A, t)) ro.initial \<bind>
+      (\<lambda>(((msg1, msg2), \<sigma>),s). if valid_plains msg1 msg2
+          then let msg = if b then msg1 else msg2
+               in rand_encrypt1 A t msg \<bind>
+                            (\<lambda>c. exec_gpv ro.oracle (\<A>\<^sub>2 c \<sigma>) s \<bind> 
+                            (\<lambda>(b', s1). return_spmf (b' = b)))
+          else coin_spmf)))"
+    unfolding rand_encrypt1 unfolding game\<^sub>2_def Let_def by simp
+    also have " \<dots> = spmf_of_set UNIV \<bind>
+      (\<lambda>A'. let A = transpose (\<chi> i. A' $ (Some i));
+                t = A' $ None
+        in coin_spmf \<bind>
+      (\<lambda>b. exec_gpv ro.oracle (\<A>\<^sub>1 (A, t)) ro.initial \<bind>
+      (\<lambda>(((msg1, msg2), \<sigma>),s). if valid_plains msg1 msg2
+          then let msg = if b then msg1 else msg2
+               in do{ u \<leftarrow> spmf_of_set (UNIV:: ('a qr, 'k) vec set);
+                      v \<leftarrow> spmf_of_set (UNIV:: 'a qr set);
+                      return_spmf (u, v)} \<bind>
+                  (\<lambda>(u,v). let v' = (v + to_module (round((real_of_int q)/2)) * 
+                                    (plain_to_msg msg))
+                        in exec_gpv ro.oracle (\<A>\<^sub>2 (compress_vec du u, 
+                             compress_poly dv v') \<sigma>) s \<bind> 
+                          (\<lambda>(b',s1). return_spmf (b' = b)))
+          else coin_spmf)))"
+      unfolding rand_encrypt1_def by (subst pk_distrib)(simp add: Let_def del: bind_spmf_of_pmf)
+    also have " \<dots> = spmf_of_set UNIV \<bind>
+      (\<lambda>A'. let A = transpose (\<chi> i. vec_nth A' (Some i));
+                t = A' $ None
+        in coin_spmf \<bind>
+      (\<lambda>b. exec_gpv ro.oracle (\<A>\<^sub>1 (A, t)) ro.initial \<bind>
+      (\<lambda>(((msg1, msg2), \<sigma>),s). if valid_plains msg1 msg2
+          then let msg = if b then msg1 else msg2
+               in do{ c \<leftarrow> spmf_of_set (UNIV:: ('a qr, 'k option) vec set);
+                      let u = \<chi> i. c $ Some i; v = c $ None in
+                      return_spmf (u,v) } \<bind>
+                  (\<lambda>(u,v). let v' = (v + to_module (round((real_of_int q)/2)) * 
+                                    (plain_to_msg msg))
+                        in exec_gpv ro.oracle (\<A>\<^sub>2 (compress_vec du u, 
+                            compress_poly dv v') \<sigma>) s \<bind> 
+                          (\<lambda>(b',s1). return_spmf (b' = b)))
+          else coin_spmf)))"
+      unfolding cipher_distrib by simp
+    also have "\<dots> = game\<^sub>3 (\<lambda>_. spmf_of_set UNIV)"
+      unfolding game\<^sub>3_def by (simp add: bind_commute_spmf[of "coin_spmf"])
+    finally show ?thesis
+      by blast
+  qed
+

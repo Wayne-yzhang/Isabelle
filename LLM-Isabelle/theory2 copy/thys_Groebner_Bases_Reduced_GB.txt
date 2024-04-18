@@ -1,0 +1,112 @@
+theory Reduced_GB
+  imports Groebner_Bases Auto_Reduction
+begin
+
+lemma (in gd_term) GB_image_monic: "is_Groebner_basis (monic ` G) \<longleftrightarrow> is_Groebner_basis G"
+  by (simp add: GB_alt_1)
+  
+
+context ordered_term
+begin
+  
+definition is_reduced_GB :: "('t \<Rightarrow>\<^sub>0 'b::field) set \<Rightarrow> bool" where
+  "is_reduced_GB B \<equiv> is_Groebner_basis B \<and> is_auto_reduced B \<and> is_monic_set B \<and> 0 \<notin> B"
+  
+lemma reduced_GB_D1:
+  assumes "is_reduced_GB G"
+  shows "is_Groebner_basis G"
+  using assms unfolding is_reduced_GB_def by simp
+
+lemma reduced_GB_D2:
+  assumes "is_reduced_GB G"
+  shows "is_auto_reduced G"
+  using assms unfolding is_reduced_GB_def by simp
+
+ lemma reduced_GB_D3:
+  assumes "is_reduced_GB G"
+  shows "is_monic_set G"
+  using assms unfolding is_reduced_GB_def by simp
+     
+lemma reduced_GB_D4:
+  assumes "is_reduced_GB G" and "g \<in> G"
+  shows "g \<noteq> 0"
+  using assms unfolding is_reduced_GB_def by auto
+    
+lemma reduced_GB_lc:
+  assumes major: "is_reduced_GB G" and "g \<in> G"
+  shows "lc g = 1"
+
+
+context gd_term
+begin
+
+lemma is_reduced_GB_subsetI:
+  assumes Ared: "is_reduced_GB A" and BGB: "is_Groebner_basis B" and Bmon: "is_monic_set B"
+    and *: "\<And>a b. a \<in> A \<Longrightarrow> b \<in> B \<Longrightarrow> a \<noteq> 0 \<Longrightarrow> b \<noteq> 0 \<Longrightarrow> a - b \<noteq> 0 \<Longrightarrow> lt (a - b) \<in> keys b \<Longrightarrow> lt (a - b) \<prec>\<^sub>t lt b \<Longrightarrow> False"
+    and id_eq: "pmdl A = pmdl B"
+  shows "A \<subseteq> B"
+proof
+  fix a
+  assume "a \<in> A"
+    
+  have AGB: "is_Groebner_basis A" by (rule reduced_GB_D1, fact Ared)
+      
+  also have "... = pmdl B" using id_eq by simp
+  finally have "a \<in> pmdl B" .
+
+    by (rule GB_adds_lt)
+  from Bmon this(1) this(2) have lcb: "lc b = 1" by (rule is_monic_setD)
+  also have "... = pmdl A" using id_eq by simp
+  finally have "b \<in> pmdl A" .
+      
+  have lt_eq: "lt b = lt a"
+  proof (rule ccontr)
+    assume "lt b \<noteq> lt a"
+      where "a' \<in> A" and "a' \<noteq> 0" and a'addsb: "lt a' adds\<^sub>t lt b" by (rule GB_adds_lt)
+    have a'addsa: "lt a' adds\<^sub>t lt a" by (rule adds_term_trans, fact a'addsb, fact baddsa)
+    have "lt a' \<noteq> lt a"
+    proof
+      assume "lt a' = lt a"
+      hence aaddsa': "lt a adds\<^sub>t lt a'" by (simp add: adds_term_refl)
+      have "lt a adds\<^sub>t lt b" by (rule adds_term_trans, fact aaddsa', fact a'addsb)
+      have "lt a = lt b" by (rule adds_term_antisym, fact+)
+    qed
+    hence "a' \<noteq> a" by auto
+    have is_red: "is_red (A - {a}) a" by (intro is_red_addsI, fact, fact, rule lt_in_keys, fact+)
+    have "\<not> is_red (A - {a}) a" by (rule is_auto_reducedD, rule reduced_GB_D2, fact Ared, fact+)
+    from this is_red show False ..
+  qed
+  
+  have "a - b = 0"
+  proof (rule ccontr)
+    let ?c = "a - b"
+    assume "?c \<noteq> 0"
+    have "?c \<in> pmdl A" by (rule pmdl.span_diff, fact+)
+    also have "... = pmdl B" using id_eq by simp
+    finally have "?c \<in> pmdl B" .
+        
+    have "lt (-b) = lt a" unfolding lt_uminus by fact
+    have "lc (-b) = - lc a" unfolding lc_uminus lca lcb ..
+    
+    have "lt ?c \<in> keys ?c" by (rule lt_in_keys, fact)
+    have "keys ?c \<subseteq> (keys a \<union> keys b)" by (fact keys_minus)
+    thus False
+    proof
+      assume "lt ?c \<in> keys a"
+          
+        where "a' \<in> A" and "a' \<noteq> 0" and a'addsc: "lt a' adds\<^sub>t lt ?c" by (rule GB_adds_lt)
+
+      from a'addsc have "lt a' \<preceq>\<^sub>t lt ?c" by (rule ord_adds_term)
+      also have "... = lt (a + (- b))" by simp
+      also have "... \<prec>\<^sub>t lt a" by (rule lt_plus_lessI, fact+)
+      finally have "lt a' \<prec>\<^sub>t lt a" .
+      hence "lt a' \<noteq> lt a" by simp
+      hence "a' \<noteq> a" by auto
+      
+      have is_red: "is_red (A - {a}) a" by (intro is_red_addsI, fact, fact, fact+)
+      have "\<not> is_red (A - {a}) a" by (rule is_auto_reducedD, rule reduced_GB_D2, fact Ared, fact+)
+      from this is_red show False ..
+    next
+      assume "lt ?c \<in> keys b"
+
+      proof (rule *)

@@ -1,0 +1,899 @@
+theory Misc_CryptHOL imports 
+  Probabilistic_While.While_SPMF
+  "HOL-Library.Rewrite"
+  "HOL-Library.Simps_Case_Conv"
+  "HOL-Library.Type_Length"
+  "HOL-Eisbach.Eisbach"
+  Coinductive.TLList
+  Monad_Normalisation.Monad_Normalisation
+  Monomorphic_Monad.Monomorphic_Monad
+  Applicative_Lifting.Applicative
+begin
+
+hide_const (open) Henstock_Kurzweil_Integration.negligible
+
+declare eq_on_def [simp del]
+
+
+lemma asm_rl_conv: "(PROP P \<Longrightarrow> PROP P) \<equiv> Trueprop True"
+by(rule equal_intr_rule) iprover+
+
+named_theorems if_distribs "Distributivity theorems for If"
+
+lemma if_mono_cong: "\<lbrakk>b \<Longrightarrow> x \<le> x'; \<not> b \<Longrightarrow> y \<le> y' \<rbrakk> \<Longrightarrow> If b x y \<le> If b x' y'"
+by simp
+
+lemma if_cong_then: "\<lbrakk> b = b'; b' \<Longrightarrow> t = t'; e = e' \<rbrakk> \<Longrightarrow> If b t e = If b' t' e'"
+by simp
+
+lemma if_False_eq: "\<lbrakk> b \<Longrightarrow> False; e = e' \<rbrakk> \<Longrightarrow> If b t e = e'"
+by auto
+
+lemma imp_OO_imp [simp]: "(\<longrightarrow>) OO (\<longrightarrow>) = (\<longrightarrow>)"
+by auto
+
+lemma inj_on_fun_updD: "\<lbrakk> inj_on (f(x := y)) A; x \<notin> A \<rbrakk> \<Longrightarrow> inj_on f A"
+by(auto simp add: inj_on_def split: if_split_asm)
+
+lemma disjoint_notin1: "\<lbrakk> A \<inter> B = {}; x \<in> B \<rbrakk> \<Longrightarrow> x \<notin> A" by auto
+
+lemma Least_le_Least:
+  fixes x :: "'a :: wellorder"
+  assumes "Q x"
+  and Q: "\<And>x. Q x \<Longrightarrow> \<exists>y\<le>x. P y"
+  shows "Least P \<le> Least Q"
+proof -
+  obtain f :: "'a \<Rightarrow> 'a" where "\<forall>a. \<not> Q a \<or> f a \<le> a \<and> P (f a)" using Q by moura
+  ultimately show ?thesis by (metis (full_types) le_cases le_less less_le_trans not_less_Least)
+qed
+
+lemma is_empty_image [simp]: "Set.is_empty (f ` A) = Set.is_empty A"
+  by(auto simp add: Set.is_empty_def)
+
+
+inductive Imagep :: "('a \<Rightarrow> 'b \<Rightarrow> bool) \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow> 'b \<Rightarrow> bool"
+  for R P
+where ImagepI: "\<lbrakk> P x; R x y \<rbrakk> \<Longrightarrow> Imagep R P y"
+
+lemma r_r_into_tranclp: "\<lbrakk> r x y; r y z \<rbrakk> \<Longrightarrow> r^++ x z"
+by(rule tranclp.trancl_into_trancl)(rule tranclp.r_into_trancl)
+
+lemma transp_tranclp_id:
+  assumes "transp R"
+  shows "tranclp R = R"
+proof(intro ext iffI)
+  fix x y
+  assume "R^++ x y"
+  thus "R x y" by induction(blast dest: transpD[OF assms])+
+qed simp
+
+lemma transp_inv_image: "transp r \<Longrightarrow> transp (\<lambda>x y. r (f x) (f y))"
+using trans_inv_image[where r="{(x, y). r x y}" and f = f]
+by(simp add: transp_trans inv_image_def)
+
+lemma Domainp_conversep: "Domainp R\<inverse>\<inverse> = Rangep R"
+by(auto)
+
+lemma bi_unique_rel_set_bij_betw:
+  assumes unique: "bi_unique R"
+  and rel: "rel_set R A B"
+  shows "\<exists>f. bij_betw f A B \<and> (\<forall>x\<in>A. R x (f x))"
+proof -
+  from assms obtain f where f: "\<And>x. x \<in> A \<Longrightarrow> R x (f x)" and B: "\<And>x. x \<in> A \<Longrightarrow> f x \<in> B"
+    apply(atomize_elim)
+    apply(fold all_conj_distrib)
+    apply(subst choice_iff[symmetric])
+    apply(auto dest: rel_setD1)
+    done
+  have "inj_on f A" by(rule inj_onI)(auto dest!: f dest: bi_uniqueDl[OF unique])
+  moreover have "f ` A = B" using rel
+    by(auto 4 3 intro: B dest: rel_setD2 f bi_uniqueDr[OF unique])
+  ultimately have "bij_betw f A B" unfolding bij_betw_def ..
+  thus ?thesis using f by blast
+qed
+
+definition restrict_relp :: "('a \<Rightarrow> 'b \<Rightarrow> bool) \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow> ('b \<Rightarrow> bool) \<Rightarrow> 'a \<Rightarrow> 'b \<Rightarrow> bool"
+  ("_ \<upharpoonleft> (_ \<otimes> _)" [53, 54, 54] 53)
+where "restrict_relp R P Q = (\<lambda>x y. R x y \<and> P x \<and> Q y)"
+
+lemma restrict_relp_apply [simp]: "(R \<upharpoonleft> P \<otimes> Q) x y \<longleftrightarrow> R x y \<and> P x \<and> Q y"
+by(simp add: restrict_relp_def)
+
+lemma restrict_relpI [intro?]: "\<lbrakk> R x y; P x; Q y \<rbrakk> \<Longrightarrow> (R \<upharpoonleft> P \<otimes> Q) x y"
+by(simp add: restrict_relp_def)
+
+lemma restrict_relpE [elim?, cases pred]:
+  assumes "(R \<upharpoonleft> P \<otimes> Q) x y"
+  obtains (restrict_relp) "R x y" "P x" "Q y"
+using assms by(simp add: restrict_relp_def)
+
+lemma conversep_restrict_relp [simp]: "(R \<upharpoonleft> P \<otimes> Q)\<inverse>\<inverse> = R\<inverse>\<inverse> \<upharpoonleft> Q \<otimes> P"
+by(auto simp add: fun_eq_iff)
+
+lemma restrict_relp_restrict_relp [simp]: "R \<upharpoonleft> P \<otimes> Q \<upharpoonleft> P' \<otimes> Q' = R \<upharpoonleft> inf P P' \<otimes> inf Q Q'"
+by(auto simp add: fun_eq_iff)
+
+lemma restrict_relp_cong:
+  "\<lbrakk> P = P'; Q = Q'; \<And>x y. \<lbrakk> P x; Q y \<rbrakk> \<Longrightarrow> R x y = R' x y \<rbrakk> \<Longrightarrow> R \<upharpoonleft> P \<otimes> Q = R' \<upharpoonleft> P' \<otimes> Q'"
+by(auto simp add: fun_eq_iff)
+
+lemma restrict_relp_cong_simp:
+  "\<lbrakk> P = P'; Q = Q'; \<And>x y. P x =simp=> Q y =simp=> R x y = R' x y \<rbrakk> \<Longrightarrow> R \<upharpoonleft> P \<otimes> Q = R' \<upharpoonleft> P' \<otimes> Q'"
+by(rule restrict_relp_cong; simp add: simp_implies_def)
+
+lemma restrict_relp_parametric [transfer_rule]:
+  includes lifting_syntax shows
+  "((A ===> B ===> (=)) ===> (A ===> (=)) ===> (B ===> (=)) ===> A ===> B ===> (=)) restrict_relp restrict_relp"
+unfolding restrict_relp_def[abs_def] by transfer_prover
+
+lemma restrict_relp_mono: "\<lbrakk> R \<le> R'; P \<le> P'; Q \<le> Q' \<rbrakk> \<Longrightarrow> R \<upharpoonleft> P \<otimes> Q \<le> R' \<upharpoonleft> P' \<otimes> Q'"
+by(simp add: le_fun_def)
+
+lemma restrict_relp_mono': 
+  "\<lbrakk> (R \<upharpoonleft> P \<otimes> Q) x y; \<lbrakk> R x y; P x; Q y \<rbrakk> \<Longrightarrow> R' x y &&& P' x &&& Q' y \<rbrakk>
+  \<Longrightarrow> (R' \<upharpoonleft> P' \<otimes> Q') x y"
+by(auto dest: conjunctionD1 conjunctionD2)
+
+lemma restrict_relp_DomainpD: "Domainp (R \<upharpoonleft> P \<otimes> Q) x \<Longrightarrow> Domainp R x \<and> P x"
+by(auto simp add: Domainp.simps)
+
+lemma restrict_relp_True: "R \<upharpoonleft> (\<lambda>_. True) \<otimes> (\<lambda>_. True) = R"
+by(simp add: fun_eq_iff)
+
+lemma restrict_relp_False1: "R \<upharpoonleft> (\<lambda>_. False) \<otimes> Q = bot"
+by(simp add: fun_eq_iff)
+
+lemma restrict_relp_False2: "R \<upharpoonleft> P \<otimes> (\<lambda>_. False) = bot"
+by(simp add: fun_eq_iff)
+
+definition rel_prod2 :: "('a \<Rightarrow> 'b \<Rightarrow> bool) \<Rightarrow> 'a \<Rightarrow> ('c \<times> 'b) \<Rightarrow> bool"
+where "rel_prod2 R a = (\<lambda>(c, b). R a b)"
+
+lemma rel_prod2_simps [simp]: "rel_prod2 R a (c, b) \<longleftrightarrow> R a b"
+by(simp add: rel_prod2_def)
+
+lemma restrict_rel_prod:
+  "rel_prod (R \<upharpoonleft> I1 \<otimes> I2) (S \<upharpoonleft> I1' \<otimes> I2') = rel_prod R S \<upharpoonleft> pred_prod I1 I1' \<otimes> pred_prod I2 I2'"
+by(auto simp add: fun_eq_iff)
+
+lemma restrict_rel_prod1:
+  "rel_prod (R \<upharpoonleft> I1 \<otimes> I2) S = rel_prod R S \<upharpoonleft> pred_prod I1 (\<lambda>_. True) \<otimes> pred_prod I2 (\<lambda>_. True)"
+by(simp add: restrict_rel_prod[symmetric] restrict_relp_True)
+
+lemma restrict_rel_prod2:
+  "rel_prod R (S \<upharpoonleft> I1 \<otimes> I2) = rel_prod R S \<upharpoonleft> pred_prod (\<lambda>_. True) I1 \<otimes> pred_prod (\<lambda>_. True) I2"
+by(simp add: restrict_rel_prod[symmetric] restrict_relp_True)
+
+consts relcompp_witness :: "('a \<Rightarrow> 'b \<Rightarrow> bool) \<Rightarrow> ('b \<Rightarrow> 'c \<Rightarrow> bool) \<Rightarrow> 'a \<times> 'c \<Rightarrow> 'b"
+specification (relcompp_witness)
+  relcompp_witness1: "(A OO B) (fst xy) (snd xy) \<Longrightarrow> A (fst xy) (relcompp_witness A B xy)"
+  relcompp_witness2: "(A OO B) (fst xy) (snd xy) \<Longrightarrow> B (relcompp_witness A B xy) (snd xy)"
+  apply(fold all_conj_distrib)
+  apply(rule choice allI)+
+  by(auto intro: choice allI)
+
+lemmas relcompp_witness[of _ _ "(x, y)" for x y, simplified] = relcompp_witness1 relcompp_witness2
+
+hide_fact (open) relcompp_witness1 relcompp_witness2
+
+lemma relcompp_witness_eq [simp]: "relcompp_witness (=) (=) (x, x) = x"
+  using relcompp_witness(1)[of "(=)" "(=)" x x] by(simp add: eq_OO)
+
+
+lemma split_apfst [simp]: "case_prod h (apfst f xy) = case_prod (h \<circ> f) xy"
+by(cases xy) simp
+
+definition corec_prod :: "('s \<Rightarrow> 'a) \<Rightarrow> ('s \<Rightarrow> 'b) \<Rightarrow> 's \<Rightarrow> 'a \<times> 'b"
+where "corec_prod f g = (\<lambda>s. (f s, g s))"
+
+lemma corec_prod_apply: "corec_prod f g s = (f s, g s)"
+by(simp add: corec_prod_def)
+
+lemma corec_prod_sel [simp]:
+  shows fst_corec_prod: "fst (corec_prod f g s) = f s"
+  and snd_corec_prod: "snd (corec_prod f g s) = g s"
+by(simp_all add: corec_prod_apply)
+
+lemma apfst_corec_prod [simp]: "apfst h (corec_prod f g s) = corec_prod (h \<circ> f) g s"
+by(simp add: corec_prod_apply)
+
+lemma apsnd_corec_prod [simp]: "apsnd h (corec_prod f g s) = corec_prod f (h \<circ> g) s"
+by(simp add: corec_prod_apply)
+
+lemma map_corec_prod [simp]: "map_prod f g (corec_prod h k s) = corec_prod (f \<circ> h) (g \<circ> k) s"
+by(simp add: corec_prod_apply)
+
+lemma split_corec_prod [simp]: "case_prod h (corec_prod f g s) = h (f s) (g s)"
+by(simp add: corec_prod_apply)
+
+lemma Pair_fst_Unity: "(fst x, ()) = x"
+  by(cases x) simp
+
+definition rprodl :: "('a \<times> 'b) \<times> 'c \<Rightarrow> 'a \<times> ('b \<times> 'c)" where "rprodl = (\<lambda>((a, b), c). (a, (b, c)))"
+
+lemma rprodl_simps [simp]: "rprodl ((a, b), c) = (a, (b, c))"
+  by(simp add: rprodl_def)
+
+lemma rprodl_parametric [transfer_rule]: includes lifting_syntax shows
+  "(rel_prod (rel_prod A B) C ===> rel_prod A (rel_prod B C)) rprodl rprodl"
+  unfolding rprodl_def by transfer_prover
+
+definition lprodr :: "'a \<times> ('b \<times> 'c) \<Rightarrow> ('a \<times> 'b) \<times> 'c" where "lprodr = (\<lambda>(a, b, c). ((a, b), c))"
+
+lemma lprodr_simps [simp]: "lprodr (a, b, c) = ((a, b), c)"
+  by(simp add: lprodr_def)
+
+lemma lprodr_parametric [transfer_rule]: includes lifting_syntax shows
+  "(rel_prod A (rel_prod B C) ===> rel_prod (rel_prod A B) C) lprodr lprodr"
+  unfolding lprodr_def by transfer_prover
+
+lemma lprodr_inverse [simp]: "rprodl (lprodr x) = x"
+  by(cases x) auto
+
+lemma rprodl_inverse [simp]: "lprodr (rprodl x) = x"
+  by(cases x) auto
+
+lemma pred_prod_mono' [mono]:
+  "pred_prod A B xy \<longrightarrow> pred_prod A' B' xy"
+  if "\<And>x. A x \<longrightarrow> A' x" "\<And>y. B y \<longrightarrow> B' y"
+  using that by(cases xy) auto
+
+fun rel_witness_prod :: "('a \<times> 'b) \<times> ('c \<times> 'd) \<Rightarrow> (('a \<times> 'c) \<times> ('b \<times> 'd))" where
+  "rel_witness_prod ((a, b), (c, d)) = ((a, c), (b, d))"
+
+
+lemma islE:
+  assumes "isl x"
+  obtains l where "x = Inl l"
+using assms by(cases x) auto
+
+lemma Inl_in_Plus [simp]: "Inl x \<in> A <+> B \<longleftrightarrow> x \<in> A"
+by auto
+
+lemma Inr_in_Plus [simp]: "Inr x \<in> A <+> B \<longleftrightarrow> x \<in> B"
+by auto
+
+lemma Inl_eq_map_sum_iff: "Inl x = map_sum f g y \<longleftrightarrow> (\<exists>z. y = Inl z \<and> x = f z)"
+by(cases y) auto
+
+lemma Inr_eq_map_sum_iff: "Inr x = map_sum f g y \<longleftrightarrow> (\<exists>z. y = Inr z \<and> x = g z)"
+by(cases y) auto
+
+lemma inj_on_map_sum [simp]:
+  "\<lbrakk> inj_on f A; inj_on g B \<rbrakk> \<Longrightarrow> inj_on (map_sum f g) (A <+> B)"
+proof(rule inj_onI, goal_cases)
+  case (1 x y)
+  then show ?case by(cases x; cases y; auto simp add: inj_on_def)
+qed
+
+lemma inv_into_map_sum:
+  "inv_into (A <+> B) (map_sum f g) x = map_sum (inv_into A f) (inv_into B g) x"
+  if "x \<in> f ` A <+> g ` B" "inj_on f A" "inj_on g B"
+  using that by(cases rule: PlusE[consumes 1])(auto simp add: inv_into_f_eq f_inv_into_f)
+
+fun rsuml :: "('a + 'b) + 'c \<Rightarrow> 'a + ('b + 'c)" where
+  "rsuml (Inl (Inl a)) = Inl a"
+| "rsuml (Inl (Inr b)) = Inr (Inl b)"
+| "rsuml (Inr c) = Inr (Inr c)"
+
+fun lsumr :: "'a + ('b + 'c) \<Rightarrow> ('a + 'b) + 'c" where
+  "lsumr (Inl a) = Inl (Inl a)"
+| "lsumr (Inr (Inl b)) = Inl (Inr b)"
+| "lsumr (Inr (Inr c)) = Inr c"
+
+lemma rsuml_lsumr [simp]: "rsuml (lsumr x) = x"
+  by(cases x rule: lsumr.cases) simp_all
+
+lemma lsumr_rsuml [simp]: "lsumr (rsuml x) = x"
+  by(cases x rule: rsuml.cases) simp_all
+
+
+declare is_none_bind [simp]
+
+lemma case_option_collapse: "case_option x (\<lambda>_. x) y = x"
+by(simp split: option.split)
+
+lemma indicator_single_Some: "indicator {Some x} (Some y) = indicator {x} y"
+by(simp split: split_indicator)
+
+
+lemma option_pred_mono_strong:
+  "\<lbrakk> pred_option P x; \<And>a. \<lbrakk> a \<in> set_option x; P a \<rbrakk> \<Longrightarrow> P' a \<rbrakk> \<Longrightarrow> pred_option P' x"
+by(fact option.pred_mono_strong)
+
+lemma option_pred_map [simp]: "pred_option P (map_option f x) = pred_option (P \<circ> f) x"
+by(fact option.pred_map)
+
+lemma option_pred_o_map [simp]: "pred_option P \<circ> map_option f = pred_option (P \<circ> f)"
+by(simp add: fun_eq_iff)
+
+lemma option_pred_bind [simp]: "pred_option P (Option.bind x f) = pred_option (pred_option P \<circ> f) x"
+by(simp add: pred_option_def)
+
+lemma pred_option_conj [simp]:
+  "pred_option (\<lambda>x. P x \<and> Q x) = (\<lambda>x. pred_option P x \<and> pred_option Q x)"
+by(auto simp add: pred_option_def)
+
+lemma pred_option_top [simp]:
+  "pred_option (\<lambda>_. True) = (\<lambda>_. True)"
+by(fact option.pred_True)
+
+lemma rel_option_restrict_relpI [intro?]:
+  "\<lbrakk> rel_option R x y; pred_option P x; pred_option Q y \<rbrakk> \<Longrightarrow> rel_option (R \<upharpoonleft> P \<otimes> Q) x y"
+by(erule option.rel_mono_strong) simp
+
+lemma rel_option_restrict_relpE [elim?]:
+  assumes "rel_option (R \<upharpoonleft> P \<otimes> Q) x y"
+  obtains "rel_option R x y" "pred_option P x" "pred_option Q y"
+proof
+  show "rel_option R x y" using assms by(auto elim!: option.rel_mono_strong)
+  have "pred_option (Domainp (R \<upharpoonleft> P \<otimes> Q)) x" using assms by(fold option.Domainp_rel) blast
+  then show "pred_option P x" by(rule option_pred_mono_strong)(blast dest!: restrict_relp_DomainpD)
+  have "pred_option (Domainp (R \<upharpoonleft> P \<otimes> Q)\<inverse>\<inverse>) y" using assms
+    by(fold option.Domainp_rel)(auto simp only: option.rel_conversep Domainp_conversep)
+  then show "pred_option Q y" by(rule option_pred_mono_strong)(auto dest!: restrict_relp_DomainpD)
+qed
+
+lemma rel_option_restrict_relp_iff:
+  "rel_option (R \<upharpoonleft> P \<otimes> Q) x y \<longleftrightarrow> rel_option R x y \<and> pred_option P x \<and> pred_option Q y"
+by(blast intro: rel_option_restrict_relpI elim: rel_option_restrict_relpE)
+
+lemma option_rel_map_restrict_relp:
+  shows option_rel_map_restrict_relp1:
+  "rel_option (R \<upharpoonleft> P \<otimes> Q) (map_option f x) = rel_option (R \<circ> f \<upharpoonleft> P \<circ> f \<otimes> Q) x"
+  and option_rel_map_restrict_relp2:
+  "rel_option (R \<upharpoonleft> P \<otimes> Q) x (map_option g y) = rel_option ((\<lambda>x. R x \<circ> g) \<upharpoonleft> P \<otimes> Q \<circ> g) x y"
+by(simp_all add: option.rel_map restrict_relp_def fun_eq_iff)
+
+fun rel_witness_option :: "'a option \<times> 'b option \<Rightarrow> ('a \<times> 'b) option" where
+  "rel_witness_option (Some x, Some y) = Some (x, y)"
+| "rel_witness_option (None, None) = None"
+
+lemma rel_witness_option:
+  shows set_rel_witness_option: "\<lbrakk> rel_option A x y; (a, b) \<in> set_option (rel_witness_option (x, y)) \<rbrakk> \<Longrightarrow> A a b"
+    and map1_rel_witness_option: "rel_option A x y \<Longrightarrow> map_option fst (rel_witness_option (x, y)) = x"
+    and map2_rel_witness_option: "rel_option A x y \<Longrightarrow> map_option snd (rel_witness_option (x, y)) = y"
+  by(cases "(x, y)" rule: rel_witness_option.cases; simp; fail)+
+
+lemma rel_witness_option1:
+  assumes "rel_option A x y"
+  shows "rel_option (\<lambda>a (a', b). a = a' \<and> A a' b) x (rel_witness_option (x, y))"
+  using map1_rel_witness_option[OF assms, symmetric]
+  unfolding option.rel_eq[symmetric] option.rel_map
+  by(rule option.rel_mono_strong)(auto intro: set_rel_witness_option[OF assms])
+
+lemma rel_witness_option2:
+  assumes "rel_option A x y"
+  shows "rel_option (\<lambda>(a, b') b. b = b' \<and> A a b') (rel_witness_option (x, y)) y"
+  using map2_rel_witness_option[OF assms]
+  unfolding option.rel_eq[symmetric] option.rel_map
+  by(rule option.rel_mono_strong)(auto intro: set_rel_witness_option[OF assms])
+
+
+abbreviation le_option :: "'a option \<Rightarrow> 'a option \<Rightarrow> bool"
+where "le_option \<equiv> ord_option (=)"
+
+lemma le_option_bind_mono:
+  "\<lbrakk> le_option x y; \<And>a. a \<in> set_option x \<Longrightarrow> le_option (f a) (g a) \<rbrakk>
+  \<Longrightarrow> le_option (Option.bind x f) (Option.bind y g)"
+by(cases x) simp_all
+
+lemma le_option_refl [simp]: "le_option x x"
+by(cases x) simp_all
+
+
+lemma le_option_conv_option_ord: "le_option = option_ord"
+by(auto simp add: fun_eq_iff flat_ord_def elim: ord_option.cases)
+
+definition pcr_Some :: "('a \<Rightarrow> 'b \<Rightarrow> bool) \<Rightarrow> 'a \<Rightarrow> 'b option \<Rightarrow> bool"
+where "pcr_Some R x y \<longleftrightarrow> (\<exists>z. y = Some z \<and> R x z)"
+
+lemma pcr_Some_simps [simp]: "pcr_Some R x (Some y) \<longleftrightarrow> R x y"
+by(simp add: pcr_Some_def)
+
+lemma pcr_SomeE [cases pred]:
+  assumes "pcr_Some R x y"
+  obtains (pcr_Some) z where "y = Some z" "R x z"
+using assms by(auto simp add: pcr_Some_def)
+
+
+fun filter_option :: "('a \<Rightarrow> bool) \<Rightarrow> 'a option \<Rightarrow> 'a option"
+where
+  "filter_option P None = None"
+| "filter_option P (Some x) = (if P x then Some x else None)"
+
+lemma set_filter_option [simp]: "set_option (filter_option P x) = {y \<in> set_option x. P y}"
+by(cases x) auto
+
+lemma filter_map_option: "filter_option P (map_option f x) = map_option f (filter_option (P \<circ> f) x)"
+by(cases x) simp_all
+
+lemma is_none_filter_option [simp]: "Option.is_none (filter_option P x) \<longleftrightarrow> Option.is_none x \<or> \<not> P (the x)"
+by(cases x) simp_all
+
+lemma filter_option_eq_Some_iff [simp]: "filter_option P x = Some y \<longleftrightarrow> x = Some y \<and> P y"
+by(cases x) auto
+
+lemma Some_eq_filter_option_iff [simp]: "Some y = filter_option P x \<longleftrightarrow> x = Some y \<and> P y"
+by(cases x) auto
+
+lemma filter_conv_bind_option: "filter_option P x = Option.bind x (\<lambda>y. if P y then Some y else None)"
+by(cases x) simp_all
+
+
+primrec assert_option :: "bool \<Rightarrow> unit option" where
+  "assert_option True = Some ()"
+| "assert_option False = None"
+
+lemma set_assert_option_conv: "set_option (assert_option b) = (if b then {()} else {})"
+by(simp)
+
+lemma in_set_assert_option [simp]: "x \<in> set_option (assert_option b) \<longleftrightarrow> b"
+by(cases b) simp_all
+
+
+
+definition join_option :: "'a option option \<Rightarrow> 'a option"
+where "join_option x = (case x of Some y \<Rightarrow> y | None \<Rightarrow> None)"
+
+simps_of_case join_simps [simp, code]: join_option_def
+
+lemma set_join_option [simp]: "set_option (join_option x) = \<Union>(set_option ` set_option x)"
+by(cases x)(simp_all)
+
+lemma in_set_join_option: "x \<in> set_option (join_option (Some (Some x)))"
+by simp
+
+lemma map_join_option: "map_option f (join_option x) = join_option (map_option (map_option f) x)"
+by(cases x) simp_all
+
+lemma bind_conv_join_option: "Option.bind x f = join_option (map_option f x)"
+by(cases x) simp_all
+
+lemma join_conv_bind_option: "join_option x = Option.bind x id"
+by(cases x) simp_all
+
+lemma join_option_parametric [transfer_rule]:
+  includes lifting_syntax shows
+  "(rel_option (rel_option R) ===> rel_option R) join_option join_option"
+unfolding join_conv_bind_option[abs_def] by transfer_prover
+
+lemma join_option_eq_Some [simp]: "join_option x = Some y \<longleftrightarrow> x = Some (Some y)"
+by(cases x) simp_all
+
+lemma Some_eq_join_option [simp]: "Some y = join_option x \<longleftrightarrow> x = Some (Some y)"
+by(cases x) auto
+
+lemma join_option_eq_None: "join_option x = None \<longleftrightarrow> x = None \<or> x = Some None"
+by(cases x) simp_all
+
+lemma None_eq_join_option: "None = join_option x \<longleftrightarrow> x = None \<or> x = Some None"
+by(cases x) auto
+
+
+function zip_option :: "'a option \<Rightarrow> 'b option \<Rightarrow> ('a \<times> 'b) option"
+where
+  "zip_option (Some x) (Some y) = Some (x, y)"
+| "zip_option _ None = None"
+| "zip_option None _ = None"
+by pat_completeness auto
+termination by lexicographic_order
+
+lemma zip_option_eq_Some_iff [iff]:
+  "zip_option x y = Some (a, b) \<longleftrightarrow> x = Some a \<and> y = Some b"
+by(cases "(x, y)" rule: zip_option.cases) simp_all
+
+lemma set_zip_option [simp]:
+  "set_option (zip_option x y) = set_option x \<times> set_option y"
+by auto
+
+lemma zip_map_option1: "zip_option (map_option f x) y = map_option (apfst f) (zip_option x y)"
+by(cases "(x, y)" rule: zip_option.cases) simp_all
+
+lemma zip_map_option2: "zip_option x (map_option g y) = map_option (apsnd g) (zip_option x y)"
+by(cases "(x, y)" rule: zip_option.cases) simp_all
+
+lemma map_zip_option:
+  "map_option (map_prod f g) (zip_option x y) = zip_option (map_option f x) (map_option g y)"
+by(simp add: zip_map_option1 zip_map_option2 option.map_comp apfst_def apsnd_def o_def prod.map_comp)
+
+lemma zip_conv_bind_option:
+  "zip_option x y = Option.bind x (\<lambda>x. Option.bind y (\<lambda>y. Some (x, y)))"
+by(cases "(x, y)" rule: zip_option.cases) simp_all
+
+lemma zip_option_parametric [transfer_rule]:
+  includes lifting_syntax shows
+  "(rel_option R ===> rel_option Q ===> rel_option (rel_prod R Q)) zip_option zip_option"
+unfolding zip_conv_bind_option[abs_def] by transfer_prover
+
+lemma rel_option_eqI [simp]: "rel_option (=) x x"
+by(simp add: option.rel_eq)
+
+
+primrec sup_option :: "'a option \<Rightarrow> 'a option \<Rightarrow> 'a option"
+where
+  "sup_option x None = x"
+| "sup_option x (Some y) = (Some y)"
+
+lemma sup_option_idem [simp]: "sup_option x x = x"
+by(cases x) simp_all
+
+lemma sup_option_assoc: "sup_option (sup_option x y) z = sup_option x (sup_option y z)"
+by(cases z) simp_all
+
+lemma sup_option_left_idem: "sup_option x (sup_option x y) = sup_option x y"
+by(rewrite sup_option_assoc[symmetric])(simp)
+
+lemmas sup_option_ai = sup_option_assoc sup_option_left_idem
+
+lemma sup_option_None [simp]: "sup_option None y = y"
+by(cases y) simp_all
+
+
+primrec (transfer) enforce_option :: "('a \<Rightarrow> bool) \<Rightarrow> 'a option \<Rightarrow> 'a option" where
+  "enforce_option P (Some x) = (if P x then Some x else None)"
+| "enforce_option P None = None"
+
+lemma set_enforce_option [simp]: "set_option (enforce_option P x) = {a \<in> set_option x. P a}"
+  by(cases x) auto
+
+lemma enforce_map_option: "enforce_option P (map_option f x) = map_option f (enforce_option (P \<circ> f) x)"
+  by(cases x) auto
+
+lemma enforce_bind_option [simp]:
+  "enforce_option P (Option.bind x f) = Option.bind x (enforce_option P \<circ> f)"
+  by(cases x) auto
+
+lemma enforce_option_alt_def:
+  "enforce_option P x = Option.bind x (\<lambda>a. Option.bind (assert_option (P a)) (\<lambda>_ :: unit. Some a))"
+  by(cases x) simp_all
+
+lemma enforce_option_eq_None_iff [simp]:
+  "enforce_option P x = None \<longleftrightarrow> (\<forall>a. x = Some a \<longrightarrow> \<not> P a)"
+  by(cases x) auto
+
+lemma enforce_option_eq_Some_iff [simp]:
+  "enforce_option P x = Some y \<longleftrightarrow> x = Some y \<and> P y"
+  by(cases x) auto
+
+lemma Some_eq_enforce_option_iff [simp]:
+  "Some y = enforce_option P x \<longleftrightarrow> x = Some y \<and> P y"
+  by(cases x) auto
+
+lemma enforce_option_top [simp]: "enforce_option \<top> = id"
+  by(rule ext; rename_tac x; case_tac x; simp)
+
+lemma enforce_option_K_True [simp]: "enforce_option (\<lambda>_. True) x = x"
+  by(cases x) simp_all
+
+lemma enforce_option_bot [simp]: "enforce_option \<bottom> = (\<lambda>_. None)"
+  by(simp add: fun_eq_iff)
+
+lemma enforce_option_K_False [simp]: "enforce_option (\<lambda>_. False) x = None"
+  by simp
+
+lemma enforce_pred_id_option: "pred_option P x \<Longrightarrow> enforce_option P x = x"
+  by(cases x) auto
+
+
+lemma map_add_apply: "(m1 ++ m2) x = sup_option (m1 x) (m2 x)"
+by(simp add: map_add_def split: option.split)
+
+lemma map_le_map_upd2: "\<lbrakk> f \<subseteq>\<^sub>m g; \<And>y'. f x = Some y' \<Longrightarrow> y' = y \<rbrakk> \<Longrightarrow> f \<subseteq>\<^sub>m g(x \<mapsto> y)"
+by(cases "x \<in> dom f")(auto simp add: map_le_def Ball_def)
+
+lemma eq_None_iff_not_dom: "f x = None \<longleftrightarrow> x \<notin> dom f"
+by auto
+
+lemma card_ran_le_dom: "finite (dom m) \<Longrightarrow> card (ran m) \<le> card (dom m)"
+by(simp add: ran_alt_def card_image_le)
+
+lemma dom_subset_ran_iff:
+  assumes "finite (ran m)"
+  shows "dom m \<subseteq> ran m \<longleftrightarrow> dom m = ran m"
+proof
+  assume le: "dom m \<subseteq> ran m"
+  then have "card (dom m) \<le> card (ran m)" by(simp add: card_mono assms)
+  moreover have "card (ran m) \<le> card (dom m)" by(simp add: finite_subset[OF le assms] card_ran_le_dom)
+  ultimately show "dom m = ran m" using card_subset_eq[OF assms le] by simp
+qed simp
+
+definition Map_empty where [simp]: "Map_empty \<equiv> Map.empty"
+
+lemma map_le_Some1D: "\<lbrakk> m \<subseteq>\<^sub>m m'; m x = Some y \<rbrakk> \<Longrightarrow> m' x = Some y"
+by(auto simp add: map_le_def Ball_def)
+
+lemma map_le_fun_upd2: "\<lbrakk> f \<subseteq>\<^sub>m g; x \<notin> dom f \<rbrakk> \<Longrightarrow> f \<subseteq>\<^sub>m g(x := y)"
+by(auto simp add: map_le_def)
+
+lemma map_eqI: "\<forall>x\<in>dom m \<union> dom m'. m x = m' x \<Longrightarrow> m = m'"
+by(auto simp add: fun_eq_iff domIff intro: option.expand)
+
+
+
+lemma countable_lfp:
+  assumes step: "\<And>Y. countable Y \<Longrightarrow> countable (F Y)"
+  and cont: "Order_Continuity.sup_continuous F"
+  shows "countable (lfp F)"
+by(subst sup_continuous_lfp[OF cont])(simp add: countable_funpow[OF step])
+
+lemma countable_lfp_apply:
+  assumes step: "\<And>Y x. (\<And>x. countable (Y x)) \<Longrightarrow> countable (F Y x)"
+  and cont: "Order_Continuity.sup_continuous F"
+  shows "countable (lfp F x)"
+proof -
+  { fix n
+    have "\<And>x. countable ((F ^^ n) bot x)"
+      by(induct n)(auto intro: step) }
+  thus ?thesis using cont by(simp add: sup_continuous_lfp)
+qed
+
+
+
+lemma idiff_enat_eq_enat_iff: "x - enat n = enat m \<longleftrightarrow> (\<exists>k. x = enat k \<and> k - n = m)"
+  by (cases x) simp_all
+
+lemma eSuc_SUP: "A \<noteq> {} \<Longrightarrow> eSuc (\<Squnion> (f ` A)) = (\<Squnion>x\<in>A. eSuc (f x))"
+  by (subst eSuc_Sup) (simp_all add: image_comp)
+
+lemma ereal_of_enat_1: "ereal_of_enat 1 = ereal 1"
+  by (simp add: one_enat_def)
+
+lemma ennreal_real_conv_ennreal_of_enat: "ennreal (real n) = ennreal_of_enat n"
+  by (simp add: ennreal_of_nat_eq_real_of_nat)
+
+lemma enat_add_sub_same2: "b \<noteq> \<infinity> \<Longrightarrow> a + b - b = (a :: enat)"
+  by (cases a; cases b) simp_all
+
+lemma enat_sub_add: "y \<le> x \<Longrightarrow> x - y + z = x + z - (y :: enat)"
+  by (cases x; cases y; cases z) simp_all
+
+lemma SUP_enat_eq_0_iff [simp]: "\<Squnion> (f ` A) = (0 :: enat) \<longleftrightarrow> (\<forall>x\<in>A. f x = 0)"
+  by (simp add: bot_enat_def [symmetric])
+
+lemma SUP_enat_add_left:
+  assumes "I \<noteq> {}"
+  shows "(SUP i\<in>I. f i + c :: enat) = (SUP i\<in>I. f i) + c" (is "?lhs = ?rhs")
+proof(cases "c", rule antisym)
+  case (enat n)
+  show "?lhs \<le> ?rhs" by(auto 4 3 intro: SUP_upper intro: SUP_least)
+  have "(SUP i\<in>I. f i) \<le> ?lhs - c" using enat 
+    by(auto simp add: enat_add_sub_same2 intro!: SUP_least order_trans[OF _ SUP_upper[THEN enat_minus_mono1]])
+  note add_right_mono[OF this, of c]
+  also have "\<dots> + c \<le> ?lhs" using assms
+    by(subst enat_sub_add)(auto intro: SUP_upper2 simp add: enat_add_sub_same2 enat)
+  finally show "?rhs \<le> ?lhs" .
+qed(simp add: assms SUP_constant)
+
+lemma SUP_enat_add_right:
+  assumes "I \<noteq> {}"
+  shows "(SUP i\<in>I. c + f i :: enat) = c + (SUP i\<in>I. f i)"
+using SUP_enat_add_left[OF assms, of f c]
+by(simp add: add.commute)
+
+lemma iadd_SUP_le_iff: "n + (SUP x\<in>A. f x :: enat) \<le> y \<longleftrightarrow> (if A = {} then n \<le> y else \<forall>x\<in>A. n + f x \<le> y)"
+by(simp add: bot_enat_def SUP_enat_add_right[symmetric] SUP_le_iff)
+
+lemma SUP_iadd_le_iff: "(SUP x\<in>A. f x :: enat) + n \<le> y \<longleftrightarrow> (if A = {} then n \<le> y else \<forall>x\<in>A. f x + n \<le> y)"
+using iadd_SUP_le_iff[of n f A y] by(simp add: add.commute)
+
+
+
+lemma (in finite_measure) nn_integral_indicator_neq_infty: 
+  "f -` A \<in> sets M \<Longrightarrow> (\<integral>\<^sup>+ x. indicator A (f x) \<partial>M) \<noteq> \<infinity>"
+unfolding ennreal_indicator[symmetric]
+apply(rule integrableD)
+apply(rule integrable_const_bound[where B=1])
+apply(simp_all add: indicator_vimage[symmetric])
+done
+
+lemma (in finite_measure) nn_integral_indicator_neq_top: 
+  "f -` A \<in> sets M \<Longrightarrow> (\<integral>\<^sup>+ x. indicator A (f x) \<partial>M) \<noteq> \<top>"
+by(drule nn_integral_indicator_neq_infty) simp
+
+lemma nn_integral_indicator_map:
+  assumes [measurable]: "f \<in> measurable M N" "{x\<in>space N. P x} \<in> sets N"
+  shows "(\<integral>\<^sup>+x. indicator {x\<in>space N. P x} (f x) \<partial>M) = emeasure M {x\<in>space M. P (f x)}"
+  using assms(1)[THEN measurable_space] 
+  by (subst nn_integral_indicator[symmetric])
+     (auto intro!: nn_integral_cong split: split_indicator simp del: nn_integral_indicator)
+
+
+
+lemma transp_rel_fun: "\<lbrakk> is_equality Q; transp R \<rbrakk> \<Longrightarrow> transp (rel_fun Q R)"
+by(rule transpI)(auto dest: transpD rel_funD simp add: is_equality_def)
+
+lemma rel_fun_inf: "inf (rel_fun Q R) (rel_fun Q R') = rel_fun Q (inf R R')"
+by(rule antisym)(auto elim: rel_fun_mono dest: rel_funD)
+
+lemma reflp_fun1: includes lifting_syntax shows "\<lbrakk> is_equality A; reflp B \<rbrakk> \<Longrightarrow> reflp (A ===> B)"
+by(simp add: reflp_def rel_fun_def is_equality_def)
+
+lemma type_copy_id': "type_definition (\<lambda>x. x) (\<lambda>x. x) UNIV"
+by unfold_locales simp_all
+
+lemma type_copy_id: "type_definition id id UNIV"
+by(simp add: id_def type_copy_id')
+
+lemma GrpE [cases pred]:
+  assumes "BNF_Def.Grp A f x y"
+  obtains (Grp) "y = f x" "x \<in> A"
+using assms
+by(simp add: Grp_def)
+
+lemma rel_fun_Grp_copy_Abs:
+  includes lifting_syntax
+  assumes "type_definition Rep Abs A"
+  shows "rel_fun (BNF_Def.Grp A Abs) (BNF_Def.Grp B g) = BNF_Def.Grp {f. f ` A \<subseteq> B} (Rep ---> g)"
+proof -
+  interpret type_definition Rep Abs A by fact
+  show ?thesis
+    by(auto simp add: rel_fun_def Grp_def fun_eq_iff Abs_inverse Rep_inverse intro!: Rep)
+qed
+
+lemma rel_set_Grp:
+  "rel_set (BNF_Def.Grp A f) = BNF_Def.Grp {B. B \<subseteq> A} (image f)"
+by(auto simp add: rel_set_def BNF_Def.Grp_def fun_eq_iff)
+
+lemma rel_set_comp_Grp:
+  "rel_set R = (BNF_Def.Grp {x. x \<subseteq> {(x, y). R x y}} ((`) fst))\<inverse>\<inverse> OO BNF_Def.Grp {x. x \<subseteq> {(x, y). R x y}} ((`) snd)"
+apply(auto 4 4 del: ext intro!: ext simp add: BNF_Def.Grp_def intro!: rel_setI intro: rev_bexI)
+apply(simp add: relcompp_apply)
+subgoal for A B
+  apply(rule exI[where x="A \<times> B \<inter> {(x, y). R x y}"])
+  apply(auto 4 3 dest: rel_setD1 rel_setD2 intro: rev_image_eqI)
+  done
+done
+
+lemma Domainp_Grp: "Domainp (BNF_Def.Grp A f) = (\<lambda>x. x \<in> A)"
+by(auto simp add: fun_eq_iff Grp_def)
+
+lemma pred_prod_conj [simp]:
+  shows pred_prod_conj1: "\<And>P Q R. pred_prod (\<lambda>x. P x \<and> Q x) R = (\<lambda>x. pred_prod P R x \<and> pred_prod Q R x)"
+  and pred_prod_conj2: "\<And>P Q R. pred_prod P (\<lambda>x. Q x \<and> R x) = (\<lambda>x. pred_prod P Q x \<and> pred_prod P R x)"
+by(auto simp add: pred_prod.simps)
+
+lemma pred_sum_conj [simp]:
+  shows pred_sum_conj1: "\<And>P Q R. pred_sum (\<lambda>x. P x \<and> Q x) R = (\<lambda>x. pred_sum P R x \<and> pred_sum Q R x)"
+  and pred_sum_conj2: "\<And>P Q R. pred_sum P (\<lambda>x. Q x \<and> R x) = (\<lambda>x. pred_sum P Q x \<and> pred_sum P R x)"
+by(auto simp add: pred_sum.simps fun_eq_iff)
+
+lemma pred_list_conj [simp]: "list_all (\<lambda>x. P x \<and> Q x) = (\<lambda>x. list_all P x \<and> list_all Q x)"
+by(auto simp add: list_all_def)
+
+lemma pred_prod_top [simp]:
+  "pred_prod (\<lambda>_. True) (\<lambda>_. True) = (\<lambda>_. True)"
+by(simp add: pred_prod.simps fun_eq_iff)
+
+lemma rel_fun_conversep: includes lifting_syntax shows
+  "(A^--1 ===> B^--1) = (A ===> B)^--1"
+by(auto simp add: rel_fun_def fun_eq_iff)
+
+lemma left_unique_Grp [iff]:
+  "left_unique (BNF_Def.Grp A f) \<longleftrightarrow> inj_on f A"
+unfolding Grp_def left_unique_def by(auto simp add: inj_on_def)
+
+lemma right_unique_Grp [simp, intro!]: "right_unique (BNF_Def.Grp A f)"
+by(simp add: Grp_def right_unique_def)
+
+lemma bi_unique_Grp [iff]:
+  "bi_unique (BNF_Def.Grp A f) \<longleftrightarrow> inj_on f A"
+by(simp add: bi_unique_alt_def)
+
+lemma left_total_Grp [iff]:
+  "left_total (BNF_Def.Grp A f) \<longleftrightarrow> A = UNIV"
+by(auto simp add: left_total_def Grp_def)
+
+lemma right_total_Grp [iff]:
+  "right_total (BNF_Def.Grp A f) \<longleftrightarrow> f ` A = UNIV"
+by(auto simp add: right_total_def BNF_Def.Grp_def image_def)
+
+lemma bi_total_Grp [iff]:
+  "bi_total (BNF_Def.Grp A f) \<longleftrightarrow> A = UNIV \<and> surj f"
+by(auto simp add: bi_total_alt_def)
+
+lemma left_unique_vimage2p [simp]:
+  "\<lbrakk> left_unique P; inj f \<rbrakk> \<Longrightarrow> left_unique (BNF_Def.vimage2p f g P)"
+unfolding vimage2p_Grp by(intro left_unique_OO) simp_all
+
+lemma right_unique_vimage2p [simp]:
+  "\<lbrakk> right_unique P; inj g \<rbrakk> \<Longrightarrow> right_unique (BNF_Def.vimage2p f g P)"
+unfolding vimage2p_Grp by(intro right_unique_OO) simp_all
+
+lemma bi_unique_vimage2p [simp]:
+  "\<lbrakk> bi_unique P; inj f; inj g \<rbrakk> \<Longrightarrow> bi_unique (BNF_Def.vimage2p f g P)"
+unfolding bi_unique_alt_def by simp
+
+lemma left_total_vimage2p [simp]:
+  "\<lbrakk> left_total P; surj g \<rbrakk> \<Longrightarrow> left_total (BNF_Def.vimage2p f g P)"
+unfolding vimage2p_Grp by(intro left_total_OO) simp_all
+
+lemma right_total_vimage2p [simp]:
+  "\<lbrakk> right_total P; surj f \<rbrakk> \<Longrightarrow> right_total (BNF_Def.vimage2p f g P)"
+unfolding vimage2p_Grp by(intro right_total_OO) simp_all
+
+lemma bi_total_vimage2p [simp]:
+  "\<lbrakk> bi_total P; surj f; surj g \<rbrakk> \<Longrightarrow> bi_total (BNF_Def.vimage2p f g P)"
+unfolding bi_total_alt_def by simp
+
+lemma vimage2p_eq [simp]:
+  "inj f \<Longrightarrow> BNF_Def.vimage2p f f (=) = (=)"
+by(auto simp add: vimage2p_def fun_eq_iff inj_on_def)
+
+lemma vimage2p_conversep: "BNF_Def.vimage2p f g R^--1 = (BNF_Def.vimage2p g f R)^--1"
+by(simp add: vimage2p_def fun_eq_iff)
+
+lemma rel_fun_refl: "\<lbrakk> A \<le> (=); (=) \<le> B \<rbrakk> \<Longrightarrow> (=) \<le> rel_fun A B"
+  by(subst fun.rel_eq[symmetric])(rule fun_mono)
+
+lemma rel_fun_mono_strong:
+  "\<lbrakk> rel_fun A B f g; A' \<le> A; \<And>x y. \<lbrakk> x \<in> f ` {x. Domainp A' x}; y \<in> g ` {x. Rangep A' x}; B x y \<rbrakk> \<Longrightarrow> B' x y \<rbrakk> \<Longrightarrow> rel_fun A' B' f g"
+  by(auto simp add: rel_fun_def) fastforce
+
+lemma rel_fun_refl_strong: 
+  assumes "A \<le> (=)" "\<And>x. x \<in> f ` {x. Domainp A x} \<Longrightarrow> B x x"
+  shows "rel_fun A B f f"
+proof -
+  have "rel_fun (=) (=) f f" by(simp add: rel_fun_eq)
+  then show ?thesis using assms(1)
+    by(rule rel_fun_mono_strong) (auto intro: assms(2))
+qed
+
+lemma Grp_iff: "BNF_Def.Grp B g x y \<longleftrightarrow> y = g x \<and> x \<in> B" by(simp add: Grp_def)
+
+lemma Rangep_Grp: "Rangep (BNF_Def.Grp A f) = (\<lambda>x. x \<in> f ` A)"
+  by(auto simp add: fun_eq_iff Grp_iff)
+
+lemma rel_fun_Grp:
+  "rel_fun (BNF_Def.Grp UNIV h)\<inverse>\<inverse> (BNF_Def.Grp A g) = BNF_Def.Grp {f. f ` range h \<subseteq> A} (map_fun h g)"
+  by(auto simp add: rel_fun_def fun_eq_iff Grp_iff)
+
+
+context includes lifting_syntax begin
+
+lemma monotone_parametric [transfer_rule]:
+  assumes [transfer_rule]: "bi_total A"
+  shows "((A ===> A ===> (=)) ===> (B ===> B ===> (=)) ===> (A ===> B) ===> (=)) monotone monotone"
+unfolding monotone_def[abs_def] by transfer_prover
+
+lemma fun_ord_parametric [transfer_rule]:
+  assumes [transfer_rule]: "bi_total C"
+  shows "((A ===> B ===> (=)) ===> (C ===> A) ===> (C ===> B) ===> (=)) fun_ord fun_ord"
+unfolding fun_ord_def[abs_def] by transfer_prover
+
+lemma Plus_parametric [transfer_rule]:
+  "(rel_set A ===> rel_set B ===> rel_set (rel_sum A B)) (<+>) (<+>)"
+unfolding Plus_def[abs_def] by transfer_prover
+
+lemma pred_fun_parametric [transfer_rule]:
+  assumes [transfer_rule]: "bi_total A"
+  shows "((A ===> (=)) ===> (B ===> (=)) ===> (A ===> B) ===> (=)) pred_fun pred_fun"
+unfolding pred_fun_def by(transfer_prover)
+
+lemma rel_fun_eq_OO: "((=) ===> A) OO ((=) ===> B) = ((=) ===> A OO B)"
+by(clarsimp simp add: rel_fun_def fun_eq_iff relcompp.simps) metis
+
+end
+
+lemma Quotient_set_rel_eq:
+  includes lifting_syntax
+  assumes "Quotient R Abs Rep T"
+  shows "(rel_set T ===> rel_set T ===> (=)) (rel_set R) (=)"
+proof(rule rel_funI iffI)+
+  fix A B C D
+  assume AB: "rel_set T A B" and CD: "rel_set T C D"
+  have *: "\<And>x y. R x y = (T x (Abs x) \<and> T y (Abs y) \<and> Abs x = Abs y)"
+    "\<And>a b. T a b \<Longrightarrow> Abs a = b"
+    using assms unfolding Quotient_alt_def by simp_all
+
+  { assume [simp]: "B = D"
+    thus "rel_set R A C"
+      by(auto 4 4 intro!: rel_setI dest: rel_setD1[OF AB, simplified] rel_setD2[OF AB, simplified] rel_setD2[OF CD] rel_setD1[OF CD] simp add: * elim!: rev_bexI)
+  next
+    assume AC: "rel_set R A C"
+    show "B = D"
+      apply safe
+       apply(drule rel_setD2[OF AB], erule bexE)
+       apply(drule rel_setD1[OF AC], erule bexE)
+       apply(drule rel_setD1[OF CD], erule bexE)
+       apply(simp add: *)

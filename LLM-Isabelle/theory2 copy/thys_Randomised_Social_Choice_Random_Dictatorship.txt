@@ -1,0 +1,137 @@
+theory Random_Dictatorship
+imports
+  Complex_Main
+  Social_Decision_Schemes
+begin
+
+definition random_dictatorship :: "'agent set \<Rightarrow> 'alt set \<Rightarrow> ('agent, 'alt) pref_profile \<Rightarrow> 'alt lottery" where
+  random_dictatorship_auxdef:
+  "random_dictatorship agents alts R =
+      do {
+        i \<leftarrow> pmf_of_set agents; 
+        pmf_of_set (Max_wrt_among (R i) alts)
+      }"
+
+context election
+begin
+
+abbreviation RD :: "('agent, 'alt) pref_profile \<Rightarrow> 'alt lottery" where
+  "RD \<equiv> random_dictatorship agents alts"
+
+lemma random_dictatorship_def:
+  assumes "is_pref_profile R"
+  shows  "RD R =
+            do {
+              i \<leftarrow> pmf_of_set agents; 
+              pmf_of_set (favorites R i)
+            }"
+proof -
+  from assms interpret pref_profile_wf agents alts R .
+  show ?thesis by (simp add: random_dictatorship_auxdef favorites_altdef)
+qed
+
+lemma random_dictatorship_unique_favorites:
+  assumes "is_pref_profile R" "has_unique_favorites R"
+  shows   "RD R = map_pmf (favorite R) (pmf_of_set agents)"
+proof -
+  from assms(1) interpret pref_profile_wf agents alts R .
+  from assms(2) interpret pref_profile_unique_favorites agents alts R by unfold_locales
+  show ?thesis unfolding random_dictatorship_def[OF assms(1)] map_pmf_def 
+    by (intro bind_pmf_cong) (auto simp: unique_favorites pmf_of_set_singleton)
+qed
+
+lemma random_dictatorship_unique_favorites':
+  assumes "is_pref_profile R" "has_unique_favorites R"
+  shows   "RD R = pmf_of_multiset (image_mset (favorite R) (mset_set agents))"
+  using assms by (simp add: random_dictatorship_unique_favorites map_pmf_of_set)
+
+lemma pmf_random_dictatorship:
+  assumes "is_pref_profile R"
+  shows "pmf (RD R) x =
+           (\<Sum>i\<in>agents. indicator (favorites R i) x /
+              real (card (favorites R i))) / real (card agents)"
+proof -
+  from assms(1) interpret pref_profile_wf agents alts R .
+  from nonempty_dom have "card agents > 0" by (auto simp del: nonempty_agents)
+  hence "ennreal (pmf (RD R) x) = 
+           ennreal ((\<Sum>i\<in>agents. pmf (pmf_of_set (favorites R i)) x) / real (card agents))"
+    (is "_ = ennreal (?p / _)") unfolding random_dictatorship_def[OF assms]
+    by (simp_all add: ennreal_pmf_bind nn_integral_pmf_of_set max_def 
+          divide_ennreal [symmetric] ennreal_of_nat_eq_real_of_nat sum_nonneg)
+  also have "?p = (\<Sum>i\<in>agents. indicator (favorites R i) x / real (card (favorites R i)))"
+    by (intro sum.cong) (simp_all add: favorites_nonempty)
+  finally show ?thesis 
+    by (subst (asm) ennreal_inj) (auto intro!: sum_nonneg divide_nonneg_nonneg)
+qed
+
+
+sublocale RD: social_decision_scheme agents alts RD
+proof
+  fix R assume R_wf: "is_pref_profile R"
+  then interpret pref_profile_wf agents alts R .
+  from R_wf show "RD R \<in> lotteries"
+    using favorites_subset_alts favorites_nonempty
+    by (auto simp: lotteries_on_def random_dictatorship_def)
+qed
+
+
+
+
+sublocale RD: anonymous_sds agents alts RD
+proof
+  fix R \<pi> assume wf: "is_pref_profile R" and perm: "\<pi> permutes agents"
+  interpret pref_profile_wf agents alts R by fact
+  from wf_permute_agents[OF perm]
+    have "RD (R \<circ> \<pi>) = map_pmf \<pi> (pmf_of_set agents) \<bind> (\<lambda>i. pmf_of_set (favorites R i))"
+    by (simp add: bind_map_pmf random_dictatorship_def o_def favorites_def)
+  also from perm wf have "\<dots> = RD R"
+    by (simp add: map_pmf_of_set_inj permutes_inj_on permutes_image random_dictatorship_def)
+  finally show "RD (R \<circ> \<pi>) = RD R" .
+qed
+
+
+
+
+sublocale RD: neutral_sds agents alts RD
+proof
+  fix \<sigma> R
+  assume perm: "\<sigma> permutes alts" and R_wf: "is_pref_profile R"
+  from R_wf interpret pref_profile_wf agents alts R .
+  from wf_permute_alts[OF perm] R_wf perm show "RD (permute_profile \<sigma> R) = map_pmf \<sigma> (RD R)"
+    by (subst random_dictatorship_def)
+       (auto intro!: bind_pmf_cong simp: random_dictatorship_def map_bind_pmf 
+          favorites_permute map_pmf_of_set_inj permutes_inj_on favorites_nonempty)
+qed
+
+
+
+
+sublocale RD: strongly_strategyproof_sds agents alts RD
+proof (unfold_locales, unfold RD.strongly_strategyproof_profile_def)
+  fix R i Ri' assume R_wf: "is_pref_profile R" and i: "i \<in> agents"
+                 and Ri'_wf: "total_preorder_on alts Ri'"
+  interpret R: pref_profile_wf agents alts R by fact
+  from R_wf Ri'_wf i have R'_wf: "is_pref_profile (R(i := Ri'))"
+    by (simp add: R.wf_update)
+  interpret R': pref_profile_wf agents alts "R(i := Ri')" by fact
+
+  show "SD (R i) (RD (R(i := Ri'))) (RD R)"
+  proof (rule R.SD_pref_profileI)
+    fix x assume "x \<in> alts"
+    hence "emeasure (measure_pmf (RD (R(i := Ri')))) (preferred_alts (R i) x)
+             \<le> emeasure (measure_pmf (RD R)) (preferred_alts (R i) x)"
+      using Ri'_wf maximal_imp_preferred[of "R i" x]
+      by (auto intro!: card_mono nn_integral_mono_AE 
+               simp: random_dictatorship_def R_wf R'_wf AE_measure_pmf_iff Max_wrt_prefs_finite
+                     emeasure_pmf_of_set Int_absorb2 favorites_def
+                     Max_wrt_prefs_nonempty card_gt_0_iff)
+    thus "lottery_prob (RD (R(i := Ri'))) (preferred_alts (R i) x)
+            \<le> lottery_prob (RD R) (preferred_alts (R i) x)"
+      by (simp add: measure_pmf.emeasure_eq_measure) 
+  qed (insert R_wf R'_wf, simp_all add: RD.sds_wf i)
+qed
+
+end
+
+
+end

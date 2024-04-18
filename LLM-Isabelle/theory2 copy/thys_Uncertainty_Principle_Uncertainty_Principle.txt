@@ -1,0 +1,87 @@
+theory Uncertainty_Principle
+  imports "QHLProver.Complex_Matrix"
+begin
+
+
+abbreviation bra_ket ("\<langle>_|_\<rangle>")
+  where "\<langle>u|v\<rangle> \<equiv> inner_prod u v"
+
+locale quantum_state =
+  fixes n:: nat
+    and \<psi>:: "complex Matrix.vec"
+  assumes dim[simp]: "\<psi> \<in> carrier_vec n"
+      and normalized[simp]: "\<langle>\<psi>|\<psi>\<rangle> = 1"
+
+begin 
+
+abbreviation observable:: "complex Matrix.mat \<Rightarrow> bool" where
+  "observable A \<equiv> A \<in> carrier_mat n n \<and> hermitian A"
+
+abbreviation mean_mat :: "complex Matrix.mat \<Rightarrow> complex Matrix.mat" ("\<llangle>_\<rrangle>")
+  where "\<llangle>A\<rrangle> \<equiv> \<langle>\<psi>| A *\<^sub>v \<psi>\<rangle> \<cdot>\<^sub>m 1\<^sub>m n"
+
+abbreviation std_dev :: "complex Matrix.mat \<Rightarrow> real" ("\<Delta>")
+  where "\<Delta> A \<equiv> norm (csqrt (\<langle>\<psi>| (A * A *\<^sub>v \<psi>)\<rangle> - \<langle>\<psi>| A *\<^sub>v \<psi>\<rangle> * \<langle>\<psi>| A *\<^sub>v \<psi>\<rangle>))"   
+
+end 
+
+abbreviation commutator :: "complex Matrix.mat \<Rightarrow> complex Matrix.mat \<Rightarrow> complex Matrix.mat" ("\<lbrakk>_,_\<rbrakk>")
+  where "commutator A B \<equiv> (A * B - B * A)"
+
+abbreviation anticommutator :: "complex Matrix.mat \<Rightarrow> complex Matrix.mat \<Rightarrow> complex Matrix.mat" ("\<lbrace>_,_\<rbrace>")
+  where "anticommutator A B \<equiv> (A * B + B * A)"
+
+
+lemma inner_prod_distrib_add_mat: 
+  fixes u v :: "complex vec"
+  assumes 
+    "u \<in> carrier_vec n"
+    "v \<in> carrier_vec m"
+    "A \<in> carrier_mat n m"
+    "B \<in> carrier_mat n m"
+  shows "\<langle>u| (A + B) *\<^sub>v v\<rangle> = \<langle>u| A *\<^sub>v v\<rangle> + \<langle>u| B *\<^sub>v v\<rangle>"
+  apply (subst add_mult_distrib_mat_vec)
+  using assms by (auto intro: inner_prod_distrib_right)
+
+lemma inner_prod_distrib_minus_mat: 
+  fixes u v :: "complex vec"
+  assumes 
+    "u \<in> carrier_vec n"
+    "v \<in> carrier_vec m"
+    "A \<in> carrier_mat n m"
+    "B \<in> carrier_mat n m"
+  shows "\<langle>u| (A - B) *\<^sub>v v\<rangle> = \<langle>u| A *\<^sub>v v\<rangle> - \<langle>u| B *\<^sub>v v\<rangle>"
+  apply (subst minus_mult_distrib_mat_vec)
+  using assms by (auto intro: inner_prod_minus_distrib_right)
+
+lemma Cauchy_Schwarz:
+  assumes "v \<in> carrier_vec n" "u \<in> carrier_vec n"
+  shows "norm (\<langle>u|v\<rangle>)^2 \<le> Re (\<langle>u|u\<rangle> * \<langle>v|v\<rangle>)"
+proof-
+  have "norm (\<langle>u|v\<rangle>)^2 \<le> (\<langle>u|u\<rangle> * \<langle>v|v\<rangle>)"
+    using assms
+    by (metis Cauchy_Schwarz_complex_vec complex_norm_square conjugate_complex_def inner_prod_swap)
+  moreover have "(\<langle>u|u\<rangle> * \<langle>v|v\<rangle>) \<in> \<real>"
+    by (simp add: complex_is_Real_iff)
+  ultimately show ?thesis by (simp add: less_eq_complex_def)
+qed
+
+context quantum_state
+begin
+
+lemma std_dev_real: 
+  assumes "observable A"
+  shows "csqrt (\<langle>\<psi>| (A * A *\<^sub>v \<psi>)\<rangle> - \<langle>\<psi>| A *\<^sub>v \<psi>\<rangle> * \<langle>\<psi>| A *\<^sub>v \<psi>\<rangle>) \<in> \<real>"
+proof (subst csqrt_of_real_nonneg)
+  have "(\<langle>\<psi>|A * A *\<^sub>v \<psi>\<rangle> - \<langle>\<psi>|A *\<^sub>v \<psi>\<rangle> * \<langle>\<psi>|A *\<^sub>v \<psi>\<rangle>) \<in> \<real>" 
+    apply (intro Reals_diff Reals_mult hermitian_inner_prod_real)
+    using assms by (auto simp: hermitian_def adjoint_mult)
+  then show "Im (\<langle>\<psi>|A * A *\<^sub>v \<psi>\<rangle> - \<langle>\<psi>|A *\<^sub>v \<psi>\<rangle> * \<langle>\<psi>|A *\<^sub>v \<psi>\<rangle>) = 0" 
+    using complex_is_Real_iff by simp
+next
+  have *:"adjoint A = A" using assms hermitian_def by blast
+  have "\<langle>\<psi>|A *\<^sub>v \<psi>\<rangle> * \<langle>\<psi>|A *\<^sub>v \<psi>\<rangle> \<le> \<langle>\<psi>|\<psi>\<rangle> * \<langle>\<psi>|A * A *\<^sub>v \<psi>\<rangle>"
+    apply (subst assoc_mult_mat_vec) prefer 4
+       apply (subst (2) adjoint_def_alter) prefer 4
+          apply (subst (2) adjoint_def_alter) prefer 4
+             apply (subst (1 2) *)

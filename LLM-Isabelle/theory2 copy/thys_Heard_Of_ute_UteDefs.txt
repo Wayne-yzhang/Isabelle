@@ -1,0 +1,140 @@
+theory UteDefs
+imports "../HOModel"
+begin
+
+
+
+
+
+
+axiomatization where Proc_finite: "OFCLASS(Proc, finite_class)"
+instance Proc :: finite by (rule Proc_finite)
+
+abbreviation
+
+
+abbreviation
+ "nSteps \<equiv> 2"
+definition phase where "phase (r::nat) \<equiv> r div nSteps"
+definition step where "step (r::nat) \<equiv> r mod nSteps"
+
+lemma phase_zero [simp]: "phase 0 = 0"
+by (simp add: phase_def)
+
+lemma step_zero [simp]: "step 0 = 0"
+by (simp add: step_def)
+
+lemma phase_step: "(phase r * nSteps) + step r = r"
+  by (auto simp add: phase_def step_def)
+
+
+record 'val pstate =
+
+
+datatype 'val msg =
+   Val "'val"
+ | Vote "'val option"
+
+
+definition Ute_initState where
+  "Ute_initState p st \<equiv>
+   (vote st = None) \<and> (decide st = None)"
+
+
+locale ute_parameters =
+  fixes \<alpha>::nat and T::nat and E::nat
+  assumes majE: "2*E \<ge> N + 2*\<alpha>"
+      and majT: "2*T \<ge> N + 2*\<alpha>"
+      and EltN: "E < N"
+      and TltN: "T < N"
+begin
+
+
+lemma alpha_lt_N: "\<alpha> < N"
+using EltN majE by auto
+
+lemma alpha_lt_T: "\<alpha> < T"
+using majT alpha_lt_N by auto
+
+lemma alpha_lt_E: "\<alpha> < E"
+using majE alpha_lt_N by auto
+
+
+
+definition
+  send0 :: "nat \<Rightarrow> Proc \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> 'val msg"
+where
+  "send0 r p q st \<equiv> Val (x st)"
+
+definition
+  next0 :: "nat \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> (Proc \<Rightarrow> 'val msg option) 
+                \<Rightarrow> 'val pstate \<Rightarrow> bool" 
+where
+  "next0 r p st msgs st' \<equiv>
+     (\<exists>v. card {q. msgs q = Some (Val v)} > T \<and> st' = st \<lparr> vote := Some v \<rparr>)
+   \<or> \<not>(\<exists>v. card {q. msgs q = Some (Val v)} > T) \<and> st' = st \<lparr> vote := None \<rparr>"
+
+
+definition
+  send1 :: "nat \<Rightarrow> Proc \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> 'val msg" 
+where
+  "send1 r p q st \<equiv> Vote (vote st)"
+
+definition
+  next1 :: "nat \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> (Proc \<Rightarrow> 'val msg option) 
+                \<Rightarrow> 'val pstate \<Rightarrow> bool" 
+where
+  "next1 r p st msgs st' \<equiv>
+    ( (\<exists>v. card {q. msgs q = Some (Vote (Some v))} > \<alpha> \<and> x st' = v)
+     \<or> \<not>(\<exists>v. card {q. msgs q = Some (Vote (Some v))} > \<alpha>) 
+         \<and> x st' = undefined  )
+  \<and> ( (\<exists>v. card {q. msgs q = Some (Vote (Some v))} > E \<and> decide st' = Some v)
+     \<or> \<not>(\<exists>v. card {q. msgs q = Some (Vote (Some v))} > E) 
+         \<and> decide st' = decide st )
+  \<and> vote st' = None"
+
+
+definition 
+  Ute_sendMsg :: "nat \<Rightarrow> Proc \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> 'val msg" 
+where
+  "Ute_sendMsg (r::nat) \<equiv> if step r = 0 then send0 r else send1 r"
+
+definition 
+  Ute_nextState :: "nat \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> (Proc \<Rightarrow> 'val msg option)
+                        \<Rightarrow> 'val pstate \<Rightarrow> bool" 
+where
+  "Ute_nextState r \<equiv> if step r = 0 then next0 r else next1 r"
+
+
+
+
+definition Ute_commPerRd where
+  "Ute_commPerRd HOrs SHOrs \<equiv>
+   \<forall>p. card (HOrs p - SHOrs p) \<le> \<alpha>
+     \<and> card (SHOrs p \<inter> HOrs p) > N + 2*\<alpha> - E - 1
+     \<and> card (SHOrs p \<inter> HOrs p) > T"
+
+
+definition Ute_commGlobal where
+  "Ute_commGlobal HOs SHOs \<equiv>
+    \<exists>\<Phi>. (let r = Suc (nSteps*\<Phi>)
+         in  (\<exists>\<pi>. \<forall>p. \<pi> = HOs r p \<and> \<pi> = SHOs r p)
+           \<and> (\<forall>p. card (SHOs (Suc r) p \<inter> HOs (Suc r) p) > T)
+           \<and> (\<forall>p. card (SHOs (Suc (Suc r)) p \<inter> HOs (Suc (Suc r)) p) > E))"
+
+
+
+
+definition Ute_SHOMachine where
+  "Ute_SHOMachine = \<lparr>
+     CinitState =  (\<lambda> p st crd. Ute_initState p st),
+     sendMsg =  Ute_sendMsg,
+     CnextState = (\<lambda> r p st msgs crd st'. Ute_nextState r p st msgs st'),
+     SHOcommPerRd = Ute_commPerRd,
+     SHOcommGlobal = Ute_commGlobal 
+   \<rparr>"
+
+abbreviation
+  "Ute_M \<equiv> (Ute_SHOMachine::(Proc, 'val pstate, 'val msg) SHOMachine)"
+
+

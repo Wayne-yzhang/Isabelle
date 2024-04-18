@@ -1,0 +1,2951 @@
+theory superposition
+
+
+imports Main terms equational_clausal_logic well_founded_continued "HOL-Library.Multiset"
+ multisets_continued 
+
+begin
+
+
+
+
+datatype 'a eclause = Ecl "'a clause" "'a trm set"
+
+fun subst_ecl
+where 
+  "(subst_ecl (Ecl C S) \<sigma>) =   
+    (Ecl (subst_cl C \<sigma>) { s. (\<exists>t. (s = (subst t \<sigma>) \<and> t \<in> S)) })"
+
+fun cl_ecl 
+where
+  "(cl_ecl (Ecl C X)) = C"
+
+fun trms_ecl
+where
+  "(trms_ecl (Ecl C X)) = X"
+
+definition renaming_cl
+  where "renaming_cl C D = (\<exists> \<eta>. (renaming \<eta> (vars_of_cl (cl_ecl C))) \<and> D = (subst_ecl C \<eta>))"
+
+definition closed_under_renaming
+  where "closed_under_renaming S = (\<forall>C D. 
+    (C \<in> S) \<longrightarrow> (renaming_cl C D) \<longrightarrow> (D \<in> S))"
+
+definition variable_disjoint
+where "(variable_disjoint C D) =  ((vars_of_cl (cl_ecl C)) \<inter>  (vars_of_cl (cl_ecl D)) = {})" 
+
+
+
+locale basic_superposition =
+
+  fixes trm_ord :: "('a trm \<times> 'a trm) set"
+  fixes sel :: "'a clause \<Rightarrow> 'a clause"
+  fixes pos_ord :: "'a eclause \<Rightarrow> 'a trm \<Rightarrow> (position \<times> position) set"
+  fixes vars :: "'a set" 
+  fixes filter_trms :: "'a clause \<Rightarrow> 'a trm set \<Rightarrow> 'a trm set" 
+  assumes
+    trm_ord_wf : "(wf trm_ord)"
+    and trm_ord_ground_total : 
+      "(\<forall>x y. ((ground_term x) \<longrightarrow> (ground_term y) \<longrightarrow> x \<noteq> y 
+        \<longrightarrow> ((x,y) \<in> trm_ord \<or> (y,x) \<in> trm_ord)))"
+    and trm_ord_trans : "trans trm_ord"
+    and trm_ord_irrefl :  "irrefl trm_ord"
+    and trm_ord_reduction_left : "\<forall>x1 x2 y. (x1,x2)  \<in> trm_ord 
+      \<longrightarrow> ((Comb x1 y),(Comb x2 y)) \<in> trm_ord"
+    and trm_ord_reduction_right : "\<forall>x1 x2 y. (x1,x2)  \<in> trm_ord 
+      \<longrightarrow> ((Comb y x1),(Comb y x2)) \<in> trm_ord"
+    and trm_ord_subterm : "\<forall>x1 x2. (x1,(Comb x1 x2))  \<in> trm_ord 
+      \<and> (x2,(Comb x1 x2)) \<in> trm_ord"
+    and trm_ord_subst : 
+    "\<forall>s x y. (x,y) \<in> trm_ord \<longrightarrow> ( (subst x s),(subst y s)) \<in> trm_ord"
+    and pos_ord_irrefl : "(\<forall>x y. (irrefl (pos_ord x y)))"
+    and pos_ord_trans : "(\<forall>x. (trans (pos_ord x y)))"
+    and pos_ord_prefix : "\<forall>x y p q r. ((q,p) \<in> (pos_ord x y) \<longrightarrow> ((append q r),p) \<in> (pos_ord x y))"
+    and pos_ord_nil : "\<forall>x y p . (p \<noteq> Nil) \<longrightarrow> (p,Nil) \<in> (pos_ord x y)"
+    and sel_neg: "(\<forall>x. ( (sel (cl_ecl x)) \<subseteq> (cl_ecl x)) 
+        \<and> (\<forall>y \<in> sel (cl_ecl x). (negative_literal y)))"
+    and sel_renaming: "\<forall>\<eta> C. ((renaming \<eta> (vars_of_cl C)) \<longrightarrow> sel C = {} \<longrightarrow> sel (subst_cl C \<eta>) = {})"
+    and infinite_vars: "\<not> (finite vars)"
+    and filter_trms_inclusion: "filter_trms C E \<subseteq> E"
+begin
+
+
+definition orient_lit :: "'a literal \<Rightarrow> 'a trm \<Rightarrow> 'a trm \<Rightarrow> sign \<Rightarrow> bool"
+where
+  "(orient_lit L u v s) = 
+    ((( (L = (Pos (Eq u v))) \<or> (L = (Pos (Eq v u)))) \<and> ((u,v) \<notin> trm_ord) \<and> (s = pos))
+    \<or>
+    (( (L = (Neg (Eq u v))) \<or> (L = (Neg (Eq v u)))) \<and> ((u,v) \<notin> trm_ord) \<and> (s = neg)))"
+
+definition orient_lit_inst :: "'a literal \<Rightarrow> 'a trm \<Rightarrow> 'a trm \<Rightarrow> sign \<Rightarrow> 'a subst \<Rightarrow> bool"
+where
+  "(orient_lit_inst L u v s \<sigma>) = 
+    ((( (L = (Pos (Eq u v))) \<or> (L = (Pos (Eq v u)))) 
+      \<and> (((subst u \<sigma>),(subst v \<sigma>)) \<notin> trm_ord) \<and> (s = pos))
+    \<or>
+    (( (L = (Neg (Eq u v))) \<or> (L = (Neg (Eq v u)))) \<and> (((subst u \<sigma>),(subst v \<sigma>)) 
+    \<notin> trm_ord) \<and> (s = neg)))"
+
+lemma lift_orient_lit: 
+  assumes "orient_lit_inst L t s p \<sigma>"
+  shows "orient_lit (subst_lit L \<sigma>) (subst t \<sigma>)  (subst s \<sigma>) p"
+unfolding orient_lit_inst_def orient_lit_def using assms orient_lit_inst_def by auto 
+
+lemma orient_lit_vars:
+  assumes "orient_lit L t s p"
+  shows "vars_of t \<subseteq> vars_of_lit L \<and> vars_of s \<subseteq> vars_of_lit L"
+proof -
+  have "p = neg \<or> p = pos" using sign.exhaust by auto
+  then show ?thesis
+  proof
+    assume "p = neg" 
+    from this and assms(1) have "(L = Neg (Eq t s)) \<or> (L = (Neg (Eq s t)))" 
+      unfolding orient_lit_def by auto
+    then show ?thesis
+    proof
+      assume "L = Neg (Eq t s)" 
+      then have "vars_of_lit L = vars_of t \<union> vars_of s" by simp
+      from this show ?thesis by simp 
+    next
+      assume "L = Neg (Eq s t)" 
+      then have "vars_of_lit L = vars_of s \<union> vars_of t" by simp
+      from this show ?thesis by simp 
+    qed
+    next assume "p = pos" 
+    from this and assms(1) have "(L = Pos (Eq t s)) \<or> (L = (Pos (Eq s t)))" 
+      unfolding orient_lit_def by auto
+    then show ?thesis
+    proof
+      assume "L = Pos (Eq t s)" 
+      then have "vars_of_lit L = vars_of t \<union> vars_of s" by simp
+      from this show ?thesis by simp 
+    next
+      assume "L = Pos (Eq s t)" 
+      then have "vars_of_lit L = vars_of s \<union> vars_of t" by simp
+      from this show ?thesis by simp 
+    qed
+  qed
+qed
+
+lemma orient_lit_inst_vars:
+  assumes "orient_lit_inst L t s p \<sigma>"
+  shows "vars_of t \<subseteq> vars_of_lit L \<and> vars_of s \<subseteq> vars_of_lit L"
+proof -
+  have "p = neg \<or> p = pos" using sign.exhaust by auto
+  then show ?thesis
+  proof
+    assume "p = neg" 
+    from this and assms(1) have "(L = Neg (Eq t s)) \<or> (L = (Neg (Eq s t)))" 
+      unfolding orient_lit_inst_def by auto
+    then show ?thesis
+    proof
+      assume "L = Neg (Eq t s)" 
+      then have "vars_of_lit L = vars_of t \<union> vars_of s" by simp
+      from this show ?thesis by simp 
+    next
+      assume "L = Neg (Eq s t)" 
+      then have "vars_of_lit L = vars_of s \<union> vars_of t" by simp
+      from this show ?thesis by simp 
+    qed
+    next assume "p = pos" 
+    from this and assms(1) have "(L = Pos (Eq t s)) \<or> (L = (Pos (Eq s t)))" 
+      unfolding orient_lit_inst_def by auto
+    then show ?thesis
+    proof
+      assume "L = Pos (Eq t s)" 
+      then have "vars_of_lit L = vars_of t \<union> vars_of s" by simp
+      from this show ?thesis by simp 
+    next
+      assume "L = Pos (Eq s t)" 
+      then have "vars_of_lit L = vars_of s \<union> vars_of t" by simp
+      from this show ?thesis by simp 
+    qed
+  qed
+qed
+
+lemma orient_lit_inst_coincide:
+  assumes "orient_lit_inst L1 t s polarity \<sigma>"
+  assumes "coincide_on \<sigma> \<eta> (vars_of_lit L1)"
+  shows "orient_lit_inst L1 t s polarity \<eta>"
+proof -
+  have "polarity = pos \<or> polarity = neg" using sign.exhaust by auto  
+  then show ?thesis
+  proof
+    assume "polarity = pos" 
+    from this and assms(1) have "L1 = Pos (Eq t s) \<or> L1 = Pos (Eq s t)" 
+      and "( (subst t \<sigma>),  (subst s \<sigma>)) \<notin> trm_ord"  
+      unfolding orient_lit_inst_def by auto
+      have "vars_of t \<subseteq> vars_of_lit L1" and "vars_of s \<subseteq> vars_of_lit L1" by auto
+      unfolding coincide_on_def by auto
+      unfolding coincide_on_def by auto
+    have "( (subst t \<eta>),  (subst s \<eta>)) \<notin> trm_ord"
+      using coincide_on_term by metis
+      unfolding orient_lit_inst_def by auto
+    next assume "polarity = neg" 
+    from this and assms(1) have "L1 = Neg (Eq t s) \<or> L1 = Neg (Eq s t)" 
+      and "( (subst t \<sigma>),  (subst s \<sigma>)) \<notin> trm_ord"  
+      unfolding orient_lit_inst_def by auto
+      have "vars_of t \<subseteq> vars_of_lit L1" and "vars_of s \<subseteq> vars_of_lit L1" by auto
+      unfolding coincide_on_def by auto
+      unfolding coincide_on_def by auto
+    have "( (subst t \<eta>),  (subst s \<eta>)) \<notin> trm_ord"
+      using coincide_on_term by metis
+      unfolding orient_lit_inst_def by auto
+  qed
+qed
+
+lemma orient_lit_inst_subterms:
+  assumes "orient_lit_inst L t s polarity \<sigma>"
+  assumes "u \<in> subterms_of t"
+  shows "u \<in> subterms_of_lit L"
+proof -
+  have "polarity = pos \<or> polarity = neg" using sign.exhaust by auto
+  then show ?thesis
+  proof
+    assume "polarity = pos" 
+    from this and assms(1) have "L = (Pos (Eq t s)) \<or> L = (Pos (Eq s t))" 
+      unfolding orient_lit_inst_def by auto
+    then show ?thesis
+    proof
+      assume "L = (Pos (Eq t s))"
+      from this and assms(2) show ?thesis  by simp
+      next assume "L = (Pos (Eq s t))"
+      from this and assms(2) show ?thesis  by simp
+    qed
+  next
+    assume "polarity = neg" 
+    from this and assms(1) have "L = (Neg (Eq t s)) \<or> L = (Neg (Eq s t))" 
+      unfolding orient_lit_inst_def by auto
+    then show ?thesis
+    proof
+      assume "L = (Neg (Eq t s))"
+      from this and assms(2) show ?thesis  by simp
+      next assume "L = (Neg (Eq s t))"
+      from this and assms(2) show ?thesis  by simp
+    qed
+  qed  
+qed
+
+
+
+
+fun mset_lit :: "'a literal \<Rightarrow> 'a trm multiset"
+  where "mset_lit (Pos (Eq t s)) = {# t,s #}" |
+        "mset_lit (Neg (Eq t s)) = {# t,t,s,s #}"
+
+fun mset_cl 
+   where "mset_cl (C,\<sigma>) = {# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set C) #}" 
+
+fun mset_ecl 
+   where "mset_ecl (C,\<sigma>) = {# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set (cl_ecl C)) #}" 
+
+lemma mset_ecl_conv: "mset_ecl (C, \<sigma>) = mset_cl (cl_ecl C, \<sigma>)"
+  by simp
+
+lemma mset_ecl_and_mset_lit:
+  assumes "L \<in> (cl_ecl C)"
+  assumes "finite (cl_ecl C)"
+  shows "(mset_lit (subst_lit L \<sigma>)) \<in># (mset_ecl (C,\<sigma>))"
+proof -
+  from assms(1) assms(2) have "L \<in># (mset_set (cl_ecl C))" by (simp) 
+  then show ?thesis
+  proof -
+  have f1: "mset_set (cl_ecl C) - {#L#} + {#L#} = mset_set (cl_ecl C)"
+  have "count {#mset_lit (subst_lit L \<sigma>)#} (mset_lit (subst_lit L \<sigma>)) = 1"
+    by simp
+  then show ?thesis
+    by (metis (no_types, lifting) f1 image_mset_add_mset insert_iff mset_ecl.simps set_mset_add_mset_insert union_mset_add_mset_right)
+  qed
+qed
+
+lemma ecl_ord_coincide:
+  assumes "coincide_on \<sigma> \<sigma>' (vars_of_cl (cl_ecl C))"
+  shows "mset_ecl (C,\<sigma>) = mset_ecl (C,\<sigma>')"
+proof -
+  have "\<forall>x. (x \<in> (cl_ecl C) \<longrightarrow> ((subst_lit x \<sigma>) = (subst_lit x \<sigma>')))"
+  proof ((rule allI),(rule impI))
+    fix x assume "x \<in> (cl_ecl C)"
+    from this have "vars_of_lit x \<subseteq> (vars_of_cl (cl_ecl C))" by auto
+    from this and assms(1) have "coincide_on \<sigma> \<sigma>' (vars_of_lit x)" unfolding coincide_on_def by auto
+    from this show "((subst_lit x \<sigma>) = (subst_lit x \<sigma>'))"
+      by (simp add: coincide_on_lit) 
+  qed
+  then show ?thesis using equal_image_mset 
+  [of  "cl_ecl C" "\<lambda>x. (mset_lit (subst_lit x \<sigma>))"  "\<lambda>x. (mset_lit (subst_lit x \<sigma>'))"]
+    by (metis  mset_ecl.simps)
+qed
+
+
+definition lit_ord :: "('a literal \<times> 'a literal) set"
+  where 
+  "lit_ord =  
+    { (x,y). (((mset_lit x),(mset_lit y)) \<in> (mult trm_ord)) }"
+
+lemma mult_trm_ord_trans:
+  shows "trans (mult trm_ord)"
+by (metis (no_types, lifting)  mult_def transI transitive_closure_trans(2))
+
+lemma lit_ord_trans:
+  shows "trans  lit_ord"
+by (metis (no_types, lifting) basic_superposition.lit_ord_def basic_superposition_axioms 
+    case_prodD case_prodI mem_Collect_eq mult_def transI transitive_closure_trans(2))
+
+lemma lit_ord_wf:
+  shows "wf lit_ord"
+proof -
+    from trm_ord_wf have "wf (mult trm_ord)" using wf_mult by auto
+    then show ?thesis 
+      using lit_ord_def 
+        and measure_wf [of "(mult trm_ord)" lit_ord mset_lit]
+        by blast
+qed
+
+definition ecl_ord :: "(('a eclause \<times> 'a subst) \<times> ('a eclause \<times> 'a subst)) set"
+  where 
+  "ecl_ord =  
+    { (x,y). (((mset_ecl x),(mset_ecl y)) \<in> (mult (mult trm_ord))) }"
+
+definition ecl_ord_eq :: "(('a eclause \<times> 'a subst) \<times> ('a eclause \<times> 'a subst)) set"
+  where 
+  "ecl_ord_eq =  
+    ecl_ord \<union> { (x,y). ((mset_ecl x) = (mset_ecl y)) }"
+
+definition cl_ord :: "(('a clause \<times> 'a subst) \<times> ('a clause \<times> 'a subst)) set"
+  where 
+  "cl_ord =  
+    { (x,y). (((mset_cl x),(mset_cl  y)) \<in> (mult (mult trm_ord))) }"
+
+definition cl_ord_eq :: "(('a clause \<times> 'a subst) \<times> ('a clause \<times> 'a subst)) set"
+  where 
+  "cl_ord_eq =  cl_ord \<union> 
+    { (x,y). (mset_cl x) = (mset_cl  y) }"
+
+lemma member_ecl_ord_iff:
+  "((C, \<sigma>\<^sub>C), (D, \<sigma>\<^sub>D)) \<in> ecl_ord \<longleftrightarrow> ((cl_ecl C, \<sigma>\<^sub>C), (cl_ecl D, \<sigma>\<^sub>D)) \<in> cl_ord"
+  by (simp add: ecl_ord_def cl_ord_def)
+
+lemma mult_mult_trm_ord_trans:
+  shows "trans (mult (mult trm_ord))"
+by (metis (no_types, lifting)  mult_def transI transitive_closure_trans(2))
+
+lemma ecl_ord_trans:
+  shows "trans  ecl_ord"
+by (metis (no_types, lifting) basic_superposition.ecl_ord_def basic_superposition_axioms case_prodD 
+    case_prodI mem_Collect_eq mult_def transI transitive_closure_trans(2))
+
+lemma cl_ord_trans:
+  shows "trans cl_ord"
+by (metis (no_types, lifting) basic_superposition.cl_ord_def basic_superposition_axioms case_prodD 
+    case_prodI mem_Collect_eq mult_def transI transitive_closure_trans(2))
+
+lemma cl_ord_eq_trans:
+  shows "trans cl_ord_eq"
+proof -
+  have "\<forall>r. trans r = (\<forall>p pa pb. ((p::'a literal set \<times> ('a \<times> 'a trm) list, pa) \<notin> r \<or> (pa, pb) \<notin> r) 
+          \<or> (p, pb) \<in> r)"
+    by (simp add: trans_def)
+  then obtain pp :: "(('a literal set \<times> ('a \<times> 'a trm) list) \<times> 'a literal set \<times> ('a \<times> 'a trm) list) set \<Rightarrow> 'a literal set \<times> ('a \<times> 'a trm) list" and ppa :: "(('a literal set \<times> ('a \<times> 'a trm) list) \<times> 'a literal set \<times> ('a \<times> 'a trm) list) set \<Rightarrow> 'a literal set \<times> ('a \<times> 'a trm) list" and ppb :: "(('a literal set \<times> ('a \<times> 'a trm) list) \<times> 'a literal set \<times> ('a \<times> 'a trm) list) set \<Rightarrow> 'a literal set \<times> ('a \<times> 'a trm) list" where
+    f1: "\<forall>r. (\<not> trans r \<or> (\<forall>p pa pb. (p, pa) \<notin> r \<or> (pa, pb) \<notin> r \<or> (p, pb) \<in> r)) \<and> (trans r \<or> (pp r, ppa r) \<in> r \<and> (ppa r, ppb r) \<in> r \<and> (pp r, ppb r) \<notin> r)"
+    by (metis (no_types))
+  have f2: "trans {(p, pa). (mset_cl p, mset_cl pa) \<in> mult (mult trm_ord)}"
+    using cl_ord_def cl_ord_trans by presburger
+  { assume "\<not> (case (ppa (cl_ord \<union> {(p, pa). mset_cl p = mset_cl pa}), ppb (cl_ord \<union> {(p, pa). mset_cl p = mset_cl pa})) of (p, pa) \<Rightarrow> mset_cl p = mset_cl pa)"
+    { assume "(ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)}"
+      moreover
+      { assume "(ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)} \<and> (mset_cl (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})), mset_cl (ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}))) \<notin> mult (mult trm_ord)"
+        then have "(ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)} \<and> mset_cl (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<noteq> mset_cl (ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}))"
+          by force
+        then have "((pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)} \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). mset_cl pa = mset_cl p}) \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)} \<and> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> {(pa, p). mset_cl pa = mset_cl p}"
+          using f2 f1 by blast }
+      ultimately have "(mset_cl (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})), mset_cl (ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}))) \<in> mult (mult trm_ord) \<or> ((pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)} \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). mset_cl pa = mset_cl p}) \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)} \<and> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> {(pa, p). mset_cl pa = mset_cl p}"
+        by fastforce }
+    then have "(mset_cl (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})), mset_cl (ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}))) \<in> mult (mult trm_ord) \<or> ((pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)} \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> {(pa, p). mset_cl pa = mset_cl p}) \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> {(pa, p). (mset_cl pa, mset_cl p) \<in> mult (mult trm_ord)} \<and> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> {(pa, p). mset_cl pa = mset_cl p} \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p} \<or> (ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p} \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}"
+      using cl_ord_def by auto }
+  then have "(pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p} \<or> (ppa (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<notin> cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p} \<or> (pp (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}), ppb (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})) \<in> cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p}"
+    using cl_ord_def by force
+  then have "trans (cl_ord \<union> {(pa, p). mset_cl pa = mset_cl p})"
+    using f1 by meson
+  from this show ?thesis unfolding cl_ord_eq_def by auto
+qed
+
+lemma wf_ecl_ord:
+  shows "wf ecl_ord"
+proof -
+    have "wf (mult trm_ord)" using trm_ord_wf and wf_mult  by auto
+    then have "wf (mult (mult trm_ord))" using wf_mult  by auto
+    thus ?thesis 
+      using ecl_ord_def 
+        and measure_wf [of "(mult (mult trm_ord))" ecl_ord mset_ecl]
+        by blast
+qed
+
+definition maximal_literal :: "'a literal \<Rightarrow> 'a clause \<Rightarrow> bool"
+  where
+    "(maximal_literal L C) = (\<forall>x. (x \<in> C \<longrightarrow> (L,x) \<notin> lit_ord))"
+
+definition eligible_literal 
+where 
+  "(eligible_literal L C \<sigma>) = (L \<in> sel (cl_ecl C) \<or> 
+    (sel(cl_ecl C) = {} 
+    \<and> (maximal_literal (subst_lit L \<sigma>) (subst_cl (cl_ecl C) \<sigma>))))"
+
+definition strictly_maximal_literal
+where "strictly_maximal_literal C L \<sigma>  = 
+  (\<forall>x \<in> (cl_ecl C) - { L }. ( (subst_lit x \<sigma>),(subst_lit L \<sigma>)) 
+                                        \<in> lit_ord)"
+
+definition lower_or_eq 
+  where "lower_or_eq t s = ((t = s) \<or> ((t,s) \<in> trm_ord))"
+
+lemma eligible_literal_coincide:
+  assumes "coincide_on \<sigma> \<sigma>' (vars_of_cl (cl_ecl C))"
+  assumes "eligible_literal L C \<sigma>"
+  assumes "L \<in> (cl_ecl C)"
+  shows "eligible_literal L C \<sigma>'"
+proof -
+  from assms(2) have 
+    "L \<in> sel (cl_ecl C) \<or> (sel (cl_ecl C) = {} \<and> maximal_literal (subst_lit L \<sigma>) 
+      (subst_cl (cl_ecl C) \<sigma>))" 
+    unfolding eligible_literal_def by auto
+  then show ?thesis
+  proof 
+    assume "L \<in> sel (cl_ecl C)" 
+    then show ?thesis unfolding eligible_literal_def by auto
+  next
+    assume "sel (cl_ecl C) = {} \<and> maximal_literal (subst_lit L \<sigma>)  (subst_cl (cl_ecl C) \<sigma>)"
+    then have "sel (cl_ecl C) = {}" and "maximal_literal (subst_lit L \<sigma>)  (subst_cl (cl_ecl C) \<sigma>)" 
+      by auto
+    from assms(1) have "(subst_cl (cl_ecl C) \<sigma>) = (subst_cl (cl_ecl C) \<sigma>')"
+      using coincide_on_cl by blast
+    from assms(3) and assms(1) have "coincide_on \<sigma> \<sigma>' (vars_of_lit L)" unfolding coincide_on_def 
+      by auto
+    from this have "(subst_lit L \<sigma>) = (subst_lit L \<sigma>')" 
+      using coincide_on_lit by auto
+      have "maximal_literal (subst_lit L \<sigma>')  (subst_cl (cl_ecl C) \<sigma>')"
+      by auto
+   qed
+qed
+
+
+definition lower_on 
+where "lower_on \<sigma> \<eta> V = (\<forall>x \<in> V. 
+  (lower_or_eq (subst (Var x) \<sigma>) ( (subst (Var x) \<eta>))))"
+
+
+lemma lower_or_eq_monotonic:
+  assumes "lower_or_eq t1 s1"
+  assumes "lower_or_eq t2 s2"
+  shows "lower_or_eq (Comb t1 t2) (Comb s1 s2)"
+unfolding lower_or_eq_def using trm_ord_reduction_left trm_ord_reduction_right
+  by (metis assms(1) assms(2) lower_or_eq_def trm_ord_trans transD)
+ 
+lemma lower_on_term:
+  shows "\<And> \<sigma> \<eta>. lower_on \<sigma> \<eta> (vars_of t) \<Longrightarrow> 
+    (lower_or_eq (subst t \<sigma>) (subst t \<eta>))"
+proof (induction t)
+  case (Var x)
+    from this show ?case 
+      unfolding lower_on_def by auto
+  next case (Const x)
+    show ?case 
+     unfolding lower_or_eq_def by auto
+  next case (Comb t1 t2)
+    show "\<And> \<sigma> \<eta>. lower_on \<sigma> \<eta> (vars_of (Comb t1 t2)) \<Longrightarrow> 
+    (lower_or_eq (subst  (Comb t1 t2) \<sigma>) (subst  (Comb t1 t2) \<eta>))"
+    proof -
+      fix \<sigma> \<eta> assume "lower_on \<sigma> \<eta> (vars_of (Comb t1 t2))"
+      from this have "lower_on \<sigma> \<eta> (vars_of t1)" and "lower_on \<sigma> \<eta> (vars_of t2)" 
+        unfolding lower_on_def by auto
+        using Comb.IH by auto
+        using Comb.IH by auto
+        show "lower_or_eq (subst  (Comb t1 t2) \<sigma>) (subst (Comb t1 t2) \<eta>)"
+        using lower_or_eq_monotonic by auto 
+    qed   
+qed
+
+lemma diff_substs_yield_diff_trms:
+  assumes "(subst (Var x) \<sigma>) \<noteq> (subst (Var x) \<eta>)"
+  shows "(x \<in> vars_of t)
+   \<Longrightarrow> (subst t \<sigma>) \<noteq> (subst t \<eta>)"
+proof (induction t)
+  case (Var y)  
+    show "(x \<in> vars_of (Var y))  \<Longrightarrow> (subst  (Var y) \<sigma>) \<noteq> (subst  (Var y) \<eta>)"
+    proof -
+      assume "(x \<in> vars_of  (Var y))" 
+      from this and assms(1)  
+      show "(subst  (Var y) \<sigma>) \<noteq> (subst  (Var y) \<eta>)" 
+      by auto
+    qed
+  next case (Const y)
+    show " (x \<in> vars_of (Const y))
+   \<Longrightarrow> (subst  (Const y) \<sigma>) \<noteq> (subst  (Const y) \<eta>)"
+    proof (rule ccontr)
+    qed
+  next case (Comb t1 t2)
+    show " (x \<in> vars_of (Comb t1 t2))
+   \<Longrightarrow> (subst  (Comb t1 t2) \<sigma>) \<noteq> (subst (Comb t1 t2) \<eta>)"
+    proof -
+      assume "(x \<in> vars_of (Comb t1 t2))" 
+      then show "(subst  (Comb t1 t2) \<sigma>) \<noteq> (subst (Comb t1 t2) \<eta>)"
+      proof 
+        assume "x \<in> vars_of t1"
+        from this have "(subst t1 \<sigma>) \<noteq> (subst t1 \<eta>)" 
+          using Comb.IH by auto
+        then show ?thesis by auto
+      next
+        assume "x \<in> vars_of t2"
+        from this have "(subst t2 \<sigma>) \<noteq> (subst t2 \<eta>)" 
+          using Comb.IH by auto
+        then show ?thesis by auto
+      qed
+    qed   
+qed
+
+lemma lower_subst_yields_lower_trms:
+  assumes "lower_on \<sigma> \<eta> (vars_of t)"
+  assumes "((subst (Var x) \<sigma>),(subst (Var x) \<eta>)) \<in> trm_ord"
+  assumes "(x \<in> vars_of t)"
+  shows "((subst t \<sigma>),(subst t \<eta>)) \<in> trm_ord"
+proof -
+  from assms(1) have "lower_or_eq (subst t \<sigma>) (subst t \<eta>)"
+    using lower_on_term by auto
+  from assms(2) have "(subst (Var x) \<sigma>) \<noteq> (subst (Var x) \<eta>)"
+    using trm_ord_irrefl irrefl_def by fastforce 
+  from this and assms(3) have "(subst t \<sigma>) \<noteq> (subst t \<eta>)"
+    using diff_substs_yield_diff_trms by fastforce 
+    show ?thesis unfolding lower_or_eq_def by auto
+qed
+
+lemma lower_on_lit:
+  assumes "lower_on \<sigma> \<eta> (vars_of_lit L)"
+  assumes "((subst (Var x) \<sigma>),(subst (Var x) \<eta>)) \<in> trm_ord"
+  assumes "x \<in> vars_of_lit L"
+  shows "((subst_lit L \<sigma>), (subst_lit L \<eta>)) \<in> lit_ord"
+proof -
+  obtain t s where def_l: "L = Pos (Eq t s) | L = (Neg (Eq t s))"
+    by (metis mset_lit.cases) 
+  from this have "vars_of t \<subseteq> vars_of_lit L" and "vars_of s \<subseteq> vars_of_lit L" by auto
+    unfolding lower_on_def by auto
+  from def_l have def_ms_l: "mset_lit L = {# t,s #} \<or> mset_lit L = {# t,t,s,s #}" by auto
+  from this have "t \<in># (mset_lit L)" and "s \<in># (mset_lit L)" by auto
+  from def_l  have "mset_lit (subst_lit L \<sigma>) = {# (subst u \<sigma>). u \<in># (mset_lit L) #}" by auto
+  from def_l have "mset_lit (subst_lit L \<eta>) = {# (subst u \<eta>). u \<in># (mset_lit L) #}" by auto
+    using lower_on_term by auto
+  let ?L = "mset_lit L"
+  let ?M1 = "mset_lit (subst_lit L \<sigma>)"
+  let ?M2 = "mset_lit (subst_lit L \<eta>)"
+    unfolding lower_on_def by auto
+    unfolding lower_on_def by auto 
+  have all_lower: "\<forall>u. (u \<in># (mset_lit L) \<longrightarrow> (((subst  u \<sigma>), (subst u \<eta>)) \<in> trm_ord 
+  \<or> (subst  u \<sigma>) = (subst u \<eta>)))"
+  proof  (rule allI,rule impI)
+    fix u assume "u \<in># (mset_lit L)"
+    have "u = t \<or> u = s"
+    proof (cases)
+      assume "mset_lit L = {# t,s #}"
+        by (simp add: count_single insert_DiffM2 insert_noteq_member not_gr0)
+      next
+      assume "\<not>mset_lit L = {# t,s #}"
+      from this and def_ms_l have "mset_lit L = {# t,t,s,s #}"
+        by auto
+        using not_gr0 by fastforce
+    qed   
+    then show "(((subst  u \<sigma>), (subst u \<eta>)) \<in> trm_ord 
+  \<or> (subst  u \<sigma>) = (subst u \<eta>))"
+    proof 
+      assume "u = t"
+        using lower_on_term by auto
+    next
+      assume "u = s"
+        using lower_on_term by auto
+    qed
+  qed
+  have sl_exists: "\<exists>u. (u \<in># (mset_lit L) \<and> ((subst u \<sigma>), (subst u \<eta>)) \<in> trm_ord)"
+  proof -
+      "x \<in> vars_of t \<or> x \<in> vars_of s" by auto
+    then show ?thesis
+    proof
+      assume "x \<in> vars_of t"
+        have "( (subst t \<sigma>),(subst t \<eta>)) \<in> trm_ord" 
+        using lower_subst_yields_lower_trms by auto
+    next
+      assume "x \<in> vars_of s"
+        have "( (subst s \<sigma>),(subst s \<eta>)) \<in> trm_ord" 
+        using lower_subst_yields_lower_trms by auto
+    qed
+  qed
+  from all_lower sl_exists and 
+  have "(?M1,?M2) \<in> (mult trm_ord)" 
+  using trm_ord_irrefl image_mset_ordering 
+                        [of ?M1 "\<lambda>x. (subst x \<sigma>)" ?L ?M2 "\<lambda>x. (subst x \<eta>)" trm_ord]
+  by blast
+  from this show ?thesis unfolding lit_ord_def by auto  
+qed
+
+lemma lower_on_lit_eq:
+  assumes "lower_on \<sigma> \<eta> (vars_of_lit L)"
+  shows "((subst_lit L \<sigma>) = (subst_lit L \<eta>)) \<or> ((subst_lit L \<sigma>), (subst_lit L \<eta>)) \<in> lit_ord"
+proof (cases)
+  assume "coincide_on \<sigma> \<eta> (vars_of_lit L)"
+  then show ?thesis using coincide_on_lit by auto
+next
+  assume "\<not>coincide_on \<sigma> \<eta> (vars_of_lit L)"
+  then obtain x where "x \<in> vars_of_lit L" 
+    and "(subst (Var x) \<sigma>) \<noteq> (subst (Var x) \<eta>)"
+    unfolding coincide_on_def by auto
+    have "((subst (Var x) \<sigma>),(subst (Var x) \<eta>)) \<in> trm_ord"
+    unfolding lower_on_def lower_or_eq_def  by auto
+qed
+
+lemma lower_on_cl:
+  assumes "lower_on \<sigma> \<eta> (vars_of_cl (cl_ecl C))"
+  assumes "((subst (Var x) \<sigma>),(subst (Var x) \<eta>)) \<in> trm_ord"
+  assumes "x \<in> vars_of_cl (cl_ecl C)"
+  assumes "finite (cl_ecl C)"
+  shows "((C,\<sigma>), (C, \<eta>)) \<in> ecl_ord"
+proof -
+  let ?M1 = "mset_ecl (C,\<sigma>)"
+  let ?M2 = "mset_ecl (C,\<eta>)"
+  let ?M = "(mset_set (cl_ecl C))" 
+  let ?f1 = "\<lambda>x. (mset_lit (subst_lit x \<sigma>))"
+  let ?f2 = "\<lambda>x. (mset_lit (subst_lit x \<eta>))"
+  have "?M1 = {# (?f1 u). u \<in># ?M #}" using mset_ecl.simps by blast 
+  have "?M2 = {# (?f2 u). u \<in># ?M #}" using mset_ecl.simps by blast 
+  have i: "\<forall>u. (u \<in># ?M \<longrightarrow> (((?f1 u), (?f2 u)) \<in> (mult trm_ord) \<or> (?f1 u) = (?f2 u)))"
+  proof ((rule allI),(rule impI))
+    fix u assume "u \<in># ?M"
+    from this have "u \<in> (cl_ecl C)" using count_mset_set(3) by (simp add: assms(4))
+    from this and assms(1)  have "lower_on \<sigma> \<eta> (vars_of_lit u)" unfolding lower_on_def by auto
+    then have "((subst_lit u \<sigma>) = (subst_lit u \<eta>)) 
+      \<or> ((subst_lit u \<sigma>), (subst_lit u \<eta>)) \<in> lit_ord" 
+      using lower_on_lit_eq by blast
+    from this show "(((?f1 u), (?f2 u)) \<in> (mult trm_ord) \<or> (?f1 u) = (?f2 u))"
+      unfolding lit_ord_def by auto
+  qed
+  have "irrefl (mult trm_ord)" by (simp add: irreflI trm_ord_wf wf_mult) 
+  have ii: "\<exists>u. (u \<in># ?M \<and> ((?f1 u), (?f2 u)) \<in> (mult trm_ord))"
+  proof -
+      by auto
+      unfolding lower_on_def by auto
+      have "((subst_lit u \<sigma>), (subst_lit u \<eta>)) \<in> lit_ord" 
+      using lower_on_lit by blast
+      unfolding lit_ord_def by auto 
+    then show ?thesis by auto
+  qed
+    have "(?M1,?M2) \<in> (mult (mult trm_ord))" 
+    using image_mset_ordering [of ?M1 ?f1 ?M ?M2 ?f2 "(mult trm_ord)" ] by auto
+  then show ?thesis unfolding ecl_ord_def by auto
+qed
+
+lemma subterm_trm_ord :
+  shows "\<And> t  s. 
+           subterm t p s \<Longrightarrow> p \<noteq> []  
+          \<Longrightarrow> (s,t) \<in> trm_ord"
+proof (induction p)
+  case Nil
+  next case (Cons i q)
+        "t = (Comb t1 t2)" using subterm.elims(2) by blast 
+    have "i = Left \<or> i = Right" using indices.exhaust by blast 
+    then show "(s,t) \<in> trm_ord"
+    proof 
+      assume "i = Left"
+        have "subterm t1 q s" by auto
+      show ?thesis
+      proof (cases)
+        assume "q = Nil"
+      next
+        assume "q \<noteq> Nil"
+          using trm_ord_trans unfolding trans_def by metis
+      qed
+    next
+      assume "i = Right"
+        have "subterm t2 q s" by auto
+      show ?thesis
+      proof (cases)
+        assume "q = Nil"
+      next
+        assume "q \<noteq> Nil"
+          using trm_ord_trans unfolding trans_def by metis
+      qed
+  qed
+qed
+
+lemma subterm_trm_ord_eq :
+  assumes "subterm t p s" 
+  shows "s = t \<or> (s,t) \<in> trm_ord"
+proof (cases)
+  assume "p = Nil"
+    from this and assms(1) show ?thesis by auto
+  next assume "p \<noteq> Nil"
+    from this and assms(1) show ?thesis using subterm_trm_ord by auto
+qed
+
+lemma subterms_of_trm_ord_eq :
+  assumes "s \<in> subterms_of t" 
+  shows "s = t \<or> (s,t) \<in> trm_ord"
+proof -
+  from assms(1) obtain p where "subterm t p s" using occurs_in_def by auto
+  from this show ?thesis using subterm_trm_ord_eq by auto
+qed
+
+lemma subt_trm_ord:
+  shows "t \<prec> s \<longrightarrow> (t,s) \<in> trm_ord"
+proof (induction s)
+    case (Var x)
+    show ?case
+    proof
+      assume "t \<prec> Var x" 
+      then show "(t,Var x) \<in> trm_ord" by auto
+    qed
+    case (Const x)
+    show ?case
+    proof
+      assume "t \<prec> Const x" 
+      then show "(t,Const x) \<in> trm_ord" by auto
+    qed
+    case (Comb t1 t2) 
+     show ?case
+    proof 
+      assume "t \<prec> Comb t1 t2"
+      show "(t, Comb t1 t2) \<in> trm_ord"
+      proof (rule ccontr)
+        assume "(t, Comb t1 t2) \<notin> trm_ord"
+        then have i: "t \<noteq> t1" using trm_ord_subterm by auto
+          show False using Comb.IH trm_ord_subterm trm_ord_trans trans_def by metis
+      qed
+    qed
+qed
+
+lemma trm_ord_vars:
+  assumes "(t,s) \<in> trm_ord"
+  shows "vars_of t \<subseteq> vars_of s"
+proof (rule ccontr)
+  assume "\<not>vars_of t \<subseteq> vars_of s"
+  then obtain x where "x \<in> vars_of t" and "x \<notin> vars_of s" by auto
+  let ?\<sigma> = "[(x,s)]"
+  from assms have "((subst t ?\<sigma>),(subst s ?\<sigma>)) \<in> trm_ord" 
+    using trm_ord_subst by auto
+  let ?\<theta> = "[]"
+  let ?V = "vars_of s"
+  have "subst s ?\<theta> = s" by simp 
+  have "subst (Var x) ?\<sigma> = s" by simp 
+  have "coincide_on ?\<sigma> ?\<theta> ?V" 
+  proof (rule ccontr)
+    assume "\<not> coincide_on ?\<sigma> ?\<theta> ?V"
+    then obtain y where "y \<in> ?V" "subst (Var y) ?\<sigma> \<noteq> subst (Var y) ?\<theta>" 
+      unfolding coincide_on_def by auto
+      by (metis assoc.simps(2) subst.simps(1)) 
+  qed
+    using coincide_on_term by metis 
+  from this have "((Var x), t) \<in> trm_ord"  using subt_trm_ord by auto
+  from this and assms(1) have "(Var x,s) \<in>trm_ord" using trm_ord_trans trans_def by metis
+  from this have "((subst (Var x) ?\<sigma>),(subst s ?\<sigma>)) \<in> trm_ord" 
+    using trm_ord_subst by metis
+    have "(s,s) \<in> trm_ord" by auto
+  from this show False using trm_ord_irrefl irrefl_def by metis
+qed
+
+lemma lower_on_ground:
+  assumes "lower_on \<sigma> \<eta> V"
+  assumes "ground_on  V \<eta>"
+  shows "ground_on  V \<sigma>"
+proof (rule ccontr)
+  assume "\<not> ground_on V \<sigma>"
+  from this obtain x where "x \<in> V" and "vars_of (subst (Var x) \<sigma>) \<noteq> {}" 
+    unfolding ground_on_def ground_term_def by metis
+    \<or> ((subst (Var x) \<sigma>),(subst (Var x) \<eta>)) \<in> trm_ord"
+    unfolding lower_on_def lower_or_eq_def by metis
+  from this have "vars_of (subst (Var x) \<sigma>) \<subseteq> vars_of (subst (Var x) \<eta>)"
+    using trm_ord_vars by auto
+    have "vars_of (subst (Var x) \<eta>) \<noteq> {}" by auto
+    unfolding ground_on_def ground_term_def by metis
+qed
+      
+lemma replacement_monotonic :
+  shows "\<And> t  s. ((subst v \<sigma>), (subst u \<sigma>)) \<in> trm_ord 
+          \<Longrightarrow> subterm t p u \<Longrightarrow> replace_subterm t p v s 
+          \<Longrightarrow> ((subst s \<sigma>), (subst t \<sigma>)) \<in> trm_ord"
+proof (induction p)
+  case Nil
+      show ?case by auto
+  next case (Cons i q)
+        "t = (Comb t1 t2)" using subterm.elims(2) by blast 
+    have "i = Left \<or> i = Right" using indices.exhaust by blast 
+    then show "((subst s \<sigma>), (subst t \<sigma>)) \<in> trm_ord"
+    proof 
+      assume "i = Left"
+        have "subterm t1 q u" by auto
+        obtain t1' where "replace_subterm t1 q v t1'" and "s = Comb t1' t2" by auto
+        "((subst t1' \<sigma>), (subst t1 \<sigma>)) \<in> trm_ord" 
+        using Cons.IH Cons.prems(1) by blast 
+        show "((subst s \<sigma>), (subst t \<sigma>)) \<in> trm_ord"
+        by (simp add: trm_ord_reduction_left)   
+    next 
+      assume "i = Right"
+        have "subterm t2 q u" by auto
+        obtain t2' where "replace_subterm t2 q v t2'" and "s = Comb t1 t2'" by auto
+        "((subst t2' \<sigma>), (subst t2 \<sigma>)) \<in> trm_ord" 
+        using Cons.IH Cons.prems(2) by blast 
+        show "((subst s \<sigma>), (subst t \<sigma>)) \<in> trm_ord"
+        by (simp add: trm_ord_reduction_right) 
+    qed
+qed
+
+lemma mset_lit_subst:
+  shows "(mset_lit (subst_lit L \<sigma>)) = 
+    {# (subst x \<sigma>). x \<in># (mset_lit L) #}"
+proof -
+  have "positive_literal L \<or> negative_literal L"  
+    using negative_literal.simps(2) positive_literal.elims(3) by blast  
+  then show ?thesis
+  proof 
+    assume "positive_literal L"
+    then obtain t s where "L = Pos (Eq t s)"
+      by (metis equation.exhaust positive_literal.elims(2)) 
+    from this show ?thesis by auto
+  next
+    assume "negative_literal L"
+    then obtain t s where "L = Neg (Eq t s)"
+      by (metis equation.exhaust negative_literal.elims(2)) 
+    from this show ?thesis by auto
+  qed
+qed
+
+lemma lit_ord_irrefl:
+  shows "(L,L) \<notin> lit_ord"
+by (simp add: lit_ord_wf)
+
+lemma lit_ord_subst:
+  assumes "(L,M) \<in> lit_ord"
+  shows "((subst_lit L \<sigma>), (subst_lit M \<sigma>)) \<in> lit_ord"
+proof -
+  let ?f = "\<lambda>x. (subst x \<sigma>)"
+  have i: "\<And> t s. ((t,s) \<in> trm_ord \<Longrightarrow> ((?f t), (?f s)) \<in> trm_ord)"
+    using trm_ord_subst by auto
+  from assms(1) have ii: "( (mset_lit L),(mset_lit M)) \<in> (mult trm_ord)" 
+    unfolding lit_ord_def by auto
+  let ?L = "{# (?f x). x \<in># (mset_lit L) #}"
+  let ?M = "{# (?f x). x \<in># (mset_lit M) #}"
+  from i and ii have iii: "( ?L,?M ) \<in> (mult trm_ord)" using monotonic_fun_mult by metis
+  have l: "?L = (mset_lit (subst_lit L \<sigma>))"
+    using mset_lit_subst by auto
+  have m: "?M = (mset_lit (subst_lit M \<sigma>))"
+    using mset_lit_subst by auto
+  from l m iii show ?thesis unfolding lit_ord_def by auto
+qed
+
+lemma args_are_strictly_lower:
+   assumes "is_compound t"
+   shows "(lhs t,t) \<in> trm_ord \<and> (rhs t,t) \<in> trm_ord"
+by (metis assms is_compound.elims(2) lhs.simps(1) rhs.simps(1) trm_ord_subterm)
+
+lemma mset_subst:
+  assumes "C' = subst_cl D \<theta>" 
+  assumes "\<sigma> \<doteq> \<theta> \<lozenge> \<eta>"
+  assumes "finite D"
+  shows "mset_cl (C',\<eta>) = mset_cl (D,\<sigma>) \<or> (mset_cl (C',\<eta>),mset_cl (D,\<sigma>)) \<in> (mult (mult trm_ord))"
+proof -
+  let ?f = "\<lambda>x. (subst_lit x \<theta>)"
+  let ?g = "\<lambda>x. (mset_lit (subst_lit x \<eta>))"
+  let ?h = "\<lambda>x. (mset_lit (subst_lit x \<sigma>))"
+  have i: "\<forall>x \<in> D. ( (?g (?f x)) = (?h x))"
+  proof 
+    fix x
+    have "(subst_lit (subst_lit x \<theta>) \<eta>) = (subst_lit x (\<theta> \<lozenge> \<eta>))"
+      using composition_of_substs_lit by auto
+    from assms(2) have "(subst_lit x  \<sigma>) = (subst_lit x (\<theta> \<lozenge> \<eta>))" 
+      using subst_eq_lit by auto
+      show "(?g (?f x)) = (?h x)" by auto
+  qed
+  from assms(3) have "mset_set (?f ` D) \<subseteq>#  {# (?f x). x \<in># mset_set (D) #}"
+    using mset_set_mset_image by auto
+  from this have ii: "{# (?g x). x \<in># mset_set (?f ` D) #} \<subseteq>#  {# (?g x). x \<in># {# (?f x). x \<in># mset_set (D) #} #}"
+    using image_mset_subseteq_mono by auto
+  have "{# (?g x). x \<in># {# (?f x). x \<in># mset_set (D) #} #} = {# (?g (?f x)). x \<in># mset_set D #}"
+    using mset_image_comp [of ?g ?f ]  by auto
+  from this and ii have
+    iii: "{# (?g x). x \<in># mset_set (?f ` D) #} \<subseteq># {# (?g (?f x)). x \<in># mset_set D #}" by auto
+  from i have "{# (?g (?f x)). x \<in># (mset_set D) #} = {# (?h x). x \<in># (mset_set D)  #} "
+    using equal_image_mset [of D "\<lambda>x. (?g (?f x))"] by auto
+  from this and iii 
+    have "{# (?g x). x \<in># mset_set (?f ` D) #} \<subseteq># {# (?h x). x \<in># mset_set D #}" by auto
+  from this 
+    have iv: "{# (?g x). x \<in># mset_set (?f ` D) #} \<subseteq># mset_cl (D,\<sigma>)" by auto
+  from assms(1) have "((\<lambda>x. subst_lit x \<theta>) ` D) = C'" by auto
+  from this and iv have "{#mset_lit (subst_lit x \<eta>). x \<in># mset_set C' #} \<subseteq># mset_cl (D, \<sigma>)"
+    by auto
+  from this have "mset_cl (C', \<eta>) \<subseteq># mset_cl (D, \<sigma>)" by auto
+  from this show ?thesis using multiset_order_inclusion_eq mult_trm_ord_trans by auto 
+qed
+
+lemma max_lit_exists:
+  shows "finite C \<Longrightarrow> C \<noteq> {} \<longrightarrow> ground_clause C \<longrightarrow> (\<exists>L. (L \<in> C \<and> (maximal_literal L C)))"
+proof (induction rule: finite.induct)
+  case emptyI
+  show ?case by simp
+next
+  fix A :: "'a clause" and a:: "'a literal"
+  assume "finite A"
+  assume hyp_ind: "A \<noteq> {} \<longrightarrow> ground_clause A \<longrightarrow> (\<exists>L. (L \<in> A \<and> (maximal_literal L A)))" 
+  show "(insert a A) \<noteq> {} \<longrightarrow> ground_clause (insert a A) 
+          \<longrightarrow> (\<exists>L. (L \<in> (insert a A) \<and> (maximal_literal L (insert a A))))"
+  proof ((rule impI)+)
+    assume "insert a A \<noteq> {}"
+    assume "ground_clause (insert a A)"
+    show "(\<exists>L. (L \<in> (insert a A) \<and> (maximal_literal L (insert a A))))"
+    proof (cases)
+      assume "A = {}"
+      then have "a \<in> (insert a A) \<and> (maximal_literal a (insert a A))" 
+        unfolding maximal_literal_def using lit_ord_irrefl by auto
+      then show ?thesis by auto
+    next assume "A \<noteq> {}"
+      have "insert a A = {a} \<union> A" by auto
+      then have "vars_of_cl (insert a A) = vars_of_cl A \<union> vars_of_lit a" by auto
+        "vars_of_lit a = {}" and "ground_clause A" by auto
+        "b \<in> A" and "maximal_literal b A" by auto
+      show ?thesis 
+      proof (cases)
+       assume "maximal_literal a A" 
+       then have "maximal_literal a (insert a A)" 
+        using lit_ord_wf maximal_literal_def by auto  
+       then show ?thesis by auto
+      next 
+       assume "\<not>maximal_literal a A" 
+       then obtain a' where "a' \<in> A" and "(a,a') \<in> lit_ord" 
+        unfolding maximal_literal_def by auto
+        unfolding maximal_literal_def by auto
+        have "(b,a) \<notin> lit_ord" unfolding lit_ord_def
+          using mult_def trancl_trans by fastforce
+        
+        unfolding maximal_literal_def by simp 
+    qed
+  qed
+ qed
+qed
+
+
+lemma eligible_lit_exists:
+  assumes "finite (cl_ecl C)"
+  assumes "(cl_ecl C) \<noteq> {}"
+  assumes "(ground_clause (subst_cl (cl_ecl C) \<sigma>))"
+  shows "\<exists>L. ((eligible_literal L C \<sigma>) \<and> (L \<in> (cl_ecl C)))"
+proof (cases)
+  assume "sel (cl_ecl C) = {}"
+  let ?C = "(subst_cl (cl_ecl C) \<sigma>)" 
+  have "finite ?C" by (simp add: assms(1))
+  have "?C \<noteq> {}"
+  proof -
+    from assms(2) obtain L where "L \<in> (cl_ecl C)" by auto
+    from this have "(subst_lit L \<sigma>) \<in> ?C" by auto
+    from this show "?C \<noteq> {}" by auto
+  qed
+    show ?thesis unfolding eligible_literal_def by metis
+next
+  assume "sel (cl_ecl C) \<noteq> {}"
+  then obtain L where "L \<in> sel (cl_ecl C)" by auto
+  from this show ?thesis unfolding eligible_literal_def using sel_neg by blast
+qed
+
+
+lemma lit_ord_dominating_term:
+  assumes "(s1,s2) \<in> trm_ord \<or> (s1,t2) \<in> trm_ord"
+  assumes "orient_lit x1 s1 t1 p1"
+  assumes "orient_lit x2 s2 t2 p2"
+  assumes "vars_of_lit x1 = {}"
+  assumes "vars_of_lit x2 = {}"
+  shows "(x1,x2) \<in> lit_ord"
+proof -
+    and "\<not>(s1,t1) \<in> trm_ord" unfolding orient_lit_def by auto
+    and "\<not>(s2,t2) \<in> trm_ord" unfolding orient_lit_def by auto
+    have o1: "t1 = s1 \<or> (t1,s1) \<in> trm_ord" using trm_ord_ground_total 
+    unfolding ground_term_def by auto
+    have o2: "t2 = s2 \<or> (t2,s2) \<in> trm_ord" using trm_ord_ground_total 
+    unfolding ground_term_def by auto
+    by (metis assms(1) o2 trm_ord_trans transE)
+  let ?m1 = "mset_lit x1"
+  let ?m2 = "mset_lit x2"
+  from assms(1) and o1 and o2 have "(t1,s2) \<in> trm_ord" using trm_ord_trans 
+     trans_def by metis
+    s2max: "\<forall>x. (x \<in># {# t1,t1,s1,s1 #} \<longrightarrow> (x,s2) \<in> trm_ord)" 
+     by auto
+   have "{# s2 #} \<subset># {# t2,t2,s2,s2 #}" by simp 
+   have "( {# s2 #}, {# t2,t2,s2,s2 #} ) \<in> mult trm_ord"
+     using trm_ord_trans multiset_order_inclusion [of "{# s2 #}" "{# t2,t2,s2,s2 #}" "trm_ord"] by auto
+  have "p1 = neg \<or> p1 = pos" using sign.exhaust by auto 
+  then show ?thesis
+  proof 
+    assume "p1 = neg" 
+      using orient_lit_def by blast
+    from this have m1: "?m1 = {# t1,t1,s1,s1 #}" using mset_lit.simps by auto
+
+    have "p2 = neg \<or> p2 = pos" using sign.exhaust by auto 
+    then show ?thesis
+    proof
+      assume "p2 = neg"
+        using orient_lit_def by blast
+      from this have m2: "?m2 = {# t2,t2,s2,s2 #}" using mset_lit.simps by auto
+      from s2max have "({# t1,t1,s1,s1 #}, {# s2 #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# s2 #}" "{#}" s2 "{# t1,t1,s1,s1 #}" "{# t1,t1,s1,s1 #}" trm_ord]
+        mult_def
+        by auto  
+
+        have "( {# t1,t1,s1,s1 #}, {# t2,t2,s2,s2 #} ) \<in> mult trm_ord"
+        using mult_trm_ord_trans unfolding trans_def by blast
+
+      from this and m1 and m2 show ?thesis
+        using lit_ord_def by auto
+      next assume "p2 = pos"
+        using orient_lit_def by blast
+      from this have m2: "?m2 = {# t2,s2 #}" using mset_lit.simps by auto
+      from s2max have "({# t1,t1,s1,s1 #}, {# s2 #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# s2 #}" "{#}" s2 "{# t1,t1,s1,s1 #}" "{# t1,t1,s1,s1 #}" trm_ord]
+        mult_def
+        by auto  
+        have "({# t1,t1,s1,s1 #}, {# t2,s2 #}) \<in> mult trm_ord" 
+        using mset_ordering_add1 [of "{# t1,t1,s1,s1 #}" " {# s2 #}" trm_ord t2] by (auto)
+      from this and m1 and m2 show ?thesis
+        using lit_ord_def by auto
+   qed
+   next 
+    assume "p1 = pos" 
+      using orient_lit_def by blast
+    from this have m1: "?m1 = {# t1,s1 #}" using mset_lit.simps by auto
+    have "p2 = neg \<or> p2 = pos" using sign.exhaust by auto 
+    then show ?thesis
+    proof
+      assume "p2 = neg"
+        using orient_lit_def by blast
+      from this have m2: "?m2 = {# t2,t2,s2,s2 #}" using mset_lit.simps by auto
+      from s2max have "({# t1,s1 #}, {# s2 #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# s2 #}" "{#}" s2 "{# t1,s1 #}" "{# t1,s1 #}" trm_ord]
+        mult_def
+        by auto  
+        have "( {# t1,s1 #}, {# t2,t2,s2,s2 #} ) \<in> mult trm_ord"
+        using mult_trm_ord_trans unfolding trans_def by blast
+
+      from this and m1 and m2 show ?thesis
+        using lit_ord_def by auto
+      next assume "p2 = pos"
+        using orient_lit_def by blast
+      from this have m2: "?m2 = {# t2,s2 #}" using mset_lit.simps by auto
+      from s2max have "({# t1,s1 #}, {# s2 #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# s2 #}" "{#}" s2 "{# t1,s1 #}" "{# t1,s1 #}" trm_ord]
+        mult_def
+        by auto  
+      from this have "({# t1,s1 #}, {# t2,s2 #}) \<in> mult trm_ord" 
+        using mset_ordering_add1 [of "{# t1,s1 #}" " {# s2 #}" trm_ord t2] by auto
+      from this and m1 and m2 show ?thesis
+        using lit_ord_def by auto
+   qed
+ qed
+qed
+
+lemma lit_ord_neg_lit_lhs:
+  assumes "orient_lit x1 s t1 pos"
+  assumes "orient_lit x2 s t2 neg"
+  assumes "vars_of_lit x1 = {}"
+  assumes "vars_of_lit x2 = {}"
+  shows "(x1,x2) \<in> lit_ord"
+proof -
+  from assms(3) and assms(1) have "vars_of t1 = {}" and "vars_of s = {}" 
+    and "\<not>(s,t1) \<in> trm_ord" unfolding orient_lit_def by auto
+  from assms(4) and assms(2) have "vars_of t2 = {}"  
+    and "\<not>(s,t2) \<in> trm_ord" unfolding orient_lit_def by auto
+    have o1: "t1 = s \<or> (t1,s) \<in> trm_ord" using trm_ord_ground_total 
+    unfolding ground_term_def by auto
+    have o2: "t2 = s \<or> (t2,s) \<in> trm_ord" using trm_ord_ground_total 
+    unfolding ground_term_def by auto
+  let ?m1 = "mset_lit x1"
+  let ?m2 = "mset_lit x2"
+      using orient_lit_def by blast
+  from this have m1: "?m1 = {# t1,s #}" using mset_lit.simps by auto
+        using orient_lit_def by blast
+  from this have m2: "?m2 = {# t2,t2,s,s #}" using mset_lit.simps by auto
+  show ?thesis
+  proof (cases)
+    assume "t1 = s"
+    have "({# s,s #}, {# t2,s,s #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# t2,s,s #}" "{# s,s #}" t2 "{# s,s #}" "{#}" trm_ord]
+        mult_def by auto
+    then have "({# s,s #}, {# t2,t2,s,s #}) \<in> mult trm_ord"
+        using mset_ordering_add1 [of "{# s,s #}" " {# t2,s,s #}" trm_ord t2] by auto
+  next
+    assume "t1 \<noteq> s"
+    from this and o1 have "(t1,s) \<in> trm_ord" by auto
+    from this have smax: "\<forall>x. (x \<in># {# t1 #} \<longrightarrow> (x,s) \<in> trm_ord)" 
+     by auto
+    from smax have "({# t1,s #}, {# s,s #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# s,s #}" "{# s #}" s "{# t1,s #}" "{# t1 #}" trm_ord]
+        mult_def by auto
+    from this have "({# t1,s #}, {# t2,s,s #}) \<in> mult trm_ord" 
+        using mset_ordering_add1 [of "{# t1,s #}" " {# s,s #}" trm_ord t2] by auto
+    from this have "({# t1,s #}, {# t2,t2,s,s #}) \<in> mult trm_ord" 
+        using mset_ordering_add1 [of "{# t1,s #}" " {# t2,s,s #}" trm_ord t2] by auto
+    from this and m1 and m2 show ?thesis using lit_ord_def by auto
+   qed
+qed
+
+lemma lit_ord_neg_lit_rhs:
+  assumes "orient_lit x1 s t1 pos"
+  assumes "orient_lit x2 t2 s neg"
+  assumes "vars_of_lit x1 = {}"
+  assumes "vars_of_lit x2 = {}"
+  shows "(x1,x2) \<in> lit_ord"
+proof -
+  from assms(3) and assms(1) have "vars_of t1 = {}" and "vars_of s = {}" 
+    and "\<not>(s,t1) \<in> trm_ord" unfolding orient_lit_def by auto
+  from assms(4) and assms(2) have "vars_of t2 = {}"  
+    and "\<not>(t2,s) \<in> trm_ord" unfolding orient_lit_def by auto
+    have o1: "t1 = s \<or> (t1,s) \<in> trm_ord" using trm_ord_ground_total 
+    unfolding ground_term_def by auto
+    have o2: "t2 = s \<or> (s,t2) \<in> trm_ord" using trm_ord_ground_total 
+    unfolding ground_term_def by auto
+  let ?m1 = "mset_lit x1"
+  let ?m2 = "mset_lit x2"
+      using orient_lit_def by blast
+  from this have m1: "?m1 = {# t1,s #}" using mset_lit.simps by auto
+        using orient_lit_def by blast
+  from this have m2: "?m2 = {# t2,t2,s,s #}" using mset_lit.simps by auto
+  show ?thesis
+  proof (cases)
+    assume "t1 = s"
+    have "({# s,s #}, {# t2,s,s #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# t2,s,s #}" "{# s,s #}" t2 "{# s,s #}" "{#}" trm_ord]
+        mult_def by auto
+    then have "({# s,s #}, {# t2,t2,s,s #}) \<in> mult trm_ord"
+        using mset_ordering_add1 [of "{# s,s #}" " {# t2,s,s #}" trm_ord t2] by auto
+  next
+    assume "t1 \<noteq> s"
+    from this and o1 have "(t1,s) \<in> trm_ord" by auto
+    from this have smax: "\<forall>x. (x \<in># {# t1 #} \<longrightarrow> (x,s) \<in> trm_ord)" 
+     by auto
+    from smax have "({# t1,s #}, {# s,s #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# s,s #}" "{# s #}" s "{# t1,s #}" "{# t1 #}" trm_ord]
+        mult_def by auto
+    from this have "({# t1,s #}, {# t2,s,s #}) \<in> mult trm_ord" 
+        using mset_ordering_add1 [of "{# t1,s #}" " {# s,s #}" trm_ord t2] by auto
+    from this have "({# t1,s #}, {# t2,t2,s,s #}) \<in> mult trm_ord" 
+        using mset_ordering_add1 [of "{# t1,s #}" " {# t2,s,s #}" trm_ord t2] by auto
+    from this and m1 and m2 show ?thesis using lit_ord_def by auto
+   qed
+qed
+
+lemma lit_ord_rhs:
+  assumes "(t1,t2) \<in> trm_ord"
+  assumes "orient_lit x1 s t1 p"
+  assumes "orient_lit x2 s t2 p"
+  assumes "vars_of_lit x1 = {}"
+  assumes "vars_of_lit x2 = {}"
+  shows "(x1,x2) \<in> lit_ord"
+proof -
+  from assms(2) and assms(4) have "vars_of t1 = {}" and "vars_of s = {}" 
+    and "\<not>(s,t1) \<in> trm_ord" unfolding orient_lit_def by auto
+  from assms(3) and assms(5) have "vars_of t2 = {}"  
+    and "\<not>(s,t2) \<in> trm_ord" unfolding orient_lit_def by auto
+    have o1: "t1 = s \<or> (t1,s) \<in> trm_ord" using trm_ord_ground_total 
+    unfolding ground_term_def by auto
+    have o2: "t2 = s \<or> (t2,s) \<in> trm_ord" using trm_ord_ground_total 
+    unfolding ground_term_def by auto
+  let ?m1 = "mset_lit x1"
+  let ?m2 = "mset_lit x2"
+  have "p = pos \<or> p = neg" using sign.exhaust by auto 
+  then show ?thesis
+  proof 
+    assume "p = pos"
+      using orient_lit_def by blast
+    from this have m1: "?m1 = {# t1,s #}" using mset_lit.simps by auto
+        using orient_lit_def by blast
+    from this have m2: "?m2 = {# t2,s #}" using mset_lit.simps  by auto
+    from assms(1) have "(\<forall>b. b \<in># {#t1#} \<longrightarrow> (b, t2) \<in> trm_ord)" by auto
+    then have "({# t1,s #}, {# t2,s #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# t2,s #}" "{# s #}" t2 "{# t1,s #}" "{# t1 #}" trm_ord]
+        mult_def by auto
+    from this and m1 and m2 show ?thesis using lit_ord_def by auto
+  next assume "p = neg"
+      using orient_lit_def by blast
+    from this have m1: "?m1 = {# t1,t1,s,s #}" using mset_lit.simps by auto
+        using orient_lit_def by blast
+    from this have m2: "?m2 = {# t2,t2,s,s #}" using mset_lit.simps by auto
+    from assms(1) have max: "(\<forall>b. b \<in># {#t1,t1#} \<longrightarrow> (b, t2) \<in> trm_ord)" by auto
+
+    have i: "{# t2,s,s #} = {# s,s,t2 #}" by (simp add: add.commute add.left_commute) 
+    have ii: "{# t1,t1,s,s #} = {# s,s,t1,t1 #}" by (simp add: add.commute add.left_commute) 
+    from i and ii and max have "({# t1,t1,s,s #}, {# t2,s,s #}) \<in> mult trm_ord"
+        using mult1_def_lemma [of "{# t2,s,s #}" "{# s,s #}" t2 "{# t1,t1,s,s #}" "{# t1,t1 #}" trm_ord]
+        mult_def by auto
+    then have "({# t1,t1,s,s #}, {# t2,t2,s,s #}) \<in> mult trm_ord"
+        using mset_ordering_add1 [of "{# t1,t1,s,s #}" " {# t2,s,s #}" trm_ord t2] by auto
+    from this and m1 and m2 show ?thesis using lit_ord_def by auto
+  qed
+qed
+
+
+lemma trm_rep_preserves_eq_semantics:
+  assumes "fo_interpretation I"
+  assumes "(I (subst t1 \<sigma>) (subst t2 \<sigma>))"
+  assumes "(validate_ground_eq I (subst_equation (Eq t1 s) \<sigma>))"
+  shows "(validate_ground_eq I (subst_equation (Eq t2 s) \<sigma>))"
+proof -
+  from assms(1) have "transitive I" and "symmetric I" unfolding 
+    fo_interpretation_def congruence_def equivalence_relation_def by auto
+  have "(subst_equation (Eq t1 s) \<sigma>) = (Eq (subst t1 \<sigma>) (subst s \<sigma>))" by simp
+  from this and assms(3) have "I (subst t1 \<sigma>)  (subst s \<sigma>)"  by simp
+    have "I (subst t2 \<sigma>) (subst s \<sigma>)" 
+    unfolding transitive_def symmetric_def by metis 
+  have "(subst_equation (Eq t2 s) \<sigma>) = (Eq (subst t2 \<sigma>) (subst s \<sigma>))" by simp
+qed
+
+lemma trm_rep_preserves_lit_semantics:
+  assumes "fo_interpretation I"
+  assumes "(I (subst t1 \<sigma>) (subst t2 \<sigma>))"
+  assumes "orient_lit_inst L t1 s polarity \<sigma>'"
+  assumes "\<not>(validate_ground_lit I (subst_lit L \<sigma>))"
+  shows "\<not>validate_ground_lit I (subst_lit (mk_lit polarity (Eq t2 s)) \<sigma>)"
+
+proof -
+  from assms(1) have "transitive I" and "symmetric I" unfolding 
+    fo_interpretation_def congruence_def equivalence_relation_def by auto
+  have "polarity = pos \<or> polarity = neg" using sign.exhaust by auto
+  then show ?thesis
+  proof
+    assume "polarity = pos"
+    from this have mk: "(mk_lit polarity (Eq t2 s)) = (Pos (Eq t2 s))" by auto
+      unfolding orient_lit_inst_def by auto
+    then show ?thesis
+    proof
+      assume "L = (Pos (Eq t1 s))"
+      from this and assms(4) have "\<not>I (subst t1 \<sigma>) (subst s \<sigma>)" by simp
+        have "\<not>I (subst t2 \<sigma>) (subst s \<sigma>)" 
+        unfolding transitive_def symmetric_def by metis 
+      from this and mk show ?thesis by simp
+    next
+      assume "L = (Pos (Eq s t1))"
+      from this and assms(4) have "\<not>I (subst s \<sigma>) (subst t1 \<sigma>)" by simp
+        have "\<not>I (subst t2 \<sigma>) (subst s \<sigma>)" 
+        unfolding transitive_def symmetric_def by metis 
+      from this and mk show ?thesis by simp
+    qed
+    next 
+    assume "polarity = neg"
+    from this have mk: "(mk_lit polarity (Eq t2 s)) = (Neg (Eq t2 s))" by auto
+      unfolding orient_lit_inst_def by auto
+    then show ?thesis
+    proof
+      assume "L = (Neg (Eq t1 s))"
+      from this and assms(4) have "I (subst t1 \<sigma>) (subst s \<sigma>)" by simp
+        have "I (subst t2 \<sigma>) (subst s \<sigma>)" 
+        unfolding transitive_def symmetric_def by metis 
+      from this and mk show ?thesis by simp
+    next
+      assume "L = (Neg (Eq s t1))"
+      from this and assms(4) have "I (subst s \<sigma>) (subst t1 \<sigma>)" by simp
+        have "I (subst t2 \<sigma>) (subst s \<sigma>)" 
+        unfolding transitive_def symmetric_def by metis 
+      from this and mk show ?thesis by simp
+    qed
+ qed
+qed
+
+lemma subterms_dominated :
+  assumes "maximal_literal L C"
+  assumes "orient_lit L t s p"
+  assumes "u \<in> subterms_of_cl C"
+  assumes "vars_of_lit L = {}"
+  assumes "vars_of_cl C = {}"
+  shows "u = t \<or> (u,t) \<in> trm_ord"
+proof (rule ccontr)
+  assume neg_h: "\<not>(u = t \<or> (u,t) \<in> trm_ord)"
+  from assms(5) and assms(3) have "vars_of u = {}" using subterm_vars by blast
+    and "\<not>(t,s) \<in> trm_ord" unfolding orient_lit_def by auto
+  from assms(3) obtain L' where "u \<in> subterms_of_lit L'" and "L' \<in> C"  by auto
+    and "u \<in> subterms_of t' \<union> subterms_of s'" unfolding orient_lit_def
+      by (metis Un_commute mset_lit.cases subterms_of_eq.simps subterms_of_lit.simps(1) 
+          subterms_of_lit.simps(2) trm_ord_wf wf_asym) 
+  then show False
+  proof 
+    assume "u \<in> subterms_of t'"
+    from this have "u = t' \<or> (u,t') \<in> trm_ord"  
+      using subterms_of_trm_ord_eq [of u t'] by auto
+      using trm_ord_ground_total unfolding ground_term_def by auto
+      using trm_ord_trans unfolding trans_def by metis
+      have "(L,L') \<in> lit_ord" using lit_ord_dominating_term by blast  
+  next
+    assume "u \<in> subterms_of s'"
+    from this have "u = s' \<or> (u,s') \<in> trm_ord"  
+      using subterms_of_trm_ord_eq [of u s'] by auto
+      using trm_ord_ground_total unfolding ground_term_def by auto
+      using trm_ord_trans unfolding trans_def by metis
+      have "(L,L') \<in> lit_ord" using lit_ord_dominating_term by blast  
+ qed
+qed
+
+
+fun dominate_eq:: "'a trm \<Rightarrow> 'a equation \<Rightarrow> bool"
+  where "(dominate_eq t (Eq u v)) = ((t,u) \<notin> trm_ord \<and> (t,v) \<notin> trm_ord)"
+
+fun dominate_lit:: "'a trm \<Rightarrow> 'a literal \<Rightarrow> bool"
+  where "(dominate_lit t (Pos e)) = (dominate_eq t e)" |
+        "(dominate_lit t (Neg e)) = (dominate_eq t e)"
+
+definition dominate_cl:: "'a trm \<Rightarrow> 'a clause \<Rightarrow> bool"
+  where "(dominate_cl t C) = (\<forall>x \<in> C. (dominate_lit t x))"
+
+definition no_disequation_in_cl:: "'a trm \<Rightarrow> 'a clause \<Rightarrow> bool"
+  where "(no_disequation_in_cl t C) = (\<forall>u v. 
+    (Neg (Eq u v) \<in> C \<longrightarrow> (u \<noteq> t \<and> v \<noteq> t)))"
+
+definition no_taut_eq_in_cl:: "'a trm \<Rightarrow> 'a clause \<Rightarrow> bool"
+  where "(no_taut_eq_in_cl t C) = (Pos (Eq t t) \<notin> C)"
+
+definition eq_occurs_in_cl
+  where
+    "(eq_occurs_in_cl t s C \<sigma>) = (\<exists>L t' s'. (L \<in> C) \<and> (orient_lit_inst L t' s' pos \<sigma>) 
+        \<and> (t = subst t' \<sigma>) \<and> (s = subst s' \<sigma>))"
+
+
+
+
+datatype inferences = Ground | FirstOrder 
+
+
+definition ck_unifier where
+  "ck_unifier t s \<sigma> type \<longleftrightarrow> (if type = FirstOrder then min_IMGU \<sigma> t s else Unifier \<sigma> t s)"
+
+lemma ck_unifier_thm:
+  assumes "ck_unifier t s \<sigma> k"
+  shows "(subst t \<sigma>) = (subst s \<sigma>)"
+  by (metis assms min_IMGU_def IMGU_iff_Idem_and_MGU MGU_is_Unifier ck_unifier_def Unifier_def)
+
+lemma subst_preserve_ck_unifier:
+  assumes "ck_unifier t s \<sigma> k"
+  shows "ck_unifier t s (comp \<sigma> \<eta>) Ground"
+proof -
+  let ?\<sigma>' = "(comp \<sigma> \<eta>)"
+  from assms have "(subst t \<sigma>) = (subst s \<sigma>)" 
+    using ck_unifier_thm by auto 
+  then have "(subst t ?\<sigma>') = (subst s ?\<sigma>')" by simp
+  then show ?thesis unfolding ck_unifier_def Unifier_def by auto
+qed
+
+
+definition allowed_redex 
+  where "allowed_redex t C \<sigma> = (\<not> (\<exists>s \<in> (trms_ecl C). 
+    (occurs_in (subst t \<sigma>) (subst s \<sigma>))))"
+
+
+definition get_trms
+  where 
+      "get_trms C E t = (if (t = FirstOrder) then (filter_trms C E) else E)"
+
+ 
+definition dom_trm
+  where "dom_trm t C = 
+      (\<exists> L u v p. (L \<in> C \<and> (decompose_literal L u v p) 
+        \<and> (( (p = neg \<and> t = u) \<or> (t,u) \<in> trm_ord))))"
+
+lemma dom_trm_lemma:
+  assumes "dom_trm t C"
+  shows "\<exists> u. (u \<in> (subterms_of_cl C) \<and> (u = t \<or> (t,u) \<in> trm_ord))"
+proof -
+  from   assms(1) obtain L u v p where
+    "L \<in> C" "decompose_literal L u v p" "(u = t \<or> (t,u) \<in> trm_ord)" 
+    unfolding dom_trm_def by blast
+    unfolding decompose_literal_def decompose_equation_def using root_subterm by force
+qed
+
+definition dom_trms
+where
+  "dom_trms C E = { x. (x \<in> E) \<and> (dom_trm x C) }"
+
+lemma dom_trms_subset:
+  shows "(dom_trms C E ) \<subseteq> E"
+unfolding dom_trms_def by auto
+
+lemma dom_trm_vars:
+  assumes "dom_trm t C"
+  shows "vars_of t \<subseteq> vars_of_cl C"
+proof -
+  from assms obtain L u v p where "L \<in> C" "decompose_literal L u v p" "t = u \<or> (t,u) \<in> trm_ord"  
+    unfolding dom_trm_def by auto
+qed
+
+definition well_constrained
+  where "well_constrained C = (\<forall>y. (y \<in> trms_ecl C \<longrightarrow> dom_trm y (cl_ecl C)))"
+
+
+definition all_trms_irreducible
+  where "(all_trms_irreducible E f) = (\<forall>x y. (x \<in> E \<longrightarrow> occurs_in y x \<longrightarrow> (f y) = y))"
+
+
+
+definition superposition :: 
+  "'a eclause \<Rightarrow> 'a eclause \<Rightarrow> 'a eclause \<Rightarrow> 'a subst \<Rightarrow> inferences \<Rightarrow> 'a clause \<Rightarrow> bool"
+where
+   "(superposition P1 P2 C \<sigma> k C') =
+   (\<exists>L t s u v M p Cl_P1 Cl_P2 Cl_C polarity t' u' L' trms_C. 
+      (L \<in> Cl_P1) \<and> (M \<in> Cl_P2) \<and> (eligible_literal L P1 \<sigma>) \<and>  (eligible_literal M P2 \<sigma>)
+      \<and> (variable_disjoint P1 P2)
+      \<and> (Cl_P1 = (cl_ecl P1)) \<and> (Cl_P2 = (cl_ecl P2)) 
+    \<and> (\<not> is_a_variable u')
+    \<and> (allowed_redex u' P1 \<sigma>)
+    \<and> trms_C = (get_trms Cl_C (dom_trms Cl_C (subst_set 
+        ((trms_ecl P1) \<union> (trms_ecl P2) \<union> 
+          { r. \<exists> q. (q,p) \<in> (pos_ord P1 t) \<and> (subterm t q r) }) \<sigma>)) k) 
+    \<and> (C = (Ecl Cl_C trms_C)) 
+    \<and> (orient_lit_inst M u v pos \<sigma>) 
+    \<and> (orient_lit_inst L t s polarity \<sigma>) 
+    \<and> ((subst u \<sigma>) \<noteq> (subst v \<sigma>))
+    \<and> (subterm t p u')
+    \<and> (ck_unifier u' u \<sigma> k)
+    \<and> (replace_subterm t p v t') 
+    \<and> ((k = FirstOrder) \<or> ( (subst_lit M \<sigma>),(subst_lit L \<sigma>)) \<in> lit_ord)
+    \<and> ((k = FirstOrder) \<or> (strictly_maximal_literal P2 M \<sigma>))
+    \<and> (L' = mk_lit polarity (Eq t' s)) 
+    \<and> (Cl_C = (subst_cl C' \<sigma>))
+    \<and> (C' = (Cl_P1 - { L }) \<union> ((Cl_P2 - { M }) \<union> { L' } )))"
+
+
+
+definition reflexion ::
+  "'a eclause \<Rightarrow> 'a eclause \<Rightarrow> 'a subst \<Rightarrow> inferences \<Rightarrow> 'a clause \<Rightarrow> bool"
+where
+  "(reflexion P C \<sigma> k C') = 
+    (\<exists>L1 t s Cl_P Cl_C trms_C.
+      (eligible_literal L1 P \<sigma>)
+      \<and> (L1 \<in> (cl_ecl P)) \<and> (Cl_C = (cl_ecl C)) \<and> (Cl_P = (cl_ecl P)) 
+      \<and> (orient_lit_inst L1 t s neg \<sigma>)
+      \<and> (ck_unifier t s \<sigma> k)
+      \<and> (C = (Ecl Cl_C trms_C))
+      \<and> trms_C = (get_trms Cl_C 
+          (dom_trms Cl_C (subst_set ( (trms_ecl P) \<union> { t } ) \<sigma>)) k) 
+      \<and> (Cl_C = (subst_cl C' \<sigma>))
+      \<and> (C' = ((Cl_P - { L1 }) )))"
+
+
+
+definition factorization ::
+  "'a eclause \<Rightarrow> 'a eclause \<Rightarrow> 'a subst \<Rightarrow> inferences \<Rightarrow> 'a clause \<Rightarrow> bool"
+where
+  "(factorization P C \<sigma> k C') = 
+    (\<exists>L1 L2 L' t s u v Cl_P Cl_C trms_C.
+      (eligible_literal L1 P \<sigma>)
+      \<and> (L1 \<in> (cl_ecl P)) \<and> (L2 \<in> (cl_ecl P) - { L1 }) \<and> (Cl_C = (cl_ecl C)) \<and> (Cl_P = (cl_ecl P)) 
+      \<and> (orient_lit_inst L1 t s pos \<sigma>)
+      \<and> (orient_lit_inst L2 u v pos \<sigma>)
+      \<and> ((subst t \<sigma>) \<noteq> (subst s \<sigma>))
+      \<and> ((subst t \<sigma>) \<noteq> (subst v \<sigma>))
+      \<and> (ck_unifier t u \<sigma> k)
+      \<and> (L' = Neg (Eq s v))
+      \<and> (C = (Ecl Cl_C trms_C)
+      \<and> trms_C = (get_trms Cl_C 
+          (dom_trms Cl_C (subst_set ( (trms_ecl P) \<union> (proper_subterms_of t) ) \<sigma>))) k) 
+      \<and> (Cl_C = (subst_cl C' \<sigma>))
+      \<and> (C' = ( (Cl_P - { L2 }) \<union> { L' } )))"
+
+
+
+definition derivable :: "'a eclause \<Rightarrow> 'a eclause set 
+  \<Rightarrow> 'a eclause set \<Rightarrow> 'a subst \<Rightarrow> inferences \<Rightarrow> 'a clause \<Rightarrow> bool"
+where
+  "(derivable C P S \<sigma> k C') = 
+      ((\<exists>P1 P2. (P1 \<in> S \<and> P2 \<in> S \<and> P = { P1, P2 } \<and> superposition P1 P2 C \<sigma> k C'))
+    \<or> (\<exists>P1. (P1 \<in> S \<and> P = { P1 } \<and> factorization P1 C \<sigma> k C'))
+    \<or> (\<exists>P1. (P1 \<in> S \<and> P = { P1 } \<and> reflexion P1 C \<sigma> k C')))"
+
+lemma derivable_premisses:
+  assumes "derivable C P S \<sigma> k C'"
+  shows "P \<subseteq> S"
+using assms derivable_def by auto
+
+inductive derivable_ecl :: "'a eclause \<Rightarrow> 'a eclause set  \<Rightarrow> bool"
+  where
+    init [simp, intro!]: "C \<in> S \<Longrightarrow> (derivable_ecl C S)" | 
+    rn [simp, intro!]: "(derivable_ecl C S) \<Longrightarrow> (renaming_cl C D) \<Longrightarrow> (derivable_ecl D S)" | 
+    deriv [simp, intro!]: "(\<forall>x. (x \<in> P \<longrightarrow> (derivable_ecl x S))) 
+      \<Longrightarrow> (derivable C P S' \<sigma> FirstOrder C') \<Longrightarrow> (derivable_ecl C S)" 
+
+
+definition instances:: "'a eclause set \<Rightarrow> ('a eclause \<times> 'a subst) set"
+  where "instances S = { x. \<exists>C \<sigma>. (C \<in> S  \<and> (ground_clause (subst_cl (cl_ecl C) \<sigma>)) 
+  \<and> x = ( C,\<sigma>))}"
+
+definition clset_instances:: "('a eclause \<times> 'a subst) set \<Rightarrow> 'a clause set"
+where
+  "clset_instances S = { C. \<exists>x. (x \<in> S \<and> C = (subst_cl (cl_ecl (fst x)) (snd x))) }"
+  
+definition grounding_set
+  where "grounding_set S \<sigma> = (\<forall>x. (x \<in> S \<longrightarrow> (ground_clause (subst_cl (cl_ecl x) \<sigma>))))"
+
+
+
+lemma cannot_validate_contradictary_literals :
+  assumes "l = Neg (Eq t t)"
+  assumes "fo_interpretation I"
+  shows "\<not> (validate_ground_lit I l)"
+proof -
+  from assms(2) have "congruence I" unfolding fo_interpretation_def by auto
+  then have "I t t" unfolding congruence_def reflexive_def equivalence_relation_def by auto
+  from this and assms(1) show ?thesis by auto
+qed
+
+lemma ground_reflexion_is_sound :
+  assumes "finite (cl_ecl C)"
+  assumes "reflexion C D \<sigma> k C'"
+  assumes "(ground_clause (subst_cl (cl_ecl D) \<theta>))"
+  shows "clause_entails_clause (subst_cl (subst_cl (cl_ecl C) \<sigma>) \<theta>) 
+          (subst_cl (cl_ecl D) \<theta>)"
+proof (rule ccontr)
+  let ?C = "(cl_ecl C)" 
+  let ?D = "(cl_ecl D)"
+  let ?C' = "(subst_cl (subst_cl (cl_ecl C) \<sigma>) \<theta>)"
+  let ?D' = "(subst_cl (cl_ecl D) \<theta>)"
+  assume "\<not> (clause_entails_clause ?C' ?D')"
+  then obtain I where "validate_clause I ?C'" and "\<not> (validate_clause I ?D')" "fo_interpretation I"
+    unfolding clause_entails_clause_def by auto
+  from assms(2) obtain L1 t s where
+    "?D = (subst_cl (?C - { L1 }) \<sigma>)" 
+    and "orient_lit_inst L1 t s neg \<sigma>" and "ck_unifier t s \<sigma> k" 
+      using reflexion_def [of C D \<sigma> k] by auto
+  from assms(1) have "finite (subst_cl (subst_cl ?C \<sigma>) \<theta>)" by auto  
+  then obtain \<eta> where i: "ground_clause (subst_cl 
+        (subst_cl (subst_cl ?C \<sigma>) \<theta>) \<eta>)" 
+    using ground_instance_exists [of "(subst_cl (subst_cl ?C \<sigma>) \<theta>)"]  
+    by auto
+  let ?CC = "(subst_cl (subst_cl (subst_cl ?C \<sigma>) \<theta>) \<eta>)" 
+  let ?\<sigma>'' = "comp \<sigma> \<theta>"
+  let ?\<sigma>' = "comp ?\<sigma>'' \<eta>"
+  have "?CC = (subst_cl (subst_cl ?C ?\<sigma>'') \<eta>)" 
+    using composition_of_substs_cl [of ?C] by auto
+  then have "?CC = (subst_cl ?C ?\<sigma>')" 
+    using composition_of_substs_cl [of ?C] by auto
+    have "validate_ground_clause I ?CC" using i validate_clause.simps by blast 
+  then obtain l' where "l' \<in> ?CC" and "validate_ground_lit I l'" by auto
+    "l \<in> ?C" and "l' = (subst_lit l ?\<sigma>')" using subst_cl.simps  by blast
+  have "subst_lit l \<sigma> \<in> ?D"
+  proof (rule ccontr)
+    assume "subst_lit l \<sigma> \<notin> ?D" 
+      have "l = L1" by auto
+      unfolding orient_lit_inst_def by auto
+      using ck_unifier_thm by auto
+    then have "subst (subst (subst t \<sigma>) \<theta>) \<eta> =
+      subst (subst (subst s \<sigma>) \<theta>) \<eta>" by auto
+    then have "(subst t ?\<sigma>') = subst s ?\<sigma>'" by auto
+      have "(subst_lit l ?\<sigma>') = (Neg (Eq (subst t ?\<sigma>') (subst t ?\<sigma>')))"
+      by auto
+      using cannot_validate_contradictary_literals [of "(subst_lit l ?\<sigma>')" "(subst t ?\<sigma>')" I]
+      by auto
+  qed
+    have "l' \<in> (subst_cl (subst_cl ?D \<theta>) \<eta>)"
+    using subst_cl.simps composition_of_substs_lit mem_Collect_eq
+    by (metis (mono_tags, lifting))
+    "validate_ground_clause I (subst_cl (subst_cl ?D \<theta>) \<eta>)" by auto
+    "(subst_cl ?D \<theta>) = (subst_cl (subst_cl ?D \<theta>) \<eta>)"
+    using substs_preserve_ground_clause [of "(subst_cl ?D \<theta>)"  \<eta>] by blast
+   have "validate_ground_clause I (subst_cl ?D \<theta>)" by force
+    using substs_preserve_ground_clause validate_clause.elims(3) by metis 
+qed
+
+lemma reflexion_is_sound :
+  assumes "finite (cl_ecl C)"
+  assumes "reflexion C D \<sigma> k C'"
+  shows "clause_entails_clause (cl_ecl C) (cl_ecl D)"
+proof (rule ccontr)
+  let ?C = "(cl_ecl C)" 
+  let ?D = "(cl_ecl D)"
+  assume "\<not> (clause_entails_clause ?C ?D)"
+  then obtain I where "validate_clause I ?C" and "\<not> (validate_clause I ?D)" "fo_interpretation I"
+    unfolding clause_entails_clause_def by auto
+    where D_false: "\<not> (validate_ground_clause I (subst_cl ?D \<theta>))" 
+      and "(ground_clause (subst_cl ?D \<theta>))" by auto
+  have  "validate_clause I (subst_cl (subst_cl ?C \<sigma>) \<theta>)"
+  from this and assms(1) and assms(2) have "validate_clause I (subst_cl ?D \<theta>)"
+    using ground_reflexion_is_sound unfolding clause_entails_clause_def
+  from this and D_false show False  
+    substs_preserve_ground_clause validate_clause.elims(1))  
+qed
+
+lemma orient_lit_semantics_pos :
+  assumes "fo_interpretation I"
+  assumes "orient_lit_inst l u v pos \<eta>"
+  assumes "validate_ground_lit I (subst_lit l \<sigma>)"
+  shows "I (subst u \<sigma>) (subst v \<sigma>)"
+proof -
+    let ?u = "subst u \<sigma>"
+    let ?v = "subst v \<sigma>"
+    from assms(2) have "l = (Pos (Eq u v)) \<or> l = (Pos (Eq v u))"  using orient_lit_inst_def by auto 
+    from this and assms(3) have "validate_ground_eq I (Eq ?u ?v) \<or> validate_ground_eq I (Eq ?v ?u)"
+      by auto
+    then have "I ?u ?v \<or> I ?v ?u" by auto
+      unfolding fo_interpretation_def congruence_def equivalence_relation_def symmetric_def by blast
+qed
+
+lemma orient_lit_semantics_neg :
+  assumes "fo_interpretation I"
+  assumes "orient_lit_inst l u v neg \<theta>"
+  assumes "validate_ground_lit I (subst_lit l \<sigma>)"
+  shows "\<not>I (subst u \<sigma>) (subst v \<sigma>)"
+proof -
+    let ?u = "subst u \<sigma>"
+    let ?v = "subst v \<sigma>"
+    from assms(2) have "l = (Neg (Eq u v)) \<or> l = (Neg (Eq v u))"  using orient_lit_inst_def by auto 
+    from this and assms(3) have "\<not>validate_ground_eq I (Eq ?u ?v) \<or> \<not>validate_ground_eq I (Eq ?v ?u)"
+      by auto
+    then have "\<not>I ?u ?v \<or> \<not>I ?v ?u" by auto
+      unfolding fo_interpretation_def congruence_def equivalence_relation_def symmetric_def by blast
+qed
+
+lemma orient_lit_semantics_replacement :
+  assumes "fo_interpretation I"
+  assumes "orient_lit_inst l u v polarity \<theta>"
+  assumes "validate_ground_lit I (subst_lit l \<sigma>)" 
+  assumes "I (subst u \<sigma>) (subst u' \<sigma>)"
+  shows "validate_ground_lit I (subst_lit (mk_lit polarity (Eq u' v)) \<sigma>)"
+proof -
+  from assms(2) obtain e where "l = Pos e \<or> l = Neg e" and "e = Eq u v \<or> e = Eq v u" 
+    unfolding orient_lit_inst_def by auto
+  have "polarity = pos \<or> polarity = neg" using sign.exhaust by blast 
+  then show ?thesis
+  proof 
+    assume "polarity = pos"
+      "I (subst u \<sigma>) (subst v \<sigma>)" using orient_lit_semantics_pos by auto
+      have "I (subst u' \<sigma>) (subst v \<sigma>)" unfolding fo_interpretation_def 
+      congruence_def equivalence_relation_def symmetric_def transitive_def by blast
+  next
+    assume "polarity = neg"
+      "\<not>I (subst u \<sigma>) (subst v \<sigma>)" using orient_lit_semantics_neg
+      by blast
+      have "\<not>I (subst u' \<sigma>) (subst v \<sigma>)" unfolding fo_interpretation_def 
+      congruence_def equivalence_relation_def symmetric_def transitive_def by blast
+  qed
+qed
+
+lemma ground_factorization_is_sound :
+  assumes "finite (cl_ecl C)"
+  assumes "factorization C D \<sigma> k C'"
+  assumes "(ground_clause (subst_cl (cl_ecl D) \<theta>))"
+  shows "clause_entails_clause (subst_cl (subst_cl (cl_ecl C) \<sigma>) \<theta>) 
+          (subst_cl (cl_ecl D) \<theta>)"
+proof (rule ccontr)
+  let ?C = "(cl_ecl C)" 
+  let ?D = "(cl_ecl D)"
+  assume "\<not> clause_entails_clause (subst_cl (subst_cl (cl_ecl C) \<sigma>) \<theta>) 
+          (subst_cl (cl_ecl D) \<theta>)"
+  then obtain I where 
+    "validate_clause I (subst_cl (subst_cl (cl_ecl C) \<sigma>) \<theta>)" and 
+      "\<not> (validate_clause I (subst_cl (cl_ecl D) \<theta>))" and "fo_interpretation I"
+    unfolding clause_entails_clause_def by auto
+  from assms(2) obtain L1 L2 L' t s u v where
+      "orient_lit_inst L1 t s pos \<sigma>" and "orient_lit_inst L2 u v pos \<sigma>" and "ck_unifier t u \<sigma> k"
+      and "L' = Neg (Eq s v)" 
+      and "(?D =  (subst_cl ( (?C - { L2 }) \<union> { L' } )) \<sigma>)"
+      and "L1 \<noteq> L2"
+      and "L1 \<in> ?C"
+   using factorization_def by auto
+  
+  from assms(1) have "finite (subst_cl (subst_cl ?C \<sigma>) \<theta>)" by auto  
+  then obtain \<eta> where i: "ground_clause (subst_cl 
+        (subst_cl (subst_cl ?C \<sigma>) \<theta>) \<eta>)" 
+    using ground_instance_exists [of "(subst_cl (subst_cl ?C \<sigma>) \<theta>)"]  
+    by auto
+  let ?CC = "(subst_cl (subst_cl (subst_cl ?C \<sigma>) \<theta>) \<eta>)" 
+  let ?\<sigma>'' = "comp \<sigma> \<theta>"
+  let ?\<sigma>' = "comp ?\<sigma>'' \<eta>"
+  have "?CC = (subst_cl (subst_cl ?C ?\<sigma>'') \<eta>)" 
+    using composition_of_substs_cl [of ?C] by auto
+  then have "?CC = (subst_cl ?C ?\<sigma>')" 
+    using composition_of_substs_cl [of ?C] by auto
+    have "validate_ground_clause I ?CC" using i validate_clause.simps by blast 
+  then obtain l' where "l' \<in> ?CC" and "validate_ground_lit I l'" by auto
+    "l \<in> ?C" and "l' = (subst_lit l ?\<sigma>')" using subst_cl.simps  by blast
+    have "\<not> validate_ground_clause I (subst_cl ?D \<theta>)"
+    using assms(3) substs_preserve_ground_clause validate_clause.elims(3) by metis 
+    "(subst_cl ?D \<theta>) = (subst_cl (subst_cl ?D \<theta>) \<eta>)"
+    using substs_preserve_ground_clause [of "(subst_cl ?D \<theta>)"  \<eta>] by blast
+   have "\<not> validate_ground_clause I (subst_cl (subst_cl ?D \<theta>) \<eta>)" by force
+    have "(subst_lit L' \<sigma>) \<in> ?D" by auto
+  then have 
+    "(subst_lit (subst_lit (subst_lit L' \<sigma>) \<theta>) \<eta>) 
+      \<in> (subst_cl (subst_cl ?D \<theta>) \<eta>)"
+    by auto    
+    have "\<not>validate_ground_lit I (subst_lit (subst_lit (subst_lit L' \<sigma>) \<theta>) \<eta>)"
+    by auto 
+    "I (subst (subst (subst s \<sigma>) \<theta>) \<eta>)
+       (subst (subst (subst v \<sigma>) \<theta>) \<eta>)" by auto
+  from this have "I (subst s ?\<sigma>') (subst v ?\<sigma>')" by simp 
+
+  have "subst_lit l \<sigma> \<in> ?D"
+  proof (rule ccontr)
+    assume "subst_lit l \<sigma> \<notin> ?D" 
+      have "l = L2" by auto
+      using ck_unifier_thm by auto
+    then have "subst (subst (subst t \<sigma>) \<theta>) \<eta> =
+      subst (subst (subst u \<sigma>) \<theta>) \<eta>" by auto
+    then have "(subst t ?\<sigma>') = subst u ?\<sigma>'" by auto
+      "validate_ground_lit I (subst_lit l ?\<sigma>')" by auto 
+ 
+      have "I (subst u ?\<sigma>') (subst v ?\<sigma>')" using orient_lit_semantics_pos 
+      by blast
+    
+      have "I (subst u ?\<sigma>') (subst s ?\<sigma>')"
+      unfolding fo_interpretation_def congruence_def equivalence_relation_def 
+        symmetric_def transitive_def by blast
+      have "I (subst t ?\<sigma>') (subst s ?\<sigma>')" by auto
+    from this have "validate_ground_eq I (subst_equation (Eq t s) ?\<sigma>')" 
+      by auto
+ 
+      have "I (subst s ?\<sigma>') (subst t ?\<sigma>')" 
+      unfolding fo_interpretation_def congruence_def equivalence_relation_def 
+        symmetric_def by auto
+    from this have "validate_ground_eq I (subst_equation (Eq s t) ?\<sigma>')" 
+      by auto
+
+      unfolding orient_lit_inst_def by auto
+      have "validate_ground_lit I (subst_lit L1 ?\<sigma>')" 
+    by auto
+      have "(subst_lit L1 \<sigma>) \<in> ?D"
+      by auto
+    then have 
+      "(subst_lit (subst_lit (subst_lit L1 \<sigma>) \<theta>) \<eta>) 
+        \<in> (subst_cl (subst_cl ?D \<theta>) \<eta>)" by auto
+    then have "(subst_lit L1 ?\<sigma>') \<in> (subst_cl (subst_cl ?D \<theta>) \<eta>)"
+      using composition_of_substs_lit by metis
+      show False by auto
+  qed
+
+    have "l' \<in> (subst_cl (subst_cl ?D \<theta>) \<eta>)"
+    using subst_cl.simps composition_of_substs_lit mem_Collect_eq
+    by (metis (mono_tags, lifting))
+    "validate_ground_clause I (subst_cl (subst_cl ?D \<theta>) \<eta>)" by auto
+    show False by blast
+qed
+
+lemma factorization_is_sound :
+  assumes "finite (cl_ecl C)"
+  assumes "factorization C D \<sigma> k C'"
+  shows "clause_entails_clause (cl_ecl C) (cl_ecl D)"
+proof (rule ccontr)
+  let ?C = "(cl_ecl C)" 
+  let ?D = "(cl_ecl D)"
+  assume "\<not> (clause_entails_clause ?C ?D)"
+  then obtain I where "validate_clause I ?C" and "\<not> (validate_clause I ?D)" "fo_interpretation I"
+    unfolding clause_entails_clause_def by auto
+    where D_false: "\<not> (validate_ground_clause I (subst_cl ?D \<theta>))" 
+      and "(ground_clause (subst_cl ?D \<theta>))" by auto
+  have  "validate_clause I (subst_cl (subst_cl ?C \<sigma>) \<theta>)"
+  from this and assms(1) and assms(2) have "validate_clause I (subst_cl ?D \<theta>)"
+    using ground_factorization_is_sound unfolding clause_entails_clause_def
+  from this and D_false show False  
+    substs_preserve_ground_clause validate_clause.elims(1))  
+qed
+
+lemma ground_superposition_is_sound :
+  assumes "finite (cl_ecl P1)"
+  assumes "finite (cl_ecl P2)"
+  assumes "superposition P1 P2 C \<sigma> k C'"
+  assumes "(ground_clause (subst_cl (cl_ecl C) \<theta>))"
+  shows "set_entails_clause 
+    { (subst_cl (subst_cl (cl_ecl P1) \<sigma>) \<theta>), 
+      (subst_cl (subst_cl (cl_ecl P2) \<sigma>) \<theta>) }
+          (subst_cl (cl_ecl C) \<theta>)"
+
+proof (rule ccontr)
+  let ?P1 = "(cl_ecl P1)" 
+  let ?P2 = "(cl_ecl P2)"
+  let ?C = "(cl_ecl C)"
+  assume "\<not> set_entails_clause 
+    { (subst_cl (subst_cl (cl_ecl P1) \<sigma>) \<theta>), 
+      (subst_cl (subst_cl (cl_ecl P2) \<sigma>) \<theta>) }
+          (subst_cl (cl_ecl C) \<theta>)"
+  then obtain I 
+    where "validate_clause I (subst_cl (subst_cl (cl_ecl P1) \<sigma>) \<theta>)" 
+    and "validate_clause I (subst_cl (subst_cl (cl_ecl P2) \<sigma>) \<theta>)" 
+      and "\<not> (validate_clause I (subst_cl (cl_ecl C) \<theta>))" and "fo_interpretation I"
+    unfolding set_entails_clause_def by (meson insert_iff validate_clause_set.elims(2))
+  from assms(3) obtain t s u v M p polarity t' u' L L'   where
+    "orient_lit_inst M u v pos \<sigma>" 
+    and "orient_lit_inst L t s polarity \<sigma>"
+    and "subterm t p u'"
+    and "ck_unifier u' u \<sigma> k"
+    and "replace_subterm t p v t'"
+    and "L' = mk_lit polarity (Eq t' s)"
+    and "?C = (subst_cl ((?P1 - { L }) \<union> ((?P2 - { M }) \<union> { L' } )) \<sigma>)"
+   using superposition_def by auto
+  
+  let ?P1' = "(subst_cl (subst_cl ?P1 \<sigma>) \<theta>)"
+  let ?P2' = "(subst_cl (subst_cl ?P2 \<sigma>) \<theta>)"
+  from assms(1) have "finite ?P1'" by simp 
+  from assms(2) have "finite ?P2'" by simp 
+
+  let ?vars = "(vars_of_cl ?P1') \<union> (vars_of_cl ?P2')"
+    using set_of_variables_is_finite_cl [of ?P1']  by auto 
+    using set_of_variables_is_finite_cl [of ?P2']  by auto 
+  then obtain \<eta> where "ground_on ?vars \<eta>" using ground_subst_exists by blast 
+  then have "ground_on (vars_of_cl ?P1') \<eta>" unfolding ground_on_def by auto
+  then have "ground_clause (subst_cl 
+        (subst_cl (subst_cl ?P1 \<sigma>) \<theta>) \<eta>)"  
+       using ground_substs_yield_ground_clause
+        [of "(subst_cl (subst_cl ?P1 \<sigma>) \<theta>)" \<eta>] by auto
+  then have "ground_clause (subst_cl 
+        (subst_cl (subst_cl ?P2 \<sigma>) \<theta>) \<eta>)"  
+       using ground_substs_yield_ground_clause 
+        [of "(subst_cl (subst_cl ?P2 \<sigma>) \<theta>)" \<eta>] by auto
+    
+  let ?P1'' = "(subst_cl ?P1' \<eta>)" 
+  let ?P2'' = "(subst_cl ?P2' \<eta>)" 
+  let ?\<sigma>'' = "comp \<sigma> \<theta>"
+  let ?\<sigma>' = "comp ?\<sigma>'' \<eta>"
+  have "?P1'' = (subst_cl (subst_cl ?P1 ?\<sigma>'') \<eta>)" 
+    using composition_of_substs_cl [of ?P1] by auto
+  then have "?P1'' = (subst_cl ?P1 ?\<sigma>')" 
+    using composition_of_substs_cl [of ?P1] by auto
+      have "validate_ground_clause I ?P1''" using  validate_clause.simps by blast 
+  then obtain l1' where "l1' \<in> ?P1''" and "validate_ground_lit I l1'" by auto
+
+  have "?P2'' = (subst_cl (subst_cl ?P2 ?\<sigma>'') \<eta>)" 
+    using composition_of_substs_cl [of ?P2] by auto
+  then have "?P2'' = (subst_cl ?P2 ?\<sigma>')" 
+    using composition_of_substs_cl [of ?P2] by auto
+    have "validate_ground_clause I ?P2''" using  validate_clause.simps by blast 
+  then obtain l2' where "l2' \<in> ?P2''" and "validate_ground_lit I l2'" by auto
+
+    "l1 \<in> ?P1" and "l1' = (subst_lit l1 ?\<sigma>')" using subst_cl.simps  by blast
+    "l2 \<in> ?P2" and "l2' = (subst_lit l2 ?\<sigma>')" using subst_cl.simps  by blast
+
+  let ?C' = "(subst_cl (subst_cl ?C \<theta>) \<eta>)"
+
+    "(subst_cl ?C \<theta>) = (subst_cl (subst_cl ?C \<theta>) \<eta>)"
+    using substs_preserve_ground_clause [of "(subst_cl ?C \<theta>)"  \<eta>] by blast
+    have "\<not> validate_ground_clause I ?C'"
+    by (metis assms(4) substs_preserve_ground_clause validate_clause.simps) 
+  have "l1 = L" 
+  proof (rule ccontr)
+    assume "l1 \<noteq> L"
+    have "(subst_lit l1 \<sigma>) \<in> ?C" by auto 
+    from this have "(subst_lit (subst_lit (subst_lit l1 \<sigma>) \<theta>) \<eta>)
+      \<in> ?C'" by auto
+      by (simp add: composition_of_substs_lit) 
+      show False by auto
+  qed
+
+  have "l2 = M" 
+  proof (rule ccontr)
+    assume "l2 \<noteq> M"
+    have "(subst_lit l2 \<sigma>) \<in> ?C" by auto 
+    from this have "(subst_lit (subst_lit (subst_lit l2 \<sigma>) \<theta>) \<eta>)
+      \<in> ?C'" by auto
+      by (simp add: composition_of_substs_lit) 
+      show False by auto
+  qed
+ 
+    have "I (subst u ?\<sigma>') (subst v ?\<sigma>')" 
+    using orient_lit_semantics_pos by blast
+
+    "subterm (subst t ?\<sigma>') p (subst u' ?\<sigma>')" 
+      using substs_preserve_subterms [of t p u'] by metis
+
+    using ck_unifier_thm [of u' u \<sigma> k] by auto
+  from this have "(subst (subst (subst u \<sigma>) \<theta>) \<eta>) 
+    = (subst (subst (subst u' \<sigma>) \<theta> ) \<eta>)" by auto
+  from this have "(subst u ?\<sigma>') = (subst u' ?\<sigma>')" 
+    using composition_of_substs by auto
+
+    have "I (subst u' ?\<sigma>') (subst v ?\<sigma>')"
+    by auto
+    have "I (subst t ?\<sigma>') (subst t' ?\<sigma>')" 
+      unfolding fo_interpretation_def using replacement_preserves_congruences [of I u' ?\<sigma>' v t p t'] 
+      by auto
+
+    have "validate_ground_lit I (subst_lit L' ?\<sigma>')" 
+    using orient_lit_semantics_replacement [of I L t s polarity \<sigma> ?\<sigma>' t'] by blast
+
+    have "subst_lit L' \<sigma> \<in> ?C" by auto
+  then have "subst_lit (subst_lit (subst_lit L' \<sigma>) \<theta>) \<eta> \<in> ?C'" 
+    by auto
+  then have "subst_lit L' ?\<sigma>' \<in> ?C'" by (simp add: composition_of_substs_lit) 
+  
+    show False by auto
+qed
+
+lemma superposition_is_sound :
+  assumes "finite (cl_ecl P1)"
+  assumes "finite (cl_ecl P2)"
+  assumes "superposition P1 P2 C \<sigma> k C'"
+  shows "set_entails_clause { cl_ecl P1, cl_ecl P2 } (cl_ecl C)"
+proof (rule ccontr)
+  let ?P1 = "(cl_ecl P1)" 
+  let ?P2 = "(cl_ecl P2)"
+  let ?C = "(cl_ecl C)"
+  assume "\<not> set_entails_clause { cl_ecl P1, cl_ecl P2 } (cl_ecl C)"
+  then obtain I 
+    where "validate_clause I ?P1" and "validate_clause I ?P2" 
+      and "\<not> (validate_clause I ?C)" and "fo_interpretation I"
+    unfolding set_entails_clause_def by (meson insert_iff validate_clause_set.elims(2))
+    where "\<not> (validate_ground_clause I (subst_cl ?C \<theta>))" 
+      and "(ground_clause (subst_cl ?C \<theta>))" by auto
+
+  have P1_true: "validate_clause I (subst_cl (subst_cl ?P1 \<sigma>) \<theta>)"
+  have P2_true: "validate_clause I (subst_cl (subst_cl ?P2 \<sigma>) \<theta>)"
+  have "\<not> (validate_clause I (subst_cl ?C \<theta>))"
+        substs_preserve_ground_clause validate_clause.elims(1))  
+  let ?S = "{ (subst_cl (subst_cl (cl_ecl P1) \<sigma>) \<theta>), 
+      (subst_cl (subst_cl (cl_ecl P2) \<sigma>) \<theta>) }"
+  from P1_true and P2_true have "validate_clause_set I ?S"
+    by (metis insert_iff singletonD validate_clause_set.elims(3)) 
+    have "\<not> set_entails_clause ?S (subst_cl (cl_ecl C) \<theta>)"
+    using set_entails_clause_def by blast
+  from this and assms(1) and assms(2) and assms(3) and 
+  show False using ground_superposition_is_sound by auto
+qed
+
+lemma superposition_preserves_finiteness:
+  assumes "finite (cl_ecl P1)"
+  assumes "finite (cl_ecl P2)"
+  assumes "superposition P1 P2 C \<sigma> k C'"
+  shows "finite (cl_ecl C) \<and> (finite C')"
+proof -
+  from assms(3) obtain L M L' where 
+    def_C: "(cl_ecl C) = (subst_cl (((cl_ecl P1) - { L }) \<union> (((cl_ecl P2) - { M }) \<union> { L' } )) \<sigma>)"
+    and def_C': "C' = (((cl_ecl P1) - { L }) \<union> (((cl_ecl P2) - { M }) \<union> { L' } ))"
+    using superposition_def by auto
+  from assms(1) and assms(2) have "finite (((cl_ecl P1) - { L }) \<union> (((cl_ecl P2) - { M }) \<union> { L' } ))"
+    by auto
+  from this and def_C def_C' show ?thesis using substs_preserve_finiteness by auto
+qed
+
+lemma reflexion_preserves_finiteness:
+  assumes "finite (cl_ecl P1)"
+  assumes "reflexion P1 C \<sigma> k C'"
+  shows "finite (cl_ecl C) \<and> (finite C')"
+proof -
+  from assms(2) obtain L1 where 
+    def_C: "(cl_ecl C) = (subst_cl ((cl_ecl P1) - { L1 }) \<sigma>)"
+    and def_C': "C' = ((cl_ecl P1) - { L1 })"
+    using reflexion_def by auto
+  from assms(1) have "finite ((cl_ecl P1) - { L1 })" by auto
+  from this and def_C def_C' show ?thesis using substs_preserve_finiteness by auto
+qed
+
+lemma factorization_preserves_finiteness:
+  assumes "finite (cl_ecl P1)"
+  assumes "factorization P1 C \<sigma> k C'"
+  shows "finite (cl_ecl C) \<and> (finite C')"
+proof -
+  from assms(2) obtain L2 L' where 
+    def_C: "(cl_ecl C) = (subst_cl ( ((cl_ecl P1) - { L2 }) \<union> { L' } ) \<sigma>)"
+    and def_C': "C' = ( ((cl_ecl P1) - { L2 }) \<union> { L' } )"
+    using factorization_def by auto
+  from assms(1) have "(finite (((cl_ecl P1) - { L2 }) \<union> { L' }))" by auto
+  from this and def_C def_C' show ?thesis using substs_preserve_finiteness by auto
+qed
+
+lemma derivable_clauses_are_finite:
+  assumes "derivable C P S \<sigma> k C'"
+  assumes "\<forall>x \<in> P. (finite (cl_ecl x))" 
+  shows "finite (cl_ecl C) \<and> (finite C')"
+proof (rule ccontr)
+  assume hyp: "\<not> (finite (cl_ecl C)  \<and> (finite C'))" 
+  have not_sup: "\<not> (\<exists>P1 P2. (P1 \<in> P \<and> P2 \<in> P \<and> superposition P1 P2 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1 P2. (P1 \<in> P \<and> P2 \<in> P \<and> superposition P1 P2 C \<sigma> k C'))"
+    then obtain P1 P2 where "P1 \<in> P" "P2 \<in> P" "superposition P1 P2 C \<sigma> k C'" by auto
+      have "finite (cl_ecl C) \<and> (finite C')" using superposition_preserves_finiteness [of P1 P2 C \<sigma>] by auto
+    then show False using hyp by auto
+  qed
+  have not_ref: "\<not> (\<exists>P1. (P1 \<in> P \<and> reflexion P1 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1. (P1 \<in> P \<and> reflexion P1 C \<sigma> k C'))"
+    then obtain P1 where "P1 \<in> P" "reflexion P1 C \<sigma> k C'" by auto
+      have "finite (cl_ecl C)  \<and> (finite C')" using reflexion_preserves_finiteness [of P1 C \<sigma>] by auto
+    then show False using hyp by auto
+  qed
+  have not_fact: "\<not> (\<exists>P1. (P1 \<in> P \<and> factorization P1 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1. (P1 \<in> P \<and>  factorization P1 C \<sigma> k C'))"
+    then obtain P1 where "P1 \<in> P" " factorization P1 C \<sigma> k C'" by auto
+      have "finite (cl_ecl C)  \<and> (finite C')" using  factorization_preserves_finiteness [of P1 C \<sigma>] by auto
+    then show False using hyp by auto
+  qed
+  from not_sup not_ref not_fact and assms(1) show False unfolding derivable_def by blast
+qed
+ 
+lemma derivable_clauses_lemma:
+  assumes "derivable C P S \<sigma> k C'"
+  shows "((cl_ecl C) = (subst_cl C' \<sigma>))"
+proof (rule ccontr)
+  assume hyp: "\<not> ((cl_ecl C) = (subst_cl C' \<sigma>))" 
+  have not_sup: "\<not> (\<exists>P1 P2. (P1 \<in> S \<and> P2 \<in> S \<and> superposition P1 P2 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1 P2. (P1 \<in> S \<and> P2 \<in> S \<and> superposition P1 P2 C \<sigma> k C'))"
+    then obtain P1 P2 where "P1 \<in> S" "P2 \<in> S" "superposition P1 P2 C \<sigma> k C'" by auto
+      where "Cl_C = (subst_cl ((Cl_P1 - { L }) \<union> ((Cl_P2 - { M }) \<union> { L' } )) \<sigma>)"
+        "(C' = (Cl_P1 - { L }) \<union> ((Cl_P2 - { M }) \<union> { L' } ))"
+        "C = (Ecl Cl_C T)"
+        unfolding superposition_def by blast
+  qed
+  have not_ref: "\<not> (\<exists>P1. (P1 \<in> S \<and> reflexion P1 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1. (P1 \<in> S \<and> reflexion P1 C \<sigma> k C'))"
+    then obtain P1 where "P1 \<in> S" "reflexion P1 C \<sigma> k C'" by auto
+      "C = (Ecl Cl_C T)"
+      "Cl_C = (subst_cl ((Cl_P - { L1 }) )) \<sigma>"
+      "(C' = ((Cl_P - { L1 }) ))" unfolding reflexion_def by blast
+  qed
+  have not_fact: "\<not> (\<exists>P1. (P1 \<in> S \<and> factorization P1 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1. (P1 \<in> S \<and>  factorization P1 C \<sigma> k C'))"
+    then obtain P1 where "P1 \<in> S" "factorization P1 C \<sigma> k C'" by auto
+      "C = (Ecl Cl_C T)"
+      "Cl_C = (subst_cl ( (Cl_P - { L2 }) \<union> { L' } )) \<sigma>"
+      "C' = ( (Cl_P - { L2 }) \<union> { L' } )" unfolding factorization_def by blast
+  qed
+  from not_sup not_ref not_fact and assms(1) show False unfolding derivable_def by blast
+qed
+
+lemma substs_preserves_decompose_literal:
+  assumes "decompose_literal L t s polarity"
+  shows "decompose_literal (subst_lit L \<eta>) (subst t \<eta>) (subst s \<eta>) polarity"
+proof -
+  let ?L = "(subst_lit L \<eta>)"
+  let ?t = "(subst t \<eta>)"
+  let ?s = "(subst s \<eta>)"
+
+  have "polarity = pos \<or> polarity = neg" using sign.exhaust by auto  
+  then show ?thesis
+  proof
+    assume "polarity = pos" 
+    from this and assms(1) have "L = Pos (Eq t s) \<or> L = Pos (Eq s t)"
+      unfolding decompose_literal_def decompose_equation_def by auto
+      have "?L = Pos (Eq ?t ?s) \<or> ?L = Pos (Eq ?s ?t)" by auto
+      decompose_equation_def by auto
+  next
+    assume "polarity = neg" 
+    from this and assms(1) have "L = Neg (Eq t s) \<or> L = Neg (Eq s t)"
+      unfolding decompose_literal_def decompose_equation_def by auto
+      decompose_equation_def by auto
+  qed
+qed
+
+lemma substs_preserve_dom_trm:
+  assumes "dom_trm t C"
+  shows "dom_trm (subst t \<sigma>) (subst_cl C \<sigma>)"
+proof -
+  let ?t = "(subst t \<sigma>)"
+  from assms(1) have "(\<exists> L u v p. (L \<in> C \<and> (decompose_literal L u v p) 
+        \<and> (( (p = neg \<and> t = u) \<or> (t,u) \<in> trm_ord))))" unfolding dom_trm_def by auto
+  from this obtain L u v p where  "L \<in> C" 
+    "decompose_literal L u v p" "(( (p = neg \<and> t = u) \<or> (t,u) \<in> trm_ord))" 
+    unfolding dom_trm_def by blast
+  let ?u = "(subst u \<sigma>)"
+
+    have "decompose_literal (subst_lit L \<sigma>) (subst u \<sigma>) (subst v \<sigma>) p" 
+    using substs_preserves_decompose_literal by metis
+    have "(( (p = neg \<and> ?t = ?u) \<or> (?t,?u) \<in> trm_ord))"
+      using trm_ord_subst by auto
+    show "dom_trm (subst t \<sigma>) (subst_cl C \<sigma>)" 
+    unfolding dom_trm_def by auto
+qed
+
+lemma substs_preserve_well_constrainedness:
+  assumes "well_constrained C"
+  shows "well_constrained (subst_ecl C \<sigma>)"
+proof (rule ccontr)
+  assume "\<not>?thesis"
+  from this obtain y where "y \<in> trms_ecl (subst_ecl C \<sigma>)"
+    and "\<not> dom_trm y (cl_ecl (subst_ecl C \<sigma>))" unfolding well_constrained_def by auto
+  obtain Cl_C T where "C = (Ecl Cl_C T)" using "eclause.exhaust" by auto
+  from this have "(subst_ecl C \<sigma>) 
+    = (Ecl (subst_cl Cl_C \<sigma>) (subst_set T \<sigma>))" by auto
+  from this have "(cl_ecl (subst_ecl C \<sigma>) = (subst_cl Cl_C \<sigma>))" 
+    and "trms_ecl (subst_ecl C \<sigma>) = (subst_set T \<sigma>)" 
+    by auto
+    obtain z where "z \<in> T" and "y = (subst z \<sigma>)" by auto
+    unfolding well_constrained_def by auto
+  from this have "dom_trm (subst z \<sigma>) (subst_cl (cl_ecl C) \<sigma>)"
+    using substs_preserve_dom_trm by auto
+    by auto
+qed
+
+lemma ck_trms_sound:
+  assumes "T = get_trms D (dom_trms C E) k"
+  shows "T \<subseteq> (dom_trms C E)"
+proof (cases)
+  assume "k = FirstOrder"
+  from this and assms have "T = filter_trms D (dom_trms C E)"
+    unfolding get_trms_def by auto
+  from this show ?thesis using filter_trms_inclusion by blast
+next
+  assume "k \<noteq> FirstOrder"
+  from this and assms have "T = (dom_trms C E)"
+    unfolding get_trms_def by auto
+  from this show ?thesis using filter_trms_inclusion by blast
+qed
+
+lemma derivable_clauses_are_well_constrained:
+  assumes "derivable C P S \<sigma> k C'"
+  shows "well_constrained C"
+proof (rule ccontr)
+  assume hyp: "\<not> well_constrained C" 
+  then obtain y where "y \<in> trms_ecl C" and "\<not> dom_trm y (cl_ecl C)"
+    unfolding well_constrained_def by auto
+  have not_sup: "\<not> (\<exists>P1 P2. (P1 \<in> S \<and> P2 \<in> S \<and> superposition P1 P2 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1 P2. (P1 \<in> S \<and> P2 \<in> S \<and> superposition P1 P2 C \<sigma> k C'))"
+    then obtain P1 P2 where "P1 \<in> S" "P2 \<in> S" "superposition P1 P2 C \<sigma> k C'" by auto
+      where 
+        "T = (get_trms Cl_C (dom_trms Cl_C (subst_set E \<sigma>)) k)"
+        "Cl_C = (subst_cl C' \<sigma>)"
+        "C = (Ecl Cl_C T)"
+        unfolding superposition_def by blast
+      have "T \<subseteq>(dom_trms Cl_C (subst_set E \<sigma>))" 
+      using ck_trms_sound  by metis
+      "y \<in> (dom_trms (cl_ecl C) (subst_set E \<sigma>))" by auto
+  qed
+  have not_ref: "\<not> (\<exists>P1. (P1 \<in> S \<and> reflexion P1 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1. (P1 \<in> S \<and> reflexion P1 C \<sigma> k C'))"
+    then obtain P1 where "P1 \<in> S" "reflexion P1 C \<sigma> k C'" by auto
+        "T = (get_trms Cl_C (dom_trms Cl_C (subst_set E \<sigma>)) k)"
+        "Cl_C = (subst_cl C' \<sigma>)"
+        "C = (Ecl Cl_C T)"
+      unfolding reflexion_def by blast
+      have "T \<subseteq>(dom_trms Cl_C (subst_set E \<sigma>))" 
+      using ck_trms_sound  by metis
+      "y \<in> (dom_trms (cl_ecl C) (subst_set E \<sigma>))" by auto
+  qed
+  have not_fact: "\<not> (\<exists>P1. (P1 \<in> S \<and> factorization P1 C \<sigma> k C'))"
+  proof
+    assume "(\<exists>P1. (P1 \<in> S \<and> factorization P1 C \<sigma> k C'))"
+    then obtain P1 where "P1 \<in> S" "factorization P1 C \<sigma> k C'" by auto
+        "T = (get_trms Cl_C (dom_trms Cl_C (subst_set E \<sigma>)) k)"
+        "Cl_C = (subst_cl C' \<sigma>)"
+        "C = (Ecl Cl_C T)"
+      unfolding factorization_def by blast
+      have "T \<subseteq>(dom_trms Cl_C (subst_set E \<sigma>))" 
+      using ck_trms_sound  by metis
+      "y \<in> (dom_trms (cl_ecl C) (subst_set E \<sigma>))" by auto
+  qed
+  from not_sup not_ref not_fact and assms(1) show False unfolding derivable_def by blast
+qed
+
+lemma derivable_clauses_are_entailed:
+  assumes "derivable C P S \<sigma> k C'"
+  assumes "validate_clause_set I (cl_ecl ` P)"
+  assumes "fo_interpretation I"
+  assumes "\<forall>x \<in> P. (finite (cl_ecl x))"
+  shows "validate_clause I (cl_ecl C)"
+proof (rule ccontr)
+  assume "\<not>validate_clause I (cl_ecl C)"
+  have not_sup: "\<not> (\<exists>P1 P2. (P1 \<in> S \<and> P2 \<in> S \<and> P = { P1, P2 } \<and> superposition P1 P2 C \<sigma> k C'))"
+  proof 
+    assume "(\<exists>P1 P2. (P1 \<in> S \<and> P2 \<in> S \<and> P = { P1, P2 } \<and> superposition P1 P2 C \<sigma> k C'))"
+    from this obtain P1 P2 where "P1 \<in> P" "P2 \<in> P" and "superposition P1 P2 C \<sigma> k C'" by auto
+      using superposition_is_sound by blast
+      have "validate_clause I (cl_ecl C)" 
+      using set_entails_clause_def [of "{ (cl_ecl P1), (cl_ecl P2) }" "cl_ecl C"] by auto
+  qed
+  have not_fact: "\<not> (\<exists>P1. (P1 \<in> S \<and> P = { P1 } \<and> factorization P1 C \<sigma> k C'))"
+  proof 
+    assume "(\<exists>P1. (P1 \<in> S \<and> P = { P1 } \<and> factorization P1 C \<sigma> k C'))"
+    from this obtain P1 where "P1 \<in> P" and "factorization P1 C \<sigma> k C'" by auto
+      using factorization_is_sound by auto
+      have "validate_clause I (cl_ecl C)" unfolding clause_entails_clause_def by auto
+  qed
+  have not_ref: "\<not> (\<exists>P1. (P1 \<in> S \<and> P = { P1 } \<and> reflexion P1 C \<sigma> k C'))"
+  proof 
+    assume "(\<exists>P1. (P1 \<in> S \<and> P = { P1 } \<and> reflexion P1 C \<sigma> k C'))"
+    from this obtain P1 where "P1 \<in> P" and "reflexion  P1 C \<sigma> k C'" by auto
+      using reflexion_is_sound by auto
+      have "validate_clause I (cl_ecl C)" unfolding clause_entails_clause_def by auto
+  qed
+  from not_sup not_fact not_ref and assms(1) show False unfolding derivable_def by blast
+qed
+
+lemma all_derived_clauses_are_finite:
+  shows "derivable_ecl C S \<Longrightarrow> \<forall>x \<in> S. (finite (cl_ecl x)) \<Longrightarrow> finite (cl_ecl C)"
+proof (induction rule: derivable_ecl.induct)
+  fix C :: "'a eclause" fix S assume "C \<in> S"
+  assume "\<forall>x \<in> S. (finite (cl_ecl x))"
+next
+  fix C S fix D :: "'a eclause" assume "derivable_ecl C S" 
+  assume "\<forall>x \<in> S. (finite (cl_ecl x))" assume hyp_ind: "\<forall>x \<in> S. (finite (cl_ecl x)) \<Longrightarrow> finite (cl_ecl C)"  
+    "(renaming_cl C D)"
+    unfolding renaming_cl_def by auto
+  obtain C_Cl T where "C = (Ecl C_Cl T)" using "eclause.exhaust" by auto
+    have "(cl_ecl D) = (subst_cl (cl_ecl C) \<eta>)" by auto
+    using substs_preserve_finiteness by auto
+next
+  fix P S C S' \<sigma> C' 
+  assume h: "\<forall>x. x \<in> P \<longrightarrow> derivable_ecl x S \<and> ((\<forall>x\<in>S. finite (cl_ecl x)) \<longrightarrow> finite (cl_ecl x))" 
+  assume "derivable C P S' \<sigma> FirstOrder C'"
+  assume "\<forall>x\<in>S. finite (cl_ecl x)"
+    using derivable_clauses_are_finite by auto 
+qed
+
+lemma all_derived_clauses_are_wellconstrained:
+  shows "derivable_ecl C S \<Longrightarrow> \<forall>x \<in> S. (well_constrained x) \<Longrightarrow> well_constrained C"
+proof (induction rule: derivable_ecl.induct)
+  fix C :: "'a eclause" fix S assume "C \<in> S"
+  assume "\<forall>x \<in> S. (well_constrained x)"
+next
+  fix C S fix D :: "'a eclause" assume "derivable_ecl C S" 
+  assume "\<forall>x \<in> S. (well_constrained x)" assume hyp_ind: "\<forall>x \<in> S. (well_constrained x) \<Longrightarrow> well_constrained C"  
+    "(renaming_cl C D)"
+    unfolding renaming_cl_def by auto
+    using substs_preserve_well_constrainedness by auto
+next
+  fix P S C S' \<sigma> C' 
+  assume "\<forall>x. x \<in> P \<longrightarrow> derivable_ecl x S \<and> (Ball S well_constrained \<longrightarrow> well_constrained x)" 
+  assume "derivable C P S' \<sigma> FirstOrder C'"
+  assume "Ball S well_constrained"
+    using derivable_clauses_are_well_constrained by auto
+qed
+
+lemma SOUNDNESS:
+  shows "derivable_ecl C S \<Longrightarrow> \<forall>x \<in> S. (finite (cl_ecl x)) 
+    \<Longrightarrow> set_entails_clause (cl_ecl ` S) (cl_ecl C)"
+proof (induction rule: derivable_ecl.induct)
+  fix C :: "'a eclause" fix S assume "C \<in> S"
+  assume "\<forall>x \<in> S. (finite (cl_ecl x))"
+          unfolding set_entails_clause_def by auto
+next
+  fix C S fix D :: "'a eclause" assume "derivable_ecl C S" 
+  assume "\<forall>x \<in> S. (finite (cl_ecl x))" 
+  assume hyp_ind: "\<forall>x \<in> S. (finite (cl_ecl x)) \<Longrightarrow> set_entails_clause (cl_ecl ` S) (cl_ecl C)"  
+  assume  "(renaming_cl C D)"
+    unfolding renaming_cl_def by auto
+  obtain C_Cl T where "C = (Ecl C_Cl T)" using "eclause.exhaust" by auto
+    have "(cl_ecl D) = (subst_cl (cl_ecl C) \<eta>)" by auto
+  show "set_entails_clause (cl_ecl ` S) (cl_ecl D)"
+  proof (rule ccontr)
+    assume "\<not>?thesis"
+    from this obtain I where "fo_interpretation I" and i: "validate_clause_set I (cl_ecl `S)" 
+      "\<not>validate_clause I (cl_ecl D)" 
+      unfolding set_entails_clause_def by auto
+      have "\<not>validate_clause I (cl_ecl C)" using instances_are_entailed by metis
+      unfolding set_entails_clause_def by auto
+  qed
+next
+  fix P S C S' \<sigma> C' 
+  assume h: "\<forall>x. x \<in> P \<longrightarrow> derivable_ecl x S \<and> ((\<forall>x\<in>S. finite (cl_ecl x)) \<longrightarrow> set_entails_clause (cl_ecl ` S) (cl_ecl x))" 
+  assume "derivable C P S' \<sigma> FirstOrder C'"
+  assume "\<forall>x\<in>S. finite (cl_ecl x)"
+    by metis
+  show "set_entails_clause (cl_ecl ` S) (cl_ecl C)"
+  proof (rule ccontr)
+    assume "\<not>?thesis"
+    from this obtain I where "fo_interpretation I" and ii: "validate_clause_set I (cl_ecl `S)" 
+      "\<not>validate_clause I (cl_ecl C)" 
+      unfolding set_entails_clause_def by auto
+     using all_derived_clauses_are_finite by metis
+      have "\<forall>x \<in> P.  (validate_clause I (cl_ecl x))" unfolding set_entails_clause_def by auto
+    from this have "validate_clause_set I (cl_ecl ` P)"  by auto
+      have "validate_clause I (cl_ecl C)" 
+      using derivable_clauses_are_entailed [of C P S' \<sigma> FirstOrder C' I] by blast 
+ qed
+qed
+
+lemma REFUTABLE_SETS_ARE_UNSAT:
+  assumes "\<forall>x \<in> S. (finite (cl_ecl x))"
+  assumes "derivable_ecl C S"
+  assumes "(cl_ecl C = {})"
+  shows "\<not> (satisfiable_clause_set (cl_ecl ` S))"
+proof 
+  assume "(satisfiable_clause_set (cl_ecl ` S))"
+  then obtain I where "fo_interpretation I" and model: "validate_clause_set I (cl_ecl ` S)" 
+    unfolding satisfiable_clause_set_def [of "cl_ecl ` S"] by blast
+  from assms(1) assms(2) have "set_entails_clause (cl_ecl ` S) (cl_ecl C)"
+    using SOUNDNESS by metis
+    unfolding set_entails_clause_def by auto
+  from this and assms(3) show False by auto
+qed
+
+
+
+definition subterms_inclusion :: "'a trm set \<Rightarrow> 'a trm set \<Rightarrow> bool"
+  where "subterms_inclusion E1 E2 = (\<forall>x1 \<in> E1. \<exists>x2 \<in> E2. (occurs_in x1 x2))"
+
+lemma subterms_inclusion_refl:
+ shows "subterms_inclusion E E"
+proof (rule ccontr)
+  assume "\<not>subterms_inclusion E E"
+  from this obtain x1 where "x1 \<in> E" and "\<not> occurs_in x1 x1" unfolding subterms_inclusion_def by force
+  from this have "\<not>subterm x1 Nil x1" by metis
+  from this show False by auto
+qed
+
+lemma subterms_inclusion_subset:
+  assumes "subterms_inclusion E1 E2"
+  assumes "E2 \<subseteq> E2'"
+  shows "subterms_inclusion E1 E2'"
+by (meson assms(1) assms(2) basic_superposition.subterms_inclusion_def basic_superposition_axioms 
+      subsetD)
+
+lemma set_inclusion_preserve_normalization:
+  assumes "all_trms_irreducible E f"
+  assumes "E' \<subseteq> E"
+  shows "all_trms_irreducible E' f"
+by (meson all_trms_irreducible_def assms(1) assms(2) subsetD)
+
+lemma subterms_inclusion_preserves_normalization:
+  assumes "all_trms_irreducible E f"
+  assumes "subterms_inclusion E' E"
+  shows "all_trms_irreducible E' f"
+by (meson all_trms_irreducible_def assms(1) assms(2) occur_in_subterm subterms_inclusion_def)
+
+
+definition redundant_inference ::
+  "'a eclause \<Rightarrow> 'a eclause set \<Rightarrow> 'a eclause set \<Rightarrow> 'a subst \<Rightarrow> bool"
+  where "redundant_inference C S P \<sigma> \<longleftrightarrow> (\<exists>S' \<subseteq> instances S.
+    set_entails_clause (clset_instances S') (cl_ecl C) \<and>
+    (\<forall>x \<in> S'. subterms_inclusion (subst_set (trms_ecl (fst x)) (snd x)) (trms_ecl C)) \<and>
+    (\<forall>x \<in> S'. \<exists>D' \<in> cl_ecl ` P. ((cl_ecl (fst x), snd x),(D',\<sigma>)) \<in> cl_ord))"
+
+
+definition redundant_clause :: 
+  "'a eclause \<Rightarrow> 'a eclause set  \<Rightarrow> 'a subst \<Rightarrow> 'a clause \<Rightarrow> bool"
+  where "(redundant_clause C S \<sigma> C') = 
+    (\<exists>S'. (S' \<subseteq> (instances S) \<and> (set_entails_clause (clset_instances S') (cl_ecl C)) \<and> 
+            (\<forall>x \<in> S'. ( subterms_inclusion (subst_set (trms_ecl (fst x)) (snd x)) 
+              (trms_ecl C))) \<and>
+            (\<forall>x \<in> S'. ( ((mset_ecl ((fst x),(snd x))),(mset_cl (C',\<sigma>))) \<in> (mult (mult trm_ord))
+              \<or> (mset_ecl ((fst x),(snd x))) = mset_cl (C',\<sigma>)))))"
+
+
+lemma self_redundant_clause:
+  assumes "C \<in> S"
+  assumes "C' = (cl_ecl C)"
+  assumes "ground_clause (subst_cl (cl_ecl C) \<sigma>)"
+  shows "redundant_clause (subst_ecl C \<sigma>) S \<sigma> C'"
+proof -
+  obtain Cl_C and T where "C = Ecl Cl_C T" using eclause.exhaust by auto
+  from this have "cl_ecl C = Cl_C" and "trms_ecl C = T" by auto
+  let ?Cl_C = "subst_cl Cl_C \<sigma>"
+  let ?T  = "subst_set T \<sigma>"
+  let ?C = "subst_ecl C \<sigma>"
+  from this have "cl_ecl ?C = ?Cl_C" and "trms_ecl ?C = ?T" by auto
+  let ?S = "{ (C,\<sigma>) }"
+  from assms(1) assms(3) have i: "?S \<subseteq> (instances S)" unfolding instances_def by auto 
+    by auto
+    using set_entails_clause_member by force
+  have iii: "(\<forall>x \<in> ?S. ( subterms_inclusion (subst_set (trms_ecl (fst x)) (snd x)) 
+              (trms_ecl ?C)))"
+  proof 
+    fix x assume "x \<in> ?S" 
+    from this have "x = (C,\<sigma>)" by auto
+      have "subst_set (trms_ecl (fst x)) (snd x) = ?T" by auto
+      have "subst_set (trms_ecl (fst x)) (snd x) = (trms_ecl ?C)" by auto
+    from this show "( subterms_inclusion (subst_set (trms_ecl (fst x)) (snd x)) 
+              (trms_ecl ?C))" 
+              using subterms_inclusion_refl by auto
+  qed
+  have iv: "(\<forall>x \<in> ?S. ( ((mset_ecl ((fst x),(snd x))),(mset_cl (C',\<sigma>))) \<in> (mult (mult trm_ord))
+              \<or> (mset_ecl ((fst x),(snd x))) = mset_cl (C',\<sigma>)))"
+  proof 
+    fix x assume "x \<in> ?S"
+    from this have "x = (C,\<sigma>)" by auto
+    from this show "( ((mset_ecl ((fst x),(snd x))),(mset_cl (C',\<sigma>))) \<in> (mult (mult trm_ord))
+              \<or> (mset_ecl ((fst x),(snd x))) = mset_cl (C',\<sigma>))" by auto
+  qed
+  from i ii iii iv show ?thesis unfolding redundant_clause_def by metis
+qed
+
+definition trms_subsumes
+  where "trms_subsumes C D \<sigma>
+    = ( (subst_cl (cl_ecl C) \<sigma>) = (cl_ecl D) 
+    \<and> ((subst_set (trms_ecl C) \<sigma>) \<subseteq> trms_ecl D))"
+
+definition inference_closed 
+  where "inference_closed S  = (\<forall> P C' D \<theta>. 
+      (derivable D P S \<theta> FirstOrder C') \<longrightarrow> (D \<in> S))"
+
+
+
+definition ground_inference_saturated :: "'a eclause set \<Rightarrow> bool"
+  where "(ground_inference_saturated S) = (\<forall> C P \<sigma> C'. (derivable C P S \<sigma> Ground C') \<longrightarrow> 
+      (ground_clause (cl_ecl C)) \<longrightarrow> (grounding_set P \<sigma>) \<longrightarrow> (redundant_inference C S P \<sigma>))"
+
+
+definition inference_saturated :: "'a eclause set \<Rightarrow> bool"
+  where "(inference_saturated S) = (\<forall> C P \<sigma> C' D \<theta> \<eta>. 
+     (derivable C P S \<sigma> Ground C') \<longrightarrow> (ground_clause (cl_ecl C)) \<longrightarrow> (grounding_set P \<sigma>) 
+      \<longrightarrow> (derivable D P S \<theta> FirstOrder C') \<longrightarrow> (trms_subsumes D C \<eta>)
+      \<longrightarrow> (\<sigma> \<doteq> \<theta> \<lozenge> \<eta>)
+      \<longrightarrow> (redundant_inference (subst_ecl D \<eta>) S P \<sigma>))"
+
+
+definition clause_saturated :: "'a eclause set \<Rightarrow> bool"
+  where "(clause_saturated S) = (\<forall> C P \<sigma> C' D \<theta> \<eta>. 
+     (derivable C P S \<sigma> Ground C') \<longrightarrow> (ground_clause (cl_ecl C)) 
+      \<longrightarrow> (derivable D P S \<theta> FirstOrder C') \<longrightarrow> (trms_subsumes D C \<eta>)
+      \<longrightarrow> (\<sigma> \<doteq> \<theta> \<lozenge> \<eta>)
+      \<longrightarrow> (redundant_clause (subst_ecl D \<eta>) S \<sigma> C'))"
+
+
+lemma conclusion_is_smaller_than_premisses:
+  assumes "derivable C P S \<sigma> Ground C'"
+  assumes "\<forall>x \<in> S. (finite (cl_ecl x))" 
+  assumes "grounding_set P \<sigma>" 
+  shows "\<exists> D. (D \<in> P \<and> (( (mset_cl (C',\<sigma>)), (mset_ecl (D,\<sigma>))) \<in> (mult (mult trm_ord))))"
+proof (rule ccontr)
+  assume hyp: "\<not> (\<exists> D. (D \<in> P \<and> (( (mset_cl (C',\<sigma>)), (mset_ecl (D,\<sigma>))) \<in> (mult (mult trm_ord)))))" 
+  from assms(1) have "P \<subseteq> S" unfolding derivable_def by auto
+  have not_sup: "\<not> (\<exists>P1 P2. (P1 \<in> P \<and> P2 \<in> P \<and> superposition P1 P2 C \<sigma> Ground C'))"
+  proof
+    assume "(\<exists>P1 P2. (P1 \<in> P \<and> P2 \<in> P \<and> superposition P1 P2 C \<sigma> Ground C'))"
+    then obtain P1 P2 where "P1 \<in> P" "P2 \<in> P" "superposition P1 P2 C \<sigma> Ground C'" by auto
+      "M \<in> (cl_ecl P2)" "L \<in> (cl_ecl P1)"
+      "orient_lit_inst M u v pos \<sigma>" 
+      "orient_lit_inst L t s polarity \<sigma>" 
+      "subterm t p u'"
+      "ck_unifier u' u \<sigma> Ground"
+      "replace_subterm t p v t'"
+      "L' = mk_lit polarity (Eq t' s)" 
+      "(C = (Ecl Cl_C NT))"
+      "(subst u \<sigma>) \<noteq> (subst v \<sigma>)" 
+      "( (subst_lit M \<sigma>),(subst_lit L \<sigma>)) 
+            \<in> lit_ord"
+      "strictly_maximal_literal P2 M \<sigma>"
+      "Cl_C = (subst_cl (((cl_ecl P1) - { L }) \<union> (((cl_ecl P2) - { M }) \<union> { L' } )) \<sigma>)"
+      "C' = (((cl_ecl P1) - { L }) \<union> (((cl_ecl P2) - { M }) \<union> { L' } ))"
+      unfolding superposition_def by blast 
+
+      unfolding grounding_set_def by auto 
+    from this have "vars_of_cl (subst_cl (cl_ecl P2) \<sigma>) = {}" by auto
+      by auto
+      "orient_lit (subst_lit M \<sigma>) (subst u \<sigma>) (subst v \<sigma>) pos" 
+      using lift_orient_lit by auto
+       using orient_lit_vars by blast
+       using orient_lit_vars by blast
+      have "((subst u \<sigma>),(subst v \<sigma>)) \<notin> trm_ord" 
+      unfolding orient_lit_def by auto
+       have "((subst v \<sigma>),(subst u \<sigma>)) \<in> trm_ord"  using trm_ord_ground_total 
+       unfolding ground_term_def by blast
+
+    from this have "vars_of_cl (subst_cl (cl_ecl P1) \<sigma>) = {}" by auto
+      by auto
+      "orient_lit (subst_lit L \<sigma>) (subst t \<sigma>) (subst s \<sigma>) polarity" 
+      using lift_orient_lit by auto
+       using orient_lit_vars by blast
+       using orient_lit_vars by blast
+
+    let ?mC1 = "mset_ecl (P1, \<sigma>)"
+    let ?mC2 = "mset_ecl (C, \<sigma>)"
+
+      have "mset_set (cl_ecl P1) = mset_set ((cl_ecl P1)-{ L }) + mset_set { L }"
+      using split_mset_set [of "cl_ecl P1" "cl_ecl P1 - { L }" "{ L }"] by blast
+
+    from this have  d1: "{# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set (cl_ecl P1)) #}
+      = {# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set ((cl_ecl P1) - { L })) #} 
+        + {# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set { L }) #}"
+        using split_image_mset by auto
+    
+    let ?C = "(((cl_ecl P1) - { L }) \<union> (((cl_ecl P2) - { M }) \<union> { L' } ))"
+    let ?C' = "?C - ( (cl_ecl P1) - { L })"
+    have "?C = ( (cl_ecl P1) - { L }) \<union> ?C'" by auto
+      have "mset_set ?C = mset_set ((cl_ecl P1)-{ L }) + mset_set ?C'"
+      using split_mset_set [of "?C" "cl_ecl P1 - { L }" "?C'"] by blast
+
+    from this have  d2: "{# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set ?C) #}
+      = {# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set ((cl_ecl P1) - { L })) #} 
+        + {# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set ?C') #}"
+        using split_image_mset by auto
+    
+    have "{# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set { L }) #} \<noteq> {#}"
+      by auto
+   let ?K = "{# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set ?C') #}"
+   let ?J = "{# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set { L }) #}"
+   have "(\<forall>k \<in> set_mset ?K. \<exists>j \<in> set_mset ?J. (k, j) \<in> (mult trm_ord))"
+   proof 
+    fix k assume "k \<in> set_mset ?K"
+    from this have "k \<in># ?K" by auto
+    from this obtain M' where "M' \<in># (mset_set ?C')" and "k = (mset_lit (subst_lit M' \<sigma>))"
+      using image_mset_thm [of "?K"  "\<lambda>x. (mset_lit (subst_lit x \<sigma>))" "(mset_set ?C')"]
+      by metis
+
+    have "L \<in># (mset_set { L })" by auto
+    from this have "(mset_lit (subst_lit L \<sigma>) \<in># ?J)" by auto
+    from this have "(mset_lit (subst_lit L \<sigma>) \<in> set_mset ?J)" by auto
+ 
+  have "{# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set { L }) #} \<noteq> {#}" by auto
+
+
+    show "\<exists>j \<in> set_mset ?J. (k, j) \<in> (mult trm_ord)"
+    proof (cases)
+      assume "M' \<in> (cl_ecl P2) - { M }"  
+        have "((subst_lit M' \<sigma>),(subst_lit M \<sigma>)) \<in> lit_ord" 
+          unfolding strictly_maximal_literal_def by metis
+        have "((subst_lit M' \<sigma>),(subst_lit L \<sigma>)) \<in> lit_ord"
+        using lit_ord_trans unfolding trans_def by metis
+      from this have "((mset_lit (subst_lit M' \<sigma>)), 
+                (mset_lit (subst_lit L \<sigma>))) \<in>  (mult trm_ord)"
+             unfolding lit_ord_def by auto
+                (mset_lit (subst_lit L \<sigma>))) \<in>  (mult trm_ord)\<close> 
+       and \<open>k = (mset_lit (subst_lit M' \<sigma>))\<close> show ?thesis by blast
+    from this and \<open>M' \<in> ?C'\<close> have "M' = L'" by auto
+    from \<open>subterm t p u'\<close> have "subterm (subst t \<sigma>) p  (subst u' \<sigma>)"
+    from \<open>ck_unifier u' u \<sigma> Ground\<close> have 
+    from this and \<open>((subst v \<sigma>),(subst u \<sigma>)) \<in> trm_ord\<close> 
+    from this \<open>subterm t p u'\<close> \<open>replace_subterm t p v t'\<close>
+      from this and \<open>orient_lit_inst L t s polarity \<sigma>\<close> 
+        from  \<open>L' = mk_lit polarity (Eq t' s)\<close> \<open>polarity = pos\<close> 
+          from this \<open>k' = (subst t' \<sigma>)\<close> 
+            and \<open>((subst t' \<sigma>),(subst t \<sigma>)) \<in> trm_ord\<close> 
+          \<open>((subst t' \<sigma>),(subst t \<sigma>)) \<in> trm_ord\<close> 
+        from this and \<open>orient_lit_inst L t s polarity \<sigma>\<close> 
+        from  \<open>L' = mk_lit polarity (Eq t' s)\<close> \<open>polarity = neg\<close> have 
+          from this \<open>k' = (subst t' \<sigma>)\<close> 
+            and \<open>((subst t' \<sigma>),(subst t \<sigma>)) \<in> trm_ord\<close> 
+        from this i ii \<open>{# (subst t \<sigma>), (subst t \<sigma>) #} \<noteq> {#}\<close>
+      \<open>(mset_lit (subst_lit L \<sigma>) \<in> set_mset ?J)\<close> 
+      \<open>k = (mset_lit (subst_lit M' \<sigma>))\<close>
+      \<open>M' = L'\<close> show ?thesis unfolding lit_ord_def by auto
+  from this \<open>C' = (((cl_ecl P1) - { L }) \<union> (((cl_ecl P2) - { M }) \<union> { L' } ))\<close> and \<open>P1 \<in> P\<close> 
+    from \<open>reflexion P1 C \<sigma> Ground C'\<close> obtain L1 t s Cl_C Cl_P where
+    from \<open>P1 \<in> P\<close> and assms(2) and \<open>P \<subseteq> S\<close> have "finite (cl_ecl P1)" by auto
+    from \<open>L1 \<in> (cl_ecl P1)\<close> \<open>finite (cl_ecl P1)\<close> 
+    from \<open>finite (cl_ecl P1)\<close> have "finite ?C" by auto
+    from \<open>finite (cl_ecl P1)\<close> \<open>finite ?C'\<close> 
+  from this d1 d2  \<open>{# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set { L1 }) #} \<noteq> {#}\<close>  
+  from this \<open>Cl_P = (cl_ecl P1)\<close> \<open>C' = ((Cl_P - { L1 }) )\<close> and \<open>P1 \<in> P\<close> 
+    from \<open>factorization P1 C \<sigma> Ground C'\<close> obtain L1 L2 L' t s u v Cl_P Cl_C  where
+    from \<open>P1 \<in> P\<close> and assms(2) and \<open>P \<subseteq> S\<close> have "finite (cl_ecl P1)" by auto
+    from assms(3) and \<open>P1 \<in> P\<close> have "ground_clause (subst_cl (cl_ecl P1) \<sigma>)" unfolding grounding_set_def  by auto 
+    from \<open>L1 \<in> (cl_ecl P1)\<close>have "(subst_lit L1 \<sigma>) \<in> (subst_cl (cl_ecl P1) \<sigma>)" by auto
+    from this and \<open>vars_of_cl (subst_cl (cl_ecl P1) \<sigma>) = {}\<close> have "vars_of_lit (subst_lit L1 \<sigma>) = {}"
+    from \<open>orient_lit_inst L1 t s pos \<sigma>\<close> have 
+    from this and \<open>vars_of_lit (subst_lit L1 \<sigma>) = {}\<close> have "vars_of (subst t \<sigma>) = {}" 
+    from \<open>orient_lit (subst_lit L1 \<sigma>) (subst t \<sigma>) (subst s \<sigma>) pos\<close> 
+       and \<open>vars_of_lit (subst_lit L1 \<sigma>) = {}\<close> have "vars_of (subst s \<sigma>) = {}" 
+    from \<open>(L2 \<in> (cl_ecl P1) - { L1 })\<close> have "L2 \<in> (cl_ecl P1)" by auto
+    from \<open>L2 \<in> (cl_ecl P1)\<close> have "(subst_lit L2 \<sigma>) \<in> (subst_cl (cl_ecl P1) \<sigma>)" by auto
+    from this and \<open>vars_of_cl (subst_cl (cl_ecl P1) \<sigma>) = {}\<close> have "vars_of_lit (subst_lit L2 \<sigma>) = {}"
+    from \<open>orient_lit_inst L2 u v pos \<sigma>\<close> have 
+    from this and \<open>vars_of_lit (subst_lit L2 \<sigma>) = {}\<close> have "vars_of (subst u \<sigma>) = {}" 
+    from \<open>orient_lit (subst_lit L2 \<sigma>) (subst u \<sigma>) (subst v \<sigma>) pos\<close> 
+       and \<open>vars_of_lit (subst_lit L2 \<sigma>) = {}\<close> have "vars_of (subst v \<sigma>) = {}" 
+    from \<open>ck_unifier t u \<sigma> Ground\<close> have "(subst t \<sigma>) = (subst u \<sigma>)" 
+    from \<open>orient_lit (subst_lit L1 \<sigma>) (subst t \<sigma>) (subst s \<sigma>) pos\<close> 
+    from this and \<open>(subst t \<sigma>) \<noteq> (subst s \<sigma>)\<close> 
+      and \<open>vars_of (subst t \<sigma>) = {}\<close> \<open>vars_of (subst s \<sigma>) = {}\<close> 
+    from this and \<open>(subst t \<sigma>) = (subst u \<sigma>)\<close> have 
+    from \<open>orient_lit (subst_lit L2 \<sigma>) (subst u \<sigma>) (subst v \<sigma>) pos\<close> 
+    from this and \<open>(subst t \<sigma>) \<noteq> (subst v \<sigma>)\<close> 
+      and \<open>(subst t \<sigma>) = (subst u \<sigma>)\<close>
+      and \<open>vars_of (subst u \<sigma>) = {}\<close> \<open>vars_of (subst v \<sigma>) = {}\<close> 
+    from \<open>L2 \<in> (cl_ecl P1)\<close> \<open>finite (cl_ecl P1)\<close> 
+    from \<open>finite (cl_ecl P1)\<close>  have "finite ?C" by auto
+    from \<open>finite ?C\<close> have "finite ?C'" by auto
+    from \<open>finite (cl_ecl P1)\<close> \<open>finite ?C'\<close> 
+    from \<open>M' \<in># (mset_set ?C')\<close>and \<open>finite ?C'\<close> have "M' \<in> ?C'" by auto
+      from \<open>M' \<in> ?C'\<close> have "M' = L'" by auto
+      from  \<open>orient_lit_inst L2 u v pos \<sigma>\<close> 
+      from  \<open>L' = Neg (Eq s v)\<close>  
+            from this and \<open>((subst s \<sigma>),(subst u \<sigma>)) \<in> trm_ord\<close>
+              and \<open>(subst u \<sigma>) \<in> set_mset {# (subst u \<sigma>), (subst v \<sigma>) #}\<close> show ?thesis by auto
+            from this and \<open>((subst v \<sigma>),(subst u \<sigma>)) \<in> trm_ord\<close>
+              and \<open>(subst u \<sigma>) \<in> set_mset {# (subst u \<sigma>), (subst v \<sigma>) #}\<close> show ?thesis by auto
+      from this i ii \<open>{# (subst u \<sigma>), (subst v \<sigma>) #} \<noteq> {#}\<close>
+        from this \<open>M' = L'\<close> \<open>k = (mset_lit (subst_lit M' \<sigma>))\<close> show ?thesis  by auto
+  from this d1 d2 \<open>{# (mset_lit (subst_lit x \<sigma>)). x \<in># (mset_set { L2 }) #} \<noteq> {#}\<close> 
+  from this \<open>(Cl_P = (cl_ecl P1))\<close> \<open>C' = ( (Cl_P - { L2 }) \<union> { L' } )\<close> and \<open>P1 \<in> P\<close> 
+  from assms(3) assms(4) \<open>derivable C P S \<sigma> Ground C'\<close> 
+      using ball_S'_C'_le[rule_format, OF \<open>x \<in> S'\<close>]
+      using \<open>(mset_cl (C', \<sigma>), mset_ecl (D, \<sigma>)) \<in> mult (mult trm_ord)\<close>
+    with \<open>D \<in> P\<close> show "\<exists>D' \<in> cl_ecl ` P. ((cl_ecl (fst x), snd x), (D', \<sigma>)) \<in> cl_ord" by auto
+  from this and \<open>S' \<subseteq> (instances S)\<close> and \<open>(set_entails_clause (clset_instances S') (cl_ecl E))\<close>
+    and \<open>(\<forall>x \<in> S'. ( subterms_inclusion (subst_set (trms_ecl (fst x)) (snd x)) 
+              (trms_ecl E)))\<close>
+  from assms(2) \<open>grounding_set P \<sigma>\<close> \<open>derivable C P S \<sigma> Ground C'\<close> 
+    \<open>\<not>redundant_inference (subst_ecl D \<eta>) S P \<sigma>\<close>
+  from this  and \<open>derivable C P S \<sigma> Ground C'\<close> \<open>ground_clause (cl_ecl C)\<close> 
+    \<open>derivable D P S \<theta> FirstOrder C'\<close> 
+    \<open>trms_subsumes D C \<eta>\<close> \<open>\<sigma> \<doteq> \<theta> \<lozenge> \<eta>\<close> assms(1) have "redundant_clause (subst_ecl D \<eta>) S \<sigma> C'" 
+  from this and \<open>\<not>redundant_clause (subst_ecl D \<eta>) S \<sigma> C'\<close> show False by auto
+section \<open>Refutational Completeness\<close>
+text \<open>We prove that our variant of the superposition calculus is complete under the 
+redundancy criteria defined above. This is done as usual, by constructing a model of every
+saturated set not containing the empty clause.\<close>
+subsection \<open>Model Construction\<close>
+text \<open>We associate as usual every set of extended clauses with an interpretation. 
+The interpretation is constructed in such a way that it is a model of the set of clauses 
+if the latter is saturated and does not contain the empty clause.
+The interpretation is constructed by defining directly a normalization function mapping every term 
+to its normal form, i.e., to the minimal equivalent term. Note that we do not consider sets of 
+rewrite rules explicitly.\<close>
+text \<open>The next function associates every normalization function with the corresponding 
+interpretation (two terms are in relation if they share the same normal form). 
+The obtained relation is an interpretation if the normalization function 
+is compatible with the term combination operator.\<close>
+text \<open>The normalization function is defined by mapping each term to a set of pairs. Intuitively,
+the second element of each pair represents the right hand side of a rule that can be used to rewrite 
+the considered term, and the first element of the pair denotes its normal form. 
+The value of the term is the first component of the pair with the smallest second component.\<close>
+text \<open>The following function returns the set of values for which the second component is minimal. 
+We then prove that this set is non-empty and define a function returning an arbitrary chosen 
+element.\<close> 
+  from this \<open>x \<in> E\<close> 
+text \<open>We now define the normalization function. The definition is tuned to 
+make the termination proof straightforward. We will reformulate it afterward to get a simpler 
+definition. 
+
+We first test whether a subterm of the considered term is reducible. If this is the case then 
+the value can be obtained by applying recursively the function on each subterm, and then again on 
+the term obtained by combining the obtained normal forms.
+If not, then we collect all possible pairs (as explained above), and we use the one with the minimal 
+second component. These pairs can be interpreted as rewrite rules, giving the value of the 
+considered term: the second component is the right-hand side of the rule and the first component is 
+the normal form of the right-hand side. 
+As usual, such rewrite rules are obtained from ground clauses that have a strictly positive 
+maximal literal, no selected literals, and that are not validated by the constructed interpretation.
+\<close>
+text \<open>We now introduce a few shorthands and rewrite the previous definition into an equivalent 
+simpler form. The key point is to prove that a term is always greater than its normal form.\<close>
+    from \<open>orient_lit L u v pos\<close> have "L = (Pos (Eq u v)) \<or> L = (Pos (Eq v u))" 
+    from this and \<open>(trm_rep u S) =  (trm_rep v S)\<close>  have "validate_ground_lit ?I L" 
+    from this and \<open>L \<in> C\<close> and assms  show False unfolding int_clset_def 
+    from \<open>orient_lit L u v neg\<close> have "L = (Neg (Eq u v)) \<or> L = (Neg (Eq v u))" 
+    from this and \<open>(trm_rep u S) \<noteq> (trm_rep v S)\<close>  have "validate_ground_lit ?I L" 
+    from this and \<open>L \<in> C\<close> and assms  show False unfolding int_clset_def 
+text \<open>The following function states that all instances of the terms attached to a clause are in 
+normal form w.r.t.\ the interpretation associated with @{term "S"}, up to some maximal term 
+@{term "t"}\<close>
+  from \<open>\<exists>x'\<in> trms_ecl C. occurs_in x (subst x' \<sigma>)\<close> obtain x' where
+  from \<open>x' \<in> trms_ecl C\<close> 
+  from this and assms(1) \<open>occurs_in x (subst x' \<sigma>)\<close> 
+  from this and \<open>trm_rep x S \<noteq> x\<close> show False by blast
+text \<open>The following predicate states that a term @{term "z"} is the normal form of the right-hand 
+side of a rule of left-hand side @{term "t"}. It is used to define the set of possible values for 
+term @{term "t"}. The actual value is that corresponding to the smallest right-hand side.\<close>
+  have "(lhs t,t) \<in> trm_ord" using \<open>subterm_reduction_applicable S t\<close> args_are_strictly_lower 
+  have "(rhs t,t) \<in> trm_ord" using \<open>subterm_reduction_applicable S t\<close> args_are_strictly_lower 
+  from assms(1) and \<open>(lhs t,t) \<in> trm_ord\<close> have 
+  from assms(1) and \<open>(rhs t,t) \<in> trm_ord\<close> have 
+  from \<open>subterm_reduction_applicable S t\<close> 
+        and \<open>((Comb (trm_rep (lhs t) S) (trm_rep (rhs t) S)),(Comb (lhs t)  (trm_rep (rhs t) S))) 
+          \<in> trm_ord\<close>
+     \<open>((Comb (trm_rep (lhs t) S) (trm_rep (rhs t) S)),(Comb (trm_rep (lhs t) S) (rhs t))) \<in> trm_ord\<close>
+text \<open>The following lemma corresponds to the initial definition of the function 
+@{term "trm_rep"}.\<close>
+    using \<open>subterm_reduction_applicable S t\<close> assms trm_rep_is_lower_aux by blast 
+    by (metis \<open>trm_rep t S = subterm_reduction_aux S t\<close> 
+        \<open>subterm_reduction_applicable S t\<close> 
+  from this and \<open>\<not>subterm_reduction_applicable S t\<close> show ?thesis 
+        from \<open>(?v,x) \<in> trm_ord\<close> and hyp_ind have "?P ?v" by metis
+        from this and \<open>(trm_rep x S) = (trm_rep ?v S)\<close> show ?thesis
+          by (metis \<open>(trm_rep (lhs x) S \<cdot> trm_rep (rhs x) S, x) \<in> trm_ord\<close> trm_ord_trans transE) 
+        from this and \<open>x \<noteq> (trm_rep x S)\<close> 
+        from \<open>pair \<in> (set_of_candidate_values S x)\<close> 
+          \<open>\<exists> CC C' C  L L' \<sigma> t' s'. candidate_values (fst pair) CC C' C (snd pair) L L' \<sigma> t' s' x S\<close>
+        from \<open>(snd pair,x) \<in> trm_ord\<close> \<open>((snd pair, x) \<in> trm_ord \<longrightarrow> fst pair = trm_rep (snd pair) S)\<close> 
+        from \<open>(snd pair,x) \<in> trm_ord\<close> and hyp_ind have "(?P (snd pair))" by blast
+        from this and \<open>fst pair = (trm_rep (snd pair) S)\<close> 
+        from this and \<open>(trm_rep x S) = fst pair\<close> and \<open>(snd pair,x) \<in> trm_ord\<close> \<open>x \<noteq> (trm_rep x S)\<close> 
+    from this and \<open>(trm_rep x S) = (trm_rep ?v S)\<close> show "(((trm_rep x S),x) \<in> trm_ord)"
+          by (metis \<open>(trm_rep (lhs x) S \<cdot> trm_rep (rhs x) S, x) \<in> trm_ord\<close> trm_ord_trans transE) 
+  from \<open>pair \<in> (set_of_candidate_values S x)\<close> 
+  from \<open>\<exists> CC C' C  L L' \<sigma> t' s'. candidate_values (fst pair) CC C' C (snd pair) L L' \<sigma> t' s' x S\<close>
+  from \<open>(snd pair,x) \<in> trm_ord\<close> and \<open>((snd pair, x) \<in> trm_ord \<longrightarrow> fst pair = trm_rep (snd pair) S)\<close> 
+  from this and \<open>(snd pair,x) \<in> trm_ord\<close> have "(trm_rep (snd pair) S,x) \<in> trm_ord"
+  from this and \<open>(trm_rep x S) = fst pair\<close> and \<open>fst pair = trm_rep (snd pair) S\<close> show ?thesis
+text \<open>Finally, the next lemma gives a simpler and more convenient definition 
+of the function @{term "trm_rep"}.\<close>
+text \<open>We now establish some useful properties of the normalization function.\<close>
+        from this and \<open>(trm_rep (trm_rep ?v S) S) =  (trm_rep ?v S)\<close> \<open>trm_rep x S = trm_rep ?v S\<close>
+          from c2 and \<open>x \<noteq> (trm_rep x S)\<close> 
+          from \<open>pair \<in> (set_of_candidate_values S x)\<close> 
+          from \<open>(snd pair,x) \<in> trm_ord\<close> 
+            and \<open>((snd pair, x) \<in> trm_ord \<longrightarrow> fst pair = trm_rep (snd pair) S)\<close> 
+          from \<open>(snd pair,x) \<in> trm_ord\<close> and hyp_ind have "(?P (snd pair))" by blast
+          from this and \<open>fst pair = (trm_rep (snd pair) S)\<close> and \<open>(trm_rep x S) = fst pair\<close> 
+            and \<open>(trm_rep (trm_rep x S) S) \<noteq> (trm_rep x S)\<close> 
+text \<open>The following predicate is true if all proper subterms are in normal form.\<close>
+text \<open>The following function checks that the considered term contains a subterm that can be 
+reduced.\<close>
+  from \<open>subterm t1 p t'\<close> and assms(2) obtain q where "subterm t q t'"
+  from this and \<open>root_term S t'\<close> and \<open>trm_rep t' S \<noteq> t'\<close> 
+            from \<open>x = (Comb x1 x2)\<close> and trm_ord_subterm have "(x1,x) \<in> trm_ord" by auto
+            from this and hyp_ind and \<open>(trm_rep x1 S) \<noteq> x1\<close> 
+            from this and neg_h and \<open>x = (Comb x1 x2)\<close> show False 
+            from \<open>x = (Comb x1 x2)\<close> and trm_ord_subterm have "(x2,x) \<in> trm_ord" by auto
+            from this and hyp_ind and \<open>(trm_rep x2 S) \<noteq> x2\<close> 
+            from this and neg_h and \<open>x = (Comb x1 x2)\<close> show False 
+        from this and \<open>root_term S x\<close> and \<open>(trm_rep x S) \<noteq> x\<close>have 
+text \<open>The following function checks that a position can be reduced, taking into account the 
+order on positions associated with the considered clause and term. A term is reducible when all 
+terms occurring at smaller positions are irreducible.\<close>
+text \<open>The next function checks that a given clause contains two equations with the same
+left-hand side and whose right-hand sides are equivalent in a given interpretation. If no such 
+equations exist then it is clear that the maximal literal is necessarily unique.\<close>
+  from \<open>(eq_occurs_in_cl ?t s'' (C- { L1 }) \<sigma>)\<close> 
+  from \<open>s'' = subst s' \<sigma>\<close> and \<open>(trm_rep ?s  S) = (trm_rep s'' S)\<close> 
+  from \<open>L' \<in> (C- { L1 })\<close> \<open>orient_lit_inst L' t' s' pos \<sigma>\<close> \<open>(subst t' \<sigma>) = ?t\<close> 
+  \<open>(trm_rep ?s  S) = (trm_rep (subst s' \<sigma>) S)\<close>
+  from \<open>orient_lit_inst L' u v polarity \<sigma>\<close> have "orient_lit ?L' ?u ?v polarity" 
+  from \<open>orient_lit_inst L t s pos \<sigma>\<close> have "orient_lit ?L ?t ?s pos" 
+  from assms(6) and \<open>orient_lit ?L' ?u ?v polarity\<close> 
+  from assms(6) and \<open>orient_lit ?L' ?u ?v polarity\<close> 
+  from assms(5) and \<open>orient_lit ?L ?t ?s pos\<close> 
+  from assms(5) and \<open>orient_lit ?L ?t ?s pos\<close> 
+  from assms(1) and \<open>L' \<in> C - { L }\<close> have "(?L,?L') \<notin> lit_ord" 
+  from this and \<open>orient_lit ?L ?t ?s pos\<close> \<open>orient_lit ?L' ?u ?v polarity\<close> and assms(5) assms(6)
+  from this and \<open>vars_of ?t \<subseteq> {}\<close> \<open>vars_of ?u \<subseteq> {}\<close> have "?u = ?t \<or> (?u,?t) \<in> trm_ord" 
+  from \<open>(?u,?v) \<notin> trm_ord\<close> and \<open>vars_of ?u \<subseteq> {}\<close> \<open>vars_of ?v \<subseteq> {}\<close> 
+  from \<open>(?t,?s) \<notin> trm_ord\<close> and \<open>vars_of ?t \<subseteq> {}\<close> \<open>vars_of ?s \<subseteq> {}\<close> 
+  from \<open>vars_of ?v \<subseteq> {}\<close> \<open>vars_of ?s \<subseteq> {}\<close> have "?v = ?s \<or> (?v,?s) \<in> trm_ord \<or> (?s,?v) \<in> trm_ord" 
+    from this and \<open>?u = ?v \<or> (?v,?u) \<in> trm_ord\<close> have "(?v,?t) \<in> trm_ord" 
+    from this and \<open>(?u,?t) \<in> trm_ord\<close> and \<open>orient_lit ?L ?t ?s pos\<close> \<open>orient_lit ?L' ?u ?v polarity\<close> 
+    from this and \<open>?u = ?t \<or> (?u,?t) \<in> trm_ord\<close> have "?u = ?t" by auto
+      from this and \<open>?u = ?t\<close> and  \<open>orient_lit ?L ?t ?s pos\<close> 
+        \<open>orient_lit ?L' ?u ?v polarity\<close> assms(5) assms(6)
+      from this and \<open>(?L,?L') \<notin> lit_ord\<close> show False by auto
+      from this and \<open>orient_lit_inst L' u v polarity \<sigma>\<close> \<open>polarity = pos\<close> \<open>?u = ?t\<close>
+      from this and \<open>?u = ?t\<close> and  \<open>orient_lit ?L ?t ?s pos\<close> \<open>orient_lit ?L' ?u ?v polarity\<close> 
+        and \<open>polarity=pos\<close> assms(5) assms(6)
+      from this and \<open>(?L,?L') \<notin> lit_ord\<close>show False by auto
+    from this and \<open>?v \<noteq> ?s\<close> and \<open>?v = ?s \<or> (?v,?s) \<in> trm_ord \<or> (?s,?v) \<in> trm_ord\<close> 
+      from this and \<open>?u = ?t\<close> and  \<open>orient_lit ?L ?t ?s pos\<close> \<open>orient_lit ?L' ?u ?v polarity\<close> 
+        and \<open>polarity=pos\<close> assms(5) assms(6)
+  from \<open>L \<in> (subst_cl ( C - { L1 } ) \<sigma>)\<close> obtain L' where "L' \<in> C - { L1 }" and 
+  from \<open>L' \<in> C - { L1 }\<close>  and \<open>L = (subst_lit L' \<sigma>)\<close> 
+  from \<open>L \<in>(subst_cl C \<sigma>)\<close> and assms(5) have "vars_of_lit L = {}" by auto
+  from o and \<open>L = (subst_lit L' \<sigma>)\<close> 
+    from o' and \<open>vars_of_lit L = {}\<close> have "vars_of (subst u \<sigma>) = {}" 
+    from o' and \<open>vars_of_lit L = {}\<close> have "vars_of (subst v \<sigma>) = {}" 
+  from o1 and \<open>vars_of_lit (subst_lit L1 \<sigma>) = {}\<close> have "vars_of (subst t \<sigma>) = {}"
+    from this and o and assms(2) and \<open>validate_ground_lit ?I L\<close> and \<open>L = (subst_lit L' \<sigma>)\<close> 
+    from assms(4) and \<open>L \<in>(subst_cl C \<sigma>)\<close> 
+    from this and o' and o1 and \<open>polarity=pos\<close> and \<open>vars_of_lit L = {}\<close> and \<open>L = (subst_lit L' \<sigma>)\<close> 
+      and \<open>vars_of_lit (subst_lit L1 \<sigma>) = {}\<close> 
+        from this and assms(8) and \<open>(trm_rep (subst u \<sigma>) S) = (trm_rep (subst v \<sigma>) S)\<close>
+        from this o and \<open>L' \<in> C - { L1 }\<close> \<open>polarity = pos\<close> \<open>(subst t \<sigma>) = (subst u \<sigma>)\<close> assms(7) 
+        from this and \<open>(subst t \<sigma>, subst u \<sigma>)  \<notin> trm_ord\<close>
+        and \<open>vars_of (subst t \<sigma>) = {}\<close> and \<open>vars_of (subst u \<sigma>) = {}\<close> 
+        from this and \<open>(subst u \<sigma>, subst v \<sigma>)  \<notin> trm_ord\<close>
+        and \<open>vars_of (subst v \<sigma>) = {}\<close> and \<open>vars_of (subst t \<sigma>) = {}\<close> 
+        from \<open>polarity = pos\<close> and o' and assms(1) and \<open>L \<in>(subst_cl C \<sigma>)\<close> and \<open>L = (subst_lit L' \<sigma>)\<close>
+          and \<open>((subst u \<sigma>), subst t \<sigma>) \<in> trm_ord\<close>
+          and \<open>((subst v \<sigma>), subst t \<sigma>) \<in> trm_ord\<close>
+        from this and \<open>trm_rep (subst u \<sigma>) S = trm_rep (subst v \<sigma>) S\<close> 
+    from this and o and assms(2) and \<open>validate_ground_lit ?I L\<close> and \<open>L = (subst_lit L' \<sigma>)\<close> 
+    from assms(4) and \<open>L \<in>(subst_cl C \<sigma>)\<close> 
+    from this and o' and o1 and \<open>vars_of_lit L = {}\<close> and \<open>L = (subst_lit L' \<sigma>)\<close> 
+      and \<open>vars_of_lit (subst_lit L1 \<sigma>) = {}\<close> 
+    from \<open>((subst_lit L1 \<sigma>),L) \<notin> lit_ord\<close> and o' and o1 and \<open>polarity=neg\<close> and \<open>vars_of_lit L = {}\<close> 
+      and \<open>L = (subst_lit L' \<sigma>)\<close> and \<open>vars_of_lit (subst_lit L1 \<sigma>) = {}\<close> 
+    from this and \<open>(subst t \<sigma>, subst u \<sigma>)  \<notin> trm_ord\<close> and \<open>vars_of (subst t \<sigma>) = {}\<close> 
+        and \<open>vars_of (subst u \<sigma>) = {}\<close> 
+     from this and \<open>(subst u \<sigma>, subst v \<sigma>)  \<notin> trm_ord\<close> and \<open>vars_of (subst v \<sigma>) = {}\<close> 
+        and \<open>vars_of (subst t \<sigma>) = {}\<close> have "(subst v \<sigma>, subst t \<sigma>) \<in> trm_ord" 
+     from \<open>polarity = neg\<close> and o' and assms(1) and \<open>L \<in>(subst_cl C \<sigma>)\<close> and \<open>L = (subst_lit L' \<sigma>)\<close>
+          and \<open>((subst u \<sigma>), subst t \<sigma>) \<in> trm_ord\<close> and \<open>((subst v \<sigma>), subst t \<sigma>) \<in> trm_ord\<close>
+     from this and \<open>trm_rep (subst u \<sigma>) S \<noteq> trm_rep (subst v \<sigma>) S\<close> show False by blast
+text \<open>We introduce the notion of a reduction, which is a ground superposition inference 
+satisfying some additional conditions: 
+
+(i) the ``from'' clause is smaller than the ``into'' clause;
+
+(ii) its ``body'' (i.e., the part of the clause without the equation involved 
+in the rule) is false in a given interpretation and strictly smaller than the involved equation.\<close>
+text \<open>The next lemma states that the rules used to evaluate terms can be renamed so that
+they share no variable with the clause in which the term occurs.\<close>
+  from \<open>finite (vars_of_cl C')\<close> \<open>finite (vars_of_cl (cl_ecl D))\<close> 
+    and \<open>\<not> (finite vars)\<close> 
+  from this \<open>finite (vars_of_cl C')\<close> obtain \<eta>'
+  from this and \<open>CC_bis = (subst_ecl CC \<eta>)\<close> 
+    and \<open>C'_bis = (subst_cl C' \<eta>)\<close> 
+  from \<open>CC \<in> S\<close> and assms(4) and \<open>renaming \<eta> (vars_of_cl C')\<close> and \<open>C' = (cl_ecl CC)\<close> 
+    \<open>CC_bis = (subst_ecl CC \<eta>)\<close> have "CC_bis \<in> S"   
+  from this and \<open>renaming \<eta> (vars_of_cl C')\<close> \<open>C' = (cl_ecl CC)\<close> 
+    \<open>C'_bis = (subst_cl C' \<eta>)\<close> have "sel C'_bis = {}" 
+  from this and \<open>L' \<in> C'\<close> \<open>C'_bis = (subst_cl C' \<eta>)\<close> have "L'_bis \<in> C'_bis" by auto 
+    from \<open>x \<in> vars_of_cl C'\<close> i  
+    from this and \<open>(subst (Var x) \<sigma>) \<noteq> (subst (Var x) ?\<theta>)\<close>
+  from \<open>L' \<in> C'\<close> have "vars_of_lit L' \<subseteq> vars_of_cl C'" by auto
+   from this and \<open>coincide_on \<sigma> ?\<theta> (vars_of_cl C')\<close> 
+  from this and \<open>L = (subst_lit L' \<sigma>)\<close> 
+  from this and \<open>L = (subst_lit L' ?\<theta>)\<close> and 
+    \<open>L'_bis = (subst_lit L' \<eta>)\<close> 
+  from \<open>coincide_on \<sigma> ?\<theta> (vars_of_cl C')\<close> and \<open>C = (subst_cl C' \<sigma>)\<close> 
+  from this and \<open>C  = subst_cl C' ?\<theta>\<close> and \<open>C'_bis = (subst_cl C' \<eta>)\<close>
+  from \<open>(finite C')\<close> and \<open>C'_bis = (subst_cl C' \<eta>)\<close> have "finite C'_bis" by auto
+    from \<open>u \<in> (trms_ecl CC_bis)\<close> and \<open>CC_bis = (subst_ecl CC \<eta>)\<close>
+      using \<open>CC = Ecl C' T\<close> by auto
+    from \<open>u = (subst v \<eta>)\<close> \<open>t = (subst u ?\<theta>')\<close> have "subst v ?\<theta> = t" by simp
+    from \<open>v \<in> trms_ecl CC\<close> \<open>CC \<in> S\<close> assms(5) 
+    from this and \<open>C' = (cl_ecl CC)\<close> \<open>coincide_on \<sigma> ?\<theta> (vars_of_cl C')\<close>  
+    from this and \<open>subst v ?\<theta> = t\<close> have "(subst v \<sigma>) = t"
+    from this and \<open>v \<in> trms_ecl CC\<close> have 
+    from \<open>x' \<in> (trms_ecl CC_bis)\<close> and \<open>CC_bis = (subst_ecl CC \<eta>)\<close>
+      using \<open>CC = Ecl C' T\<close> by auto
+    from \<open>occurs_in x (subst x' ?\<theta>')\<close> \<open>x' = subst v \<eta>\<close> have "occurs_in x (subst v ?\<theta>)" by simp
+    from \<open>v \<in> trms_ecl CC\<close> \<open>CC \<in> S\<close> assms(5) 
+    from this and \<open>C' = (cl_ecl CC)\<close> \<open>coincide_on \<sigma> ?\<theta> (vars_of_cl C')\<close>  
+    from this and \<open>occurs_in x (subst v ?\<theta>)\<close> 
+    from this and \<open>v \<in> trms_ecl CC\<close> and \<open>(x,t) \<in> trm_ord\<close> 
+      \<open>(trm_rep x S) \<noteq> x\<close> and \<open>(trms_irreducible CC \<sigma> S t)\<close> show False 
+   from \<open>(orient_lit_inst L' t' s' pos \<sigma>)\<close> have "vars_of t' \<subseteq> vars_of_lit L'" 
+    from this \<open>coincide_on \<sigma> ?\<theta> (vars_of_lit L')\<close>  
+    from this \<open>t'_bis = (subst t' \<eta>)\<close> have "subst t'_bis ?\<theta>' = subst t' \<sigma>" by simp
+    from \<open>(orient_lit_inst L' t' s' pos \<sigma>)\<close> have "vars_of s' \<subseteq> vars_of_lit L'" 
+    from this \<open>coincide_on \<sigma> ?\<theta> (vars_of_lit L')\<close>  
+    from this \<open>s'_bis = (subst s' \<eta>)\<close> have "subst s'_bis ?\<theta>' = subst s' \<sigma>" by simp
+    from \<open>(orient_lit_inst L' t' s' pos \<sigma>)\<close> 
+    from \<open>(orient_lit_inst L' t' s' pos \<sigma>)\<close> 
+      \<open>L'_bis = (subst_lit L' \<eta>)\<close>
+      \<open>t'_bis = (subst t' \<eta>)\<close>
+      \<open>s'_bis = (subst s' \<eta>)\<close>
+    from \<open>subst s'_bis ?\<theta>' = subst s' \<sigma>\<close> 
+      and \<open>subst t'_bis ?\<theta>' = subst t' \<sigma>\<close> 
+      and \<open>((subst t' \<sigma>),(subst s' \<sigma>)) \<notin> trm_ord\<close> 
+    from this and \<open>L'_bis = (Pos (Eq t'_bis s'_bis)) \<or> L'_bis = (Pos (Eq s'_bis t'_bis))\<close>
+    from \<open>(eq_occurs_in_cl t s'' (C'_bis- { L'_bis }) ?\<theta>')\<close> obtain M u v where 
+    from \<open>M \<in> C'_bis - { L'_bis }\<close> 
+      and \<open>C'_bis = (subst_cl C' \<eta>)\<close> and \<open>L'_bis = (subst_lit L' \<eta>)\<close> 
+    from \<open>orient_lit_inst M u v pos ?\<theta>'\<close> obtain e where "M = (Pos e)" 
+    from this and  \<open>orient_lit_inst M u v pos ?\<theta>'\<close> have "e = (Eq u v) \<or> e = (Eq v u)"  
+    from \<open>orient_lit_inst M u v pos ?\<theta>'\<close> have 
+    from \<open>M = (Pos e)\<close> and \<open>subst_lit M' \<eta> =  M\<close> 
+    from \<open>e = (Eq u v) \<or> e = (Eq v u)\<close> and \<open>(subst_equation e' \<eta>)  = e\<close>
+    from \<open>( (subst u ?\<theta>'),(subst v ?\<theta>')) \<notin> trm_ord\<close>
+      \<open>(subst u' \<eta>) = u\<close>
+      \<open>(subst v' \<eta>) = v\<close>
+    from this and \<open>M' = (Pos e')\<close> and \<open>e' = (Eq u' v') \<or> (e' = (Eq v' u'))\<close> 
+    from \<open>M' \<in> C' - { L' }\<close> have "vars_of_lit M' \<subseteq> vars_of_cl C'"  by auto
+    from this and \<open>coincide_on \<sigma> ?\<theta> (vars_of_cl C')\<close> have "coincide_on \<sigma> ?\<theta> (vars_of_lit M')" 
+    from this and \<open>orient_lit_inst M' u' v' pos ?\<theta>\<close> have "orient_lit_inst M' u' v' pos \<sigma>"
+    from \<open>orient_lit_inst M' u' v' pos ?\<theta>\<close> have "vars_of u' \<subseteq> vars_of_lit M'" and 
+    from \<open>vars_of u' \<subseteq> vars_of_lit M'\<close> and \<open>coincide_on ?\<theta> \<sigma> (vars_of_lit M')\<close> 
+    from this and \<open>(subst u' \<eta>) = u\<close> have "subst u ?\<theta>' = subst u' \<sigma>" by simp
+    from \<open>vars_of v' \<subseteq> vars_of_lit M'\<close> and \<open>coincide_on ?\<theta> \<sigma> (vars_of_lit M')\<close> 
+    from this and \<open>(subst v' \<eta>) = v\<close> have "subst v ?\<theta>' = subst v' \<sigma>" by simp
+    from \<open>subst v ?\<theta>' = subst v' \<sigma>\<close> \<open>s'' = (subst v ?\<theta>')\<close>
+    from \<open>subst u ?\<theta>' = subst u' \<sigma>\<close> \<open>t = (subst u ?\<theta>')\<close>
+    from \<open>s'' = (subst v' \<sigma>)\<close> \<open>t = (subst u' \<sigma>)\<close> 
+      \<open>orient_lit_inst M' u' v' pos \<sigma>\<close> \<open>M' \<in> C' - { L'}\<close> 
+    from this and \<open>(s'',t) \<in> trm_ord\<close> and \<open>(s,t) \<in> trm_ord\<close> and \<open>(trm_rep s S) = (trm_rep s'' S)\<close>
+  from \<open>t'_bis = (subst t' \<eta>)\<close> 
+    and \<open>t = subst t' \<sigma>\<close> 
+    using \<open>subst t'_bis (comp \<eta>' \<sigma>) = subst t' \<sigma>\<close> by auto 
+  from \<open>s'_bis = (subst s' \<eta>)\<close> 
+    and \<open>s = subst s' \<sigma>\<close> 
+    using \<open>subst s'_bis (comp \<eta>' \<sigma>) = subst s' \<sigma>\<close> by auto 
+  from \<open>CC_bis \<in> S\<close> \<open>t \<notin> subst_set (trms_ecl CC_bis) (comp \<eta>' \<sigma>)\<close>
+    \<open>trms_irreducible CC_bis (comp \<eta>' \<sigma>) S t\<close>
+    \<open>C'_bis = cl_ecl CC_bis\<close> \<open>(s, t) \<in> trm_ord\<close> \<open>((s, t) \<in> trm_ord \<longrightarrow> z = trm_rep s S)\<close>
+    \<open>orient_lit_inst L'_bis t'_bis s'_bis pos (comp \<eta>' \<sigma>)\<close>
+    \<open>sel C'_bis = {}\<close> \<open>L'_bis \<in> C'_bis\<close> \<open>maximal_literal L C\<close> 
+    \<open>L = subst_lit L'_bis (comp \<eta>' \<sigma>)\<close>
+    \<open>C = subst_cl C'_bis (comp \<eta>' \<sigma>)\<close>
+    \<open>ground_clause C\<close> \<open>t = subst t'_bis (comp \<eta>' \<sigma>)\<close>
+    \<open>s = subst s'_bis (comp \<eta>' \<sigma>)\<close>
+    \<open>finite C'_bis\<close> \<open>smaller_lits_are_false t C S\<close> 
+    \<open>maximal_literal_is_unique t s C'_bis L'_bis S (comp \<eta>' \<sigma>)\<close>
+      from this and \<open>C'_bis = (cl_ecl CC_bis)\<close>
+      from \<open>x \<in> vars_of_cl C'_bis\<close>  
+      from \<open>N \<in> C'_bis\<close> and \<open>C'_bis = (subst_cl C' \<eta>)\<close> obtain N' where
+      from \<open>x \<in> vars_of_lit N\<close> obtain e where "N = (Pos e) \<or> (N = (Neg e))" 
+      from \<open>N = (Pos e) \<or> (N = (Neg e))\<close> and \<open>N = subst_lit N' \<eta>\<close> obtain e' where
+      from \<open>x \<in> vars_of_eq e\<close> obtain u v where "e = (Eq u v)" and "x \<in> vars_of u \<union> vars_of v"
+      from \<open>e = (Eq u v)\<close> and \<open>e = subst_equation e' \<eta>\<close> obtain u' v' where "e' = (Eq u' v')"
+      from \<open>x \<in> vars_of u \<union> vars_of v\<close> have "x \<in> vars_of u \<or> x \<in> vars_of v" by auto
+        from this and \<open>u = (subst u' \<eta>)\<close> 
+        from \<open>y \<in> vars_of u'\<close> and \<open>e' = (Eq u' v')\<close> have "y \<in> vars_of_eq e'" by auto
+        from this and \<open>N' = (Pos e') \<or> (N' = (Neg e'))\<close> have "y \<in> vars_of_lit N'" by auto
+        from this and \<open>N' \<in> C'\<close> have "y \<in> vars_of_cl C'" by auto
+        from this and \<open>renaming \<eta> (vars_of_cl C')\<close> 
+        from this and \<open>x \<in> vars_of (subst (Var y) \<eta>)\<close> have 
+        from this and \<open>y \<in> vars_of_cl C'\<close> 
+        from this and \<open>x \<in> vars_of_cl (cl_ecl D)\<close> 
+          and \<open>((subst_codomain \<eta> (vars_of_cl C')) \<inter> (vars_of_cl (cl_ecl D))) = {}\<close> 
+        from this and \<open>v = (subst v' \<eta>)\<close> 
+        from \<open>y \<in> vars_of v'\<close> and \<open>e' = (Eq u' v')\<close> have "y \<in> vars_of_eq e'" by auto
+        from this and \<open>N' = (Pos e') \<or> (N' = (Neg e'))\<close> have "y \<in> vars_of_lit N'" by auto
+        from this and \<open>N' \<in> C'\<close> have "y \<in> vars_of_cl C'" by auto
+        from this and \<open>renaming \<eta> (vars_of_cl C')\<close> 
+        from this and \<open>x \<in> vars_of (subst (Var y) \<eta>)\<close> have 
+        from this and \<open>y \<in> vars_of_cl C'\<close> 
+        from this and \<open>x \<in> vars_of_cl (cl_ecl D)\<close> 
+          and \<open>((subst_codomain \<eta> (vars_of_cl C')) \<inter> (vars_of_cl (cl_ecl D))) = {}\<close> 
+    from this and \<open>(candidate_values z CC_bis C'_bis C s L L'_bis ?\<theta>' t'_bis s'_bis t S)\<close>
+text \<open>The following lemma states that if an eligible term in a clause instance 
+is not in normal form, then the clause instance must be reducible (according to the previous
+definition of @{term "reduction"}). This is the key lemma for proving completeness. 
+Note that we assume that the considered substitution is in normal form, so that the reduction 
+cannot occur inside a variable. We also rename the clause used for the reduction, to ensure that it 
+shares no variable with the provided clause.  
+The proof requires an additional hypothesis in the case where the reducible term occurs at the root
+position in an eligible term of a positive literal, see the first hypothesis below 
+and function @{term "equivalent_eq_exists"}.\<close>
+text \<open>The first step is to get the minimal reducible position in @{term "(subst t \<sigma>)"} and 
+the corresponding subterm @{term "v"}.\<close>
+  from \<open>finite ?Redexes\<close> this obtain mp where "mp \<in> ?Redexes" 
+      from this and \<open>subterm (subst t \<sigma>) p'' v'\<close> \<open>trm_rep v' S \<noteq> v'\<close> 
+      from this and \<open>\<And>p'. (p', mp) \<in> (pos_ord C t) \<Longrightarrow> p' \<notin> ?Redexes\<close> and \<open>(p'',mp) \<in> (pos_ord C t)\<close> 
+      from \<open>trm_rep v' S \<noteq> v'\<close> have "st_red S v'" 
+      from \<open>subterm v' p''' v''\<close> and \<open>subterm (subst t \<sigma>) p'' v'\<close> 
+      from this and \<open>trm_rep v'' S \<noteq> v''\<close> \<open>root_term S v''\<close> 
+      from this and \<open>\<And>p'. (p', mp) \<in> (pos_ord C t) \<Longrightarrow> p' \<notin> ?Redexes\<close> 
+      from this and \<open>(p'',mp) \<in> (pos_ord C t)\<close> show False using pos_ord_prefix by auto
+  from \<open>mp \<in> ?Redexes\<close> obtain p v where "mp=p" "subterm (subst t \<sigma>) p v" and "root_term S v"
+text \<open>Second, we find the clause @{term "C2"} and substitution @{term "\<eta>"} that are used to 
+determine the value of @{term "v"} according to the definition of @{term "trm_rep"},
+ and we prove that they satisfy all the desired properties. 
+In particular, clause @{term "C2"}  is renamed to ensure that it shares no variable
+with @{term "C"}.\<close>
+  from \<open>subterm (subst t \<sigma>) p v\<close> have 
+  from \<open>trm_rep v S \<noteq> v\<close> and \<open>root_term S v\<close> have "?v \<in> min_trms (set_of_candidate_values S v)"
+  from \<open>?v \<in> min_trms (set_of_candidate_values S v)\<close> obtain pair where "?v = fst pair" 
+  from \<open>pair \<in> (set_of_candidate_values S v)\<close> have 
+    from assms(7) and \<open>C \<in> S\<close> have "finite (cl_ecl C)" by auto
+    from \<open>(candidate_values zz C2_init Cl_C2_init gr_Cl_C2 gr_rhs gr_L2 L2_init 
+            \<eta>_init lhs_init rhs_init v S)\<close>   
+   from assms(11) \<open>closed_under_renaming S\<close> \<open>finite Cl_C2_init\<close> \<open>finite (cl_ecl C)\<close>
+    \<open>(candidate_values zz C2_init Cl_C2_init gr_Cl_C2 gr_rhs gr_L2 L2_init 
+        \<eta>_init lhs_init rhs_init v S)\<close>
+   from \<open>(candidate_values zz C2 Cl_C2 gr_Cl_C2 gr_rhs gr_L2 L2 \<eta> lhs rhs v S)\<close>
+    and \<open>pair = (zz,  gr_rhs)\<close> and \<open>?v = fst pair\<close>
+   from this and \<open>gr_Cl_C2 = subst_cl Cl_C2 \<eta>\<close> and \<open>gr_L2 = subst_lit L2 \<eta>\<close> 
+   from this and \<open>maximal_literal gr_L2 gr_Cl_C2\<close> and \<open>gr_Cl_C2 = subst_cl Cl_C2 \<eta>\<close>
+    and \<open>Cl_C2 = (cl_ecl C2)\<close> and \<open>gr_L2 = subst_lit L2 \<eta>\<close> have "eligible_literal L2 C2 \<eta>"
+    from \<open>ground_clause gr_Cl_C2\<close> and \<open>gr_L2 \<in> gr_Cl_C2\<close> have "vars_of_lit gr_L2 = {}" 
+    from \<open>orient_lit_inst M u' v' pos \<eta>\<close> have "orient_lit (subst_lit M \<eta>) ?u' ?v' pos"
+    from \<open>orient_lit_inst L2 lhs rhs pos \<eta>\<close> have "orient_lit (subst_lit L2 \<eta>) (subst lhs \<eta>) 
+    from \<open>orient_lit_inst M u' v' pos \<eta>\<close> and \<open>M \<in> (Cl_C2 - {L2})\<close> and 
+    \<open>gr_Cl_C2 = subst_cl Cl_C2 \<eta>\<close>
+    from \<open>M\<in>Cl_C2 - {L2}\<close> and \<open>gr_Cl_C2 = subst_cl Cl_C2 \<eta>\<close> 
+    from \<open>M\<in>Cl_C2 - {L2}\<close> and \<open>gr_Cl_C2 = subst_cl Cl_C2 \<eta>\<close> 
+    from \<open>vars_of_lit gr_L2 = {}\<close> and \<open>gr_L2 = subst_lit L2 \<eta>\<close>  
+      \<open>orient_lit (subst_lit L2 \<eta>) (subst lhs \<eta>) (subst rhs \<eta>) pos\<close> 
+    from \<open>ground_clause gr_Cl_C2\<close> and \<open>(subst_lit M \<eta>) \<in> gr_Cl_C2\<close> 
+    from this and \<open>orient_lit (subst_lit M \<eta>) ?u' ?v' pos\<close> 
+    from \<open>maximal_literal gr_L2 gr_Cl_C2\<close> and \<open>(subst_lit M \<eta>) \<in> gr_Cl_C2\<close> 
+    from this and \<open>orient_lit (subst_lit M \<eta>) ?u' ?v' pos\<close> 
+      and \<open>orient_lit (subst_lit L2 \<eta>) (subst lhs \<eta>) (subst rhs \<eta>) pos\<close>
+      and \<open>subst lhs \<eta> = subst u' \<eta>\<close> 
+      and \<open>vars_of_lit gr_L2 = {}\<close> and  \<open>vars_of_lit (subst_lit M \<eta>) = {}\<close> 
+      and \<open>gr_L2 = subst_lit L2 \<eta>\<close> have "((subst rhs \<eta>),?v') \<notin>  trm_ord" 
+    from this and \<open>vars_of ?v' = {}\<close> and \<open>vars_of (subst rhs \<eta>) = {}\<close> 
+    from this and \<open>(gr_rhs,v) \<in> trm_ord\<close> and \<open>gr_rhs = subst rhs \<eta>\<close> have 
+    from \<open>orient_lit_inst M u' v' pos \<eta>\<close> have "((subst u' \<eta>),(subst v' \<eta>)) \<notin> trm_ord" 
+        by (metis \<open>(subst v' \<eta>, v) \<in> trm_ord\<close> \<open>(gr_rhs, v) \<in> trm_ord\<close> 
+          \<open>subst lhs \<eta> = subst u' \<eta>\<close> 
+          \<open>eq_occurs_in_cl (subst u' \<eta>) (subst v' \<eta>) (Cl_C2 - {L2}) \<eta>\<close> 
+          \<open>maximal_literal_is_unique v gr_rhs Cl_C2 L2 S \<eta>\<close> \<open>v = subst lhs \<eta>\<close> 
+    from this and \<open>trm_rep (subst rhs \<eta>) S = trm_rep (subst v' \<eta>) S\<close>
+      and \<open>gr_rhs = (subst rhs \<eta>)\<close> show False by blast
+   from  this \<open>gr_Cl_C2 = subst_cl Cl_C2 \<eta>\<close>  
+   and  \<open>gr_L2 = subst_lit L2 \<eta>\<close>  
+   and \<open>smaller_lits_are_false v gr_Cl_C2 S\<close> and assms(9) and \<open>orient_lit_inst L2 lhs rhs pos \<eta>\<close>
+   and \<open>maximal_literal gr_L2 gr_Cl_C2\<close> 
+   and \<open>ground_clause gr_Cl_C2\<close>
+   and \<open>gr_L2 \<in> gr_Cl_C2\<close> and \<open>v = subst lhs \<eta>\<close> \<open>gr_rhs = subst rhs \<eta>\<close>
+   and \<open>trm_rep v S = trm_rep gr_rhs S\<close> 
+text \<open>We fuse the substitutions @{term "\<sigma>"} and @{term "\<eta>"} so that the superposition rule 
+can be applied:\<close>
+   from \<open>ground_clause (subst_cl (cl_ecl C) \<sigma>)\<close> 
+   from \<open>finite (vars_of_cl (cl_ecl C))\<close> \<open>(vars_of_cl (cl_ecl C) \<inter> vars_of_cl (cl_ecl C2)) = {}\<close>
+    \<open>ground_on (vars_of_cl (cl_ecl C)) \<sigma>\<close>  obtain \<sigma>' where
+   from \<open>coincide_on \<sigma>' \<sigma> (vars_of_cl (cl_ecl C))\<close> have "coincide_on \<sigma> \<sigma>' (vars_of_cl (cl_ecl C))" 
+   from \<open>coincide_on \<sigma>' \<eta> (vars_of_cl (cl_ecl C2))\<close> have "coincide_on \<eta> \<sigma>' (vars_of_cl (cl_ecl C2))" 
+   from \<open>eligible_literal L1 C \<sigma>\<close> \<open>L1 \<in> (cl_ecl C)\<close> \<open>coincide_on \<sigma> \<sigma>' (vars_of_cl (cl_ecl C))\<close>  
+   from \<open>eligible_literal L2 C2 \<eta>\<close> \<open>L2 \<in> Cl_C2\<close> \<open>Cl_C2 = (cl_ecl C2)\<close> \<open>coincide_on \<eta> \<sigma>' 

@@ -1,0 +1,79 @@
+theory Runge_Kutta
+imports
+  "HOL-Analysis.Analysis"
+  One_Step_Method
+  "HOL-Library.Float"
+  Affine_Arithmetic.Executable_Euclidean_Space
+  Ordinary_Differential_Equations.Multivariate_Taylor
+begin
+
+
+lemma scale_back: "(r, r *\<^sub>R x) = r *\<^sub>R (1, x)" "(0, r *\<^sub>R x) = r *\<^sub>R (0, x)"
+  by simp_all
+
+lemma integral_normalize_bounds:
+  fixes s t::real
+  assumes "t \<le> s"
+  assumes "f integrable_on {t .. s}"
+  shows [symmetric]: "(s - t) *\<^sub>R integral {0 .. 1} (\<lambda>x. f ((s - t) *\<^sub>R x + t)) = integral {t..s} f"
+proof cases
+  assume "s > t"
+  hence "s - t \<noteq> 0" "0 \<le> s - t" by simp_all
+  from assms have "(f has_integral integral {t .. s} f) (cbox t s)"
+    by (auto simp: integrable_integral)
+  have "((\<lambda>x. f ((s - t) * x + t)) has_integral (1 / \<bar>s - t\<bar>) *\<^sub>R integral {t..s} f)
+    ((\<lambda>x. (x - t) / (s - t)) ` {t..s})"
+    by (simp add: divide_simps)
+  also
+  have "t < s \<Longrightarrow> 0 \<le> x \<Longrightarrow> x \<le> 1 \<Longrightarrow> x * (s - t) + t \<le> s" for x
+  then have "((\<lambda>x. (x - t) / (s - t)) ` {t..s}) = {0 .. 1}"
+    by (auto intro!: image_eqI[where x="x * (s - t) + t" for x]
+      simp: divide_simps)
+  finally
+  have "integral {0..1} (\<lambda>x. f ((s - t) * x + t)) = (1 / \<bar>s - t\<bar>) *\<^sub>R integral {t..s} f"
+    by (rule integral_unique)
+  then show ?thesis
+qed (insert assms, simp)
+
+lemma
+  has_integral_integral_eqI:
+  "f integrable_on s \<Longrightarrow> integral s f = k \<Longrightarrow> (f has_integral k) s"
+  by (simp add:  has_integral_integral)
+
+lemma convex_scaleR_sum2:
+  assumes "x \<in> G" "y \<in> G" "convex G"
+  assumes "a \<ge> 0" "b \<ge> 0" "a + b \<noteq> 0"
+  shows "(a *\<^sub>R x + b *\<^sub>R y) /\<^sub>R (a + b) \<in> G"
+proof -
+  have "(a / (a + b)) *\<^sub>R x + (b / (a + b)) *\<^sub>R y \<in> G"
+    using assms
+    by (intro convexD) (auto simp: divide_simps)
+  then show ?thesis
+    by (auto simp: algebra_simps divide_simps)
+qed
+
+lemma sum_by_parts_ivt:
+  assumes "finite X"
+  assumes "convex G"
+  assumes "\<And>i. i \<in> X \<Longrightarrow> g i \<in> G"
+  assumes "\<And>i. i \<in> X \<Longrightarrow> 0 \<le> c i"
+  obtains y where "y \<in> G" "(\<Sum>x\<in>X. c x *\<^sub>R g x) = sum c X *\<^sub>R y" | "G = {}"
+proof (atomize_elim, cases "sum c X = 0", goal_cases)
+  case pos: 2
+  let ?y = "(\<Sum>x\<in>X. (c x / sum c X) *\<^sub>R g x)"
+  have "?y \<in> G" using pos
+    by (intro convex_sum)
+      (auto simp: sum_divide_distrib[symmetric]
+        intro!: divide_nonneg_nonneg assms sum_nonneg)
+  thus ?case
+    by (auto intro!: exI[where x = ?y] simp: scaleR_right.sum pos)
+qed (insert assms, auto simp: sum_nonneg_eq_0_iff)
+
+lemma
+  integral_by_parts_near_bounded_convex_set:
+  assumes f: "(f has_integral I) (cbox a b)"
+  assumes s: "((\<lambda>x. f x *\<^sub>R g x) has_integral P) (cbox a b)"
+  assumes G: "\<And>x. x \<in> cbox a b \<Longrightarrow> g x \<in> G"
+  assumes nonneg: "\<And>x. x \<in> cbox a b \<Longrightarrow> f x \<ge> 0"
+  assumes convex: "convex G"
+  assumes bounded: "bounded G"

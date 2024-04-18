@@ -1,0 +1,243 @@
+theory Reviewer_Assignment_Value_Setup
+  imports Reviewer_Assignment_Intro
+begin
+
+
+
+declare updates_commute_paper[simp]
+
+consts PID :: paperID
+
+definition eqExcRLR :: "role list \<Rightarrow> role list \<Rightarrow> bool" where
+"eqExcRLR rl rl1 \<equiv> [r \<leftarrow> rl . \<not> isRevRoleFor PID r] = [r \<leftarrow> rl1 . \<not> isRevRoleFor PID r]"
+
+lemma eqExcRLR_set:
+assumes 1: "eqExcRLR rl rl1" and 2: "\<not> isRevRoleFor PID r"
+shows "r \<in>\<in> rl \<longleftrightarrow> r \<in>\<in> rl1"
+proof-
+  have "set ([r\<leftarrow>rl . \<not> isRevRoleFor PID r]) = set ([r\<leftarrow>rl1 . \<not> isRevRoleFor PID r])"
+  using 1 unfolding eqExcRLR_def by auto
+  thus ?thesis using 2 unfolding set_filter by auto
+qed
+
+lemmas eqExcRLR = eqExcRLR_def
+
+lemma eqExcRLR_eq[simp,intro!]: "eqExcRLR rl rl"
+unfolding eqExcRLR by auto
+
+lemma eqExcRLR_sym:
+assumes "eqExcRLR rl rl1"
+shows "eqExcRLR rl1 rl"
+using assms unfolding eqExcRLR by auto
+
+lemma eqExcRLR_trans:
+assumes "eqExcRLR rl rl1" and "eqExcRLR rl1 rl2"
+shows "eqExcRLR rl rl2"
+using assms unfolding eqExcRLR by auto
+
+lemma eqExcRLR_imp:
+assumes s: "reach s" and pid: "pid \<noteq> PID" and
+1: "eqExcRLR (roles s cid uid) (roles s1 cid uid)"
+shows
+"isRevNth s cid uid pid = isRevNth s1 cid uid pid \<and>
+ isRev s cid uid pid = isRev s1 cid uid pid \<and>
+ getRevRole s cid uid pid = getRevRole s1 cid uid pid \<and>
+ getReviewIndex s cid uid pid = getReviewIndex s1 cid uid pid" (is "?A \<and> ?B \<and> ?C \<and> ?D")
+proof(intro conjI)
+  show A: ?A
+    apply(rule ext)
+    using 1 by (metis eqExcRLR_set isRevRoleFor.simps(1) pid)
+  show B: ?B using A unfolding isRev_def2 by auto
+  show C: ?C
+    apply(cases "isRev s cid uid pid")
+    subgoal by (metis A B getRevRole_Some_Rev_isRevNth isRevNth_equals isRev_getRevRole2 s)
+    by (metis B Bex_set_list_ex find_None_iff getRevRole_def isRev_def)
+  show D: ?D unfolding getReviewIndex_def using C by auto
+qed
+
+lemma eqExcRLR_imp2:
+assumes "eqExcRLR (roles s cid uid) (roles s1 cid uid)"
+shows
+"isPC s cid uid = isPC s1 cid uid \<and>
+ isChair s cid uid = isChair s1 cid uid \<and>
+ isAut s cid uid = isAut s1 cid uid"
+by (metis (opaque_lifting, no_types) assms eqExcRLR_set isRevRoleFor.simps)
+
+lemma filter_eq_imp:
+assumes "\<And> x. P x \<Longrightarrow> Q x"
+and "filter Q xs = filter Q ys"
+shows "filter P xs = filter P ys"
+using assms filter_filter
+proof-
+  have "filter P xs = filter P (filter Q xs)"
+  unfolding filter_filter using assms by metis
+  also have "... = filter P (filter Q ys)" using assms by simp
+  also have "... = filter P ys" unfolding filter_filter using assms by metis
+  finally show ?thesis .
+qed
+
+lemma arg_cong3: "a = a1 \<Longrightarrow> b = b1 \<Longrightarrow> c = c1 \<Longrightarrow> h a b c = h a1 b1 c1"
+by auto
+
+lemmas map_concat_cong1 = arg_cong[where f = concat, OF arg_cong2[where f = map, OF _ refl]]
+lemmas If_cong1 = arg_cong3[where h = If, OF _ refl refl]
+
+lemma diff_cong1: "a = a1 \<Longrightarrow> (a \<noteq> b) = (a1 \<noteq> b)" by auto
+
+lemma isRev_pref_notConflict:
+assumes "reach s" and "isRev s cid uid pid"
+shows "pref s uid pid \<noteq> Conflict"
+by (metis assms pref_Conflict_isRev)
+
+lemma isRev_pref_notConflict_isPC:
+assumes "reach s" and "isRev s cid uid pid"
+shows "pref s uid pid \<noteq> Conflict \<and> isPC s cid uid"
+by (metis assms(1) assms(2) isRev_isPC isRev_pref_notConflict)
+
+lemma eqExcRLR_imp_isRevRole_imp:
+assumes "eqExcRLR rl rl1"
+shows "[r\<leftarrow> rl. \<not> isRevRole r] = [r\<leftarrow> rl1 . \<not> isRevRole r]"
+using assms filter_eq_imp unfolding eqExcRLR_def
+by (metis isRevRole.simps(1) isRevRoleFor.elims(2))
+
+lemma notIsPC_eqExLRL_roles_eq:
+assumes s: "reach s" and s1: "reach s1" and PID: "PID \<in>\<in> paperIDs s cid"
+and pc: "\<not> isPC s cid uid"
+and eq: "eqExcRLR (roles s cid uid) (roles (s1::state) cid uid)"
+shows "roles s cid uid = roles s1 cid uid"
+proof-
+  have "\<not> isPC s1 cid uid" using pc eqExcRLR_imp2[OF eq] by auto
+  hence "\<not> isRev s cid uid PID \<and> \<not> isRev s1 cid uid PID" using pc s s1 PID
+  by (metis isRev_pref_notConflict_isPC)
+  thus ?thesis using eq unfolding eqExcRLR_def
+  by (metis Bex_set_list_ex filter_id_conv isRev_def)
+qed
+
+lemma foo1: "P a \<Longrightarrow> [r\<leftarrow>List.insert a l . P r] = (if a\<in>set l then filter P l else a#filter P l)"
+  by (metis filter.simps(2) in_set_insert not_in_set_insert)
+
+lemma foo2: "\<lbrakk>eqExcRLR rl rl'; \<not> isRevRoleFor PID x\<rbrakk> \<Longrightarrow> eqExcRLR (List.insert x rl) (List.insert x rl')"
+  unfolding eqExcRLR_def
+  apply (auto simp: foo1) []
+  apply (metis eqExcRLR_def eqExcRLR_set isRevRoleFor.simps)+
+  done
+
+lemma foo3:
+  assumes "eqExcRLR rl rl'" "isRevRoleFor PID x"
+  shows "eqExcRLR (List.insert x rl) (rl')"
+  and "eqExcRLR (rl) (List.insert x rl')"
+  using assms
+  unfolding eqExcRLR_def
+  by (auto simp: List.insert_def)
+
+
+
+definition eqExcPID :: "state \<Rightarrow> state \<Rightarrow> bool" where
+"eqExcPID s s1 \<equiv>
+ confIDs s = confIDs s1 \<and> conf s = conf s1 \<and>
+ userIDs s = userIDs s1 \<and> pass s = pass s1 \<and> user s = user s1
+ \<and>
+ (\<forall> cid uid. eqExcRLR (roles s cid uid) (roles s1 cid uid))
+ \<and>
+ paperIDs s = paperIDs s1
+ \<and>
+ paper s = paper s1
+ \<and>
+ pref s = pref s1 \<and>
+ voronkov s = voronkov s1 \<and>
+ news s = news s1 \<and> phase s = phase s1"
+
+lemma eqExcPID_eq[simp,intro!]: "eqExcPID s s"
+unfolding eqExcPID_def by auto
+
+lemma eqExcPID_sym:
+assumes "eqExcPID s s1" shows "eqExcPID s1 s"
+using assms eqExcRLR_sym unfolding eqExcPID_def by auto
+
+lemma eqExcPID_trans:
+assumes "eqExcPID s s1" and "eqExcPID s1 s2" shows "eqExcPID s s2"
+using assms eqExcRLR_trans unfolding eqExcPID_def by metis
+
+lemma eqExcPID_imp:
+"eqExcPID s s1 \<Longrightarrow>
+ confIDs s = confIDs s1 \<and> conf s = conf s1 \<and>
+ userIDs s = userIDs s1 \<and> pass s = pass s1 \<and> user s = user s1
+ \<and>
+ eqExcRLR (roles s cid uid) (roles s1 cid uid)
+ \<and>
+ paperIDs s = paperIDs s1
+ \<and>
+ paper s = paper s1
+ \<and>
+ pref s = pref s1 \<and>
+ voronkov s = voronkov s1 \<and>
+ news s = news s1 \<and> phase s = phase s1 \<and>
+ getAllPaperIDs s = getAllPaperIDs s1"
+unfolding eqExcPID_def eqExcRLR_def getAllPaperIDs_def by auto
+
+lemma eqExcPID_imp':
+assumes s: "reach s" and ss1: "eqExcPID s s1" and pid: "pid \<noteq> PID \<or> PID \<noteq> pid"
+shows
+"isRev s cid uid pid = isRev s1 cid uid pid \<and>
+ getRevRole s cid uid pid = getRevRole s1 cid uid pid \<and>
+ getReviewIndex s cid uid pid = getReviewIndex s1 cid uid pid"
+proof-
+  have 1: "eqExcRLR (roles s cid uid) (roles s1 cid uid)"
+  using eqExcPID_imp[OF ss1] by auto
+  show ?thesis proof (intro conjI)
+    show 3: "isRev s cid uid pid = isRev s1 cid uid pid"
+    by (metis "1" eqExcRLR_imp pid s)
+    show 4: "getRevRole s cid uid pid = getRevRole s1 cid uid pid"
+    by (metis "1" eqExcRLR_imp pid s)
+    show "getReviewIndex s cid uid pid = getReviewIndex s1 cid uid pid"
+    unfolding getReviewIndex_def using 4 by auto
+  qed
+qed
+
+lemma eqExcPID_imp1:
+"eqExcPID s s1 \<Longrightarrow> pid \<noteq> PID \<or> PID \<noteq> pid \<Longrightarrow>
+    getNthReview s pid n = getNthReview s1 pid n"
+unfolding eqExcPID_def getNthReview_def
+by auto
+
+lemma eqExcPID_imp2:
+assumes "reach s" and "eqExcPID s s1" and "pid \<noteq> PID \<or> PID \<noteq> pid"
+shows "getReviewersReviews s cid pid = getReviewersReviews s1 cid pid"
+proof-
+  have
+  "(\<lambda>uID. if isRev s cid uID pid then [(uID, getNthReview s pid (getReviewIndex s cid uID pid))] else []) =
+   (\<lambda>uID. if isRev s1 cid uID pid then [(uID, getNthReview s1 pid (getReviewIndex s1 cid uID pid))] else [])"
+  apply(rule ext)
+  using assms using assms by (auto simp add: eqExcPID_imp' eqExcPID_imp1)
+  thus ?thesis unfolding getReviewersReviews_def using assms by (simp add: eqExcPID_imp)
+qed
+
+lemma eqExcPID_imp3:
+"reach s \<Longrightarrow> eqExcPID s s1 \<Longrightarrow> pid \<noteq> PID \<or> PID \<noteq> pid
+ \<Longrightarrow>
+ getNthReview s pid = getNthReview s1 pid"
+unfolding eqExcPID_def apply auto
+apply (rule ext) by (metis getNthReview_def)
+
+lemma eqExcPID_cong[simp, intro]:
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>confIDs := uu1\<rparr>) (s1 \<lparr>confIDs := uu2\<rparr>)"
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>conf := uu1\<rparr>) (s1 \<lparr>conf := uu2\<rparr>)"
+
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>userIDs := uu1\<rparr>) (s1 \<lparr>userIDs := uu2\<rparr>)"
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>pass := uu1\<rparr>) (s1 \<lparr>pass := uu2\<rparr>)"
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>user := uu1\<rparr>) (s1 \<lparr>user := uu2\<rparr>)"
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>roles := uu1\<rparr>) (s1 \<lparr>roles := uu2\<rparr>)"
+
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>paperIDs := uu1\<rparr>) (s1 \<lparr>paperIDs := uu2\<rparr>)"
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>paper := uu1\<rparr>) (s1 \<lparr>paper := uu2\<rparr>)"
+
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>pref := uu1\<rparr>) (s1 \<lparr>pref := uu2\<rparr>)"
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>voronkov := uu1\<rparr>) (s1 \<lparr>voronkov := uu2\<rparr>)"
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>news := uu1\<rparr>) (s1 \<lparr>news := uu2\<rparr>)"
+"\<And> uu1 uu2. eqExcPID s s1 \<Longrightarrow> uu1 = uu2 \<Longrightarrow> eqExcPID (s \<lparr>phase := uu1\<rparr>) (s1 \<lparr>phase := uu2\<rparr>)"
+
+unfolding eqExcPID_def by auto
+
+It is used for the confidentiality property that doesn't cover the authors of that paper in the
+notification phase (when the authors will learn the contents of the reviews).\<close>
+subsection \<open>Value Setup\<close>

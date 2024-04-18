@@ -1,0 +1,704 @@
+theory BPlusTree_ImpRange
+imports
+  BPlusTree_Iter
+  BPlusTree_Range
+  BPlusTree_ImpSplit
+begin
+
+abbreviation "blist_leafs_assn k \<equiv> list_assn ((\<lambda> t (ti,r',z',lptrs). bplustree_assn_leafs k t (the ti) r' z' lptrs) \<times>\<^sub>a id_assn)"
+
+context split\<^sub>i_tree
+begin
+
+lemma list_induct5 [consumes 4, case_names Nil Cons]:
+  "length xs = length ys \<Longrightarrow> length ys = length zs \<Longrightarrow> length zs = length ws \<Longrightarrow> length ws = length vs \<Longrightarrow>
+   P [] [] [] [] [] \<Longrightarrow> (\<And>x xs y ys z zs w ws v vs. length xs = length ys \<Longrightarrow>
+   length ys = length zs \<Longrightarrow> length zs = length ws \<Longrightarrow> length ws = length vs \<Longrightarrow> P xs ys zs ws vs \<Longrightarrow>
+   P (x#xs) (y#ys) (z#zs) (w#ws) (v#vs)) \<Longrightarrow> P xs ys zs ws vs"
+proof (induct xs arbitrary: ys zs ws vs)
+  case Nil then show ?case by simp
+next
+  case (Cons x xs ys zs ws) then show ?case by ((cases ys, simp_all), (cases zs,simp_all), (cases ws, simp_all)) (cases vs, simp_all)
+qed
+
+declare butlast.simps[simp del] last.simps[simp del]
+lemma blist_assn_extract_leafs: "
+length ts = length tsi \<Longrightarrow>
+length tsi = length rs \<Longrightarrow>
+blist_assn k ts (zip (zip (map fst tsi) (zip (butlast (r#rs)) rs)) (map snd tsi))
+=
+(\<exists>\<^sub>Aspl. blist_leafs_assn k ts (zip (zip (map fst tsi) (zip (butlast (r#rs)) (zip rs spl))) (map snd tsi)) * \<up>(length spl = length rs))"
+proof(induction arbitrary: r rule: list_induct3)
+  case Nil
+  then show ?case
+    apply(intro ent_iffI)
+    by sep_auto+
+next
+  case (Cons x xs y ys z zs r)
+  show ?case
+    using Cons.hyps
+    using Cons.hyps
+  apply (sep_auto simp add: butlast_double_Cons last_double_Cons)
+    supply R= Cons.IH[simplified, of z]
+    thm R
+    apply(subst R)
+  proof(intro ent_iffI, goal_cases)
+    case 1
+    then show ?case
+    apply(sep_auto eintros del: exI simp add: prod_assn_def bplustree_extract_leafs split!: prod.splits)
+      subgoal for _ _ spl lptrs
+      apply(inst_existentials "lptrs#spl")
+        apply auto
+        done
+      done
+  next
+    case 2
+    then show ?case
+    apply(sep_auto eintros del: exI)
+      subgoal for spl
+      apply(cases spl)
+        apply simp
+        subgoal for hdspl tlspl
+          apply(inst_existentials tlspl)
+          apply (auto simp add: prod_assn_def bplustree_extract_leafs split!: prod.splits)
+          done
+        done
+      done
+    qed
+  qed
+declare butlast.simps[simp add] last.simps[simp add]
+
+lemma blist_discard_leafs: 
+  assumes 
+"length ts = length tsi"
+"length tsi = length rs"
+"length spl = length rs"
+shows
+"blist_leafs_assn k ts (zip (zip (map fst tsi) (zip (butlast (r#rs)) (zip rs spl))) (map snd tsi)) \<Longrightarrow>\<^sub>A
+blist_assn k ts (zip (zip (map fst tsi) (zip (butlast (r#rs)) rs)) (map snd tsi))"
+  apply (subst blist_assn_extract_leafs[OF assms(1,2)])
+  using assms
+  by sep_auto
+
+declare butlast.simps[simp del] last.simps[simp del]
+lemma split\<^sub>i_leafs_rule_help: 
+"sorted_less (separators ts) \<Longrightarrow>
+  length tsi = length rs \<Longrightarrow>
+  tsi' = (zip (zip (map fst tsi) (zip (butlast (r#rs)) (butlast (rs@[z]))))) (map snd tsi) \<Longrightarrow>
+ <is_pfa c tsi (a,n) 
+  * blist_assn k ts tsi' > 
+    split\<^sub>i (a,n) p 
+  <\<lambda>i. \<exists>\<^sub>Aspl.
+    is_pfa c tsi (a,n)
+    * blist_leafs_assn k ts (zip (zip (map fst tsi) (zip (butlast (r#rs)) (zip (butlast (rs@[z])) spl))) (map snd tsi))
+    * \<up>(split_relation ts (split ts p) i)
+    * \<up>(length spl = length rs) >\<^sub>t" 
+proof(rule hoare_triple_preI, goal_cases) 
+  case 1
+  have ***: "length tsi' = length rs"
+    using 1 by auto
+  then have *: "length ts = length tsi'"
+    using 1 by (auto dest!: mod_starD list_assn_len)
+  then have **: "length ts = length tsi"
+    using 1 by (auto dest!: mod_starD list_assn_len)
+  note R = split\<^sub>i_rule[of ts tsi rs "zip (zip (subtrees tsi) (zip (butlast (r # rs)) rs)) (separators tsi)" r]
+  from 1 show ?thesis
+    apply(vcg)
+    using ** 1(2)
+    apply(simp add: blist_assn_extract_leafs)
+    find_theorems ex_assn entails
+    apply(rule ent_ex_preI)
+    subgoal for x spl
+      apply(inst_ex_assn spl)
+      apply sep_auto
+      done
+    done
+qed
+declare butlast.simps[simp add] last.simps[simp add]
+
+lemma fr_refl_rot: "P \<Longrightarrow>\<^sub>A R \<Longrightarrow> F * P \<Longrightarrow>\<^sub>A F * R"
+  using fr_refl[of P R F] by (simp add: mult.commute)
+
+declare butlast.simps[simp del] last.simps[simp del]
+lemma split\<^sub>i_leafs_rule[sep_heap_rules]: 
+  assumes "sorted_less (separators ts)"
+  and "length tsi = length rs"
+  and "length spl = length rs"
+  and "tsi' = zip (zip (map fst tsi) (zip (butlast (r#rs)) (zip (butlast (rs@[z])) spl))) (map snd tsi)"
+  shows "
+ <is_pfa c tsi (a,n) 
+  * blist_leafs_assn k ts tsi' > 
+    split\<^sub>i (a,n) p 
+  <\<lambda>i. \<exists>\<^sub>Aspl.
+    is_pfa c tsi (a,n)
+    * blist_leafs_assn k ts (zip (zip (map fst tsi) (zip (butlast (r#rs)) (zip (butlast (rs@[z])) spl))) (map snd tsi))
+    * \<up>(split_relation ts (split ts p) i)
+    * \<up>(length spl = length rs) >\<^sub>t" 
+proof(rule hoare_triple_preI, goal_cases) 
+  case 1
+  have "length tsi' = length rs"
+    using assms by auto
+  then have *: "length ts = length tsi'"
+    using 1 by (auto dest!: mod_starD list_assn_len)
+  then have **: "length ts = length tsi"
+    using 1 assms by (auto dest!: mod_starD list_assn_len)
+  note R = split\<^sub>i_leafs_rule_help[
+    OF assms(1,2),
+    of "zip (zip (subtrees tsi) (zip (butlast (r # rs)) (butlast (rs @ [z])))) (separators tsi)" r
+        z c a n k
+  ]
+  thm R
+  note R' = fi_rule[OF R, of "is_pfa c tsi (a,n) * blist_leafs_assn k ts tsi'" "emp"]
+  thm R'
+  show ?case
+    apply(vcg heap add: R')
+    subgoal
+      apply (simp add: assms)
+      apply(rule fr_refl_rot)
+      using blist_discard_leafs[OF ** assms(2,3)]
+      apply auto
+      done
+    subgoal by sep_auto
+    done
+qed
+
+end
+
+subsection "The imperative split locale"
+
+
+locale split\<^sub>i_range = abs_split_range: split_range split lrange_list + split\<^sub>i_tree split split\<^sub>i
+  for split::
+    "('a bplustree \<times> 'a::{heap,default,linorder,order_top}) list \<Rightarrow> 'a
+       \<Rightarrow> ('a bplustree \<times> 'a) list \<times> ('a bplustree \<times> 'a) list" 
+    and lrange_list ::  "'a \<Rightarrow> ('a::{heap,default,linorder,order_top}) list \<Rightarrow> 'a list"
+    and split\<^sub>i :: "('a btnode ref option \<times> 'a::{heap,default,linorder,order_top}) pfarray \<Rightarrow> 'a \<Rightarrow> nat Heap" +
+  fixes lrange_list\<^sub>i:: "'a \<Rightarrow> ('a::{heap,default,linorder,order_top}) pfarray \<Rightarrow> 'a pfa_it Heap"
+  assumes lrange_list_rule [sep_heap_rules]:"sorted_less ks \<Longrightarrow>
+   <is_pfa c ks (a',n')> 
+    lrange_list\<^sub>i x (a',n') 
+  <pfa_is_it c ks (a',n') (lrange_list x ks)>\<^sub>t"
+begin
+
+partial_function (heap) leaf_nodes_lrange\<^sub>i ::
+  "'a btnode ref \<Rightarrow> 'a \<Rightarrow> 'a btnode ref option Heap"
+  where
+    "leaf_nodes_lrange\<^sub>i p x = do {
+  node \<leftarrow> !p;
+  (case node of
+     Btleaf xs z \<Rightarrow> do {
+        return (Some p)
+      }
+       |
+     Btnode ts t \<Rightarrow> do {
+       i \<leftarrow> split\<^sub>i ts x;
+       tsl \<leftarrow> pfa_length ts;
+       if i < tsl then do {
+         s \<leftarrow> pfa_get ts i;
+         let (sub,sep) = s in
+           leaf_nodes_lrange\<^sub>i (the sub) x
+       } else
+           leaf_nodes_lrange\<^sub>i t x
+    }
+)}"
+
+
+
+lemma leaf_nodes_assn_split2:
+"length xs = length xsi \<Longrightarrow>
+  leaf_nodes_assn k (xs @ ys) r z (xsi @ ysi) = (\<exists>\<^sub>Al. leaf_nodes_assn k xs r l xsi * leaf_nodes_assn k ys l z ysi)"
+proof(induction arbitrary: r rule: list_induct2)
+  case (Nil r)
+  then show ?case
+    apply(cases r; cases ys)
+    apply clarsimp_all
+      subgoal
+        apply(rule ent_iffI)
+        by (sep_auto dest!: leaf_nodes_assn_impl_length)+
+      subgoal
+        apply(rule ent_iffI)
+        by (sep_auto dest!: leaf_nodes_assn_impl_length)+
+      subgoal
+        apply(rule ent_iffI)
+        by (sep_auto dest!: leaf_nodes_assn_impl_length)+
+    subgoal for _ t _
+      apply(cases t)
+      subgoal
+      apply clarsimp_all
+          apply(rule ent_iffI)
+          by (sep_auto dest!: leaf_nodes_assn_impl_length)+
+        subgoal by clarsimp
+        done
+    done
+next
+  case (Cons x xs xi xsi r)
+  show ?case
+    apply(cases r; cases x)
+    apply clarsimp_all
+        apply(rule ent_iffI)
+    subgoal for _ ts
+      apply(subst Cons.IH)
+      apply simp
+      apply(rule ent_ex_preI)+
+      subgoal for tsi fwd l
+        apply(inst_ex_assn l tsi fwd)
+        apply sep_auto
+        done
+      done
+    subgoal for _ ts
+      apply(subst Cons.IH)
+      apply(simp)
+      apply(rule ent_ex_preI)+
+      subgoal for l tsi fwd
+        apply(inst_ex_assn tsi fwd l)
+        apply sep_auto
+      done
+    done
+  done
+qed
+
+lemma eq_preI: "(\<forall>h. h \<Turnstile> P \<longrightarrow> Q = Q') \<Longrightarrow> P * Q = P * Q'"
+  apply(intro ent_iffI)
+  using entails_def mod_starD apply blast+
+  done
+
+lemma simp_map_temp: "(map (leaf_nodes \<circ> fst)) = map (\<lambda>a. (leaf_nodes (fst a)))"
+  by (meson comp_apply)
+
+
+declare last.simps[simp del] butlast.simps[simp del]
+lemma blist_leafs_assn_split_help:
+"   length tsi' = length rrs \<Longrightarrow>
+    length rrs = length spl \<Longrightarrow>
+    length spl = length ts \<Longrightarrow>
+    (blist_leafs_assn k ts
+      (zip (zip (subtrees tsi') (zip (butlast (r # rrs)) (zip rrs spl))) (separators tsi'))
+      =
+     list_assn ((\<lambda>t (ti, r', x, y). trunk_assn k t (the ti) r' x y) \<times>\<^sub>a id_assn) ts
+      (zip (zip (subtrees tsi') (zip (butlast (r # rrs)) (zip rrs spl))) (separators tsi')) *
+     leaf_nodes_assn k (concat (map (leaf_nodes \<circ> fst) ts)) r (last (r#rrs)) (concat spl)
+) "
+proof(induction tsi' rrs spl ts arbitrary: r rule: list_induct4)
+  case Nil
+  then show ?case
+    by (sep_auto simp add: last.simps butlast.simps)
+next
+  case (Cons x xs y ys z zs w ws r)
+  show ?case
+    using Cons.hyps Cons.prems
+    apply(clarsimp simp add: butlast_double_Cons last_double_Cons)
+    apply(clarsimp simp add: prod_assn_def split!: prod.splits)
+        apply(simp add: bplustree_leaf_nodes_sep)
+    apply(subst Cons.IH[of y])
+    subgoal for sub sep
+      apply(intro ent_iffI)
+      subgoal
+      apply(rule entails_preI)
+    apply(subst leaf_nodes_assn_split2)
+        subgoal by (auto dest!: mod_starD leaf_nodes_assn_impl_length)
+        apply (simp add: simp_map_temp)
+        apply(inst_ex_assn y)
+        apply(sep_auto)
+        done
+      subgoal
+      apply(rule entails_preI)
+        apply(cases ws)
+      proof(goal_cases)
+        case 1
+        then show ?thesis
+          by (sep_auto simp add: last.simps)
+      next
+        case (2 _ a list)
+        then show ?thesis
+          apply(cases xs, simp)
+          apply(cases ys, simp)
+          apply(cases zs, simp)
+          subgoal for x' xs' y'' ys'' z' zs'
+          apply(clarsimp simp add: butlast_double_Cons last_double_Cons)
+          apply(clarsimp simp add: prod_assn_def split!: prod.splits)
+            subgoal for sub' sep'
+            apply(subgoal_tac "y = Some (hd z')")
+            prefer 2
+            subgoal by (auto dest!: mod_starD trunk_assn_hd)
+          apply sep_auto
+    apply(subst leaf_nodes_assn_split[where yi="the y" and ysr="tl z'@concat zs'"])
+        find_theorems trunk_assn length
+        subgoal by (auto dest!: mod_starD trunk_assn_leafs_len_imp)
+        apply(subgoal_tac "z' \<noteq> []")
+        prefer 2
+          subgoal by (auto dest!: mod_starD trunk_assn_leafs_len_imp simp add: leaf_nodes_not_empty)
+          subgoal by simp
+        apply (simp add: simp_map_temp)
+        apply(sep_auto)
+        done
+      done
+    done
+    qed
+  done
+  done
+qed
+declare last.simps[simp add] butlast.simps[simp add]
+
+lemma blist_leafs_assn_split:
+"   length tsi' = length rrs \<Longrightarrow>
+    length rrs = length spl \<Longrightarrow>
+    (blist_leafs_assn k ts
+      (zip (zip (subtrees tsi') (zip (butlast (r # rrs)) (zip rrs spl))) (separators tsi'))
+      =
+     list_assn ((\<lambda>t (ti, r', x, y). trunk_assn k t (the ti) r' x y) \<times>\<^sub>a id_assn) ts
+      (zip (zip (subtrees tsi') (zip (butlast (r # rrs)) (zip rrs spl))) (separators tsi')) *
+     leaf_nodes_assn k (concat (map (leaf_nodes \<circ> fst) ts)) r (last (r#rrs)) (concat spl)
+) "
+proof((intro ent_iffI; rule entails_preI), goal_cases)
+  case 1
+  then have "length spl = length ts" 
+    by (auto dest!: list_assn_len)
+  then show ?case 
+    using blist_leafs_assn_split_help[OF 1(1,2)]
+    by auto
+next
+  case 2
+  then have "length spl = length ts" 
+    by (auto dest!: mod_starD list_assn_len)
+  then show ?case
+    using blist_leafs_assn_split_help[OF 2(1,2)]
+    by auto
+qed
+
+lemma split_list: "i < length ts \<Longrightarrow> ts ! i = x \<Longrightarrow> \<exists>ls rs. ts = ls@x#rs \<and> length ls = i"
+  by (metis id_take_nth_drop length_take min_simps(2))
+
+lemma take_butlast_Suc: "i < length xs \<Longrightarrow> take i (butlast xs) = butlast (take (Suc i) xs)"
+  by (metis Suc_leI Suc_to_right take_butlast take_minus_one_conv_butlast)
+
+lemma inbetween_aligned_imp_Laligned: "inbetween aligned l (ls@(sub,sep)#rs) t u \<Longrightarrow> Laligned sub sep"
+  by (induction ls arbitrary: l) (auto simp add: aligned_imp_Laligned)
+
+lemma Laligned_sub: "Laligned (Node (ls@(sub,sep)#rs) t) u \<Longrightarrow> Laligned sub sep"
+  by (cases ls) (auto simp add: inbetween_aligned_imp_Laligned split!: prod.splits) 
+
+declare last.simps[simp del] butlast.simps[simp del]
+lemma leaf_nodes_lrange\<^sub>i_rule:
+  assumes "k > 0" "root_order k t" "Laligned t u"
+  shows "<bplustree_assn_leafs k t ti r z lptrs >
+leaf_nodes_lrange\<^sub>i ti x
+<\<lambda>p. (\<exists>\<^sub>A lptrs xs1 lptrs1 lptrs2.
+  trunk_assn k t ti r z lptrs *
+  leaf_nodes_assn k xs1 r p lptrs1 *
+  leaf_nodes_assn k (abs_split_range.leaf_nodes_lrange t x) p z lptrs2 *
+  \<up>(lptrs = lptrs1@lptrs2) *
+  \<up>(leaf_nodes t = xs1@(abs_split_range.leaf_nodes_lrange t x))
+)
+>\<^sub>t"
+  using assms
+proof(induction t x arbitrary: ti r z u lptrs rule: abs_split_range.leaf_nodes_lrange.induct)
+  case (1 ks x)
+  then show ?case
+    apply(subst leaf_nodes_lrange\<^sub>i.simps)
+    apply (sep_auto eintros del: exI)
+    apply(inst_existentials "[ti]" "[]::'a bplustree list" "[]::'a btnode ref list" "[ti]")
+    apply sep_auto+
+    done
+next
+  case (2 ts t x ti r z u lptrs)
+  then have "sorted_less (separators ts)"
+    by (meson Laligned_sorted_separators sorted_wrt_append)
+  obtain ls rs where split_pair: "split ts x = (ls,rs)"
+    by (meson surj_pair)
+  show ?case
+  proof(cases rs)
+    case Nil
+    then show ?thesis
+      using split_pair
+    apply(subst leaf_nodes_lrange\<^sub>i.simps)
+    apply simp
+    apply(vcg)
+    apply simp
+    subgoal for tsi tii tsi' rrs spl
+      apply(cases tsi)
+      subgoal for tsia tsin
+    supply R = split\<^sub>i_leafs_rule[of ts tsi' rrs "butlast spl" "(zip (zip (subtrees tsi') (zip (butlast (r # rrs)) (zip rrs (butlast spl))))
+        (separators tsi'))" r z]
+      thm R
+    apply (vcg heap add: R)
+      subgoal by simp
+      subgoal by simp
+      subgoal by (simp add: butlast.simps)
+      apply simp
+      apply(rule norm_pre_ex_rule)
+      apply(rule hoare_triple_preI)
+      apply(vcg)
+      subgoal by (auto simp add: split_relation_alt is_pfa_def dest!:  mod_starD list_assn_len)[]
+      subgoal for _ spl
+      supply R = "2.IH"(1)[OF split_pair[symmetric] Nil, of u]
+      thm R
+      apply(vcg heap add: R)
+      subgoal using "2.prems" by simp
+      subgoal 
+      using "2.prems"(2) assms(1) order_impl_root_order root_order.simps(2) by blast
+      subgoal 
+      using "2.prems"(3) Lalign_Llast by blast
+    apply (sep_auto eintros del: exI)
+    subgoal for y lptrs xs1 lptrs1 lptrs2
+      apply(inst_existentials "concat (spl@[lptrs])" "concat (map (leaf_nodes \<circ> fst) ts) @ xs1" "(concat spl) @ lptrs1" lptrs2
+            tsia tsin tii tsi' "(zip (zip (subtrees tsi') (zip (butlast (r # rrs)) (zip rrs spl)))
+            (separators tsi'))" rrs "spl@[lptrs]")
+      subgoal
+        by (auto)
+      subgoal
+        apply sep_auto
+        apply(subst blist_leafs_assn_split)
+        subgoal by simp
+        subgoal 
+          by (auto dest!: mod_starD list_assn_len)
+        apply(rule entails_preI)
+        apply(subst leaf_nodes_assn_split2)
+        subgoal 
+          by (auto dest!: mod_starD leaf_nodes_assn_impl_length)
+        apply (sep_auto eintros del: exI)
+        apply(inst_existentials "(last (r # rrs))")
+        apply (sep_auto)
+        done
+      done
+  done
+    done
+  done
+  done
+  next
+    case (Cons subsep rrs)
+    then obtain sub sep where subsep_split[simp]:"subsep = (sub,sep)"
+      by (cases subsep)
+    then show ?thesis
+    apply(subst leaf_nodes_lrange\<^sub>i.simps)
+    using split_pair Cons apply (simp split!: list.splits prod.splits)
+    apply(vcg)
+    apply simp
+    subgoal for tsi tii tsi' rs' spl_first
+      apply(cases tsi)
+      subgoal for tsia tsin
+    supply R = split\<^sub>i_leafs_rule[of ts tsi' rs' "butlast spl_first" "(zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' (butlast spl_first))))
+        (separators tsi'))" r z]
+      thm R
+    apply (vcg heap add: R)
+      subgoal by simp
+      subgoal by simp
+      subgoal by (simp add: butlast.simps)
+      thm split_relation_alt
+      apply simp
+      apply(rule norm_pre_ex_rule)
+         apply(auto simp add: split_relation_alt list_assn_append_Cons_left dest!: mod_starD list_assn_len)[]
+      apply(rule norm_pre_ex_rule)+
+      apply(rule hoare_triple_preI)
+      subgoal for spl lsi subsepi rsi
+        apply(cases subsepi)
+        subgoal for zz sepi
+          apply(cases zz)
+          subgoal for subi subp subfwd sublptrs
+      apply(vcg)
+      subgoal for _ _ suba sepa 
+      apply(subgoal_tac "lsi = take (length ls) (zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl)))
+     (separators tsi'))")
+      prefer 2
+    subgoal proof (goal_cases)
+      case 1
+      have *: "length lsi = length ls"
+        using 1 by (auto dest!: mod_starD list_assn_len)
+      then have "take (length ls) (zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl))) (separators tsi')) = 
+                  take (length ls) (lsi @ ((subi, subp, subfwd, sublptrs), sepi) # rsi)"
+        using 1 by auto
+      also have "\<dots> = lsi"
+        using * by auto
+      finally show ?case .. 
+    qed
+      apply(subgoal_tac "rsi = drop (length ls+1) (zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl)))
+     (separators tsi'))")
+      prefer 2
+    subgoal proof (goal_cases)
+      case 1
+      have *: "length lsi = length ls"
+        using 1 by (auto dest!: mod_starD list_assn_len)
+      then have "drop (length ls+1) (zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl))) (separators tsi')) = 
+                  drop (length ls+1) (lsi @ ((subi, subp, subfwd, sublptrs), sepi) # rsi)"
+        using 1 by auto
+      also have "\<dots> = rsi"
+        using * by auto
+      finally show ?case .. 
+    qed
+      apply(subgoal_tac "subtrees tsi' = (take (length ls) (subtrees tsi'))@subi#(drop (length ls+1) (subtrees tsi'))")
+    prefer 2
+      subgoal proof (goal_cases)
+        case 1
+        have "length spl = length tsi'" "length tsi' = length rs'"
+          using 1 by auto
+        then have "subtrees tsi' = map fst (map fst ((zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl)))
+       (separators tsi'))))"
+          by simp
+        also have "\<dots> = map fst (map fst (lsi @ ((subi, subp, subfwd, sublptrs), sepi) # rsi))"
+          using 1 by simp
+        also have "\<dots> = map fst (map fst (lsi)) @ subi # map fst (map fst (rsi))"
+          by auto
+        also have "\<dots> = (take (length ls) (subtrees tsi')) @ subi # (drop (length ls +1) (subtrees tsi'))"
+          using 1 by (auto simp add: take_map[symmetric] drop_map[symmetric])
+        finally show ?case .
+      qed
+      apply(subgoal_tac "separators tsi' = (take (length ls) (separators tsi'))@sepi#(drop (length ls+1) (separators tsi'))")
+    prefer 2
+      subgoal proof (goal_cases)
+        case 1
+        have "length spl = length tsi'" "length tsi' = length rs'"
+          using 1 by auto
+        then have "separators tsi' = map snd ((zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl)))
+       (separators tsi')))"
+          by simp
+        also have "\<dots> = map snd (lsi @ ((subi, subp, subfwd, sublptrs), sepi) # rsi)"
+          using 1 by simp
+        also have "\<dots> = map snd (lsi) @ sepi # map snd (rsi)"
+          by auto
+        also have "\<dots> = (take (length ls) (separators tsi')) @ sepi # (drop (length ls +1) (separators tsi'))"
+          using 1 by (auto simp add: take_map[symmetric] drop_map[symmetric])
+        finally show ?case .
+      qed
+      apply(subgoal_tac "spl = (take (length ls) spl)@sublptrs#(drop (length ls+1) spl)")
+        prefer 2
+      subgoal proof (goal_cases)
+        case 1
+        have "length spl = length tsi'" "length tsi' = length rs'"
+          using 1 by auto
+        then have "spl = map snd (map snd (map snd (map fst ((zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl)))
+       (separators tsi'))))))"
+          by simp
+        also have "\<dots> = map snd (map snd (map snd (map fst (lsi @ ((subi, subp, subfwd, sublptrs), sepi) # rsi))))"
+          using 1 by simp
+        also have "\<dots> = map snd (map snd (map snd (map fst (lsi)))) @ sublptrs # map snd (map snd (map snd (map fst (rsi))))"
+          by auto
+        also have "\<dots> = (take (length ls) spl) @ sublptrs # (drop (length ls +1) spl)"
+          using 1 by (auto simp add: take_map[symmetric] drop_map[symmetric])
+        finally show ?case .
+      qed
+      apply(subgoal_tac "rs' = (take (length ls) rs')@subfwd#(drop (length ls+1) rs')")
+        prefer 2
+      subgoal proof (goal_cases)
+        case 1
+        have "length spl = length tsi'" "length tsi' = length rs'"
+          using 1 by auto
+        then have "rs' = map fst (map snd (map snd (map fst ((zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl)))
+       (separators tsi'))))))"
+          by simp
+        also have "\<dots> = map fst (map snd (map snd (map fst (lsi @ ((subi, subp, subfwd, sublptrs), sepi) # rsi))))"
+          using 1 by simp
+        also have "\<dots> = map fst (map snd (map snd (map fst (lsi)))) @ subfwd # map fst (map snd (map snd (map fst (rsi))))"
+          by auto
+        also have "\<dots> = (take (length ls) rs') @ subfwd # (drop (length ls +1) rs')"
+          using 1 by (auto simp add: take_map[symmetric] drop_map[symmetric])
+        finally show ?case .
+      qed
+      apply(subgoal_tac "butlast (r#rs') = (take (length ls) (butlast (r#rs')))@subp#(drop (length ls+1) (butlast (r#rs')))")
+        prefer 2
+      subgoal proof (goal_cases)
+        case 1
+        have "length spl = length tsi'" "length tsi' = length rs'"
+          using 1 by auto
+        then have "butlast (r#rs') = (map fst (map snd (map fst ((zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl)))
+       (separators tsi'))))))"
+          by simp
+        also have "\<dots> = map fst (map snd (map fst (lsi @ ((subi, subp, subfwd, sublptrs), sepi) # rsi)))"
+          using 1 by simp
+        also have "\<dots> = map fst (map snd (map fst (lsi))) @ subp # map fst (map snd (map fst (rsi)))"
+          by auto
+        also have "\<dots> = (take (length ls) (butlast (r#rs'))) @ subp # (drop (length ls +1) (butlast (r#rs')))"
+          using 1 by (auto simp add: take_map[symmetric] drop_map[symmetric])
+        finally show ?case .
+      qed
+          apply(subgoal_tac "subsepi = ((suba, subp, subfwd, sublptrs), sepa)", simp)
+        prefer 2
+    subgoal proof (goal_cases)
+      case assms: 1
+      have "subi = suba" "sepi = sepa"
+      proof(goal_cases)
+        case 1
+        have "subtrees tsi' ! (length ls) = subi"
+          by (metis append_take_drop_id assms(20) nth_via_drop same_append_eq)
+        moreover have "subtrees tsi' ! (length ls) = suba"
+          using assms by simp
+        ultimately show ?case by simp
+      next
+        case 2
+        have "separators tsi' ! (length ls) = sepi"
+          by (metis append_take_drop_id assms(21) nth_via_drop same_append_eq)
+        moreover have "separators tsi' ! (length ls) = sepa"
+          using assms by simp
+        ultimately show ?case by simp
+      qed
+      then show ?case
+        using assms by auto
+    qed
+      supply R = "2.IH"(2)[OF split_pair[symmetric] Cons subsep_split[symmetric], of sep]
+      thm R
+      apply(vcg heap add: R)
+      subgoal using "2.prems" by simp
+      subgoal 
+        using "2.prems"(2) assms(1)  root_order.simps(2)
+        by (auto dest!: order_impl_root_order[of k sub, OF assms(1)])
+      subgoal 
+        using "2.prems"(3) split_pair Cons subsep_split Laligned_sub[of ls sub sep rrs]
+        by simp
+    apply (sep_auto eintros del: exI)
+    subgoal for y lptrs xs1 lptrs1 lptrs2
+      thm blist_leafs_assn_split
+        apply(inst_existentials "concat ((take (length ls) spl)@lptrs#(drop (Suc (length ls)) spl)@[last spl_first])" "concat (map (leaf_nodes \<circ> fst) ls) @ xs1"
+"concat (take (length ls) spl) @ lptrs1" "lptrs2 @ (concat (drop (Suc (length ls)) spl))@last spl_first"
+tsia tsin tii tsi' "zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' (butlast ((take (length ls) spl)@lptrs#(drop (Suc (length ls)) spl)@[last spl_first])))))
+         (separators tsi')" rs' "(take (length ls) spl)@lptrs#(drop (Suc (length ls)) spl)@[last spl_first]" "(take (length ls)
+            (zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' spl)))
+              (separators tsi')))" subi subp subfwd lptrs sepi "(drop (Suc (length ls))
+            (zip (zip (subtrees tsi') (zip (butlast (r # rs')) (zip rs' ((take (length ls) spl)@lptrs#(drop (length ls+1) spl)))))
+              (separators tsi')))")
+      subgoal
+        find_theorems "butlast" "_@[_]"
+        apply (auto)
+      proof (goal_cases)
+        case (1 a b)
+        have *: "(take (length ls) spl @ (lptrs1 @ lptrs2) # drop (Suc (length ls)) spl @ [last spl_first])
+ = ((take (length ls) spl @ (lptrs1 @ lptrs2) # drop (Suc (length ls)) spl) @ [last spl_first])"
+          by auto
+        have **: 
+           "subtrees tsi' = take (length ls) (subtrees tsi') @ subi # drop (Suc (length ls)) (subtrees tsi')"
+           "separators tsi' = take (length ls) (separators tsi') @ sepi # drop (Suc (length ls)) (separators tsi')"
+           "spl = take (length ls) spl @ sublptrs # drop (Suc (length ls)) spl"
+           "rs' = take (length ls) rs' @ subfwd # drop (Suc (length ls)) rs'"
+           "butlast (r # rs') =
+           take (length ls) (butlast (r # rs')) @
+           subp # drop (Suc (length ls)) (butlast (r # rs'))"
+          using 1 by simp_all
+        have drop_sep_tsi': "drop (length ls) (separators tsi') = sepi#(drop (length ls+1) (separators tsi'))" 
+        proof -
+          have "take (length ls) (separators tsi') @ drop (length ls) (separators tsi') = take (length ls) (separators tsi')@sepi#(drop (length ls+1) (separators tsi'))" 
+            using 1 by auto
+          then show ?thesis
+            by (meson same_append_eq)
+        qed
+        have drop_sub_tsi': "drop (length ls) (subtrees tsi') = subi#(drop (length ls+1) (subtrees tsi'))" 
+        proof -
+          have "take (length ls) (subtrees tsi') @ drop (length ls) (subtrees tsi') = take (length ls) (subtrees tsi')@subi#(drop (length ls+1) (subtrees tsi'))" 
+            using 1 by auto
+          then show ?thesis
+            by (meson same_append_eq)
+        qed
+        have drop_rs': "drop (length ls) rs' = subfwd#(drop (length ls+1) rs')" 
+        proof -
+          have "take (length ls) rs' @ drop (length ls) rs' = take (length ls) rs'@subfwd#(drop (length ls+1) rs')" 
+            using 1 by auto
+          then show ?thesis
+            by (meson same_append_eq)
+        qed
+        have drop_butlastrs': "drop (length ls) (butlast (r#rs')) = subp#(drop (length ls+1) (butlast (r#rs')))" 
+        proof -
+          have "take (length ls) (butlast (r#rs')) @ drop (length ls) (butlast (r#rs')) = take (length ls) (butlast (r#rs'))@subp#(drop (length ls+1) (butlast (r#rs')))" 
+            using 1 by auto
+          then show ?thesis
+            by (meson same_append_eq)
+        qed
+        have "length tsi' = length rs'" "length spl = length rs'" "length ls \<le> length rs'" 
+          using 1 by auto
+        then show ?case 
+          apply(subst *)

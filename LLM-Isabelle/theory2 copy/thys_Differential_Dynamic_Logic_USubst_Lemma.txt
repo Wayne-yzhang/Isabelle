@@ -1,0 +1,1408 @@
+theory "USubst_Lemma"
+imports
+  Ordinary_Differential_Equations.ODE_Analysis
+  "Ids"
+  "Lib"
+  "Syntax"
+  "Denotational_Semantics"
+  "Frechet_Correctness"
+  "Static_Semantics"
+  "Coincidence"
+  "Bound_Effect"
+  "USubst"
+begin context ids begin
+lemma interp_eq:
+  "f = f' \<Longrightarrow> p = p' \<Longrightarrow> c = c' \<Longrightarrow> PP = PP' \<Longrightarrow> ode = ode' \<Longrightarrow> odebv = odebv' \<Longrightarrow>
+   \<lparr>Functions = f, Predicates = p, Contexts = c, Programs = PP, ODEs = ode, ODEBV = odebv\<rparr> =
+   \<lparr>Functions = f', Predicates = p', Contexts = c', Programs = PP', ODEs = ode', ODEBV = odebv'\<rparr>"
+  by auto
+
+
+primrec extendf_deriv :: "('sf,'sc,'sz) interp \<Rightarrow> 'sf \<Rightarrow> ('sf + 'sz,'sz) trm \<Rightarrow> 'sz state \<Rightarrow> 'sz Rvec \<Rightarrow> ('sz Rvec \<Rightarrow> real)"
+where
+  "extendf_deriv I _ (Var i) \<nu> x = (\<lambda>_. 0)"
+| "extendf_deriv I _ (Const r) \<nu> x = (\<lambda>_. 0)"
+| "extendf_deriv I g (Function f args) \<nu> x =
+  (case f of 
+    Inl ff \<Rightarrow> (THE f'. \<forall>y. (Functions I ff has_derivative f' y) (at y))
+              (\<chi> i. dterm_sem
+                     \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. x $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                        ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                     (args i) \<nu>) \<circ>
+             (\<lambda>\<nu>'. \<chi> ia. extendf_deriv I g (args ia) \<nu> x \<nu>')
+  | Inr ff \<Rightarrow> (\<lambda> \<nu>'. \<nu>' $ ff))"
+| "extendf_deriv I g (Plus t1 t2) \<nu> x = (\<lambda>\<nu>'. (extendf_deriv I g t1 \<nu> x \<nu>') + (extendf_deriv I g t2 \<nu> x \<nu>'))"
+| "extendf_deriv I g (Times t1 t2) \<nu> x = 
+   (\<lambda>\<nu>'. ((dterm_sem (extendf I x) t1 \<nu> * (extendf_deriv I g t2 \<nu> x \<nu>'))) 
+       + (extendf_deriv I g t1 \<nu> x \<nu>') * (dterm_sem (extendf I x) t2 \<nu>))"
+| "extendf_deriv I g ($' _) \<nu> = undefined"
+| "extendf_deriv I g (Differential _) \<nu> = undefined"
+
+lemma extendf_dterm_sem_continuous:
+  fixes f'::"('sf + 'sz,'sz) trm" and I::"('sf,'sc,'sz) interp"
+  assumes free:"dfree f'"
+  assumes good_interp:"is_interp I"
+  shows "continuous_on UNIV (\<lambda>x. dterm_sem (extendf I x) f' \<nu>)"
+proof(induction rule: dfree.induct[OF free])
+  case (3 args f)
+  then show ?case 
+    apply(cases f)
+     apply (auto simp add: continuous_intros)
+    subgoal for a
+      apply(rule continuous_on_compose2[of UNIV "Functions I a" UNIV "(\<lambda> x. (\<chi> i. dterm_sem
+                       \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. x $ f'), Predicates = Predicates I, Contexts = Contexts I,
+                          Programs = Programs I, ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                       (args i) \<nu>))"])
+      subgoal
+        using is_interpD[OF good_interp]
+        using has_derivative_continuous_on[of UNIV "(Functions I a)" "(THE f'. \<forall>x. (Functions I a has_derivative f' x) (at x))"] 
+        by auto
+      apply(rule continuous_on_vec_lambda) by auto
+    done
+qed (auto simp add: continuous_intros)
+
+lemma extendf_deriv_bounded:
+  fixes f'::"('sf + 'sz,'sz) trm" and I::"('sf,'sc,'sz) interp"
+  assumes free:"dfree f'"
+  assumes good_interp:"is_interp I"
+  shows "bounded_linear (extendf_deriv I i f' \<nu> x)"
+proof(induction rule: dfree.induct[OF free])
+  case (1 i)
+  then show ?case by auto
+next
+  case (2 r)
+  then show ?case by auto
+next
+  case (3 args f)
+  then show ?case apply auto
+    apply(cases f)
+     apply auto
+    subgoal for a
+      apply(rule bounded_linear_compose[of "(THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y))
+           (\<chi> i. dterm_sem
+                  \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. x $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                     ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                  (args i) \<nu>)"])
+       subgoal using good_interp unfolding is_interp_def  using has_derivative_bounded_linear  by fastforce
+      apply(rule bounded_linear_vec)
+      by auto
+    done
+next
+  case (4 \<theta>\<^sub>1 \<theta>\<^sub>2)
+  then show ?case apply auto
+    using bounded_linear_add by blast
+next
+  case (5 \<theta>\<^sub>1 \<theta>\<^sub>2)
+  then show ?case apply auto
+    apply(rule bounded_linear_add)
+     apply(rule bounded_linear_const_mult)
+     subgoal by auto
+    apply(rule bounded_linear_mult_const)
+    subgoal by auto
+    done
+qed
+
+lemma extendf_deriv_continuous:
+  fixes f'::"('sf + 'sz,'sz) trm" and I::"('sf,'sc,'sz) interp"
+  assumes free:"dfree f'"
+  assumes good_interp:"is_interp I"
+  shows "continuous_on UNIV (\<lambda>x. Blinfun (extendf_deriv I i f' \<nu> x))"
+proof (induction rule: dfree.induct[OF free])
+  case (3 args f)
+  assume dfrees:"\<And>i. dfree (args i)"
+  assume const:"\<And>j. continuous_on UNIV (\<lambda>x. Blinfun (extendf_deriv I i (args j) \<nu> x))"
+  then show ?case 
+    unfolding extendf_deriv.simps
+    apply(cases f)
+    subgoal for a 
+      apply simp
+      proof -
+        have boundedF:"\<And>x. bounded_linear (((THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y))
+                          (\<chi> i. dterm_sem (extendf I x) (args i) \<nu>) ))"
+          using blinfun.bounded_linear_right using good_interp unfolding is_interp_def 
+          by auto
+        have boundedG:"\<And>x. bounded_linear (\<lambda> b. (\<chi> ia. extendf_deriv I i (args ia) \<nu> x b))"
+          by (simp add: bounded_linear_vec dfrees extendf_deriv_bounded good_interp)
+        have boundedH:"\<And>x. bounded_linear (\<lambda>b. (THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y))
+                          (\<chi> i. dterm_sem
+                          (extendf I x)
+                                 
+                                 (args i) \<nu>)
+                          (\<chi> ia. extendf_deriv I i (args ia) \<nu> x b))"
+          using bounded_linear_compose  boundedG boundedF by blast
+        have eq:"(\<lambda>x. Blinfun (\<lambda>b. (THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y))
+                          (\<chi> i. dterm_sem
+                                 (extendf I x)
+                                 (args i) \<nu>)
+                          (\<chi> ia. extendf_deriv I i (args ia) \<nu> x b)))
+                          = 
+                (\<lambda>x. blinfun_compose(Blinfun((THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y))
+                          (\<chi> i. dterm_sem
+                                 (extendf I x)
+                                 (args i) \<nu>) )) (Blinfun(\<lambda> b. (\<chi> ia. extendf_deriv I i (args ia) \<nu> x b))))"
+          apply(rule ext)
+          apply(rule blinfun_eqI)
+          subgoal for x ia
+            using boundedG[of x]  blinfun_apply_blinfun_compose bounded_linear_Blinfun_apply
+          proof -
+            have f1: "bounded_linear (\<lambda>v. FunctionFrechet I a (\<chi> s. dterm_sem (extendf I x) (args s) \<nu>) (\<chi> s. extendf_deriv I i (args s) \<nu> x v))"
+              by fastforce          
+            have "bounded_linear (FunctionFrechet I a (\<chi> s. dterm_sem (extendf I x) (args s) \<nu>))"
+              using good_interp is_interp_def by blast
+            then have "blinfun_apply (Blinfun (FunctionFrechet I a (\<chi> s. dterm_sem (extendf I x) (args s) \<nu>))) (\<chi> s. extendf_deriv I i (args s) \<nu> x ia) = blinfun_apply (Blinfun (\<lambda>v. FunctionFrechet I a (\<chi> s. dterm_sem (extendf I x) (args s) \<nu>) (\<chi> s. extendf_deriv I i (args s) \<nu> x v))) ia"
+              using f1 by (simp add: bounded_linear_Blinfun_apply)
+            then have "blinfun_apply (Blinfun (FunctionFrechet I a (\<chi> s. dterm_sem (extendf I x) (args s) \<nu>))) (\<chi> s. extendf_deriv I i (args s) \<nu> x ia) = blinfun_apply (Blinfun (\<lambda>v. FunctionFrechet I a (\<chi> s. dterm_sem (extendf I x) (args s) \<nu>) (\<chi> s. extendf_deriv I i (args s) \<nu> x v))) ia \<and> bounded_linear (\<lambda>v. \<chi> s. extendf_deriv I i (args s) \<nu> x v)"
+            then show ?thesis
+              by (simp add: bounded_linear_Blinfun_apply)
+          qed
+        done
+        have bounds:"\<And>ia x. bounded_linear (extendf_deriv I i (args ia) \<nu> x)" 
+          by (simp add: dfrees extendf_deriv_bounded good_interp)
+        have vec_bound:"\<And>x. bounded_linear (\<lambda>b. \<chi> ia. extendf_deriv I i (args ia) \<nu> x b)" 
+          by (simp add: boundedG)
+        have blinfun_vec:"(\<lambda>x. Blinfun (\<lambda>b. \<chi> ia. extendf_deriv I i (args ia) \<nu> x b)) = (\<lambda>x. blinfun_vec (\<lambda> ia.  Blinfun(\<lambda>b. extendf_deriv I i (args ia) \<nu> x b)))"
+          apply(rule ext)
+          apply(rule blinfun_eqI)
+          apply(rule vec_extensionality)
+          subgoal for x y ia
+          proof -
+            have "(\<chi> s. extendf_deriv I i (args s) \<nu> x y) $ ia = blinfun_apply (blinfun_vec (\<lambda>s. Blinfun (extendf_deriv I i (args s) \<nu> x))) y $ ia"
+              by (simp add: bounded_linear_Blinfun_apply bounds)
+            then have "(\<chi> s. extendf_deriv I i (args s) \<nu> x y) $ ia = blinfun_apply (blinfun_vec (\<lambda>s. Blinfun (extendf_deriv I i (args s) \<nu> x))) y $ ia \<and> bounded_linear (\<lambda>v. \<chi> s. extendf_deriv I i (args s) \<nu> x v)"
+            then show ?thesis
+              by (simp add: bounded_linear_Blinfun_apply)
+          qed
+          done
+        have vec_cont:"continuous_on UNIV (\<lambda>x. blinfun_vec (\<lambda> ia.  Blinfun(\<lambda>b. extendf_deriv I i (args ia) \<nu> x b)))"
+          apply(rule continuous_blinfun_vec')
+          using "3.IH" by blast
+        have cont_intro:"\<And> f g s. continuous_on s f \<Longrightarrow> continuous_on s g \<Longrightarrow> continuous_on s (\<lambda>x. f x  o\<^sub>L  g x)"
+          by(auto intro: continuous_intros)
+        have cont:"continuous_on UNIV (\<lambda>x. blinfun_compose(Blinfun((THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y))
+                          (\<chi> i. dterm_sem
+                                 \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. x $ f'), Predicates = Predicates I, Contexts = Contexts I,
+                                    Programs = Programs I, ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                                 (args i) \<nu>) )) (Blinfun(\<lambda> b. (\<chi> ia. extendf_deriv I i (args ia) \<nu> x b))))"
+          apply(rule cont_intro)
+           defer
+           subgoal using blinfun_vec vec_cont by presburger
+          apply(rule continuous_on_compose2[of UNIV "(\<lambda>x. Blinfun ((THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y)) x))"])
+            subgoal using good_interp unfolding is_interp_def by simp
+           apply(rule continuous_on_vec_lambda)
+           subgoal for i using extendf_dterm_sem_continuous[OF dfrees[of i] good_interp] by auto
+          by auto
+        then show " continuous_on UNIV
+       (\<lambda>x. Blinfun (\<lambda>b. (THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y))
+                          (\<chi> i. dterm_sem
+                                 \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. x $ f'), Predicates = Predicates I, Contexts = Contexts I,
+                                    Programs = Programs I, ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                                 (args i) \<nu>)
+                          (\<chi> ia. extendf_deriv I i (args ia) \<nu> x b)))"
+          using eq apply simp by presburger
+        qed
+    by simp
+next
+  case (4 \<theta>\<^sub>1 \<theta>\<^sub>2)
+  assume free1:"dfree \<theta>\<^sub>1"
+  assume free2:"dfree \<theta>\<^sub>2"
+  assume IH1:"continuous_on UNIV (\<lambda>x. Blinfun (extendf_deriv I i \<theta>\<^sub>1 \<nu> x))"
+  assume IH2:"continuous_on UNIV (\<lambda>x. Blinfun (extendf_deriv I i \<theta>\<^sub>2 \<nu> x))"
+  have bound:"\<And>x. bounded_linear  (\<lambda>a. extendf_deriv I i \<theta>\<^sub>1 \<nu> x a + extendf_deriv I i \<theta>\<^sub>2 \<nu> x a)"
+    using extendf_deriv_bounded[OF free1 good_interp] extendf_deriv_bounded[OF free2 good_interp]
+    by (simp add: bounded_linear_add)
+  have eq:"(\<lambda>x. Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>1 \<nu> x a + extendf_deriv I i \<theta>\<^sub>2 \<nu> x a)) = (\<lambda>x. Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>1 \<nu> x a) + Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>2 \<nu> x a))"
+    apply(rule ext)
+    apply(rule blinfun_eqI)
+    subgoal for x j
+      using bound[of x] extendf_deriv_bounded[OF free1 good_interp] 
+      extendf_deriv_bounded[OF free2 good_interp] 
+      blinfun.add_left[of "Blinfun (extendf_deriv I i \<theta>\<^sub>1 \<nu> x)" "Blinfun (extendf_deriv I i \<theta>\<^sub>2 \<nu> x)"]
+      bounded_linear_Blinfun_apply[of "(extendf_deriv I i \<theta>\<^sub>1 \<nu> x)"]
+      bounded_linear_Blinfun_apply[of "(extendf_deriv I i \<theta>\<^sub>2 \<nu> x)"]
+      by (simp add: bounded_linear_Blinfun_apply)
+    done
+  have "continuous_on UNIV (\<lambda>x. Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>1 \<nu> x a) + Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>2 \<nu> x a))"
+    apply(rule continuous_intros)
+    using IH1 IH2 by auto
+  then show ?case
+    apply simp
+    using eq by presburger
+next
+  case (5 \<theta>\<^sub>1 \<theta>\<^sub>2)
+  assume free1:"dfree \<theta>\<^sub>1"
+  assume free2:"dfree \<theta>\<^sub>2"
+  assume IH1:"continuous_on UNIV (\<lambda>x. Blinfun (extendf_deriv I i \<theta>\<^sub>1 \<nu> x))"
+  assume IH2:"continuous_on UNIV (\<lambda>x. Blinfun (extendf_deriv I i \<theta>\<^sub>2 \<nu> x))"
+  have bounded:"\<And>x. bounded_linear (\<lambda>a. dterm_sem (extendf I x) \<theta>\<^sub>1 \<nu> * extendf_deriv I i \<theta>\<^sub>2 \<nu> x a +
+                       extendf_deriv I i \<theta>\<^sub>1 \<nu> x a * dterm_sem (extendf I x) \<theta>\<^sub>2 \<nu>)"
+    using extendf_deriv_bounded[OF free1 good_interp] extendf_deriv_bounded[OF free2 good_interp]
+    by (simp add: bounded_linear_add bounded_linear_const_mult bounded_linear_mult_const)
+  have eq:"(\<lambda>x. Blinfun (\<lambda>a. dterm_sem (extendf I x) \<theta>\<^sub>1 \<nu> * extendf_deriv I i \<theta>\<^sub>2 \<nu> x a +
+                       extendf_deriv I i \<theta>\<^sub>1 \<nu> x a * dterm_sem (extendf I x) \<theta>\<^sub>2 \<nu>)) = 
+           (\<lambda>x. dterm_sem (extendf I x) \<theta>\<^sub>1 \<nu> *\<^sub>R Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>2 \<nu> x a) +
+           dterm_sem (extendf I x) \<theta>\<^sub>2 \<nu> *\<^sub>R Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>1 \<nu> x a))"
+    apply(rule ext)
+    apply(rule blinfun_eqI)
+    subgoal for x j
+      using extendf_deriv_bounded[OF free1 good_interp] extendf_deriv_bounded[OF free2 good_interp] bounded[of x]
+      blinfun.scaleR_left 
+      bounded_linear_Blinfun_apply[of "Blinfun (extendf_deriv I i \<theta>\<^sub>2 \<nu> x)"]
+      bounded_linear_Blinfun_apply[of "Blinfun (extendf_deriv I i \<theta>\<^sub>1 \<nu> x)"]
+      mult.commute 
+      plus_blinfun.rep_eq[of "dterm_sem (extendf I x) \<theta>\<^sub>1 \<nu> *\<^sub>R Blinfun (extendf_deriv I i \<theta>\<^sub>2 \<nu> x)" "dterm_sem (extendf I x) \<theta>\<^sub>2 \<nu> *\<^sub>R Blinfun (extendf_deriv I i \<theta>\<^sub>1 \<nu> x)"]
+      real_scaleR_def
+      by (simp add: blinfun.scaleR_left bounded_linear_Blinfun_apply)
+    done
+  have "continuous_on UNIV (\<lambda>x. dterm_sem (extendf I x) \<theta>\<^sub>1 \<nu> *\<^sub>R Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>2 \<nu> x a) +
+           dterm_sem (extendf I x) \<theta>\<^sub>2 \<nu> *\<^sub>R Blinfun (\<lambda>a. extendf_deriv I i \<theta>\<^sub>1 \<nu> x a))"
+    apply(rule continuous_intros)+
+      apply(rule extendf_dterm_sem_continuous[OF free1 good_interp])
+     apply(rule IH2)
+    apply(rule continuous_intros)+
+     apply(rule extendf_dterm_sem_continuous[OF free2 good_interp])
+    by(rule IH1)
+  then show ?case
+    unfolding extendf_deriv.simps
+    using eq by presburger
+qed (auto intro: continuous_intros)
+  
+lemma extendf_deriv:
+  fixes f'::"('sf + 'sz,'sz) trm" and I::"('sf,'sc,'sz) interp"
+  assumes free:"dfree f'"
+  assumes good_interp:"is_interp I"
+  shows "\<exists>f''. \<forall>x. ((\<lambda>R. dterm_sem (extendf I R) f' \<nu>) has_derivative (extendf_deriv I i_f f' \<nu> x)) (at x)"
+  using free apply (induction rule: dfree.induct)
+  apply(auto)+
+   defer
+   subgoal for \<theta>\<^sub>1 \<theta>\<^sub>2 x
+     apply(rule has_derivative_mult)
+      by auto
+   subgoal for args i x
+     apply(cases "i")
+      defer
+      apply auto
+      subgoal for b using has_derivative_proj' by blast
+     subgoal for a
+   proof -
+     assume dfrees:"(\<And>i. dfree (args i))"
+     assume IH1:"(\<And>ia. \<forall>x. ((\<lambda>R. dterm_sem
+                      \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. R $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                         ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                      (args ia) \<nu>) has_derivative
+                extendf_deriv I i_f (args ia) \<nu> x)
+                (at x))"
+     then have IH1':"(\<And>ia. \<And>x. ((\<lambda>R. dterm_sem
+                      \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. R $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                         ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                      (args ia) \<nu>) has_derivative
+                extendf_deriv I i_f (args ia) \<nu> x)
+                (at x))"
+       by auto
+     assume a:"i = Inl a"
+     have chain:"\<And>f f' x s g g'. (f has_derivative f') (at x within s) \<Longrightarrow>
+      (g has_derivative g') (at (f x) within f ` s) \<Longrightarrow> (g \<circ> f has_derivative g' \<circ> f') (at x within s)"
+       by (auto intro: derivative_intros)
+     let ?f = "(\<lambda>x. Functions I a x)"
+     let ?g = "(\<lambda> R. (\<chi> i. dterm_sem
+                       \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. R $ f'), Predicates = Predicates I, Contexts = Contexts I,
+                          Programs = Programs I, ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                       (args i) \<nu>))"
+     let ?myf' = "(\<lambda>x. (THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y)) (?g x))"
+     let ?myg' = "(\<lambda>x. (\<lambda>\<nu>'. \<chi> ia. extendf_deriv I i_f (args ia) \<nu> x \<nu>'))"
+     have fg_eq:"(\<lambda>R. Functions I a
+           (\<chi> i. dterm_sem
+                  \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. R $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                     ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                  (args i) \<nu>)) = (?f \<circ> ?g)"
+       by auto
+     have "\<forall>x. ((?f o ?g) has_derivative (?myf' x \<circ> ?myg' x)) (at x)"
+       apply (rule allI)
+       apply (rule diff_chain_at)
+       subgoal for xa
+         apply (rule has_derivative_vec)
+         subgoal for i using IH1'[of i xa] by auto
+         done
+       subgoal for xa 
+       proof -
+         have deriv:"\<And>x. (Functions I a has_derivative FunctionFrechet I a x) (at x)"
+         and cont:"continuous_on UNIV (\<lambda>x. Blinfun (FunctionFrechet I a x))"
+           using good_interp[unfolded is_interp_def] by auto
+         show ?thesis
+           apply(rule has_derivative_at_withinI)
+           using deriv by auto
+       qed
+      done
+    then have "((?f o ?g) has_derivative (?myf' x \<circ> ?myg' x)) (at x)" by auto
+    then show "((\<lambda>R. Functions I a
+           (\<chi> i. dterm_sem
+                  \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. R $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                     ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+                  (args i) \<nu>)) has_derivative
+              (THE f'. \<forall>y. (Functions I a has_derivative f' y) (at y))
+      (\<chi> i. dterm_sem
+             \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. x $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+             (args i) \<nu>) \<circ>
+     (\<lambda>\<nu>'. \<chi> ia. extendf_deriv I i_f (args ia) \<nu> x \<nu>'))
+     (at x) "
+      using fg_eq by auto
+  qed
+  done
+done
+
+lemma adjoint_safe:
+  assumes good_interp:"is_interp I"
+  assumes good_subst:"(\<And>i f'. SFunctions \<sigma> i = Some f' \<Longrightarrow> dfree f') "    
+  shows "is_interp (adjoint I \<sigma> \<nu>)"
+  apply(unfold adjoint_def)
+  apply(unfold is_interp_def)
+  apply(auto simp del: extendf.simps extendc.simps FunctionFrechet.simps)
+   subgoal for x i
+     apply(cases "SFunctions \<sigma> i = None")
+      subgoal
+        apply(auto simp del: extendf.simps extendc.simps)
+        using good_interp unfolding is_interp_def by simp
+      apply(auto  simp del: extendf.simps extendc.simps)
+      subgoal for f'
+        using good_subst[of i f'] apply (auto  simp del: extendf.simps extendc.simps)
+      proof -
+        assume some:"SFunctions \<sigma> i = Some f'"
+        assume free:"dfree f'"
+        let ?f = "(\<lambda>R. dterm_sem (extendf I R) f' \<nu>)"
+        let ?Pred = "(\<lambda>fd. (\<forall>x. (?f has_derivative (fd x)) (at x)))"
+        let ?f''="extendf_deriv I i f' \<nu>"
+        have Pf:"?Pred ?f''"
+          using extendf_deriv[OF good_subst[of i f'] good_interp, of \<nu> i, OF some]
+          by auto
+        have "(THE G. (?f has_derivative G) (at x)) = ?f'' x"
+          apply(rule the_deriv)
+          using Pf by auto
+        then have the_eq:"(THE G. \<forall> x. (?f has_derivative G x) (at x)) = ?f''"
+          using Pf the_all_deriv by auto
+        show "((\<lambda>R. dterm_sem (extendf I R) f' \<nu>) has_derivative (THE f'a. \<forall>x. ((\<lambda>R. dterm_sem (extendf I R) f' \<nu>) has_derivative f'a x) (at x)) x) (at x)"
+          using the_eq Pf by simp
+      qed
+      done
+    subgoal for i
+      apply(cases "SFunctions \<sigma> i = None")
+       subgoal
+         apply(auto  simp del: extendf.simps extendc.simps)
+         using good_interp unfolding is_interp_def by simp
+      apply(auto  simp del: extendf.simps extendc.simps)
+      subgoal for f'
+        using good_subst[of i f'] apply (auto  simp del: extendf.simps extendc.simps)
+      proof -
+        assume some:"SFunctions \<sigma> i = Some f'"
+        assume free:"dfree f'"
+        let ?f = "(\<lambda>R. dterm_sem (extendf I R) f' \<nu>)"
+        let ?Pred = "(\<lambda>fd. (\<forall>x. (?f has_derivative (fd x)) (at x)))"
+        let ?f''="extendf_deriv I i f' \<nu>"
+        have Pf:"?Pred ?f''"
+          using extendf_deriv[OF good_subst[of i f'] good_interp, of \<nu> i, OF some]
+          by auto
+        have "\<And>x. (THE G. (?f has_derivative G) (at x)) = ?f'' x"
+          apply(rule the_deriv)
+          using Pf by auto
+        then have the_eq:"(THE G. \<forall> x. (?f has_derivative G x) (at x)) = ?f''"
+          using Pf the_all_deriv by auto
+        have "continuous_on UNIV (\<lambda>x. Blinfun (?f'' x))"
+          by(rule extendf_deriv_continuous[OF free good_interp])
+        show "continuous_on UNIV (\<lambda>x. Blinfun ((THE f'a. \<forall>x. ((\<lambda>R. dterm_sem (extendf I R) f' \<nu>) has_derivative f'a x) (at x)) x))"
+          using the_eq Pf 
+      qed
+    done
+  done
+
+lemma adjointFO_safe:
+  assumes good_interp:"is_interp I"
+  assumes good_subst:"(\<And>i. dsafe (\<sigma> i))"
+  shows "is_interp (adjointFO I \<sigma> \<nu>)"
+  apply(unfold adjointFO_def)
+  apply(unfold is_interp_def)
+  apply(auto simp del: extendf.simps extendc.simps FunctionFrechet.simps)
+   subgoal for x i
+     apply(cases "i")
+      subgoal
+        apply(auto  simp del: extendf.simps extendc.simps)
+        using good_interp unfolding is_interp_def by simp
+     apply(auto  simp del: extendf.simps extendc.simps)
+     subgoal for f'
+     proof -
+       assume some:"i = Inr f'"
+       have free:"dsafe (\<sigma> f')" using good_subst by auto
+       let ?f = "(\<lambda>_. dterm_sem I (\<sigma> f') \<nu>)"
+       let ?Pred = "(\<lambda>fd. (\<forall>x. (?f has_derivative (fd x)) (at x)))"
+       let ?f''="(\<lambda>_ _. 0)"
+       have Pf:"?Pred ?f''"
+       proof (induction "\<sigma> f'")
+       qed (auto)
+       have "(THE G. (?f has_derivative G) (at x)) = ?f'' x"
+         apply(rule the_deriv)
+         using Pf by auto
+       then have the_eq:"(THE G. \<forall> x. (?f has_derivative G x) (at x)) = ?f''"
+         using Pf the_all_deriv[of ?f ?f''] by auto
+       have another_eq:"(THE f'a. \<forall>x. ((\<lambda>_. dterm_sem I (\<sigma> f') \<nu>) has_derivative f'a x) (at x)) x = (\<lambda> _. 0)"
+         using Pf by (simp add: the_eq) 
+       then show "((\<lambda>_. dterm_sem I (\<sigma> f') \<nu>) has_derivative (THE f'a. \<forall>x. ((\<lambda>_. dterm_sem I (\<sigma> f') \<nu>) has_derivative f'a x) (at x)) x) (at x)"
+         using the_eq Pf by simp
+       qed
+    done
+  subgoal for i
+    apply(cases i)
+     subgoal
+       apply(auto  simp del: extendf.simps extendc.simps)
+       using good_interp unfolding is_interp_def by simp
+    apply(auto  simp del: extendf.simps extendc.simps)
+    subgoal for f'
+      using good_subst[of f'] 
+    proof -
+      assume some:"i = Inr f'"
+      have free:"dsafe (\<sigma> f')" using good_subst by auto
+      let ?f = "(\<lambda>R. dterm_sem I (\<sigma> f') \<nu>)"
+      let ?Pred = "(\<lambda>fd. (\<forall>x. (?f has_derivative (fd x)) (at x)))"
+      have Pf:"?Pred ?f''" by simp
+      have "\<And>x. (THE G. (?f has_derivative G) (at x)) = ?f'' x"
+        apply(rule the_deriv)
+        using Pf by auto
+      then have the_eq:"(THE G. \<forall> x. (?f has_derivative G x) (at x)) = ?f''"
+        using Pf the_all_deriv[of "(\<lambda>R. dterm_sem I (\<sigma> f') \<nu>)" "(\<lambda>_ _. 0)"]
+        by blast
+      then have blin_cont:"continuous_on UNIV (\<lambda>x. Blinfun (?f'' x))"
+        by (simp add: continuous_on_const)
+      have truth:"(\<lambda>x. Blinfun ((THE f'a. \<forall>x. ((\<lambda>_. dterm_sem I (\<sigma> f') \<nu>) has_derivative f'a x) (at x)) x))
+        = (\<lambda>x. Blinfun (\<lambda> _. 0))"
+        apply(rule ext)
+        apply(rule blinfun_eqI)
+        by (simp add: local.the_eq)
+      then show "continuous_on UNIV (\<lambda>x. Blinfun ((THE f'a. \<forall>x. ((\<lambda>_. dterm_sem I (\<sigma> f') \<nu>) has_derivative f'a x) (at x)) x))"
+        using truth 
+        by (metis (mono_tags, lifting) blin_cont continuous_on_eq)
+      qed
+    done
+  done
+
+lemma adjoint_consequence:"(\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dsafe f') \<Longrightarrow> (\<And>f f'. SPredicates \<sigma> f = Some f' \<Longrightarrow> fsafe f') \<Longrightarrow> Vagree \<nu> \<omega> (FVS \<sigma>) \<Longrightarrow> adjoint I \<sigma> \<nu> = adjoint I \<sigma> \<omega>"
+  apply(unfold FVS_def)
+  apply(auto)
+  apply(unfold adjoint_def)
+  apply(rule interp_eq)
+       apply(auto simp add: fun_eq_iff)
+    subgoal for xa xaa 
+      apply(cases "SFunctions \<sigma> xa")
+       apply(auto)
+      subgoal for a 
+      proof -
+        assume safes:"(\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dsafe f')"
+        assume agrees:"Vagree \<nu> \<omega> (\<Union>x. SFV \<sigma> x)"
+        assume some:"SFunctions \<sigma> xa = Some a"
+        from safes some have safe:"dsafe a" by auto
+        have sub:"SFV \<sigma> (Inl xa) \<subseteq> (\<Union>x. SFV \<sigma> x)"
+          by blast
+        from agrees 
+        have "Vagree \<nu> \<omega> (SFV \<sigma> (Inl xa))"
+          using agree_sub[OF sub agrees] by auto
+        then have agree:"Vagree \<nu> \<omega> (FVT a)"
+          using some by auto
+        show "?thesis"
+          using coincidence_dterm[of a, OF safes[of xa a, OF some] agree] by auto
+      qed
+    done
+   subgoal for xa xaa 
+    apply(cases "SPredicates \<sigma> xa")
+     apply(auto)
+    subgoal for a 
+    proof -
+      assume safes:"(\<And>f f'. SPredicates \<sigma> f = Some f' \<Longrightarrow> fsafe f')"
+      assume agrees:"Vagree \<nu> \<omega> (\<Union>x. SFV \<sigma> x)"
+      assume some:"SPredicates \<sigma> xa = Some a"
+      assume sem:"\<nu> \<in> fml_sem \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. xaa $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                  ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+        a"
+      from safes some have safe:"fsafe a" by auto
+      have sub:"SFV \<sigma> (Inr (Inr xa)) \<subseteq> (\<Union>x. SFV \<sigma> x)"
+        by blast
+      from agrees 
+      have "Vagree \<nu> \<omega> (SFV \<sigma> (Inr (Inr xa)))"
+        using agree_sub[OF sub agrees] by auto
+      then have agree:"Vagree \<nu> \<omega> (FVF a)"
+        using some by auto
+      let ?I' = "\<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. xaa $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                  ODEs = ODEs I, ODEBV = ODEBV I\<rparr>"
+      have IA:"\<And>S. Iagree ?I' ?I' (SIGF a)" using Iagree_refl by auto
+      show "?thesis"
+        using coincidence_formula[of a, OF safes[of xa a, OF some] IA agree] sem by auto
+    qed
+    done
+   subgoal for xa xaa 
+    apply(cases "SPredicates \<sigma> xa")
+     apply(auto)
+    subgoal for a 
+    proof -
+      assume safes:"(\<And>f f'. SPredicates \<sigma> f = Some f' \<Longrightarrow> fsafe f')"
+      assume agrees:"Vagree \<nu> \<omega> (\<Union>x. SFV \<sigma> x)"
+      assume some:"SPredicates \<sigma> xa = Some a"
+      assume sem:"\<omega> \<in> fml_sem \<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. xaa $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                  ODEs = ODEs I, ODEBV = ODEBV I\<rparr>
+        a"
+      from safes some have safe:"fsafe a" by auto
+      have sub:"SFV \<sigma> (Inr (Inr xa)) \<subseteq> (\<Union>x. SFV \<sigma> x)"
+        by blast
+      from agrees 
+      have "Vagree \<nu> \<omega> (SFV \<sigma> (Inr (Inr xa)))"
+        using agree_sub[OF sub agrees] by auto
+      then have agree:"Vagree \<nu> \<omega> (FVF a)"
+        using some by auto
+      let ?I' = "\<lparr>Functions = case_sum (Functions I) (\<lambda>f' _. xaa $ f'), Predicates = Predicates I, Contexts = Contexts I, Programs = Programs I,
+                  ODEs = ODEs I, ODEBV = ODEBV I\<rparr>"
+      have IA:"\<And>S. Iagree ?I' ?I' (SIGF a)" using Iagree_refl by auto
+      show "?thesis"
+        using coincidence_formula[of a, OF safes[of xa a, OF some] IA agree] sem by auto
+    qed
+  done    
+done
+
+lemma SIGT_plus1:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Plus t1 t2). case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) 
+  \<Longrightarrow> Vagree \<nu> \<omega> (\<Union>i\<in>SIGT t1. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {})"
+  unfolding Vagree_def by auto
+
+lemma SIGT_plus2:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Plus t1 t2). case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) 
+  \<Longrightarrow> Vagree \<nu> \<omega> (\<Union>i\<in>SIGT t2. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {})"
+  unfolding Vagree_def by auto
+
+lemma SIGT_times1:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Times t1 t2). case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) 
+  \<Longrightarrow> Vagree \<nu> \<omega> (\<Union>i\<in>SIGT t1. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {})"
+  unfolding Vagree_def by auto
+
+lemma SIGT_times2:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Times t1 t2). case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) 
+  \<Longrightarrow> Vagree \<nu> \<omega> (\<Union>i\<in>SIGT t2. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {})"
+  unfolding Vagree_def by auto
+
+lemma uadmit_sterm_adjoint':
+  assumes dsafe:"\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dsafe f'"
+  assumes fsafe:"\<And>f f'. SPredicates \<sigma> f = Some f' \<Longrightarrow> fsafe f'"
+  shows  "Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> sterm_sem (adjoint I \<sigma> \<nu>) \<theta> = sterm_sem (adjoint I \<sigma> \<omega>) \<theta>"
+proof (induct "\<theta>")
+  case (Plus \<theta>1 \<theta>2)
+  assume IH1:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>1. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> sterm_sem (local.adjoint I \<sigma> \<nu>) \<theta>1 = sterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>1"
+  assume IH2:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>2. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> sterm_sem (local.adjoint I \<sigma> \<nu>) \<theta>2 = sterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Plus \<theta>1 \<theta>2). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+  then show ?case
+    using IH1[OF SIGT_plus1[OF VA]] IH2[OF SIGT_plus2[OF VA]] by auto
+next
+  case (Times \<theta>1 \<theta>2)
+  assume IH1:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>1. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> sterm_sem (local.adjoint I \<sigma> \<nu>) \<theta>1 = sterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>1"
+  assume IH2:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>2. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> sterm_sem (local.adjoint I \<sigma> \<nu>) \<theta>2 = sterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Times \<theta>1 \<theta>2). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"    
+  then show ?case
+    using IH1[OF SIGT_times1[OF VA]] IH2[OF SIGT_times2[OF VA]] by auto
+next
+  case (Function x1a x2a)
+  assume IH:"\<And>x. x \<in> range x2a \<Longrightarrow> Vagree \<nu> \<omega> (\<Union>i\<in>SIGT x. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow>
+    sterm_sem (local.adjoint I \<sigma> \<nu>) x = sterm_sem (local.adjoint I \<sigma> \<omega>) x"
+  from IH have IH':"\<And>j. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (x2a j). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow>
+    sterm_sem (local.adjoint I \<sigma> \<nu>) (x2a j) = sterm_sem (local.adjoint I \<sigma> \<omega>) (x2a j)"
+    using rangeI by auto
+  assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT ($f x1a x2a). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+  from VA have VAs:"\<And>j. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (x2a j). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+    unfolding Vagree_def SIGT.simps using rangeI by blast
+  have SIGT:"x1a \<in> SIGT ($f x1a x2a)" by auto
+  have VAsub:"\<And>a. SFunctions \<sigma> x1a = Some a \<Longrightarrow> (FVT a) \<subseteq> (\<Union>i\<in>SIGT ($f x1a x2a). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+    using SIGT by auto
+  have VAf:"\<And>a. SFunctions \<sigma> x1a = Some a \<Longrightarrow> Vagree \<nu> \<omega> (FVT a)"
+    using agree_sub[OF VAsub VA] by auto
+  then show ?case 
+    using IH'[OF VAs] apply (auto simp add: fun_eq_iff)
+    apply(cases "SFunctions \<sigma> x1a")
+     defer
+     subgoal for x a
+     proof -
+       assume VA:"(\<And>a. SFunctions \<sigma> x1a = Some a \<Longrightarrow> Vagree \<nu> \<omega> (FVT a))"
+       assume sems:"(\<And>j. \<forall>x. sterm_sem (local.adjoint I \<sigma> \<nu>) (x2a j) x = sterm_sem (local.adjoint I \<sigma> \<omega>) (x2a j) x)"
+       assume some:"SFunctions \<sigma> x1a = Some a"
+       note FVT = VAf[OF some]
+       have dsem:"\<And>R . dterm_sem (extendf I R) a \<nu> = dterm_sem (extendf I R) a \<omega>"
+         using coincidence_dterm[OF dsafe[OF some] FVT] by auto
+       have "\<And>R. Functions (local.adjoint I \<sigma> \<nu>) x1a R = Functions (local.adjoint I \<sigma> \<omega>) x1a R"
+         using dsem some unfolding adjoint_def by auto
+       then show "Functions (local.adjoint I \<sigma> \<nu>) x1a (\<chi> i. sterm_sem (local.adjoint I \<sigma> \<omega>) (x2a i) x) =
+                 Functions (local.adjoint I \<sigma> \<omega>) x1a (\<chi> i. sterm_sem (local.adjoint I \<sigma> \<omega>) (x2a i) x)"
+         by auto
+     qed
+    unfolding adjoint_def apply auto    
+    done
+qed (auto)  
+  
+lemma uadmit_sterm_adjoint:
+  assumes TUA:"TUadmit \<sigma> \<theta> U"
+  assumes VA:"Vagree \<nu> \<omega> (-U)"
+  assumes dsafe:"\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dsafe f'"
+  assumes fsafe:"\<And>f f'. SPredicates \<sigma> f = Some f' \<Longrightarrow> fsafe f'"
+  shows  "sterm_sem (adjoint I \<sigma> \<nu>) \<theta> = sterm_sem (adjoint I \<sigma> \<omega>) \<theta>"
+proof -
+  have duh:"\<And>A B. A \<inter> B = {} \<Longrightarrow> A \<subseteq> -B"
+    by auto
+  have "\<And>x. x \<in> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> x \<in> (-U)"
+    using TUA unfolding TUadmit_def by auto
+  then have sub1:"(\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> -U"
+    by auto
+  then have VA':"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {})"
+    using agree_sub[OF sub1 VA] by auto
+  then show "?thesis" using uadmit_sterm_adjoint'[OF dsafe fsafe VA'] by auto
+qed
+
+lemma uadmit_sterm_ntadjoint':
+  assumes dsafe:"\<And>i. dsafe (\<sigma> i)"
+  shows  "Vagree \<nu> \<omega> ((\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i))) \<Longrightarrow> sterm_sem (adjointFO I \<sigma> \<nu>) \<theta> = sterm_sem (adjointFO I \<sigma> \<omega>) \<theta>"
+proof (induct "\<theta>")
+  case (Plus \<theta>1 \<theta>2)
+  assume IH1:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>1}. FVT (\<sigma> i)) \<Longrightarrow> sterm_sem (adjointFO I \<sigma> \<nu>) \<theta>1 = sterm_sem (adjointFO I \<sigma> \<omega>) \<theta>1"
+  assume IH2:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>2}. FVT (\<sigma> i)) \<Longrightarrow> sterm_sem (adjointFO I \<sigma> \<nu>) \<theta>2 = sterm_sem (adjointFO I \<sigma> \<omega>) \<theta>2"
+  assume VA:"Vagree \<nu> \<omega> ((\<Union> i\<in>{i. Inr i \<in> SIGT (Plus \<theta>1 \<theta>2)}. FVT (\<sigma> i)))"
+  from VA 
+    have VA1:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>1}. FVT (\<sigma> i))"
+    and  VA2:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>2}. FVT (\<sigma> i))" unfolding Vagree_def by auto
+  then show ?case
+    using IH1[OF VA1] IH2[OF VA2] by auto
+next
+  case (Times \<theta>1 \<theta>2)
+  assume IH1:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>1}. FVT (\<sigma> i)) \<Longrightarrow> sterm_sem (adjointFO I \<sigma> \<nu>) \<theta>1 = sterm_sem (adjointFO I \<sigma> \<omega>) \<theta>1"
+  assume IH2:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>2}. FVT (\<sigma> i)) \<Longrightarrow> sterm_sem (adjointFO I \<sigma> \<nu>) \<theta>2 = sterm_sem (adjointFO I \<sigma> \<omega>) \<theta>2"
+  assume VA:"Vagree \<nu> \<omega> ((\<Union> i\<in>{i. Inr i \<in> SIGT (Times \<theta>1 \<theta>2)}. FVT (\<sigma> i)))"
+  from VA 
+  have VA1:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>1}. FVT (\<sigma> i))"
+  and  VA2:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>2}. FVT (\<sigma> i))" unfolding Vagree_def by auto
+  then show ?case
+    using IH1[OF VA1] IH2[OF VA2] by auto
+next
+  case (Function x1a x2a) 
+  assume IH:"\<And>x. x \<in> range x2a \<Longrightarrow> Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT x}. FVT (\<sigma> i)) \<Longrightarrow>
+    sterm_sem (adjointFO I \<sigma> \<nu>) x = sterm_sem (adjointFO I \<sigma> \<omega>) x"
+  from IH have IH':"\<And>j. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT (x2a j)}. FVT (\<sigma> i)) \<Longrightarrow>
+    sterm_sem (adjointFO I \<sigma> \<nu>) (x2a j) = sterm_sem (adjointFO I \<sigma> \<omega>) (x2a j)"
+    using rangeI by auto
+  assume VA:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT ($f x1a x2a)}. FVT (\<sigma> i)) "
+  from VA have VAs:"\<And>j. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT (x2a j)}. FVT (\<sigma> i))"
+    unfolding Vagree_def SIGT.simps using rangeI by blast
+  have SIGT:"x1a \<in> SIGT ($f x1a x2a)" by auto
+  have VAsub:"\<And>a. x1a = Inr a \<Longrightarrow> (FVT (\<sigma> a)) \<subseteq> (\<Union> i\<in>{i. Inr i \<in> SIGT ($f x1a x2a)}. FVT (\<sigma> i))"
+    using SIGT by auto
+  have VAf:"\<And>a. x1a = Inr a \<Longrightarrow>Vagree \<nu> \<omega> (FVT (\<sigma> a))"
+    using agree_sub[OF VAsub VA] by auto
+  then show ?case 
+    using IH'[OF VAs] apply (auto simp add: fun_eq_iff)
+    apply(cases "x1a")
+     defer
+     subgoal for x a
+     proof -
+       assume VA:"(\<And>a.  x1a = Inr a \<Longrightarrow> Vagree \<nu> \<omega> (FVT (\<sigma> a)))"
+       assume sems:"(\<And>j. \<forall>x. sterm_sem (adjointFO I \<sigma> \<nu>) (x2a j) x = sterm_sem (adjointFO I \<sigma> \<omega>) (x2a j) x)"
+       assume some:"x1a = Inr a"
+       note FVT = VAf[OF some]
+       from dsafe have dsafer:"\<And>i. dsafe (\<sigma> i)" using dfree_is_dsafe by auto
+       have dsem:"dterm_sem I (\<sigma> a) \<nu> = dterm_sem I (\<sigma> a) \<omega>"
+         using coincidence_dterm[OF dsafer FVT] some by auto
+       then have "\<And>R. Functions (adjointFO I \<sigma> \<nu>) x1a R = Functions (adjointFO I \<sigma> \<omega>) x1a R"
+         using some unfolding adjoint_def unfolding adjointFO_def by auto
+       then show "Functions (adjointFO I \<sigma> \<nu>) x1a (\<chi> i. sterm_sem (adjointFO I \<sigma> \<omega>) (x2a i) x) =
+                  Functions (adjointFO I \<sigma> \<omega>) x1a (\<chi> i. sterm_sem (adjointFO I \<sigma> \<omega>) (x2a i) x)"
+         by auto
+     qed
+    unfolding adjointFO_def by auto
+qed (auto) 
+  
+lemma uadmit_sterm_ntadjoint:
+  assumes TUA:"NTUadmit \<sigma> \<theta> U"
+  assumes VA:"Vagree \<nu> \<omega> (-U)"
+  assumes dsafe:"\<And>i . dsafe (\<sigma> i)"
+  assumes good_interp:"is_interp I"
+  shows  "sterm_sem (adjointFO I \<sigma> \<nu>) \<theta> = sterm_sem (adjointFO I \<sigma> \<omega>) \<theta>"
+proof -
+  have duh:"\<And>A B. A \<inter> B = {} \<Longrightarrow> A \<subseteq> -B"
+    by auto
+  have "\<And>x. x \<in> ((\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i))) \<Longrightarrow> x \<in> (-U)"
+    using TUA unfolding NTUadmit_def by auto
+  then have sub1:"(\<Union>i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i)) \<subseteq> -U"
+    by auto
+  then have VA':"Vagree \<nu> \<omega> (\<Union>i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i))"
+    using agree_sub[OF sub1 VA] by auto
+  then show "?thesis" using uadmit_sterm_ntadjoint'[OF  dsafe VA'] by auto
+qed
+
+lemma uadmit_dterm_adjoint':
+  assumes dfree:"\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dfree f'"
+  assumes fsafe:"\<And>f f'. SPredicates \<sigma> f = Some f' \<Longrightarrow> fsafe f'"
+  assumes good_interp:"is_interp I"
+  shows  "\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> dsafe \<theta> \<Longrightarrow> dterm_sem (adjoint I \<sigma> \<nu>) \<theta> = dterm_sem (adjoint I \<sigma> \<omega>) \<theta>"
+proof (induct "\<theta>")
+  case (Plus \<theta>1 \<theta>2)
+  assume IH1:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>1. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> dsafe \<theta>1 \<Longrightarrow> dterm_sem (local.adjoint I \<sigma> \<nu>) \<theta>1 = dterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>1"
+  assume IH2:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>2. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> dsafe \<theta>2 \<Longrightarrow> dterm_sem (local.adjoint I \<sigma> \<nu>) \<theta>2 = dterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Plus \<theta>1 \<theta>2). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+  assume safe:"dsafe (Plus \<theta>1 \<theta>2)"
+  then show ?case
+    using IH1[OF SIGT_plus1[OF VA]] IH2[OF SIGT_plus2[OF VA]] by auto
+next
+  case (Times \<theta>1 \<theta>2)
+  assume IH1:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>1. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> dsafe \<theta>1 \<Longrightarrow> dterm_sem (local.adjoint I \<sigma> \<nu>) \<theta>1 = dterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>1"
+  assume IH2:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>2. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> dsafe \<theta>2 \<Longrightarrow> dterm_sem (local.adjoint I \<sigma> \<nu>) \<theta>2 = dterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Times \<theta>1 \<theta>2). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+  assume safe:"dsafe (Times \<theta>1 \<theta>2)"
+  then show ?case
+    using IH1[OF SIGT_times1[OF VA]] IH2[OF SIGT_times2[OF VA]] by auto
+next
+  case (Function x1a x2a)
+  assume IH:"\<And>x. \<And>\<nu> \<omega>. x \<in> range x2a \<Longrightarrow> Vagree \<nu> \<omega> (\<Union>i\<in>SIGT x. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow>
+    dsafe x \<Longrightarrow> dterm_sem (local.adjoint I \<sigma> \<nu>) x = dterm_sem (local.adjoint I \<sigma> \<omega>) x"
+  assume safe:"dsafe (Function x1a x2a)"
+  from safe have safes:"\<And>j. dsafe (x2a j)" by auto
+  from IH have IH':"\<And>j. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (x2a j). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow>
+    dterm_sem (local.adjoint I \<sigma> \<nu>) (x2a j) = dterm_sem (local.adjoint I \<sigma> \<omega>) (x2a j)"
+    using rangeI safes by auto
+  assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT ($f x1a x2a). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+  from VA have VAs:"\<And>j. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (x2a j). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+    unfolding Vagree_def SIGT.simps using rangeI by blast
+  have SIGT:"x1a \<in> SIGT ($f x1a x2a)" by auto
+  have VAsub:"\<And>a. SFunctions \<sigma> x1a = Some a \<Longrightarrow> (FVT a) \<subseteq> (\<Union>i\<in>SIGT ($f x1a x2a). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+    using SIGT by auto
+  have VAf:"\<And>a. SFunctions \<sigma> x1a = Some a \<Longrightarrow> Vagree \<nu> \<omega> (FVT a)"
+    using agree_sub[OF VAsub VA] by auto
+  then show ?case 
+    using IH'[OF VAs] apply (auto simp add: fun_eq_iff)
+    apply(cases "SFunctions \<sigma> x1a")
+     defer
+     subgoal for x1 x2 a
+     proof -
+       assume VA:"(\<And>a. SFunctions \<sigma> x1a = Some a \<Longrightarrow> Vagree \<nu> \<omega> (FVT a))"
+       assume sems:"(\<And>j. \<forall>x1 x2. dterm_sem (local.adjoint I \<sigma> \<nu>) (x2a j) (x1,x2) = dterm_sem (local.adjoint I \<sigma> \<omega>) (x2a j) (x1,x2))"
+       assume some:"SFunctions \<sigma> x1a = Some a"
+       note FVT = VAf[OF some]
+       have dsafe:"\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dsafe f'"
+         using dfree dfree_is_dsafe by auto
+       have dsem:"\<And>R . dterm_sem (extendf I R) a \<nu> = dterm_sem (extendf I R) a \<omega>"
+         using coincidence_dterm[OF dsafe[OF some] FVT] by auto
+       have "\<And>R. Functions (local.adjoint I \<sigma> \<nu>) x1a R = Functions (local.adjoint I \<sigma> \<omega>) x1a R"
+         using dsem some unfolding adjoint_def by auto
+       then show "Functions (local.adjoint I \<sigma> \<nu>) x1a (\<chi> i. dterm_sem (local.adjoint I \<sigma> \<omega>) (x2a i) (x1,x2)) =
+                  Functions (local.adjoint I \<sigma> \<omega>) x1a (\<chi> i. dterm_sem (local.adjoint I \<sigma> \<omega>) (x2a i) (x1,x2))"
+         by auto
+      qed
+  unfolding adjoint_def apply auto    
+  done
+next
+  case (Differential \<theta>)
+  assume IH:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {}) \<Longrightarrow> dsafe \<theta> \<Longrightarrow> dterm_sem (local.adjoint I \<sigma> \<nu>) \<theta> = dterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT (Differential \<theta>). case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+  assume safe:"dsafe (Differential \<theta>)"
+  then have free:"dfree \<theta>" by (auto dest: dsafe.cases)
+  from VA have VA':"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some a \<Rightarrow> FVT a | None \<Rightarrow> {})"
+    by auto
+  have dsafe:"\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dsafe f'"
+    using dfree dfree_is_dsafe by auto
+  have sem:"sterm_sem (local.adjoint I \<sigma> \<nu>) \<theta> = sterm_sem (local.adjoint I \<sigma> \<omega>) \<theta>"
+    using uadmit_sterm_adjoint'[OF dsafe fsafe VA', of "\<lambda> x y. x" "\<lambda> x y. x" I] by auto
+  have good1:"is_interp (adjoint I \<sigma> \<nu>)" using adjoint_safe[OF good_interp dfree] by auto
+  have good2:"is_interp (adjoint I \<sigma> \<omega>)" using adjoint_safe[OF good_interp dfree] by auto
+  have frech:"frechet (local.adjoint I \<sigma> \<nu>) \<theta> = frechet (local.adjoint I \<sigma> \<omega>) \<theta>"
+    apply (auto simp add: fun_eq_iff)
+    subgoal for a b
+      using sterm_determines_frechet [OF good1 good2 free free sem, of "(a,b)"] by auto
+    done
+  then show "dterm_sem (local.adjoint I \<sigma> \<nu>) (Differential \<theta>) = dterm_sem (local.adjoint I \<sigma> \<omega>) (Differential \<theta>)"
+    by (auto simp add: directional_derivative_def)
+qed (auto)  
+
+lemma uadmit_dterm_adjoint:
+  assumes TUA:"TUadmit \<sigma> \<theta> U"
+  assumes VA:"Vagree \<nu> \<omega> (-U)"
+  assumes dfree:"\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dfree f'"
+  assumes fsafe:"\<And>f f'. SPredicates \<sigma> f = Some f' \<Longrightarrow>  fsafe f'"
+  assumes dsafe:"dsafe \<theta>"
+  assumes good_interp:"is_interp I"
+  shows  "dterm_sem (adjoint I \<sigma> \<nu>) \<theta> = dterm_sem (adjoint I \<sigma> \<omega>) \<theta>"
+proof -
+  have duh:"\<And>A B. A \<inter> B = {} \<Longrightarrow> A \<subseteq> -B"
+    by auto
+  have "\<And>x. x \<in> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> x \<in> (-U)"
+    using TUA unfolding TUadmit_def by auto
+  then have sub1:"(\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> -U"
+    by auto
+  then have VA':"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {})"
+    using agree_sub[OF sub1 VA] by auto
+  then show "?thesis" using uadmit_dterm_adjoint'[OF dfree fsafe good_interp VA' dsafe] 
+    by auto
+qed
+
+lemma uadmit_dterm_ntadjoint':
+  assumes dfree:"\<And>i. dsafe (\<sigma> i)"
+  assumes good_interp:"is_interp I"
+  shows  "\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i)) \<Longrightarrow> dsafe \<theta> \<Longrightarrow> dterm_sem (adjointFO I \<sigma> \<nu>) \<theta> = dterm_sem (adjointFO I \<sigma> \<omega>) \<theta>"
+proof (induct "\<theta>")
+  case (Plus \<theta>1 \<theta>2 \<nu> \<omega>)
+  assume IH1:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>1}. FVT (\<sigma> i)) \<Longrightarrow> dsafe \<theta>1 \<Longrightarrow> dterm_sem (adjointFO I \<sigma> \<nu>) \<theta>1 = dterm_sem (adjointFO I \<sigma> \<omega>) \<theta>1"
+  assume IH2:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>2}. FVT (\<sigma> i)) \<Longrightarrow> dsafe \<theta>2 \<Longrightarrow> dterm_sem (adjointFO I \<sigma> \<nu>) \<theta>2 = dterm_sem (adjointFO I \<sigma> \<omega>) \<theta>2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT (Plus \<theta>1 \<theta>2)}. FVT (\<sigma> i))"
+  then have VA1:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>1}. FVT (\<sigma> i))"
+    and VA2:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>2}. FVT (\<sigma> i))"
+    unfolding Vagree_def by auto
+  assume safe:"dsafe (Plus \<theta>1 \<theta>2)"
+  show ?case 
+    using IH1[OF VA1] IH2[OF VA2] safe by auto
+next
+  case (Times \<theta>1 \<theta>2 \<nu> \<omega>)
+  assume IH1:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>1}. FVT (\<sigma> i)) \<Longrightarrow> dsafe \<theta>1 \<Longrightarrow> dterm_sem (adjointFO I \<sigma> \<nu>) \<theta>1 = dterm_sem (adjointFO I \<sigma> \<omega>) \<theta>1"
+  assume IH2:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>2}. FVT (\<sigma> i)) \<Longrightarrow> dsafe \<theta>2 \<Longrightarrow> dterm_sem (adjointFO I \<sigma> \<nu>) \<theta>2 = dterm_sem (adjointFO I \<sigma> \<omega>) \<theta>2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT (Times \<theta>1 \<theta>2)}. FVT (\<sigma> i))"
+  then have VA1:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>1}. FVT (\<sigma> i))"
+    and VA2:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>2}. FVT (\<sigma> i))"
+    unfolding Vagree_def by auto
+  assume safe:"dsafe (Times \<theta>1 \<theta>2)"
+  show ?case 
+    using IH1[OF VA1] IH2[OF VA2] safe by auto
+next
+  case (Function x1a x2a)
+    assume IH:"\<And>x. \<And>\<nu> \<omega>. x \<in> range x2a \<Longrightarrow> Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT x}. FVT (\<sigma> i)) \<Longrightarrow>
+      dsafe x \<Longrightarrow> dterm_sem (adjointFO I \<sigma> \<nu>) x = dterm_sem (adjointFO I \<sigma> \<omega>) x"
+    assume safe:"dsafe (Function x1a x2a)"
+    from safe have safes:"\<And>j. dsafe (x2a j)" by auto
+    from IH have IH':"\<And>j. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT (x2a j)}. FVT (\<sigma> i)) \<Longrightarrow>
+      dterm_sem (adjointFO I \<sigma> \<nu>) (x2a j) = dterm_sem (adjointFO I \<sigma> \<omega>) (x2a j)"
+      using rangeI safes by auto
+    assume VA:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT ($f x1a x2a)}. FVT (\<sigma> i))"
+    from VA have VAs:"\<And>j. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT (x2a j)}. FVT (\<sigma> i))"
+      unfolding Vagree_def SIGT.simps using rangeI by blast
+    have SIGT:"x1a \<in> SIGT ($f x1a x2a)" by auto
+    have VAsub:"\<And>a. x1a = Inr a\<Longrightarrow> (FVT (\<sigma> a)) \<subseteq> (\<Union> i\<in>{i. Inr i \<in> SIGT ($f x1a x2a)}. FVT (\<sigma> i))"
+      using SIGT by auto
+    have VAf:"\<And>a. x1a = Inr a \<Longrightarrow> Vagree \<nu> \<omega> (FVT (\<sigma> a))"
+      using agree_sub[OF VAsub VA] by auto
+  then show ?case 
+    using IH'[OF VAs] apply (auto simp add: fun_eq_iff)
+    apply(cases "x1a")
+     defer
+     subgoal for x1 x2 a
+     proof -
+       assume VA:"(\<And>a. x1a = Inr a \<Longrightarrow> Vagree \<nu> \<omega> (FVT (\<sigma> a)))"
+       assume sems:"(\<And>j. \<forall>x1 x2. dterm_sem (adjointFO I \<sigma> \<nu>) (x2a j) (x1,x2) = dterm_sem (adjointFO I \<sigma> \<omega>) (x2a j) (x1,x2))"
+       assume some:"x1a = Inr a"
+       note FVT = VAf[OF some]
+       have dsafe:"\<And>i. dsafe (\<sigma> i)"
+         using dfree dfree_is_dsafe by auto
+       have dsem:"\<And>R . dterm_sem I (\<sigma> a) \<nu> = dterm_sem I (\<sigma> a) \<omega>"
+         using coincidence_dterm[OF dsafe FVT] by auto
+       have "\<And>R. Functions (adjointFO I \<sigma> \<nu>) x1a R = Functions (adjointFO I \<sigma> \<omega>) x1a R"
+         using dsem some unfolding adjointFO_def by auto
+       then show "Functions (adjointFO I \<sigma> \<nu>) x1a (\<chi> i. dterm_sem (adjointFO I \<sigma> \<omega>) (x2a i) (x1,x2)) =
+                  Functions (adjointFO I \<sigma> \<omega>) x1a (\<chi> i. dterm_sem (adjointFO I \<sigma> \<omega>) (x2a i) (x1,x2))"
+         by auto
+     qed
+    unfolding adjointFO_def apply auto    
+    done
+next
+  case (Differential \<theta>)
+  assume IH:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i)) \<Longrightarrow> dsafe \<theta> \<Longrightarrow> dterm_sem (adjointFO I \<sigma> \<nu>) \<theta> = dterm_sem (adjointFO I \<sigma> \<omega>) \<theta>"
+  assume VA:"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT (Differential \<theta>)}. FVT (\<sigma> i))"
+  assume safe:"dsafe (Differential \<theta>)"
+  then have free:"dfree \<theta>" by (auto dest: dsafe.cases)
+  from VA have VA':"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i))"
+    by auto
+  have dsafe:"\<And>i. dsafe (\<sigma> i)"
+    using dfree dfree_is_dsafe by auto
+  have sem:"sterm_sem (adjointFO I \<sigma> \<nu>) \<theta> = sterm_sem (adjointFO I \<sigma> \<omega>) \<theta>"
+    using uadmit_sterm_ntadjoint'[OF dsafe  VA'] by auto
+  have good1:"is_interp (adjointFO I \<sigma> \<nu>)" using adjointFO_safe[OF good_interp dsafe, of "\<lambda>i. i"] by auto
+  have good2:"is_interp (adjointFO I \<sigma> \<omega>)" using adjointFO_safe[OF good_interp dsafe, of "\<lambda>i. i"] by auto
+  have frech:"frechet (adjointFO I \<sigma> \<nu>) \<theta> = frechet (adjointFO I \<sigma> \<omega>) \<theta>"
+    apply (auto simp add: fun_eq_iff)
+    subgoal for a b
+      using sterm_determines_frechet [OF good1 good2 free free sem, of "(a,b)"] by auto
+    done
+  then show "dterm_sem (adjointFO I \<sigma> \<nu>) (Differential \<theta>) = dterm_sem (adjointFO I \<sigma> \<omega>) (Differential \<theta>)"
+    by (auto simp add: directional_derivative_def)
+qed (auto)  
+
+lemma uadmit_dterm_ntadjoint:
+  assumes TUA:"NTUadmit \<sigma> \<theta> U"
+  assumes VA:"Vagree \<nu> \<omega> (-U)"
+  assumes dfree:"\<And>i . dsafe (\<sigma> i)"
+  assumes dsafe:"dsafe \<theta>"
+  assumes good_interp:"is_interp I"
+  shows  "dterm_sem (adjointFO I \<sigma> \<nu>) \<theta> = dterm_sem (adjointFO I \<sigma> \<omega>) \<theta>"
+proof -
+  have duh:"\<And>A B. A \<inter> B = {} \<Longrightarrow> A \<subseteq> -B"
+    by auto
+  have duh:"\<And>A B. A \<inter> B = {} \<Longrightarrow> A \<subseteq> -B"
+    by auto
+  have "\<And>x. x \<in> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i)) \<Longrightarrow> x \<in> (-U)"
+    using TUA unfolding NTUadmit_def by auto
+  then have sub1:"(\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i)) \<subseteq> -U"
+    by auto
+  then have VA':"Vagree \<nu> \<omega> (\<Union> i\<in>{i. Inr i \<in> SIGT \<theta>}. FVT (\<sigma> i))"
+    using agree_sub[OF sub1 VA] by auto
+  then show "?thesis" using uadmit_dterm_ntadjoint'[OF dfree good_interp VA' dsafe] 
+    by auto
+qed
+
+definition ssafe ::"('sf, 'sc, 'sz) subst \<Rightarrow> bool"
+where "ssafe \<sigma> \<equiv>
+  (\<forall> i f'. SFunctions \<sigma> i = Some f' \<longrightarrow> dfree f') \<and> 
+  (\<forall> f f'. SPredicates \<sigma> f = Some f'  \<longrightarrow> fsafe f') \<and>
+  (\<forall> f f'. SPrograms \<sigma> f = Some f'  \<longrightarrow> hpsafe f') \<and>
+  (\<forall> f f'. SODEs \<sigma> f = Some f'  \<longrightarrow> osafe f') \<and>
+  (\<forall> C C'. SContexts \<sigma> C = Some C'  \<longrightarrow> fsafe C')"
+
+lemma uadmit_dterm_adjointS:
+  assumes ssafe:"ssafe \<sigma>"
+  assumes good_interp:"is_interp I"
+  fixes \<nu> \<omega>
+  assumes VA:"Vagree \<nu> \<omega> (\<Union>i\<in>SIGT \<theta>. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {})"
+  assumes dsafe:"dsafe \<theta>"
+  shows  "dterm_sem (adjoint I \<sigma> \<nu>) \<theta> = dterm_sem (adjoint I \<sigma> \<omega>) \<theta>"
+proof -
+  show "?thesis" 
+    apply(rule uadmit_dterm_adjoint')
+    using good_interp ssafe VA dsafe unfolding ssafe_def by auto 
+qed
+
+lemma adj_sub_assign_fact:"\<And>i j e. i\<in>SIGT e \<Longrightarrow> j \<in> (case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> Inl i \<in>({Inl x |x. x \<in> dom (SFunctions \<sigma>)} \<union> {Inr (Inl x) |x. x \<in> dom (SContexts \<sigma>)} \<union> {Inr (Inr x) |x. x \<in> dom (SPredicates \<sigma>)} \<union>
+         {Inr (Inr x) |x. x \<in> dom (SPrograms \<sigma>)}) \<inter>
+        {Inl x |x. x \<in> SIGT e}"
+  unfolding SDom_def apply auto
+  subgoal for i j
+    apply (cases "SFunctions \<sigma> i")
+     by auto
+  done
+
+lemma adj_sub_geq1_fact:"\<And>i j x1 x2. i\<in>SIGT x1 \<Longrightarrow> j \<in> (case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> Inl i \<in>({Inl x |x. x \<in> dom (SFunctions \<sigma>)} \<union> {Inr (Inl x) |x. x \<in> dom (SContexts \<sigma>)} \<union> {Inr (Inr x) |x. x \<in> dom (SPredicates \<sigma>)} \<union>
+         {Inr (Inr x) |x. x \<in> dom (SPrograms \<sigma>)}) \<inter>
+        {Inl x |x. x \<in> SIGT x1 \<or> x \<in> SIGT x2}"
+  unfolding SDom_def apply auto
+  subgoal for i j
+    apply (cases "SFunctions \<sigma> i")
+     by auto
+  done
+
+lemma adj_sub_geq2_fact:"\<And>i j x1 x2. i\<in>SIGT x2 \<Longrightarrow> j \<in> (case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> Inl i \<in>({Inl x |x. x \<in> dom (SFunctions \<sigma>)} \<union> {Inr (Inl x) |x. x \<in> dom (SContexts \<sigma>)} \<union> {Inr (Inr x) |x. x \<in> dom (SPredicates \<sigma>)} \<union>
+         {Inr (Inr x) |x. x \<in> dom (SPrograms \<sigma>)}) \<inter>
+        {Inl x |x. x \<in> SIGT x1 \<or> x \<in> SIGT x2}"
+  unfolding SDom_def apply auto
+  subgoal for i j
+    apply (cases "SFunctions \<sigma> i")
+     by auto
+  done
+lemma adj_sub_prop_fact:"\<And>i j x1 x2 k. i\<in>SIGT (x2 k) \<Longrightarrow> j \<in> (case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> Inl i \<in>({Inl x |x. x \<in> dom (SFunctions \<sigma>)} \<union> {Inr (Inl x) |x. x \<in> dom (SContexts \<sigma>)} \<union> {Inr (Inr x) |x. x \<in> dom (SPredicates \<sigma>)} \<union>
+         {Inr (Inr x) |x. x \<in> dom (SPrograms \<sigma>)}) \<inter>
+         insert (Inr (Inr x1)) {Inl x |x. \<exists>xa. x \<in> SIGT (x2 xa)}"
+  unfolding SDom_def apply auto
+  subgoal for i j
+    apply (cases "SFunctions \<sigma> i")
+     by auto
+  done
+
+lemma adj_sub_ode_fact:"\<And>i j x1 x2. Inl i \<in> SIGO x1 \<Longrightarrow> j \<in> (case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<Longrightarrow> Inl i \<in>({Inl x |x. x \<in> dom (SFunctions \<sigma>)} \<union> {Inr (Inl x) |x. x \<in> dom (SContexts \<sigma>)} \<union> {Inr (Inr x) |x. x \<in> dom (SPredicates \<sigma>)} \<union>
+         {Inr (Inr x) |x. x \<in> dom (SPrograms \<sigma>)}) \<inter>
+         (SIGF x2 \<union> {Inl x |x. Inl x \<in> SIGO x1} \<union> {Inr (Inr x) |x. Inr x \<in> SIGO x1})"
+  unfolding SDom_def apply auto
+  subgoal for i j
+    apply (cases "SFunctions \<sigma> i")
+     by auto
+  done
+
+lemma adj_sub_assign:"\<And>e \<sigma> x. (\<Union>i\<in>SIGT e. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x := e). SFV \<sigma> a)"
+subgoal for e \<sigma> x
+ unfolding SDom_def apply auto
+  subgoal for i j
+    apply (cases "SFunctions \<sigma> j")
+     apply auto
+    subgoal for a
+      using adj_sub_assign_fact[of j e i]
+      by (metis (mono_tags, lifting) SFV.simps(1) option.simps(5))
+    done
+  done
+done
+
+lemma adj_sub_diff_assign:"\<And>e \<sigma> x. (\<Union>i\<in>SIGT e. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (DiffAssign x e). SFV \<sigma> a)"
+  subgoal for e \<sigma> x
+    unfolding SDom_def apply auto
+    subgoal for i j
+      apply (cases "SFunctions \<sigma> j")
+       apply auto
+      subgoal for a
+        using adj_sub_assign_fact[of j e i]
+        by (metis (mono_tags, lifting) SFV.simps(1) option.simps(5))
+      done
+    done
+  done
+   
+lemma adj_sub_geq1:"\<And>\<sigma> x1 x2. (\<Union>i\<in>SIGT x1. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGF (Geq x1 x2). SFV \<sigma> a)"
+  subgoal for \<sigma> x1 x2
+    unfolding SDom_def apply auto
+    subgoal for x i
+      apply (cases "SFunctions \<sigma> i")
+       apply auto
+      subgoal for a
+        using adj_sub_geq1_fact[of i x1 x \<sigma>] 
+        by (metis (mono_tags, lifting) SFV.simps(1) option.simps(5))
+      done
+    done
+  done
+
+lemma adj_sub_geq2:"\<And>\<sigma> x1 x2. (\<Union>i\<in>SIGT x2. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGF (Geq x1 x2). SFV \<sigma> a)"
+  subgoal for \<sigma> x1 x2
+    unfolding SDom_def apply auto
+    subgoal for x i
+      apply (cases "SFunctions \<sigma> i")
+       apply auto
+      subgoal for a
+        using adj_sub_geq2_fact[of i x2 x \<sigma>] 
+        by (metis (mono_tags, lifting) SFV.simps(1) option.simps(5))
+      done
+    done
+  done
+
+lemma adj_sub_prop:"\<And>\<sigma> x1 x2 j . (\<Union>i\<in>SIGT (x2 j). case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGF ($\<phi> x1 x2). SFV \<sigma> a)"
+  subgoal for \<sigma> x1 x2 j
+    unfolding SDom_def apply auto
+    subgoal for x i
+      apply (cases "SFunctions \<sigma> i")
+       apply auto
+      subgoal for a
+        using adj_sub_prop_fact[of i x2 j x \<sigma> x1] 
+        by (metis (mono_tags, lifting) SFV.simps(1) option.simps(5))     
+      done
+    done
+  done
+
+lemma adj_sub_ode:"\<And>\<sigma> x1 x2. (\<Union>i\<in>{i |i. Inl i \<in> SIGO x1}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some x \<Rightarrow> FVT x) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (EvolveODE x1 x2). SFV \<sigma> a)"
+  subgoal for \<sigma> x1 x2
+    unfolding SDom_def apply auto
+    subgoal for x i
+      apply (cases "SFunctions \<sigma> i")
+       apply auto
+      subgoal for a
+        using adj_sub_ode_fact[of i x1 x \<sigma> x2]
+        by (metis (mono_tags, lifting) SFV.simps(1) option.simps(5)) 
+     done
+   done
+  done
+
+lemma uadmit_ode_adjoint':
+  fixes \<sigma> I
+  assumes ssafe:"ssafe \<sigma>"
+  assumes good_interp:"is_interp I"
+  shows"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>{i |i. Inl i \<in> SIGO ODE}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some x \<Rightarrow> FVT x)\<Longrightarrow> osafe ODE \<Longrightarrow> ODE_sem (adjoint I \<sigma> \<nu>) ODE = ODE_sem (adjoint I \<sigma> \<omega>) ODE"
+proof (induction ODE)
+  case (OVar x)
+  then show ?case unfolding adjoint_def by auto
+next
+  case (OSing x1a x2)
+    assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>{i |i. Inl i \<in> SIGO (OSing x1a x2)}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some a \<Rightarrow> FVT a)"
+    assume osafe:"osafe (OSing x1a x2)"
+    then have dfree:"dfree x2" by (auto dest: osafe.cases)
+    have safes:"(\<And>f f'. SFunctions \<sigma> f = Some f' \<Longrightarrow> dsafe f')"
+      "(\<And>f f'. SPredicates \<sigma> f = Some f' \<Longrightarrow> fsafe f')"
+      using ssafe unfolding ssafe_def using dfree_is_dsafe by auto
+    have sem:"sterm_sem (local.adjoint I \<sigma> \<nu>) x2 = sterm_sem (local.adjoint I \<sigma> \<omega>) x2"
+       using uadmit_sterm_adjoint'[of \<sigma> \<nu> \<omega> x2 I, OF safes, of "(\<lambda> x y. x)" "(\<lambda> x y. x)"] VA
+       by auto
+    show ?case 
+      apply auto
+      apply (rule ext)
+      subgoal for x
+        apply (rule vec_extensionality)
+        using sem by auto
+      done
+next
+  case (OProd ODE1 ODE2)
+    assume IH1:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>{i |i. Inl i \<in> SIGO ODE1}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some a \<Rightarrow> FVT a) \<Longrightarrow>
+      osafe ODE1 \<Longrightarrow> ODE_sem (local.adjoint I \<sigma> \<nu>) ODE1 = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE1"
+    assume IH2:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>i\<in>{i |i. Inl i \<in> SIGO ODE2}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some a \<Rightarrow> FVT a) \<Longrightarrow>
+    osafe ODE2 \<Longrightarrow> ODE_sem (local.adjoint I \<sigma> \<nu>) ODE2 = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE2"
+    assume VA:"Vagree \<nu> \<omega> (\<Union>i\<in>{i |i. Inl i \<in> SIGO (OProd ODE1 ODE2)}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some a \<Rightarrow> FVT a)"
+    assume safe:"osafe (OProd ODE1 ODE2)"
+    from safe have safe1:"osafe ODE1" and safe2:"osafe ODE2" by (auto dest: osafe.cases) 
+    have sub1:"(\<Union>i\<in>{i |i. Inl i \<in> SIGO ODE1}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some a \<Rightarrow> FVT a) \<subseteq> (\<Union>i\<in>{i |i. Inl i \<in> SIGO (OProd ODE1 ODE2)}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some a \<Rightarrow> FVT a)"
+      by auto
+    have sub2:"(\<Union>i\<in>{i |i. Inl i \<in> SIGO ODE2}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some a \<Rightarrow> FVT a) \<subseteq> (\<Union>i\<in>{i |i. Inl i \<in> SIGO (OProd ODE1 ODE2)}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some a \<Rightarrow> FVT a)"
+      by auto
+  then show ?case using IH1[OF agree_sub[OF sub1 VA] safe1] IH2[OF agree_sub[OF sub2 VA] safe2] by auto
+qed
+
+lemma uadmit_ode_ntadjoint':
+  fixes \<sigma> I
+  assumes ssafe:"\<And>i. dsafe (\<sigma> i)"
+  assumes good_interp:"is_interp I"
+  shows"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO ODE}. FVT (\<sigma> y)) \<Longrightarrow> osafe ODE \<Longrightarrow> ODE_sem (adjointFO I \<sigma> \<nu>) ODE = ODE_sem (adjointFO I \<sigma> \<omega>) ODE"
+proof (induction ODE)
+  case (OVar x)
+  then show ?case unfolding adjointFO_def by auto
+next
+  case (OSing x1a x2)
+  assume VA:"Vagree \<nu> \<omega> (\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO (OSing x1a x2)}. FVT (\<sigma> y))"
+  assume osafe:"osafe (OSing x1a x2)"
+  then have dfree:"dfree x2" by (auto dest: osafe.cases)
+  have sem:"sterm_sem (adjointFO I \<sigma> \<nu>) x2 = sterm_sem (adjointFO I \<sigma> \<omega>) x2"
+     using uadmit_sterm_ntadjoint'[of \<sigma> \<nu> \<omega> x2 I, OF ssafe] VA
+     by auto
+  show ?case 
+    apply auto
+    apply (rule ext)
+    subgoal for x
+      apply (rule vec_extensionality)
+      using sem by auto
+    done
+next
+  case (OProd ODE1 ODE2)
+  assume IH1:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO ODE1}. FVT (\<sigma> y)) \<Longrightarrow>
+    osafe ODE1 \<Longrightarrow> ODE_sem (adjointFO I \<sigma> \<nu>) ODE1 = ODE_sem (adjointFO I \<sigma> \<omega>) ODE1"
+  assume IH2:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO ODE2}. FVT (\<sigma> y)) \<Longrightarrow>
+    osafe ODE2 \<Longrightarrow> ODE_sem (adjointFO I \<sigma> \<nu>) ODE2 = ODE_sem (adjointFO I \<sigma> \<omega>) ODE2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO (OProd ODE1 ODE2)}. FVT (\<sigma> y))"
+  assume safe:"osafe (OProd ODE1 ODE2)"
+  from safe have safe1:"osafe ODE1" and safe2:"osafe ODE2" by (auto dest: osafe.cases) 
+  have sub1:"(\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO ODE1}. FVT (\<sigma> y)) \<subseteq> (\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO (OProd ODE1 ODE2)}. FVT (\<sigma> y))"
+    by auto
+  have sub2:"(\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO ODE2}. FVT (\<sigma> y)) \<subseteq> (\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO (OProd ODE1 ODE2)}. FVT (\<sigma> y))"
+    by auto
+  then show ?case using IH1[OF agree_sub[OF sub1 VA] safe1] IH2[OF agree_sub[OF sub2 VA] safe2] by auto
+qed
+
+lemma adjoint_ode_vars:
+  shows "ODE_vars (local.adjoint I \<sigma> \<nu>) ODE = ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+  apply(induction ODE)
+  unfolding adjoint_def by auto
+
+lemma uadmit_mkv_adjoint:
+  assumes ssafe:"ssafe \<sigma>"
+  assumes good_interp:"is_interp I"
+  assumes VA:"Vagree \<nu> \<omega> (\<Union>i \<in> {i | i. (Inl i\<in>SIGO ODE)}. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {})"
+  assumes osafe:"osafe ODE"
+  shows "mk_v (adjoint I \<sigma> \<nu>) ODE = mk_v (adjoint I \<sigma> \<omega>) ODE"
+  apply(rule ext)
+  subgoal for R
+    apply(rule ext)
+    subgoal for solt
+      apply(rule agree_UNIV_eq)
+      using mk_v_agree[of "(adjoint I \<sigma> \<nu>)" ODE "R" solt]
+      using mk_v_agree[of "(adjoint I \<sigma> \<omega>)" ODE "R" solt]
+      using uadmit_ode_adjoint'[OF ssafe good_interp VA osafe]
+      unfolding Vagree_def
+      apply auto
+       subgoal for i
+         apply (cases "Inl i \<in> Inl ` ODE_vars (adjoint I \<sigma> \<omega>) ODE")
+       proof -
+         assume sem_eq:"ODE_sem (local.adjoint I \<sigma> \<nu>) ODE = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE"
+         have vars_eq:"ODE_vars (local.adjoint I \<sigma> \<nu>) ODE = ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+           apply(induction ODE)
+           unfolding adjoint_def by auto
+         assume thing1:" 
+           \<forall>i. (Inl i \<in> Inl ` ODE_vars (local.adjoint I \<sigma> \<nu>) ODE \<longrightarrow> fst (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = solt $ i) \<and>
+             (Inl i \<in> Inr ` ODE_vars (local.adjoint I \<sigma> \<nu>) ODE \<longrightarrow> fst (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = solt $ i)"
+         assume thing2:" 
+           \<forall>i. (Inl i \<in> Inl ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE \<longrightarrow> fst (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = solt $ i) \<and>
+             (Inl i \<in> Inr ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE \<longrightarrow> fst (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = solt $ i)"
+         assume inl:"Inl i \<in> Inl ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+          from thing1 and inl have eq1: "fst (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = solt $ i"
+            using vars_eq by auto
+          from thing2 and inl have eq2: "fst (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = solt $ i"
+            using vars_eq by auto
+         show "fst (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = fst (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i"
+           using eq1 eq2 by auto
+       next
+         assume sem_eq:"ODE_sem (local.adjoint I \<sigma> \<nu>) ODE = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE"
+         assume thing1:"\<forall>i. Inl i \<notin> Inl ` ODE_vars (local.adjoint I \<sigma> \<nu>) ODE \<and> Inl i \<notin> Inr ` ODE_vars (local.adjoint I \<sigma> \<nu>) ODE \<longrightarrow>
+        fst (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = fst R $ i"
+         assume thing2:"\<forall>i. Inl i \<notin> Inl ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE \<and> Inl i \<notin> Inr ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE \<longrightarrow>
+        fst (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = fst R $ i"
+         assume inl:"Inl i \<notin> Inl ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+         have vars_eq:"ODE_vars (local.adjoint I \<sigma> \<nu>) ODE = ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+           apply(induction ODE)
+             unfolding adjoint_def by auto
+         from thing1 and inl have eq1: "fst (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = fst R $ i"
+           using vars_eq by auto
+         from thing2 and inl have eq2: "fst (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = fst R $ i"
+           using vars_eq by auto
+         show "fst (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = fst (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i"
+           using eq1 eq2 by auto
+       qed
+      subgoal for i
+        apply (cases "Inr i \<in> Inr ` ODE_vars (adjoint I \<sigma> \<omega>) ODE")
+       proof -
+         assume sem_eq:"ODE_sem (local.adjoint I \<sigma> \<nu>) ODE = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE"
+         assume thing1:"\<forall>i. (Inr i \<in> Inl ` ODE_vars (local.adjoint I \<sigma> \<nu>) ODE \<longrightarrow>
+             snd (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE solt $ i) \<and>
+            (Inr i \<in> Inr ` ODE_vars (local.adjoint I \<sigma> \<nu>) ODE \<longrightarrow>
+              snd (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE solt $ i)"
+         assume thing2:"\<forall>i. (Inr i \<in> Inl ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE \<longrightarrow>
+              snd (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE solt $ i) \<and>
+             (Inr i \<in> Inr ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE \<longrightarrow>
+          snd (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE solt $ i)"
+         assume inr:"Inr i \<in> Inr ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+         have vars_eq:"ODE_vars (local.adjoint I \<sigma> \<nu>) ODE = ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+          apply(induction ODE)
+            unfolding adjoint_def by auto
+         show "snd (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = snd (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i"
+           using thing1 thing2 vars_eq inr by auto
+       next
+         assume sem_eq:"ODE_sem (local.adjoint I \<sigma> \<nu>) ODE = ODE_sem (local.adjoint I \<sigma> \<omega>) ODE"
+         assume thing1:"\<forall>i. Inr i \<notin> Inl ` ODE_vars (local.adjoint I \<sigma> \<nu>) ODE \<and> Inr i \<notin> Inr ` ODE_vars (local.adjoint I \<sigma> \<nu>) ODE \<longrightarrow>
+             snd (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = snd R $ i"
+         assume thing2:"\<forall>i. Inr i \<notin> Inl ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE \<and> Inr i \<notin> Inr ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE \<longrightarrow>
+             snd (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = snd R $ i"
+         assume inr:"Inr i \<notin> Inr ` ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+         have vars_eq:"ODE_vars (local.adjoint I \<sigma> \<nu>) ODE = ODE_vars (local.adjoint I \<sigma> \<omega>) ODE"
+          apply(induction ODE)
+            unfolding adjoint_def by auto
+         have eq1:"snd (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = snd R $ i"
+           using thing1 sem_eq vars_eq inr by auto
+         have eq2:"snd (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i = snd R $ i"
+           using thing2 sem_eq vars_eq inr by auto
+         show "snd (mk_v (local.adjoint I \<sigma> \<nu>) ODE R solt) $ i = snd (mk_v (local.adjoint I \<sigma> \<omega>) ODE R solt) $ i"
+           using eq1 eq2 by auto
+       qed
+      done
+    done
+  done
+
+lemma adjointFO_ode_vars:
+  shows "ODE_vars (adjointFO I \<sigma> \<nu>) ODE = ODE_vars (adjointFO I \<sigma> \<omega>) ODE"
+  apply(induction ODE)
+    unfolding adjointFO_def by auto
+
+lemma uadmit_mkv_ntadjoint:
+  assumes ssafe:"\<And>i. dsafe (\<sigma> i)"
+  assumes good_interp:"is_interp I"
+  assumes VA:"Vagree \<nu> \<omega> (\<Union>y\<in>{y. Inl (Inr y) \<in> SIGO ODE}. FVT (\<sigma> y))"
+  assumes osafe:"osafe ODE"
+  shows "mk_v (adjointFO I \<sigma> \<nu>) ODE = mk_v (adjointFO I \<sigma> \<omega>) ODE"
+  apply(rule ext)
+  subgoal for R
+    apply(rule ext)
+    subgoal for solt
+      apply(rule agree_UNIV_eq)
+      using mk_v_agree[of "(adjointFO I \<sigma> \<nu>)" ODE "R" solt]
+      using mk_v_agree[of "(adjointFO I \<sigma> \<omega>)" ODE "R" solt]
+      using uadmit_ode_ntadjoint'[OF ssafe good_interp VA osafe]
+      unfolding Vagree_def
+      apply auto
+      using adjointFO_ode_vars by metis+
+    done
+  done
+    
+lemma uadmit_prog_fml_adjoint':
+  fixes \<sigma> I
+  assumes ssafe:"ssafe \<sigma>"
+  assumes good_interp:"is_interp I"
+  shows "\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>x\<in>SDom \<sigma> \<inter> SIGP \<alpha>. SFV \<sigma> x) \<Longrightarrow> hpsafe \<alpha> \<Longrightarrow> prog_sem (adjoint I \<sigma> \<nu>) \<alpha> = prog_sem (adjoint I \<sigma> \<omega>) \<alpha>"
+  and "\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>x\<in>SDom \<sigma> \<inter> SIGF \<phi>. SFV \<sigma> x) \<Longrightarrow> fsafe \<phi> \<Longrightarrow> fml_sem (adjoint I \<sigma> \<nu>) \<phi> = fml_sem (adjoint I \<sigma> \<omega>) \<phi>"
+proof (induct "\<alpha>" and "\<phi>")
+  case (Pvar x)
+  then show ?case unfolding adjoint_def by auto
+next
+  case (Assign x e)
+  assume VA:"Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x := e). SFV \<sigma> a)"
+  assume safe:"hpsafe (x := e)"
+  from safe have dsafe:"dsafe e" by (auto dest: hpsafe.cases)
+  have sub:"(\<Union>i\<in>SIGT e. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x := e). SFV \<sigma> a)"
+    using adj_sub_assign[of \<sigma> e x] by auto
+  have "dterm_sem (local.adjoint I \<sigma> \<nu>) e = dterm_sem (local.adjoint I \<sigma> \<omega>) e"
+    by (rule uadmit_dterm_adjointS[OF ssafe good_interp agree_sub[OF sub VA] dsafe])
+  then show ?case by (auto simp add: vec_eq_iff)
+next
+  case (DiffAssign x e)
+  assume VA:"Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (DiffAssign x e). SFV \<sigma> a)"
+  assume safe:"hpsafe (DiffAssign x e)"
+  from safe have dsafe:"dsafe e" by (auto dest: hpsafe.cases)
+  have sub:"(\<Union>i\<in>SIGT e. case SFunctions \<sigma> i of Some x \<Rightarrow> FVT x | None \<Rightarrow> {}) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (DiffAssign x e). SFV \<sigma> a)"
+    using adj_sub_diff_assign[of \<sigma> e] by auto
+  have "dterm_sem (local.adjoint I \<sigma> \<nu>) e = dterm_sem (local.adjoint I \<sigma> \<omega>) e"
+    by (rule uadmit_dterm_adjointS[OF ssafe good_interp agree_sub[OF sub VA] dsafe])
+  then show ?case by (auto simp add: vec_eq_iff)
+next
+  case (Test x)
+  assume IH:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGF x. SFV \<sigma> a) \<Longrightarrow> fsafe x \<Longrightarrow> fml_sem (adjoint I \<sigma> \<nu>) x = fml_sem (adjoint I \<sigma> \<omega>) x"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (? x). SFV \<sigma> a)"
+  assume hpsafe:"hpsafe (? x)"
+  then have fsafe:"fsafe x" by (auto dest: hpsafe.cases)
+  have sub:"(\<Union>a\<in>SDom \<sigma> \<inter> SIGF x. SFV \<sigma> a) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (? x). SFV \<sigma> a)"
+    by auto
+  have "fml_sem (adjoint I \<sigma> \<nu>) x = fml_sem (adjoint I \<sigma> \<omega>) x"
+    using IH[OF agree_sub[OF sub VA] fsafe] by auto
+  then show ?case by auto
+next
+  case (EvolveODE x1 x2)
+  assume IH:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGF x2. SFV \<sigma> a) \<Longrightarrow> fsafe x2 \<Longrightarrow> fml_sem (local.adjoint I \<sigma> \<nu>) x2 = fml_sem (local.adjoint I \<sigma> \<omega>) x2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (EvolveODE x1 x2). SFV \<sigma> a)"
+  assume safe:"hpsafe (EvolveODE x1 x2)"
+  then have osafe:"osafe x1" and fsafe:"fsafe x2" by (auto dest: hpsafe.cases)
+  have sub1:"(\<Union>a\<in>SDom \<sigma> \<inter> SIGF x2. SFV \<sigma> a) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (EvolveODE x1 x2). SFV \<sigma> a)"
+    by auto
+  then have VAF:"Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGF x2. SFV \<sigma> a)"
+    using agree_sub[OF sub1 VA] by auto 
+  note IH' = IH[OF VAF fsafe]
+  have sub:"(\<Union>i\<in>{i |i. Inl i \<in> SIGO x1}. case SFunctions \<sigma> i of None \<Rightarrow> {} | Some x \<Rightarrow> FVT x) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (EvolveODE x1 x2). SFV \<sigma> a)"
+    using adj_sub_ode[of \<sigma> x1 x2] by auto
+  moreover have IH2:"ODE_sem (local.adjoint I \<sigma> \<nu>) x1 = ODE_sem (local.adjoint I \<sigma> \<omega>) x1"
+    apply (rule uadmit_ode_adjoint')
+       subgoal by (rule ssafe)
+      subgoal by (rule good_interp)
+     subgoal using agree_sub[OF sub VA] by auto
+    subgoal by (rule osafe)
+    done
+  have mkv:"mk_v (adjoint I \<sigma> \<nu>) x1 = mk_v (adjoint I \<sigma> \<omega>) x1"
+    apply (rule uadmit_mkv_adjoint)
+       using ssafe good_interp osafe agree_sub[OF sub VA] by auto
+  show ?case 
+    apply auto
+     subgoal for aa ba bb sol t
+       apply(rule exI[where x = sol])
+       apply(rule conjI)
+        subgoal by auto
+       apply(rule exI[where x=t])
+       apply(rule conjI)
+        subgoal using mkv by auto
+       apply(rule conjI)
+        subgoal by auto using IH2 mkv IH' by auto
+    subgoal for aa ba bb sol t
+      apply(rule exI[where x = sol])
+      apply(rule conjI)
+       subgoal by auto
+      apply(rule exI[where x=t])
+      apply(rule conjI)
+       subgoal using mkv by auto
+      apply(rule conjI)
+       subgoal by auto using IH2 mkv IH' by auto
+    done
+next
+  case (Choice x1 x2)
+  assume IH1:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP x1. SFV \<sigma> a) \<Longrightarrow> hpsafe x1 \<Longrightarrow> prog_sem (local.adjoint I \<sigma> \<nu>) x1 = prog_sem (local.adjoint I \<sigma> \<omega>) x1"
+  assume IH2:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP x2. SFV \<sigma> a) \<Longrightarrow> hpsafe x2 \<Longrightarrow> prog_sem (local.adjoint I \<sigma> \<nu>) x2 = prog_sem (local.adjoint I \<sigma> \<omega>) x2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x1 \<union>\<union> x2). SFV \<sigma> a)"
+  assume safe:"hpsafe (x1 \<union>\<union> x2)"
+  from safe have
+    safe1:"hpsafe x1"
+    and safe2:"hpsafe x2"
+    by (auto dest: hpsafe.cases)
+  have sub1:"(\<Union>a\<in>SDom \<sigma> \<inter> SIGP x1. SFV \<sigma> a) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x1 \<union>\<union> x2). SFV \<sigma> a)"
+    by auto
+  have sub2:"(\<Union>a\<in>SDom \<sigma> \<inter> SIGP x2. SFV \<sigma> a) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x1 \<union>\<union> x2). SFV \<sigma> a)"
+    by auto
+  then show ?case using IH1[OF agree_sub[OF sub1 VA] safe1] IH2[OF agree_sub[OF sub2 VA] safe2] by auto
+next
+  case (Sequence x1 x2)
+  assume IH1:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP x1. SFV \<sigma> a) \<Longrightarrow> hpsafe x1 \<Longrightarrow> prog_sem (local.adjoint I \<sigma> \<nu>) x1 = prog_sem (local.adjoint I \<sigma> \<omega>) x1"
+  assume IH2:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP x2. SFV \<sigma> a) \<Longrightarrow> hpsafe x2 \<Longrightarrow> prog_sem (local.adjoint I \<sigma> \<nu>) x2 = prog_sem (local.adjoint I \<sigma> \<omega>) x2"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x1 ;; x2). SFV \<sigma> a)"
+  assume safe:"hpsafe (x1 ;; x2)"
+  from safe have
+    safe1:"hpsafe x1"
+    and safe2:"hpsafe x2"
+    by (auto dest: hpsafe.cases)
+  have sub1:"(\<Union>a\<in>SDom \<sigma> \<inter> SIGP x1. SFV \<sigma> a) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x1 ;; x2). SFV \<sigma> a)"
+    by auto
+  have sub2:"(\<Union>a\<in>SDom \<sigma> \<inter> SIGP x2. SFV \<sigma> a) \<subseteq> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x1 ;; x2). SFV \<sigma> a)"
+    by auto
+  then show ?case using IH1[OF agree_sub[OF sub1 VA] safe1] IH2[OF agree_sub[OF sub2 VA] safe2] by auto
+next
+  case (Loop x)
+  assume IH:"\<And>\<nu> \<omega>. Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP x. SFV \<sigma> a) \<Longrightarrow> hpsafe x \<Longrightarrow> prog_sem (local.adjoint I \<sigma> \<nu>) x = prog_sem (local.adjoint I \<sigma> \<omega>) x"
+  assume VA:"Vagree \<nu> \<omega> (\<Union>a\<in>SDom \<sigma> \<inter> SIGP (x**). SFV \<sigma> a)"

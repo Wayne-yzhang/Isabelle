@@ -1,0 +1,139 @@
+
+theory Inference
+  imports
+    Subsumption
+    "Extended_Finite_State_Machines.Transition_Lexorder"
+    "HOL-Library.Product_Lexorder"
+begin
+
+declare One_nat_def [simp del]
+
+
+
+type_synonym tid = nat
+type_synonym tids = "tid list"
+type_synonym iEFSM = "(tids \<times> (cfstate \<times> cfstate) \<times> transition) fset"
+
+definition origin :: "tids \<Rightarrow> iEFSM \<Rightarrow> nat" where
+  "origin uid t = fst (fst (snd (fthe_elem (ffilter (\<lambda>x. set uid \<subseteq> set (fst x)) t))))"
+
+definition dest :: "tids \<Rightarrow> iEFSM \<Rightarrow> nat" where
+  "dest uid t = snd (fst (snd (fthe_elem (ffilter (\<lambda>x. set uid \<subseteq> set (fst x)) t))))"
+
+definition get_by_id :: "iEFSM \<Rightarrow> tid \<Rightarrow> transition" where
+  "get_by_id e uid = (snd \<circ> snd) (fthe_elem (ffilter (\<lambda>(tids, _). uid \<in> set tids) e))"
+
+definition get_by_ids :: "iEFSM \<Rightarrow> tids \<Rightarrow> transition" where
+  "get_by_ids e uid = (snd \<circ> snd) (fthe_elem (ffilter (\<lambda>(tids, _). set uid \<subseteq> set tids) e))"
+
+definition uids :: "iEFSM \<Rightarrow> nat fset" where
+  "uids e = ffUnion (fimage (fset_of_list \<circ> fst) e)"
+
+definition max_uid :: "iEFSM \<Rightarrow> nat option" where
+  "max_uid e = (let uids = uids e in if uids = {||} then None else Some (fMax uids))"
+
+definition tm :: "iEFSM \<Rightarrow> transition_matrix" where
+  "tm e = fimage snd e"
+
+definition all_regs :: "iEFSM \<Rightarrow> nat set" where
+  "all_regs e = EFSM.all_regs (tm e)"
+
+definition max_reg :: "iEFSM \<Rightarrow> nat option" where
+  "max_reg e = EFSM.max_reg (tm e)"
+
+definition "max_reg_total e = (case max_reg e of None \<Rightarrow> 0 | Some r \<Rightarrow> r)"
+
+definition max_output :: "iEFSM \<Rightarrow> nat" where
+  "max_output e = EFSM.max_output (tm e)"
+
+definition max_int :: "iEFSM \<Rightarrow> int" where
+  "max_int e = EFSM.max_int (tm e)"
+
+definition S :: "iEFSM \<Rightarrow> nat fset" where
+  "S m = (fimage (\<lambda>(uid, (s, s'), t). s) m) |\<union>| fimage (\<lambda>(uid, (s, s'), t). s') m"
+
+lemma S_alt: "S t = EFSM.S (tm t)"
+  apply (simp add: S_def EFSM.S_def tm_def)
+  by force
+
+lemma to_in_S:
+  "(\<exists>to from uid. (uid, (from, to), t) |\<in>| xb \<longrightarrow> to |\<in>| S xb)"
+  apply (simp add: S_def)
+  by blast
+
+lemma from_in_S:
+  "(\<exists>to from uid. (uid, (from, to), t) |\<in>| xb \<longrightarrow> from |\<in>| S xb)"
+  apply (simp add: S_def)
+  by blast
+
+
+primrec make_guard :: "value list \<Rightarrow> nat \<Rightarrow> vname gexp list" where
+"make_guard [] _ = []" |
+"make_guard (h#t) n = (gexp.Eq (V (vname.I n)) (L h))#(make_guard t (n+1))"
+
+primrec make_outputs :: "value list \<Rightarrow> output_function list" where
+  "make_outputs [] = []" |
+  "make_outputs (h#t) = (L h)#(make_outputs t)"
+
+definition max_uid_total :: "iEFSM \<Rightarrow> nat" where
+  "max_uid_total e = (case max_uid e of None \<Rightarrow> 0 | Some u \<Rightarrow> u)"
+
+definition add_transition :: "iEFSM \<Rightarrow> cfstate \<Rightarrow> label \<Rightarrow> value list \<Rightarrow> value list \<Rightarrow> iEFSM" where
+  "add_transition e s label inputs outputs = finsert ([max_uid_total e + 1], (s, (maxS (tm e))+1), \<lparr>Label=label, Arity=length inputs, Guards=(make_guard inputs 0), Outputs=(make_outputs outputs), Updates=[]\<rparr>) e"
+
+fun make_branch :: "iEFSM \<Rightarrow> cfstate \<Rightarrow> registers \<Rightarrow> trace \<Rightarrow> iEFSM" where
+  "make_branch e _ _ [] = e" |
+  "make_branch e s r ((label, inputs, outputs)#t) =
+    (case (step (tm e) s r label inputs) of
+      Some (transition, s', outputs', updated) \<Rightarrow>
+        if outputs' = (map Some outputs) then
+          make_branch e s' updated t
+        else
+          make_branch (add_transition e s label inputs outputs) ((maxS (tm e))+1) r t  |
+      None \<Rightarrow>
+          make_branch (add_transition e s label inputs outputs) ((maxS (tm e))+1) r t
+    )"
+
+primrec make_pta_aux :: "log \<Rightarrow> iEFSM \<Rightarrow> iEFSM" where
+  "make_pta_aux [] e = e" |
+  "make_pta_aux (h#t) e = make_pta_aux t (make_branch e 0 <> h)"
+
+definition "make_pta log = make_pta_aux log {||}"
+
+lemma make_pta_aux_fold [code]:
+  "make_pta_aux l e = fold (\<lambda>h e. make_branch e 0 <> h) l e"
+  by(induct l arbitrary: e, auto)
+
+introduce \emph{internal variables} to the model to generalise behaviours and allow transitions to
+be merged. This is done by providing the inference technique with a set of \emph{heuristics}. The
+aim here is not to create a ``one size fits all'' magic oracle, rather to recognise particular
+\emph{data usage patterns} which can be abstracted.\<close>
+subsection\<open>Scoring State Merges\<close>
+text\<open>To tackle the state merging challenge, we need some means of determining which states are
+compatible for merging. Because states are merged pairwise, we additionally require a way of
+ordering the state merges. The potential merges are then sorted highest to lowest according to this
+score such that we can merge states in order of their merge score.
+
+We want to sort first by score (highest to lowest) and then by state pairs (lowest to highest) so we
+endup merging the states with the highest scores first and then break ties by those state pairs
+which are closest to the origin.\<close>
+subsection\<open>Merging States\<close>
+subsection\<open>Resolving Nondeterminism\<close>
+text\<open>Because EFSM transitions are not simply atomic actions, duplicated behaviours cannot be
+resolved into a single transition by simply merging destination states, as it can in classical FSM
+inference. It is now possible for attempts to resolve the nondeterminism introduced by merging
+states to fail, meaning that two states which initially seemed compatible cannot actually be merged.
+This is not the case in classical FSM inference.\<close>
+\<comment> \<open>When we replace one transition with another, we need to merge their uids to keep track of which\<close>
+\<comment> \<open>transition accounts for which action in the original traces                                     \<close>
+       \<comment> \<open>Replace t1 with t2\<close>
+       \<comment> \<open>Replace t2 with t1\<close>
+subsection\<open>EFSM Inference\<close>
+subsection\<open>Evaluating Inferred Models\<close>
+text\<open>We need a function to test the EFSMs we infer. The \texttt{test\_trace} function executes a
+trace in the model and outputs a more comprehensive trace such that the expected outputs and actual
+outputs can be compared. If a point is reached where the model does not recognise an action, the
+remainder of the trace forms the second element of the output pair such that we know the exact point
+at which the model stopped processing.\<close>
+text\<open>The \texttt{test\_log} function executes the \texttt{test\_trace} function on a collection of
+traces known as the \emph{test set.}\<close>

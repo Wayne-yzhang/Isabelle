@@ -1,0 +1,323 @@
+
+
+theory Algebraic_Numbers_Prelim
+imports
+  "HOL-Computational_Algebra.Fundamental_Theorem_Algebra"
+  Polynomial_Factorization.Gauss_Lemma
+  Berlekamp_Zassenhaus.Unique_Factorization_Poly
+  Polynomial_Factorization.Square_Free_Factorization
+begin
+
+lemma primitive_imp_unit_iff:
+  fixes p :: "'a :: {comm_semiring_1,semiring_no_zero_divisors} poly"
+  assumes pr: "primitive p"
+  shows "p dvd 1 \<longleftrightarrow> degree p = 0"
+proof
+  assume "degree p = 0"
+  from degree0_coeffs[OF this] obtain p0 where p: "p = [:p0:]" by auto
+  then have "\<forall>c \<in> set (coeffs p). p0 dvd c" by (simp add: cCons_def)
+  with pr have "p0 dvd 1" by (auto dest: primitiveD)
+  with p show "p dvd 1" by auto
+next
+  assume "p dvd 1"
+  then show "degree p = 0" by (auto simp: poly_dvd_1)
+qed
+
+lemma dvd_all_coeffs_imp_dvd:
+  assumes "\<forall>a \<in> set (coeffs p). c dvd a" shows "[:c:] dvd p"
+proof (insert assms, induct p)
+  case 0
+  then show ?case by simp
+next
+  case (pCons a p)
+  have "pCons a p = [:a:] + pCons 0 p" by simp
+  also have "[:c:] dvd ..."
+  proof (rule dvd_add)
+    from pCons show "[:c:] dvd [:a:]" by (auto simp: cCons_def)
+    from pCons have "[:c:] dvd p" by auto
+    from Rings.dvd_mult[OF this]
+    show "[:c:] dvd pCons 0 p" by (subst pCons_0_as_mult)
+  qed
+  finally show ?case.
+qed
+
+lemma irreducible_content:
+  fixes p :: "'a::{comm_semiring_1,semiring_no_zero_divisors} poly"
+  assumes "irreducible p" shows "degree p = 0 \<or> primitive p"
+proof(rule ccontr)
+  assume not: "\<not>?thesis"
+  then obtain c where c1: "\<not>c dvd 1" and "\<forall>a \<in> set (coeffs p). c dvd a" by (auto elim: not_primitiveE)
+  from dvd_all_coeffs_imp_dvd[OF this(2)]
+  obtain r where p: "p = r * [:c:]" by (elim dvdE, auto)
+  from irreducibleD[OF assms this] have "r dvd 1 \<or> [:c:] dvd 1" by auto
+  with c1 have "r dvd 1" unfolding const_poly_dvd_1 by auto
+  then have "degree r = 0" unfolding poly_dvd_1 by auto
+  with p have "degree p = 0" by auto
+  with not show False by auto
+qed
+
+lemma linear_irreducible_field:
+  fixes p :: "'a :: field poly"
+  assumes deg: "degree p = 1" shows "irreducible p"
+proof (intro irreducibleI)
+  from deg show p0: "p \<noteq> 0" by auto
+  from deg show "\<not> p dvd 1" by (auto simp: poly_dvd_1)
+  fix a b assume p: "p = a * b"
+  with p0 have a0: "a \<noteq> 0" and b0: "b \<noteq> 0" by auto
+  from degree_mult_eq[OF this, folded p] assms
+  consider "degree a = 1" "degree b = 0" | "degree a = 0" "degree b = 1" by force
+  then show "a dvd 1 \<or> b dvd 1"
+    by (cases; insert a0 b0, auto simp: primitive_imp_unit_iff)
+qed
+
+lemma linear_irreducible_int:
+  fixes p :: "int poly"
+  assumes deg: "degree p = 1" and cp: "content p dvd 1"
+  shows "irreducible p"
+proof (intro irreducibleI)
+  from deg show p0: "p \<noteq> 0" by auto
+  from deg show "\<not> p dvd 1" by (auto simp: poly_dvd_1)
+  fix a b assume p: "p = a * b"
+  note * = cp[unfolded p is_unit_content_iff, unfolded content_mult]
+  have a1: "content a dvd 1" and b1: "content b dvd 1"
+    using content_ge_0_int[of a] pos_zmult_eq_1_iff_lemma[OF *] * by (auto simp: abs_mult)
+  with p0 have a0: "a \<noteq> 0" and b0: "b \<noteq> 0" by auto
+  from degree_mult_eq[OF this, folded p] assms
+  consider "degree a = 1" "degree b = 0" | "degree a = 0" "degree b = 1" by force
+  then show "a dvd 1 \<or> b dvd 1"
+    by (cases; insert a1 b1, auto simp: primitive_imp_unit_iff)
+qed
+
+lemma irreducible_connect_rev:
+  fixes p :: "'a :: {comm_semiring_1,semiring_no_zero_divisors} poly"
+  assumes irr: "irreducible p" and deg: "degree p > 0"
+  shows "irreducible\<^sub>d p"
+proof(intro irreducible\<^sub>dI deg)
+  fix q r
+  assume degq: "degree q > 0" and diff: "degree q < degree p" and p: "p = q * r"
+  from degq have nu: "\<not> q dvd 1" by (auto simp: poly_dvd_1)
+  from irreducibleD[OF irr p] nu have "r dvd 1" by auto
+  then have "degree r = 0" by (auto simp: poly_dvd_1)
+  with degq diff show False unfolding p using degree_mult_le[of q r] by auto
+qed
+
+
+abbreviation ipoly where "ipoly f x \<equiv> poly (of_int_poly f) x"
+
+lemma poly_map_poly_code[code_unfold]: "poly (map_poly h p) x = fold_coeffs (\<lambda> a b. h a + x * b) p 0"
+  by (induct p, auto)
+
+abbreviation real_of_int_poly :: "int poly \<Rightarrow> real poly" where
+  "real_of_int_poly \<equiv> of_int_poly"
+
+abbreviation real_of_rat_poly :: "rat poly \<Rightarrow> real poly" where
+  "real_of_rat_poly \<equiv> map_poly of_rat"
+
+lemma of_rat_of_int[simp]: "of_rat \<circ> of_int = of_int" by auto
+
+lemma ipoly_of_rat[simp]: "ipoly p (of_rat y) = of_rat (ipoly p y)"
+proof-
+  have id: "of_int = of_rat o of_int" unfolding comp_def by auto
+  show ?thesis by (subst id, subst map_poly_map_poly[symmetric], auto)
+qed
+
+lemma ipoly_of_real[simp]:
+  "ipoly p (of_real x :: 'a :: {field,real_algebra_1}) = of_real (ipoly p x)"
+proof -
+  have id: "of_int = of_real o of_int" unfolding comp_def by auto
+  show ?thesis by (subst id, subst map_poly_map_poly[symmetric], auto)
+qed
+
+lemma finite_ipoly_roots: assumes "p \<noteq> 0"
+  shows "finite {x :: real. ipoly p x = 0}"
+proof -
+  let ?p = "real_of_int_poly p"
+  from assms have "?p \<noteq> 0" by auto
+  thus ?thesis by (rule poly_roots_finite)
+qed
+
+
+
+lemma algebraic_altdef_ipoly:
+  shows "algebraic x \<longleftrightarrow> (\<exists>p. ipoly p x = 0 \<and> p \<noteq> 0)"
+unfolding algebraic_def
+proof (safe, goal_cases)
+  case (1 p)
+  define the_int where "the_int = (\<lambda>x::'a. THE r. x = of_int r)"
+  define p' where "p' = map_poly the_int p"
+  have of_int_the_int: "of_int (the_int x) = x" if "x \<in> \<int>" for x
+    unfolding the_int_def by (rule sym, rule theI') (insert that, auto simp: Ints_def)
+  have the_int_0_iff: "the_int x = 0 \<longleftrightarrow> x = 0" if "x \<in> \<int>"
+    using of_int_the_int[OF that] by auto
+  have "map_poly of_int p' = map_poly (of_int \<circ> the_int) p"
+      by (simp add: p'_def map_poly_map_poly)
+  also from 1 of_int_the_int have "\<dots> = p"
+    by (subst poly_eq_iff) (auto simp: coeff_map_poly)
+  finally have p_p': "map_poly of_int p' = p" .
+  show ?case
+  proof (intro exI conjI notI)
+    from 1 show "ipoly p' x = 0" by (simp add: p_p')
+  next
+    assume "p' = 0"
+    hence "p = 0" by (simp add: p_p' [symmetric])
+  qed
+next
+  case (2 p)
+  thus ?case by (intro exI[of _ "map_poly of_int p"], auto)
+qed
+
+
+definition represents :: "int poly \<Rightarrow> 'a :: field_char_0 \<Rightarrow> bool" (infix "represents" 51)
+  where "p represents x = (ipoly p x = 0 \<and> p \<noteq> 0)"
+
+lemma representsI[intro]: "ipoly p x = 0 \<Longrightarrow> p \<noteq> 0 \<Longrightarrow> p represents x"
+  unfolding represents_def by auto
+
+lemma representsD:
+  assumes "p represents x" shows "p \<noteq> 0" and "ipoly p x = 0" using assms unfolding represents_def by auto
+
+lemma representsE:
+  assumes "p represents x" and "p \<noteq> 0 \<Longrightarrow> ipoly p x = 0 \<Longrightarrow> thesis"
+  shows thesis using assms unfolding represents_def by auto
+
+lemma represents_imp_degree:
+  fixes x :: "'a :: field_char_0"
+  assumes "p represents x" shows "degree p \<noteq> 0"
+proof-
+  from assms have "p \<noteq> 0" and px: "ipoly p x = 0" by (auto dest:representsD)
+  then have "(of_int_poly p :: 'a poly) \<noteq> 0" by auto
+  then have "degree (of_int_poly p :: 'a poly) \<noteq> 0" by (fold poly_zero[OF px])
+  then show ?thesis by auto
+qed
+
+lemma representsE_full[elim]:
+  assumes rep: "p represents x"
+    and main: "p \<noteq> 0 \<Longrightarrow> ipoly p x = 0 \<Longrightarrow> degree p \<noteq> 0 \<Longrightarrow> thesis"
+  shows thesis
+  by (rule main, insert represents_imp_degree[OF rep] rep, auto elim: representsE)
+
+lemma represents_of_rat[simp]: "p represents (of_rat x) = p represents x" by (auto elim!:representsE)
+lemma represents_of_real[simp]: "p represents (of_real x) = p represents x" by (auto elim!:representsE)
+
+lemma algebraic_iff_represents: "algebraic x \<longleftrightarrow> (\<exists> p. p represents x)"
+  unfolding algebraic_altdef_ipoly represents_def ..
+
+lemma represents_irr_non_0:
+  assumes irr: "irreducible p" and ap: "p represents x" and x0: "x \<noteq> 0"
+  shows "poly p 0 \<noteq> 0"
+proof
+  have nu: "\<not> [:0,1::int:] dvd 1" by (auto simp: poly_dvd_1)
+  assume "poly p 0 = 0"
+  hence dvd: "[: 0, 1 :] dvd p" by (unfold dvd_iff_poly_eq_0, simp)
+  then obtain q where pq: "p = [:0,1:] * q" by (elim dvdE)
+  from irreducibleD[OF irr this] nu have "q dvd 1" by auto
+  from this obtain r where "q = [:r:]" "r dvd 1" by (auto simp add: poly_dvd_1 dest: degree0_coeffs)
+  with pq have "p = [:0,r:]" by auto
+  with ap have "x = 0" by (auto simp: of_int_hom.map_poly_pCons_hom)
+  with x0 show False by auto
+qed
+
+
+definition poly_rat :: "rat \<Rightarrow> int poly" where
+  "poly_rat x = (case quotient_of x of (n,d) \<Rightarrow> [:-n,d:])"
+
+definition abs_int_poly:: "int poly \<Rightarrow> int poly" where
+  "abs_int_poly p \<equiv> if lead_coeff p < 0 then -p else p"
+
+lemma pos_poly_abs_poly[simp]:
+  shows "lead_coeff (abs_int_poly p) > 0 \<longleftrightarrow> p \<noteq> 0"
+proof-
+  have "p \<noteq> 0 \<longleftrightarrow> lead_coeff p * sgn (lead_coeff p) > 0" by (fold abs_sgn, auto)
+  then show ?thesis by (auto simp: abs_int_poly_def mult.commute)
+qed
+
+lemma abs_int_poly_0[simp]: "abs_int_poly 0 = 0"
+  by (auto simp: abs_int_poly_def)
+
+lemma abs_int_poly_eq_0_iff[simp]: "abs_int_poly p = 0 \<longleftrightarrow> p = 0"
+  by (auto simp: abs_int_poly_def sgn_eq_0_iff)
+
+lemma degree_abs_int_poly[simp]: "degree (abs_int_poly p) = degree p"
+  by (auto simp: abs_int_poly_def sgn_eq_0_iff)
+
+lemma abs_int_poly_dvd[simp]: "abs_int_poly p dvd q \<longleftrightarrow> p dvd q"
+  by (unfold abs_int_poly_def, auto)
+
+lemma (in idom) irreducible_uminus[simp]: "irreducible (-x) \<longleftrightarrow> irreducible x"
+proof-
+  have "-x = -1 * x" by simp
+  also have "irreducible ... \<longleftrightarrow> irreducible x" by (rule irreducible_mult_unit_left, auto)
+  finally show ?thesis.
+qed
+
+lemma irreducible_abs_int_poly[simp]:
+  "irreducible (abs_int_poly p) \<longleftrightarrow> irreducible p"
+  by (unfold abs_int_poly_def, auto)
+
+lemma coeff_abs_int_poly[simp]:
+  "coeff (abs_int_poly p) n = (if lead_coeff p < 0 then - coeff p n else coeff p n)"
+  by (simp add: abs_int_poly_def)
+
+lemma lead_coeff_abs_int_poly[simp]:
+  "lead_coeff (abs_int_poly p) = abs (lead_coeff p)"
+  by auto
+
+lemma ipoly_abs_int_poly_eq_zero_iff[simp]:
+  "ipoly (abs_int_poly p) (x :: 'a :: comm_ring_1) = 0 \<longleftrightarrow> ipoly p x = 0"
+  by (auto simp: abs_int_poly_def sgn_eq_0_iff of_int_poly_hom.hom_uminus)
+
+lemma abs_int_poly_represents[simp]:
+  "abs_int_poly p represents x \<longleftrightarrow> p represents x" by (auto elim!:representsE)
+
+
+lemma content_pCons[simp]: "content (pCons a p) = gcd a (content p)"
+  by (unfold content_def coeffs_pCons_eq_cCons cCons_def, auto)
+
+lemma content_uminus[simp]:
+  fixes p :: "'a :: ring_gcd poly" shows "content (-p) = content p"
+  by (induct p, auto)
+
+lemma primitive_abs_int_poly[simp]:
+  "primitive (abs_int_poly p) \<longleftrightarrow> primitive p"
+  by (auto simp: abs_int_poly_def)
+
+lemma abs_int_poly_inv[simp]: "smult (sgn (lead_coeff p)) (abs_int_poly p) = p"
+  by (cases "lead_coeff p > 0", auto simp: abs_int_poly_def)
+
+
+
+definition cf_pos :: "int poly \<Rightarrow> bool" where
+  "cf_pos p = (content p = 1 \<and> lead_coeff p > 0)"
+
+definition cf_pos_poly :: "int poly \<Rightarrow> int poly" where
+  "cf_pos_poly f = (let
+      c = content f;
+      d = (sgn (lead_coeff f) * c)
+    in sdiv_poly f d)"
+
+lemma sgn_is_unit[intro!]:
+  assumes "x \<noteq> 0"
+  shows "sgn x dvd 1" using assms by(cases x "0::'a" rule:linorder_cases, auto)
+
+lemma cf_pos_poly_0[simp]: "cf_pos_poly 0 = 0" by (unfold cf_pos_poly_def sdiv_poly_def, auto)
+
+lemma cf_pos_poly_eq_0[simp]: "cf_pos_poly f = 0 \<longleftrightarrow> f = 0"
+proof(cases "f = 0")
+  case True
+  thus ?thesis unfolding cf_pos_poly_def Let_def by (simp add: sdiv_poly_def)
+next
+  case False
+  then have lc0: "lead_coeff f \<noteq> 0" by auto
+  then have s0: "sgn (lead_coeff f) \<noteq> 0" (is "?s \<noteq> 0") and "content f \<noteq> 0" (is "?c \<noteq> 0") by (auto simp: sgn_0_0)
+  then have sc0: "?s * ?c \<noteq> 0" by auto
+  { fix i
+    from content_dvd_coeff sgn_is_unit[OF lc0]
+    have "?s * ?c dvd coeff f i" by (auto simp: unit_dvd_iff)
+    then have "coeff f i div (?s * ?c) = 0 \<longleftrightarrow> coeff f i = 0" by (auto simp:dvd_div_eq_0_iff)
+  } note * = this
+  show ?thesis unfolding cf_pos_poly_def Let_def sdiv_poly_def poly_eq_iff by (auto simp: coeff_map_poly *)
+(* TODO: remove *)
+(* TODO *)
+lemma coprime_prod: (* TODO: move *)
+lemma smult_prod: (* TODO: move or find corresponding lemma *)
+(* TODO: move? *)

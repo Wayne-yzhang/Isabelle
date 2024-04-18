@@ -1,0 +1,244 @@
+theory SML_Topological_Space
+  imports 
+    "../Simple_Orders/SML_Simple_Orders"
+    "HOL-Analysis.Elementary_Topology"
+    "../Foundations/Transfer_Ext"
+    "../Foundations/Lifting_Set_Ext"
+begin
+
+
+
+
+
+
+locale topological_space_ow = 
+  fixes U :: "'at set" and \<tau> :: "'at set \<Rightarrow> bool"
+  assumes open_UNIV[simp, intro]: "\<tau> U"
+  assumes open_Int[intro]: 
+    "\<lbrakk> S \<subseteq> U; T \<subseteq> U; \<tau> S; \<tau> T \<rbrakk> \<Longrightarrow> \<tau> (S \<inter> T)"
+  assumes open_Union[intro]: 
+    "\<lbrakk> K \<subseteq> Pow U; \<forall>S\<in>K. \<tau> S \<rbrakk> \<Longrightarrow> \<tau> (\<Union>K)"
+begin
+
+context
+  includes lifting_syntax
+begin
+
+tts_register_sbts \<tau> | U
+proof-
+  assume dom_ATA: "Domainp ATA = (\<lambda>x. x \<in> U)" 
+    and "bi_unique ATA" 
+    and "right_total ATA"
+  obtain Rep :: "'a \<Rightarrow> 'at" and Abs :: "'at \<Rightarrow> 'a" where 
+    td: "type_definition Rep Abs (Collect (Domainp ATA))" and
+    ATA_Rep: "ATA b b' = (b = Rep b')" for b b'
+    by (blast dest: ex_type_definition)
+  define \<tau>' where \<tau>': "\<tau>' = (image Rep ---> id) \<tau>"
+  have Domainp_scr_S: "Domainp (rel_set ATA) = (\<lambda>x. x \<subseteq> U)"
+    unfolding Domainp_set by (auto simp: dom_ATA)
+  have scr_S_rep[intro, simp]: "rel_set ATA (image Rep a) a" for a 
+    unfolding rel_set_def by (auto simp: ATA_Rep)
+  have rel_set_eq_rep_set: "rel_set ATA x y \<longleftrightarrow> x = image Rep y" for x y
+  proof -
+    have "bi_unique (rel_set ATA)" 
+    from this show ?thesis by (auto dest: bi_uniqueDl)
+  qed  
+  have "(rel_set ATA ===> (=)) \<tau> \<tau>'"
+    unfolding \<tau>' map_fun_apply id_def
+    apply(intro rel_funI)
+    unfolding rel_set_eq_rep_set
+    apply(elim ssubst)
+    ..  
+  then show " \<exists>\<tau>'. (rel_set ATA ===> (=)) \<tau> \<tau>'" by auto
+qed
+
+end
+
+end
+
+locale topological_space_pair_ow = 
+  ts\<^sub>1: topological_space_ow U\<^sub>1 \<tau>\<^sub>1 + ts\<^sub>2: topological_space_ow U\<^sub>2 \<tau>\<^sub>2 
+  for U\<^sub>1 :: "'at set" and \<tau>\<^sub>1 and U\<^sub>2 :: "'bt set" and \<tau>\<^sub>2
+
+locale topological_space_triple_ow = 
+  ts\<^sub>1: topological_space_ow U\<^sub>1 \<tau>\<^sub>1 + 
+  ts\<^sub>2: topological_space_ow U\<^sub>2 \<tau>\<^sub>2 +
+  ts\<^sub>3: topological_space_ow U\<^sub>3 \<tau>\<^sub>3
+  for U\<^sub>1 :: "'at set" and \<tau>\<^sub>1 
+    and U\<^sub>2 :: "'bt set" and \<tau>\<^sub>2 
+    and U\<^sub>3 :: "'ct set" and \<tau>\<^sub>3
+begin
+
+sublocale tsp\<^sub>1\<^sub>2: topological_space_pair_ow U\<^sub>1 \<tau>\<^sub>1 U\<^sub>2 \<tau>\<^sub>2 ..
+sublocale tsp\<^sub>1\<^sub>3: topological_space_pair_ow U\<^sub>1 \<tau>\<^sub>1 U\<^sub>3 \<tau>\<^sub>3 ..
+sublocale tsp\<^sub>2\<^sub>3: topological_space_pair_ow U\<^sub>2 \<tau>\<^sub>2 U\<^sub>3 \<tau>\<^sub>3 ..
+sublocale tsp\<^sub>2\<^sub>1: topological_space_pair_ow U\<^sub>2 \<tau>\<^sub>2 U\<^sub>1 \<tau>\<^sub>1 ..
+sublocale tsp\<^sub>3\<^sub>1: topological_space_pair_ow U\<^sub>3 \<tau>\<^sub>3 U\<^sub>1 \<tau>\<^sub>1 ..
+sublocale tsp\<^sub>3\<^sub>2: topological_space_pair_ow U\<^sub>3 \<tau>\<^sub>3 U\<^sub>2 \<tau>\<^sub>2 ..
+
+end
+
+inductive generate_topology_on :: "['at set set, 'at set, 'at set] \<Rightarrow> bool" 
+  (
+    [1000, 1000, 1000] 10
+  )
+  for S :: "'at set set" 
+  where
+    UNIV: "(in_topology_generated_by S on U : \<guillemotleft>open\<guillemotright> U)"
+  | Int: "(in_topology_generated_by S on U : \<guillemotleft>open\<guillemotright> (a \<inter> b))" 
+    if "(in_topology_generated_by S on U : \<guillemotleft>open\<guillemotright> a)" 
+      and "(in_topology_generated_by S on U : \<guillemotleft>open\<guillemotright> b)" 
+      and "a \<subseteq> U" 
+      and "b \<subseteq> U"
+  | UN: "(in_topology_generated_by S on U : \<guillemotleft>open\<guillemotright> (\<Union>K))"
+    if "K \<subseteq> Pow U" 
+      and "(\<And>k. k \<in> K \<Longrightarrow> (in_topology_generated_by S on U : \<guillemotleft>open\<guillemotright> k))"
+  | Basis: "(in_topology_generated_by S on U : \<guillemotleft>open\<guillemotright> s)" 
+      if "s \<in> S" and "s \<subseteq> U"
+
+lemma gto_imp_ss: "(in_topology_generated_by S on U : \<guillemotleft>open\<guillemotright> A) \<Longrightarrow> A \<subseteq> U"
+  by (induction rule: generate_topology_on.induct) auto
+
+lemma gt_eq_gto: "generate_topology = (\<lambda>S. generate_topology_on S UNIV)"
+proof(intro ext iffI)
+  fix S and x :: "'a set"
+  assume "generate_topology S x"
+  then show "in_topology_generated_by S on UNIV : \<guillemotleft>open\<guillemotright> x"
+    by (induction rule: generate_topology.induct)
+      (simp_all add: UNIV Int UN Basis)
+next
+  fix S and x :: "'a set"
+  assume gto: "in_topology_generated_by S on UNIV : \<guillemotleft>open\<guillemotright> x"
+  define U where U: "U = (UNIV::'a set)"
+  from gto have "generate_topology_on S U x" unfolding U .
+  from this U show "generate_topology S x"
+    by (induction rule: generate_topology_on.induct)
+      (
+        simp_all add: 
+          generate_topology.UNIV 
+          generate_topology.Int
+          generate_topology.UN
+          generate_topology.Basis
+      )
+qed 
+
+
+definition topological_basis_with :: "['a set \<Rightarrow> bool, 'a set set] \<Rightarrow> bool"
+  where
+  "(with \<tau> : \<guillemotleft>topological_basis\<guillemotright> B) = 
+    (\<Union>B = UNIV \<and> (\<forall>b \<in> B. \<tau> b) \<and> (\<forall>q. \<tau> q \<longrightarrow> (\<exists>B'\<subseteq>B. \<Union>B' = q)))"
+
+ctr relativization
+  synthesis ctr_simps
+  assumes [transfer_domain_rule, transfer_rule]: "Domainp A = (\<lambda>x. x \<in> U)"
+    and [transfer_rule]: "bi_unique A" "right_total A" 
+  trp (?'a A)
+  in closed_ow: closed.with_def 
+    and compact_ow: compact.with_def
+    and connected_ow: connected.with_def 
+    and islimpt_ow: islimpt.with_def 
+    and interior_ow: interior.with_def
+    and closure_ow: closure.with_def 
+    and frontier_ow: frontier.with_def 
+    and countably_compact_ow: countably_compact.with_def
+
+context topological_space_ow
+begin
+
+abbreviation closed where "closed \<equiv> closed_ow U \<tau>"
+abbreviation compact where "compact \<equiv> compact_ow U \<tau>"
+abbreviation connected where "connected \<equiv> connected_ow U \<tau>"
+  where "x \<guillemotleft>islimpt\<guillemotright> S \<equiv> on U with \<tau> : x \<guillemotleft>islimpt\<guillemotright> S"
+abbreviation interior where "interior \<equiv> interior_ow U \<tau>"
+abbreviation closure where "closure \<equiv> closure_ow U \<tau>"
+abbreviation frontier where "frontier \<equiv> frontier_ow U \<tau>"
+abbreviation countably_compact 
+  where "countably_compact \<equiv> countably_compact_ow U \<tau>"
+
+end
+
+context
+  includes lifting_syntax
+begin
+
+private lemma Domainp_fun_rel_eq_subset:
+  fixes A :: "['a, 'c] \<Rightarrow> bool"
+  fixes B :: "['b, 'd] \<Rightarrow> bool"
+  assumes "bi_unique A" "bi_unique B"
+  shows 
+    "Domainp (A ===> B) = 
+      (\<lambda>f. f ` (Collect (Domainp A)) \<subseteq> (Collect (Domainp B)))"
+proof(intro ext, standard)
+  let ?sA = "Collect (Domainp A)" and ?sB = "(Collect (Domainp B))"  
+  fix f assume "Domainp (A ===> B) f" show "f ` ?sA \<subseteq> ?sB"
+  proof(clarsimp)
+    fix x x' assume "A x x'"
+      "A x x' \<Longrightarrow> B (f x) (f' x')" for x x'
+      unfolding rel_fun_def by auto
+    thus "Domainp B (f x)" by auto
+  qed
+next
+  let ?sA = "Collect (Domainp A)" and ?sB = "(Collect (Domainp B))"  
+  fix f assume "f ` ?sA \<subseteq> ?sB"
+  define f' where f': "f' = (\<lambda>x'. (THE y'. \<exists>x. A x x' \<and> B (f x) y'))"
+  have "(A ===> B) f f'"
+  proof(intro rel_funI)
+    fix x x' assume "A x x'"
+    then obtain y' where y': "B (f x) y'" by clarsimp
+    have "f' x' = y'" unfolding f'
+    proof 
+      {
+        fix y'' assume "\<exists>x. A x x' \<and> B (f x) y''"
+        then obtain x'' where x'': "A x'' x' \<and> B (f x'') y''" by clarsimp
+        with y' x'' have "y'' = y'" using assms(2) by (auto dest: bi_uniqueDr)
+      }
+      thus "\<exists>x. A x x' \<and> B (f x) y'' \<Longrightarrow> y'' = y'" for y'' by simp
+    qed
+    thus "B (f x) (f' x')" using y' by simp 
+  qed
+  thus "Domainp (A ===> B) f" by auto
+qed
+
+private lemma Ex_rt_bu_transfer[transfer_rule]:
+  fixes A :: "['a, 'c] \<Rightarrow> bool"
+  fixes B :: "['b, 'd] \<Rightarrow> bool"
+  assumes [transfer_rule]: "bi_unique A" "right_total A" "bi_unique B"
+  shows 
+    "(((B ===> A) ===> (=)) ===> (=)) 
+      (Bex (Collect (\<lambda>f. f ` (Collect (Domainp B)) \<subseteq> (Collect (Domainp A))))) 
+      Ex"
+proof-
+  from assms(3,1) have domainp_eq_ss:
+    "Domainp (B ===> A) = 
+      (\<lambda>f. f ` (Collect (Domainp B)) \<subseteq> (Collect (Domainp A)))"
+    by (rule Domainp_fun_rel_eq_subset)
+  have "right_total (B ===> A)" 
+    using assms by (simp add: bi_unique_alt_def right_total_fun)
+  then have     
+    "(((B ===> A) ===> (=)) ===> (=)) (Bex (Collect (Domainp (B ===> A)))) Ex"
+    by (simp add: right_total_Ex_transfer)
+  thus ?thesis unfolding domainp_eq_ss by simp
+qed
+
+end
+
+definition topological_basis_ow :: 
+  "['a set, 'a set \<Rightarrow> bool, 'a set set] \<Rightarrow> bool"
+  where
+    "(on U with \<tau> : \<guillemotleft>topological_basis\<guillemotright> B) =
+      (\<Union>B = U \<and> (\<forall>b \<in> B. \<tau> b) \<and> (\<forall>q \<subseteq> U. \<tau> q \<longrightarrow> (\<exists>B'\<subseteq> B. \<Union>B' = q)))"
+
+context topological_space
+begin
+
+lemma topological_basis_with[ud_with]: 
+  "topological_basis = topological_basis_with open"
+  unfolding topological_basis_def topological_basis_with_def Ball_def
+  by (intro ext) (metis Union_mono open_UNIV top.extremum_uniqueI)
+
+end
+
+
+
+
+

@@ -1,0 +1,79 @@
+theory Sepref_Monadify
+imports Sepref_Basic Sepref_Id_Op
+begin
+
+
+
+
+  where [simp]: "SP x \<equiv> x"
+lemma SP_cong[cong]: "SP x \<equiv> SP x" by simp
+lemma PR_CONST_cong[cong]: "PR_CONST x \<equiv> PR_CONST x" by simp
+
+  where [simp]: "RCALL D \<equiv> D"
+  where [simp]: "EVAL x \<equiv> RETURN x"
+
+
+lemma monadify_simps: 
+  "Refine_Basic.bind$(RETURN$x)$(\<lambda>\<^sub>2x. f x) = f x" 
+  "EVAL$x \<equiv> RETURN$x"
+  by simp_all
+
+definition [simp]: "PASS \<equiv> RETURN"
+
+lemma remove_pass_simps:
+  "Refine_Basic.bind$(PASS$x)$(\<lambda>\<^sub>2x. f x) \<equiv> f x" 
+  "Refine_Basic.bind$m$(\<lambda>\<^sub>2x. PASS$x) \<equiv> m"
+  by simp_all
+
+
+definition COPY :: "'a \<Rightarrow> 'a" 
+  where [simp]: "COPY x \<equiv> x"
+lemma RET_COPY_PASS_eq: "RETURN$(COPY$p) = PASS$p" by simp
+
+
+named_theorems_rev sepref_monadify_arity "Sepref.Monadify: Arity alignment equations"
+named_theorems_rev sepref_monadify_comb "Sepref.Monadify: Combinator equations"
+
+
+lemma dflt_arity[sepref_monadify_arity]:
+  "RETURN \<equiv> \<lambda>\<^sub>2x. SP RETURN$x" 
+  "RECT \<equiv> \<lambda>\<^sub>2B x. SP RECT$(\<lambda>\<^sub>2D x. B$(\<lambda>\<^sub>2x. RCALL$D$x)$x)$x" 
+  "case_list \<equiv> \<lambda>\<^sub>2fn fc l. SP case_list$fn$(\<lambda>\<^sub>2x xs. fc$x$xs)$l" 
+  "case_prod \<equiv> \<lambda>\<^sub>2fp p. SP case_prod$(\<lambda>\<^sub>2a b. fp$a$b)$p" 
+  "case_option \<equiv> \<lambda>\<^sub>2fn fs ov. SP case_option$fn$(\<lambda>\<^sub>2x. fs$x)$ov" 
+  "If \<equiv> \<lambda>\<^sub>2b t e. SP If$b$t$e" 
+  "Let \<equiv> \<lambda>\<^sub>2x f. SP Let$x$(\<lambda>\<^sub>2x. f$x)"
+  by (simp_all only: SP_def APP_def PROTECT2_def RCALL_def)
+
+
+lemma dflt_comb[sepref_monadify_comb]:
+  "\<And>B x. RECT$B$x \<equiv> Refine_Basic.bind$(EVAL$x)$(\<lambda>\<^sub>2x. SP (RECT$B$x))"
+  "\<And>D x. RCALL$D$x \<equiv> Refine_Basic.bind$(EVAL$x)$(\<lambda>\<^sub>2x. SP (RCALL$D$x))"
+  "\<And>fn fc l. case_list$fn$fc$l \<equiv> Refine_Basic.bind$(EVAL$l)$(\<lambda>\<^sub>2l. (SP case_list$fn$fc$l))"
+  "\<And>fp p. case_prod$fp$p \<equiv> Refine_Basic.bind$(EVAL$p)$(\<lambda>\<^sub>2p. (SP case_prod$fp$p))"
+  "\<And>fn fs ov. case_option$fn$fs$ov 
+    \<equiv> Refine_Basic.bind$(EVAL$ov)$(\<lambda>\<^sub>2ov. (SP case_option$fn$fs$ov))"
+  "\<And>b t e. If$b$t$e \<equiv> Refine_Basic.bind$(EVAL$b)$(\<lambda>\<^sub>2b. (SP If$b$t$e))"
+  "\<And>x. RETURN$x \<equiv> Refine_Basic.bind$(EVAL$x)$(\<lambda>\<^sub>2x. SP (RETURN$x))"
+  "\<And>x f. Let$x$f \<equiv> Refine_Basic.bind$(EVAL$x)$(\<lambda>\<^sub>2x. (SP Let$x$f))"
+  by (simp_all)
+
+
+lemma dflt_plain_comb[sepref_monadify_comb]:
+  "EVAL$(If$b$t$e) \<equiv> Refine_Basic.bind$(EVAL$b)$(\<lambda>\<^sub>2b. If$b$(EVAL$t)$(EVAL$e))"
+  "EVAL$(case_list$fn$(\<lambda>\<^sub>2x xs. fc x xs)$l) \<equiv> 
+    Refine_Basic.bind$(EVAL$l)$(\<lambda>\<^sub>2l. case_list$(EVAL$fn)$(\<lambda>\<^sub>2x xs. EVAL$(fc x xs))$l)"
+  "EVAL$(case_prod$(\<lambda>\<^sub>2a b. fp a b)$p) \<equiv> 
+    Refine_Basic.bind$(EVAL$p)$(\<lambda>\<^sub>2p. case_prod$(\<lambda>\<^sub>2a b. EVAL$(fp a b))$p)"
+  "EVAL$(case_option$fn$(\<lambda>\<^sub>2x. fs x)$ov) \<equiv> 
+    Refine_Basic.bind$(EVAL$ov)$(\<lambda>\<^sub>2ov. case_option$(EVAL$fn)$(\<lambda>\<^sub>2x. EVAL$(fs x))$ov)"
+  "EVAL $ (Let $ v $ (\<lambda>\<^sub>2x. f x)) \<equiv> (\<bind>) $ (EVAL $ v) $ (\<lambda>\<^sub>2x. EVAL $ (f x))"
+  apply (rule eq_reflection, simp split: list.split prod.split option.split)+
+  done
+
+lemma evalcomb_PR_CONST[sepref_monadify_comb]:
+  "EVAL$(PR_CONST x) \<equiv> SP (RETURN$(PR_CONST x))"
+  by simp
+
+
+end

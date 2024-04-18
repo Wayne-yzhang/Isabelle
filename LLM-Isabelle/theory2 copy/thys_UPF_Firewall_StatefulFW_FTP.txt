@@ -1,0 +1,127 @@
+theory 
+  FTP
+  imports 
+    StatefulCore 
+begin
+
+
+datatype  msg = ftp_init  | ftp_port_request port | ftp_data | ftp_close | ftp_other
+
+
+definition
+  is_init :: "id \<Rightarrow> (adr\<^sub>i\<^sub>p, msg)packet \<Rightarrow> bool" where 
+  "is_init = (\<lambda> i p. (id p = i \<and> content p = ftp_init))"
+
+definition
+  is_ftp_port_request :: "id  \<Rightarrow> port \<Rightarrow>(adr\<^sub>i\<^sub>p, msg) packet \<Rightarrow> bool" where
+  "is_ftp_port_request = (\<lambda> i port p. (id p = i \<and> content p = ftp_port_request port))" 
+
+definition
+  is_ftp_data :: "id \<Rightarrow> (adr\<^sub>i\<^sub>p, msg) packet \<Rightarrow> bool" where
+  "is_ftp_data = (\<lambda> i p. (id p = i \<and> content p = ftp_data))"
+
+definition
+  is_ftp_close :: "id \<Rightarrow> (adr\<^sub>i\<^sub>p, msg) packet \<Rightarrow> bool" where
+  "is_ftp_close = (\<lambda> i p.  (id p = i \<and> content p = ftp_close))"
+
+definition 
+  port_open :: "(adr\<^sub>i\<^sub>p, msg) history \<Rightarrow> id \<Rightarrow> port \<Rightarrow> bool" where
+  "port_open = (\<lambda> L a p. (not_before (is_ftp_close a) (is_ftp_port_request a p) L))"
+
+definition
+  is_ftp_other :: "id \<Rightarrow> (adr\<^sub>i\<^sub>p, msg ) packet \<Rightarrow> bool" where 
+  "is_ftp_other = (\<lambda> i p. (id p = i \<and> content p = ftp_other))"
+
+fun are_ftp_other where
+  "are_ftp_other i (x#xs) = (is_ftp_other i x \<and> are_ftp_other i xs)"
+  |"are_ftp_other i [] = True"
+
+
+fun last_opened_port where
+  "last_opened_port i ((j,s,d,ftp_port_request p)#xs) = (if i=j then p else last_opened_port i xs)"
+| "last_opened_port i (x#xs) = last_opened_port i xs"
+| "last_opened_port x [] = undefined"
+
+fun FTP_STA :: "((adr\<^sub>i\<^sub>p,msg) history, adr\<^sub>i\<^sub>p, msg) FWStateTransition"
+  where 
+   "FTP_STA ((i,s,d,ftp_port_request pr), (log, pol)) =
+       (if before(Not o is_ftp_close i)(is_init i) log \<and>
+           dest_port (i,s,d,ftp_port_request pr) = (21::port) 
+        then Some (((i,s,d,ftp_port_request pr)#log, 
+                   (allow_from_to_port pr (subnet_of d) (subnet_of s)) \<Oplus> pol))
+        else Some (((i,s,d,ftp_port_request pr)#log,pol)))"
+  |"FTP_STA ((i,s,d,ftp_close), (log,pol)) = 
+       (if   (\<exists> p. port_open log i p) \<and> dest_port (i,s,d,ftp_close) = (21::port) 
+        then Some ((i,s,d,ftp_close)#log, 
+                   deny_from_to_port (last_opened_port i log) (subnet_of d)(subnet_of s) \<Oplus> pol)
+       else  Some (((i,s,d,ftp_close)#log, pol)))"
+
+  |"FTP_STA (p, s) = Some (p#(fst s),snd s)"
+
+
+fun    FTP_STD :: "((adr\<^sub>i\<^sub>p,msg) history, adr\<^sub>i\<^sub>p, msg) FWStateTransition"
+  where "FTP_STD (p,s) = Some s" 
+
+definition TRPolicy ::"    (adr\<^sub>i\<^sub>p,msg)packet \<times> (adr\<^sub>i\<^sub>p,msg)history \<times> ((adr\<^sub>i\<^sub>p,msg)packet \<mapsto> unit)
+                        \<mapsto> (unit             \<times> (adr\<^sub>i\<^sub>p,msg)history \<times> ((adr\<^sub>i\<^sub>p,msg)packet \<mapsto> unit))"
+  where     "TRPolicy = ((FTP_STA,FTP_STD) \<Otimes>\<^sub>\<nabla> applyPolicy) o (\<lambda>(x,(y,z)).((x,z),(x,(y,z))))"
+
+definition TRPolicy\<^sub>M\<^sub>o\<^sub>n
+  where     "TRPolicy\<^sub>M\<^sub>o\<^sub>n = policy2MON(TRPolicy)"
+
+definition TRPolicy\<^sub>M\<^sub>o\<^sub>n' 
+  where     "TRPolicy\<^sub>M\<^sub>o\<^sub>n' = policy2MON (((\<lambda>(x,y,z). (z,(y,z))) o_f  TRPolicy ))"
+
+
+datatype ftp_states = S0 | S1 | S2 | S3
+
+
+
+fun
+  is_ftp :: "ftp_states \<Rightarrow> adr\<^sub>i\<^sub>p  \<Rightarrow> adr\<^sub>i\<^sub>p \<Rightarrow> id \<Rightarrow> port \<Rightarrow>
+            (adr\<^sub>i\<^sub>p,msg) history \<Rightarrow> bool"
+  where
+    "is_ftp H c s i p [] = (H=S3)"
+  |"is_ftp H c s i p (x#InL) = (snd s = 21  \<and>((\<lambda> (id,sr,de,co). (((id = i \<and> (
+   (H=ftp_states.S2 \<and> sr = c \<and> de = s \<and> co = ftp_init \<and> is_ftp S3 c s i p InL) \<or> 
+   (H=ftp_states.S1 \<and> sr = c \<and> de = s \<and> co = ftp_port_request p \<and>  is_ftp S2 c s i p InL) \<or> 
+   (H=ftp_states.S1 \<and> sr = s \<and> de = (fst c,p) \<and> co= ftp_data \<and> is_ftp S1 c s i p InL) \<or> 
+   (H=ftp_states.S0 \<and> sr = c \<and> de = s \<and> co = ftp_close  \<and> is_ftp S1 c s i p InL) ))))) x))"
+
+
+
+definition  is_single_ftp_run :: "adr\<^sub>i\<^sub>p src \<Rightarrow> adr\<^sub>i\<^sub>p dest \<Rightarrow> id \<Rightarrow> port  \<Rightarrow> (adr\<^sub>i\<^sub>p,msg) history set" 
+  where      "is_single_ftp_run s d i p = {x. (is_ftp S0 s d i p x)}"
+
+definition 
+  ftp_2_interleaved :: "adr\<^sub>i\<^sub>p src \<Rightarrow> adr\<^sub>i\<^sub>p dest \<Rightarrow> id \<Rightarrow> port  \<Rightarrow>
+               adr\<^sub>i\<^sub>p src \<Rightarrow> adr\<^sub>i\<^sub>p dest \<Rightarrow> id \<Rightarrow> port  \<Rightarrow>
+            (adr\<^sub>i\<^sub>p,msg) history set" where
+  "ftp_2_interleaved s1 d1 i1 p1 s2 d2 i2 p2 = 
+      {x. (is_ftp S0 s1 d1 i1 p1 (packet_with_id x i1)) \<and>
+          (is_ftp S0 s2 d2 i2 p2 (packet_with_id x i2))}"
+
+lemma subnetOf_lemma: "(a::int) \<noteq> (c::int) \<Longrightarrow> \<forall>x\<in>subnet_of (a, b::port). (c, d) \<notin> x"
+  by (rule ballI, simp add: subnet_of_int_def)
+
+lemma subnetOf_lemma2: " \<forall>x\<in>subnet_of (a::int, b::port). (a, b) \<in>  x"
+  by (rule ballI, simp add: subnet_of_int_def)
+
+lemma subnetOf_lemma3: "(\<exists>x. x \<in> subnet_of (a::int, b::port))"
+  by (rule exI,  simp add: subnet_of_int_def)
+
+lemma subnetOf_lemma4: "\<exists>x\<in>subnet_of (a::int, b::port). (a, c::port) \<in> x"
+  by (rule bexI, simp_all add: subnet_of_int_def)
+
+lemma port_open_lemma: "\<not> (Ex (port_open [] (x::port)))"
+  by (simp add: port_open_def)
+
+lemmas FTPLemmas =  TRPolicy_def applyPolicy_def policy2MON_def 
+                    Let_def in_subnet_def src_def
+                    dest_def  subnet_of_int_def 
+                    is_init_def p_accept_def port_open_def is_ftp_data_def is_ftp_close_def 
+                    is_ftp_port_request_def content_def PortCombinators
+                    exI subnetOf_lemma subnetOf_lemma2 subnetOf_lemma3 subnetOf_lemma4 
+                    NetworkCore.id_def adr\<^sub>i\<^sub>pLemmas port_open_lemma
+                    bind_SE_def unit_SE_def valid_SE_def
+end

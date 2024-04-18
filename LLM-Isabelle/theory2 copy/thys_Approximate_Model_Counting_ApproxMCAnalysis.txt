@@ -1,0 +1,306 @@
+theory ApproxMCAnalysis imports
+  ApproxMCCoreAnalysis
+  RandomXORHashFamily
+  Median_Method.Median
+begin
+
+lemma replicate_pmf_Pi_pmf:
+  assumes "distinct ls"
+  shows "replicate_pmf (length ls) P =
+    map_pmf (\<lambda>f. map f ls)
+      (Pi_pmf (set ls) def (\<lambda>_. P))"
+  using assms
+proof (induction ls)
+  case Nil
+  then show ?case
+  by auto
+next
+  case (Cons x xs)
+  then show ?case
+    by (auto intro!: bind_pmf_cong simp add: Pi_pmf_insert' map_bind_pmf bind_map_pmf)
+qed
+
+lemma replicate_pmf_Pi_pmf':
+  assumes "finite V"
+  shows "replicate_pmf (card V) P =
+    map_pmf (\<lambda>f. map f (sorted_list_of_set V))
+      (Pi_pmf V def (\<lambda>_. P))"
+proof -
+  have *:"card V = length (sorted_list_of_set V)"
+    using assms by auto
+  show ?thesis
+    unfolding *
+    apply (subst replicate_pmf_Pi_pmf)
+    using assms by auto
+qed
+
+definition map_of_default::"('a \<times> 'b) list \<Rightarrow> 'b \<Rightarrow> 'a \<Rightarrow> 'b"
+where "map_of_default ls def =
+  (let m = map_of ls in
+  (\<lambda>x. case m x of None \<Rightarrow> def | Some v \<Rightarrow> v))"
+
+lemma Pi_pmf_replicate_pmf:
+  assumes "finite V"
+  shows
+    "(Pi_pmf V def (\<lambda>_. p)) =
+    map_pmf (\<lambda>bs.
+      map_of_default (zip (sorted_list_of_set V) bs) def)
+      (replicate_pmf (card V) p)"
+proof -
+  show ?thesis
+   apply (subst replicate_pmf_Pi_pmf'[OF assms, where def="def"])
+  unfolding map_pmf_comp
+   apply (intro map_pmf_idI[symmetric])
+   unfolding map_of_default_def Let_def fun_eq_iff map_of_zip_map
+   by (smt (verit, del_insts) assms option.case(1) option.case(2) pmf_Pi pmf_eq_0_set_pmf sorted_list_of_set.set_sorted_key_list_of_set)
+qed
+
+lemma proj_inter_neutral:
+  assumes "\<And>w. w \<in> B \<longleftrightarrow> restr S w \<in> C"
+  shows "proj S (A \<inter> B) = proj S A \<inter> C"
+  unfolding ApproxMCCore.proj_def
+  using assms by auto
+
+locale ApproxMC =
+  fixes sols :: "'fml \<Rightarrow> ('a \<Rightarrow> bool) set"
+  fixes enc_xor :: "'a set \<times> bool \<Rightarrow> 'fml \<Rightarrow> 'fml"
+  assumes sols_enc_xor:
+    "\<And>F xor. finite (fst xor) \<Longrightarrow>
+      sols (enc_xor xor F) =
+      sols F \<inter> {\<omega>. satisfies_xor xor {x. \<omega> x}}"
+begin
+
+definition compute_thresh :: "real \<Rightarrow> nat"
+  where "compute_thresh \<epsilon> =
+  nat \<lceil>1 + 9.84 * (1 + \<epsilon> / (1 + \<epsilon>)) * (1 + 1 / \<epsilon>)^2\<rceil>"
+
+definition fix_t :: "real \<Rightarrow> nat"
+  where "fix_t \<delta> =
+  nat \<lceil>ln (1 / \<delta>) /(2 * (0.5-0.36)^2)\<rceil>"
+
+definition raw_median_bound :: "real \<Rightarrow> nat \<Rightarrow> real"
+  where "raw_median_bound \<alpha> t =
+  (\<Sum>i = 0..t div 2.
+    (t choose i) * (1 / 2 + \<alpha>) ^ i * (1 / 2 - \<alpha>) ^ (t - i))"
+
+definition compute_t :: "real \<Rightarrow> nat \<Rightarrow> nat"
+  where "compute_t \<delta> n =
+  (if raw_median_bound 0.14 n < \<delta> then n
+  else fix_t \<delta>)"
+
+definition size_xor ::"
+  'fml \<Rightarrow> 'a set \<Rightarrow>
+  (nat \<Rightarrow> ('a set \<times> bool) option) \<Rightarrow>
+  nat \<Rightarrow> nat"
+  where "size_xor F S xorsf i = (
+    let xors = map (the \<circ> xorsf) [0..<i] in
+    let Fenc = fold enc_xor xors F in
+      card (proj S (sols Fenc))
+    )"
+
+definition check_xor ::"
+  'fml \<Rightarrow> 'a set \<Rightarrow>
+  nat \<Rightarrow>
+  (nat \<Rightarrow> ('a set \<times> bool) option) \<Rightarrow>
+  nat \<Rightarrow> bool"
+  where "check_xor F S thresh xorsf i =
+  (size_xor F S xorsf i < thresh)"
+
+definition approxcore_xors :: "
+  'fml \<Rightarrow> 'a set \<Rightarrow>
+  nat \<Rightarrow>
+  (nat \<Rightarrow> ('a set \<times> bool) option) \<Rightarrow>
+  nat"
+  where "
+    approxcore_xors F S thresh xorsf =
+    (case List.find
+      (check_xor F S thresh xorsf) [1..<card S] of
+      None \<Rightarrow> 2 ^ card S
+    | Some m \<Rightarrow>
+      (2 ^ m * size_xor F S xorsf m))"
+
+definition approxmccore :: "'fml \<Rightarrow> 'a set \<Rightarrow> nat \<Rightarrow> nat pmf"
+where "approxmccore F S thresh =
+  map_pmf (approxcore_xors F S thresh) (random_xors S (card S - 1))"
+
+definition approxmc :: "'fml \<Rightarrow> 'a set \<Rightarrow> real \<Rightarrow> real \<Rightarrow> nat \<Rightarrow> nat pmf"
+  where "approxmc F S \<epsilon> \<delta> n = (
+    let thresh = compute_thresh \<epsilon> in
+    if card (proj S (sols F)) < thresh then
+      return_pmf (card (proj S (sols F)))
+    else
+      let t = compute_t \<delta> n in
+      map_pmf (median t)
+        (prod_pmf {0..<t::nat} (\<lambda>i. approxmccore F S thresh))
+  )"
+
+lemma median_commute:
+  assumes "t \<ge> 1"
+  shows "(real \<circ> median t) = (\<lambda>w::nat \<Rightarrow> nat. median t (real \<circ> w))"
+  unfolding median_def map_map[symmetric]
+  apply (subst Median.map_sort[where f = "\<lambda>x. real x"])
+  subgoal by (clarsimp simp add:mono_def)
+  apply (subst nth_map)
+  using assms by auto
+
+lemma median_default:
+  shows "median t y = median t (\<lambda>x. if x < t then y x else def)"
+  unfolding median_def
+  by (auto intro!: arg_cong[where f = "\<lambda>ls. sort ls ! (t div 2)"])
+
+definition default_\<alpha>::"'a set \<Rightarrow> nat assg"
+  where "default_\<alpha> S i = (if i < card S - 1 then Some True else None)"
+
+lemma dom_default_\<alpha>:
+  "dom (default_\<alpha> S) = {0..<card S -1}"
+  by (auto simp add:default_\<alpha>_def split: if_splits)
+
+lemma compute_thresh_bound_4:
+  assumes "\<epsilon> > 0"
+  shows"4 < compute_thresh \<epsilon>"
+proof -
+  have 1: "(1 + \<epsilon> / (1 + \<epsilon>)) > 1"
+    using assms
+    by simp
+  have 2: "(1 + 1 / \<epsilon>)^2 > 1"
+    using assms by simp
+
+  define a where "a = (1 + \<epsilon> / (1 + \<epsilon>)) * (1 + 1 / \<epsilon>)\<^sup>2"
+  have "a > 1" unfolding a_def
+    using 1 2
+    using less_1_mult by blast
+  then have "(984 / 10\<^sup>2) * a \<ge> 4"
+    by auto
+
+  thus ?thesis
+    unfolding compute_thresh_def
+    by (smt (verit) a_def arith_special(2) arithmetic_simps(1) more_arith_simps(11) nat_less_real_le numeral_Bit0 of_nat_numeral real_nat_ceiling_ge)
+qed
+
+lemma satisfies_xor_with_domain:
+  assumes "fst x \<subseteq> S"
+  shows "satisfies_xor x {x. w x} \<longleftrightarrow>
+    satisfies_xor x ({x. w x} \<inter> S)"
+  using assms
+  apply (cases x)
+  by (simp add: Int_assoc inf.absorb_iff2)
+
+lemma approxcore_xors_eq:
+  assumes thresh:
+    "thresh = compute_thresh \<epsilon>"
+    "thresh \<le> card (proj S (sols F))"
+  assumes \<epsilon>: "\<epsilon> > (0::real)" "\<epsilon> \<le> 1"
+  assumes S: "finite S"
+  shows "measure_pmf.prob (random_xors S (card S - 1))
+       {xors. real (approxcore_xors F S thresh xors) \<in>
+        {real (card (proj S (sols F))) / (1 + \<epsilon>)..
+        (1 + \<epsilon>) * real (card (proj S (sols F)))}} \<ge> 0.64"
+proof -
+
+  have "ApproxMCCore (sols F) S \<epsilon> (default_\<alpha> S) thresh"
+    apply unfold_locales
+    subgoal using dom_default_\<alpha> by simp
+    subgoal using \<epsilon> by simp
+    subgoal using thresh assms(3) compute_thresh_bound_4 by blast
+    using thresh S by auto
+  then interpret amc: ApproxMCCore "sols F" _ _ "(default_\<alpha> S)" .
+
+  have "
+    m < card S \<Longrightarrow>
+    {0..<m} \<subseteq> dom xors \<Longrightarrow>
+    (\<And>i. i < m \<Longrightarrow> fst (the (xors i)) \<subseteq> S) \<Longrightarrow>
+    (proj S
+       (sols (fold enc_xor (map (the \<circ> xors) [0..<m]) F))) =
+     proj S (sols F) \<inter>
+        {w. hslice m (\<lambda>\<omega>. xor_hash \<omega> xors) w =
+          aslice m (default_\<alpha> S)}" for m xors
+  proof (induction m)
+    case 0
+    then show ?case
+      unfolding hslice_def aslice_def
+      by auto
+  next
+    case (Suc m)
+    have m: "m \<in> dom xors"
+      by (meson Set.basic_monos(7) Suc(3) atLeastLessThan_iff le0 lessI)
+    have sp: "fst (the (xors m)) \<subseteq> S"
+      by (simp add: Suc(4))
+
+    then obtain xor where x: "xors m = Some xor"
+      using m by blast
+
+    have eq: "{w. xor_hash w xors m = Some True} =
+        {\<omega>. satisfies_xor xor {x. \<omega> x = Some True}}"
+      unfolding xor_hash_def
+      by (clarsimp simp add: x)
+
+    have neut: "\<And>w.
+      w \<in> {\<omega>. satisfies_xor xor {x. \<omega> x}} \<longleftrightarrow>
+      restr S w \<in> {\<omega>. satisfies_xor xor {x. \<omega> x = Some True}}"
+      using sp unfolding restr_def
+      by (smt (verit, ccfv_SIG) Collect_cong Int_def mem_Collect_eq option.sel satisfies_xor_with_domain x)
+
+    have lhs: "
+      proj S
+       (sols (fold enc_xor (map (the \<circ> xors) [0..<Suc m]) F)) =
+      proj S (sols (fold enc_xor (map (the \<circ> xors) [0..<m]) F)) \<inter>
+        {w. xor_hash w xors m = Some True}"
+      apply clarsimp
+      apply (subst sols_enc_xor)
+      subgoal using assms(5) rev_finite_subset sp by blast
+      apply (subst proj_inter_neutral)
+      using eq neut x by auto
+
+    have rhs1:" hslice (Suc m) (\<lambda>\<omega>. xor_hash \<omega> xors) w = aslice (Suc m) (default_\<alpha> S) \<Longrightarrow>
+      hslice m (\<lambda>\<omega>. xor_hash \<omega> xors) w = aslice m (default_\<alpha> S)" for w
+      unfolding hslice_def aslice_def fun_eq_iff
+      by (auto simp add:lessThan_Suc restrict_map_def split: if_splits)
+
+    have rhs2:"hslice (Suc m) (\<lambda>\<omega>. xor_hash \<omega> xors) w = aslice (Suc m) (default_\<alpha> S) \<Longrightarrow>
+      xor_hash w xors m = Some True" for w
+      unfolding hslice_def aslice_def fun_eq_iff
+      apply (clarsimp simp add:lessThan_Suc restrict_map_def )
+      by (metis default_\<alpha>_def domIff m xor_hash_eq_dom)
+
+    have rhs3: "hslice m (\<lambda>\<omega>. xor_hash \<omega> xors) w = aslice m (default_\<alpha> S) \<Longrightarrow>
+      xor_hash w xors m = Some True \<Longrightarrow>
+      hslice (Suc m) (\<lambda>\<omega>. xor_hash \<omega> xors) w = aslice (Suc m) (default_\<alpha> S)" for w
+      unfolding hslice_def aslice_def fun_eq_iff
+      apply (clarsimp simp add:lessThan_Suc restrict_map_def )
+      by (metis One_nat_def Suc.prems(1) Suc_lessD Suc_less_eq Suc_pred default_\<alpha>_def gr_zeroI zero_less_diff)
+
+    have rhs: "{w. hslice (Suc m) (\<lambda>\<omega>. xor_hash \<omega> xors) w = aslice (Suc m) (default_\<alpha> S)} =
+      {w. hslice m (\<lambda>\<omega>. xor_hash \<omega> xors) w = aslice m (default_\<alpha> S)} \<inter>
+      {w. xor_hash w xors m = Some True}"
+      by (auto simp add: rhs1 rhs2 rhs3)
+
+    have ih: "proj S (sols (fold enc_xor (map (the \<circ> xors) [0..<m]) F)) =
+      proj S (sols F) \<inter>
+      {w. hslice m (\<lambda>\<omega>. xor_hash \<omega> xors) w = aslice m (default_\<alpha> S)}"
+      apply (intro Suc(1))
+      using Suc(2) Suc_lessD apply blast
+      using Suc(3) atLeast0_lessThan_Suc apply blast
+      using Suc(4) less_SucI by blast
+
+    show ?case
+      unfolding lhs rhs
+      by (simp add: Int_ac(1) ih)
+  qed
+  then have *: "
+    m < card S \<Longrightarrow>
+    {0..<m} \<subseteq> dom xors \<Longrightarrow>
+    (\<And>i. i < m \<Longrightarrow> fst (the (xors i)) \<subseteq> S) \<Longrightarrow>
+     size_xor F S xors m =
+     amc.card_slice (\<lambda>\<omega>. xor_hash \<omega> xors) m" for m xors
+    unfolding size_xor_def amc.card_slice_def
+    by auto
+
+  have **: "
+   {0..<card S - 1} \<subseteq> dom xors \<Longrightarrow>
+   (\<And>i. i < card S - 1 \<Longrightarrow> fst (the (xors i)) \<subseteq> S) \<Longrightarrow>
+   find (check_xor F S thresh xors) [1..<card S] =
+   find (\<lambda>i. (\<lambda>\<omega>. xor_hash \<omega> xors) \<in> amc.T i) [1..<card S]" for xors
+    apply (intro find_cong)
+    unfolding check_xor_def amc.T_def
+    subgoal by simp
+    apply (subst *)

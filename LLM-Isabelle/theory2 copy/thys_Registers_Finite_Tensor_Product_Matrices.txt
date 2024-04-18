@@ -1,0 +1,185 @@
+theory Finite_Tensor_Product_Matrices
+  imports Finite_Tensor_Product
+begin
+
+definition tensor_pack :: "nat \<Rightarrow> nat \<Rightarrow> (nat \<times> nat) \<Rightarrow> nat"
+  where "tensor_pack X Y = (\<lambda>(x, y). x * Y + y)"
+
+definition tensor_unpack :: "nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> (nat \<times> nat)"
+  where "tensor_unpack X Y xy = (xy div Y, xy mod Y)"
+
+lemma tensor_unpack_inj:
+  assumes "i < A * B" and "j < A * B"
+  shows "tensor_unpack A B i = tensor_unpack A B j \<longleftrightarrow> i = j"
+  by (metis div_mult_mod_eq prod.sel(1) prod.sel(2) tensor_unpack_def)
+
+lemma tensor_unpack_bound1[simp]: "i < A * B \<Longrightarrow> fst (tensor_unpack A B i) < A"
+  unfolding tensor_unpack_def
+  apply auto
+  using less_mult_imp_div_less by blast
+lemma tensor_unpack_bound2[simp]: "i < A * B \<Longrightarrow> snd (tensor_unpack A B i) < B"
+  unfolding tensor_unpack_def
+  apply auto
+  by (metis mod_less_divisor mult.commute mult_zero_left nat_neq_iff not_less0)
+
+  unfolding tensor_unpack_def apply auto
+  by (metis div_mult2_eq mult.commute)
+  unfolding tensor_unpack_def apply auto
+  by (meson dvd_triv_right mod_mod_cancel)
+  unfolding tensor_unpack_def apply auto
+
+definition "tensor_state_jnf \<psi> \<phi> = (let d1 = dim_vec \<psi> in let d2 = dim_vec \<phi> in
+  vec (d1*d2) (\<lambda>i. let (i1,i2) = tensor_unpack d1 d2 i in (vec_index \<psi> i1) * (vec_index \<phi> i2)))"
+
+  unfolding tensor_state_jnf_def Let_def by simp
+
+lemma enum_prod_nth_tensor_unpack:
+  shows "(Enum.enum ! i :: 'a::enum\<times>'b::enum) = 
+        (let (i1,i2) = tensor_unpack CARD('a) CARD('b) i in 
+              (Enum.enum ! i1, Enum.enum ! i2))"
+  using assms 
+  by (simp add: enum_prod_def card_UNIV_length_enum product_nth tensor_unpack_def)
+
+lemma vec_of_basis_enum_tensor_state_index:
+proof -
+  define i1 i2 where "i1 = fst (tensor_unpack CARD('a) CARD('b) i)"
+    and "i2 = snd (tensor_unpack CARD('a) CARD('b) i)"
+  have [simp]: "i1 < CARD('a)" "i2 < CARD('b)"
+    using assms i1_def tensor_unpack_bound1 apply presburger
+    using assms i2_def tensor_unpack_bound2 by presburger
+
+    by (simp add: vec_of_basis_enum_ell2_component)
+    apply (transfer fixing: i i1 i2)
+    by (simp add: enum_prod_nth_tensor_unpack case_prod_beta i1_def i2_def)
+    by (simp add: vec_of_basis_enum_ell2_component)
+  finally show ?thesis
+    by (simp add: case_prod_beta i1_def i2_def)
+qed
+
+lemma vec_of_basis_enum_tensor_state:
+  apply (rule eq_vecI, simp_all)
+  apply (subst vec_of_basis_enum_tensor_state_index, simp_all)
+  by (simp add: tensor_state_jnf_def case_prod_beta Let_def)
+
+
+lemma mat_of_cblinfun_tensor_op_index:
+proof -
+  define i1 i2 j1 j2
+    where "i1 = fst (tensor_unpack CARD('b) CARD('d) i)"
+      and "i2 = snd (tensor_unpack CARD('b) CARD('d) i)"
+      and "j1 = fst (tensor_unpack CARD('a) CARD('c) j)"
+      and "j2 = snd (tensor_unpack CARD('a) CARD('c) j)"
+  have [simp]: "i1 < CARD('b)" "i2 < CARD('d)" "j1 < CARD('a)" "j2 < CARD('c)"
+    using assms i1_def tensor_unpack_bound1 apply presburger
+    using assms i2_def tensor_unpack_bound2 apply blast
+    using assms(2) j1_def tensor_unpack_bound1 apply blast
+    using assms(2) j2_def tensor_unpack_bound2 by presburger
+
+    by (simp add: mat_of_cblinfun_ell2_component)
+    by (simp add: tensor_op_ell2 enum_prod_nth_tensor_unpack[where i=j] Let_def case_prod_beta j1_def[symmetric] j2_def[symmetric] flip: tensor_ell2_ket)
+    by (simp add: vec_of_basis_enum_ell2_component)
+    by (simp add: case_prod_beta vec_of_basis_enum_tensor_state_index i1_def[symmetric] i2_def[symmetric])
+    by (simp add: vec_of_basis_enum_ell2_component)
+    by (simp add: mat_of_cblinfun_ell2_component)
+  finally show ?thesis
+    by (simp add: i1_def[symmetric] i2_def[symmetric] j1_def[symmetric] j2_def[symmetric] case_prod_beta)
+qed
+
+
+definition "tensor_op_jnf A B = 
+  (let r1 = dim_row A in
+   let c1 = dim_col A in
+   let r2 = dim_row B in
+   let c2 = dim_col B in
+   mat (r1 * r2) (c1 * c2)
+   (\<lambda>(i,j). let (i1,i2) = tensor_unpack r1 r2 i in
+            let (j1,j2) = tensor_unpack c1 c2 j in
+              (A $$ (i1,j1)) * (B $$ (i2,j2))))"
+
+lemma tensor_op_jnf_dim[simp]: 
+  unfolding tensor_op_jnf_def Let_def by simp_all
+
+
+lemma mat_of_cblinfun_tensor_op:
+  apply (rule eq_matI, simp_all add: )
+    apply (subst mat_of_cblinfun_tensor_op_index)
+      apply (simp_all add: canonical_basis_length)
+  by (simp add: tensor_op_jnf_def case_prod_beta Let_def canonical_basis_length)
+
+
+lemma mat_of_cblinfun_assoc_ell2'[simp]: 
+  (is "mat_of_cblinfun ?assoc = _")
+proof  (rule mat_eq_iff[THEN iffD2], intro conjI allI impI)
+
+    by (simp add: canonical_basis_length)
+    by (simp add: canonical_basis_length)
+
+  fix i j
+  let ?i = "Enum.enum ! i :: (('a\<times>'b)\<times>'c)" and ?j = "Enum.enum ! j :: ('a\<times>('b\<times>'c))"
+
+
+  define i1 i23 i2 i3
+    where "i1 = fst (tensor_unpack CARD('a) (CARD('b)*CARD('c)) i)"
+      and "i23 = snd (tensor_unpack CARD('a) (CARD('b)*CARD('c)) i)"
+      and "i2 = fst (tensor_unpack CARD('b) CARD('c) i23)"
+      and "i3 = snd (tensor_unpack CARD('b) CARD('c) i23)"
+  define j12 j1 j2 j3
+    where "j12 = fst (tensor_unpack (CARD('a)*CARD('b)) CARD('c) j)"
+      and "j1 = fst (tensor_unpack CARD('a) CARD('b) j12)"
+      and "j2 = snd (tensor_unpack CARD('a) CARD('b) j12)"
+      and "j3 = snd (tensor_unpack (CARD('a)*CARD('b)) CARD('c) j)"
+
+  have [simp]: "j12 < CARD('a)*CARD('b)" "i23 < CARD('b)*CARD('c)"
+    using j12_def jB tensor_unpack_bound1 apply presburger
+    using i23_def iB' tensor_unpack_bound2 by blast
+
+    by (simp add: j1_def j12_def tensor_unpack_fstfst)
+
+  let ?i1 = "Enum.enum ! i1 :: 'a" and ?i2 = "Enum.enum ! i2 :: 'b" and ?i3 = "Enum.enum ! i3 :: 'c"
+  let ?j1 = "Enum.enum ! j1 :: 'a" and ?j2 = "Enum.enum ! j2 :: 'b" and ?j3 = "Enum.enum ! j3 :: 'c"
+
+    by (auto simp add: enum_prod_nth_tensor_unpack case_prod_beta
+          tensor_unpack_fstfst tensor_unpack_fstsnd tensor_unpack_sndsnd i1_def i2_def i23_def i3_def)
+    by (auto simp add: enum_prod_nth_tensor_unpack case_prod_beta
+        tensor_unpack_fstfst tensor_unpack_fstsnd tensor_unpack_sndsnd j1_def j2_def j12_def j3_def)
+    unfolding i1_def i2_def i3_def j1_def j2_def j3_def apply simp
+    apply (subst enum_inj, simp, simp)
+    apply (subst enum_inj, simp, simp)
+    apply (subst enum_inj, simp, simp)
+    apply (subst tensor_unpack_inj[symmetric, where i=i and j=j and A="CARD('a)" and B="CARD('b)*CARD('c)"], simp, simp)
+    unfolding prod_eq_iff
+    by (simp add: i1_def[symmetric] j1_def[symmetric] i2_def[symmetric] j2_def[symmetric] i3_def[symmetric] j3_def[symmetric]
+        i23_def[symmetric] j12_def[symmetric] j1'
+        prod_eq_iff tensor_unpack_fstsnd tensor_unpack_sndsnd)
+
+    by (subst mat_of_cblinfun_ell2_component, auto)
+    by (simp add: j assoc_ell2'_tensor flip: tensor_ell2_ket)
+    by (auto simp add: ket.rep_eq i)
+    using ijeq by simp
+  finally
+    by auto
+qed
+
+lemma assoc_ell2'_inv: "assoc_ell2 o\<^sub>C\<^sub>L assoc_ell2' = id_cblinfun"
+  apply (rule equal_ket, case_tac x, hypsubst)
+  by (simp flip: tensor_ell2_ket add: cblinfun_apply_cblinfun_compose assoc_ell2'_tensor assoc_ell2_tensor)
+
+lemma assoc_ell2_inv: "assoc_ell2' o\<^sub>C\<^sub>L assoc_ell2 = id_cblinfun"
+  apply (rule equal_ket, case_tac x, hypsubst)
+  by (simp flip: tensor_ell2_ket add: cblinfun_apply_cblinfun_compose assoc_ell2'_tensor assoc_ell2_tensor)
+
+lemma mat_of_cblinfun_assoc_ell2[simp]: 
+  (is "mat_of_cblinfun ?assoc = _")
+proof -
+  let ?assoc' = "assoc_ell2' :: (('a::enum\<times>('b::enum\<times>'c::enum)) ell2 \<Rightarrow>\<^sub>C\<^sub>L _)"
+  have "one_mat (CARD('a)*CARD('b)*CARD('c)) = mat_of_cblinfun (?assoc o\<^sub>C\<^sub>L ?assoc')"
+    by (simp add: mult.assoc mat_of_cblinfun_id)
+    using mat_of_cblinfun_compose by blast
+    by simp
+    apply (rule right_mult_one_mat')
+    by (simp add: canonical_basis_length)
+  finally show ?thesis
+    by simp
+qed
+
+end

@@ -1,0 +1,201 @@
+theory Classifying_Markov_Chain_States
+  imports
+    "HOL-Computational_Algebra.Group_Closure"
+    Discrete_Time_Markov_Chain
+begin
+
+lemma eventually_mult_Gcd:
+  fixes S :: "nat set"
+  assumes S: "\<And>s t. s \<in> S \<Longrightarrow> t \<in> S \<Longrightarrow> s + t \<in> S"
+  assumes s: "s \<in> S" "s > 0"
+  shows "eventually (\<lambda>m. m * Gcd S \<in> S) sequentially"
+proof -
+  define T where "T = insert 0 (int ` S)"
+  with s S have "int s \<in> T" "0 \<in> T" and T: "r \<in> T \<Longrightarrow> t \<in> T \<Longrightarrow> r + t \<in> T" for r t
+    by (auto simp del: of_nat_add simp add: of_nat_add [symmetric])
+  have "Gcd T \<in> group_closure T"
+    by (rule Gcd_in_group_closure)
+  also have "group_closure T = {s - t | s t. s \<in> T \<and> t \<in> T}"
+  proof (auto intro: group_closure.base group_closure.diff)
+    fix x assume "x \<in> group_closure T"
+    then show "\<exists>s t. x = s - t \<and> s \<in> T \<and> t \<in> T"
+    proof induction
+        apply (rule_tac x=x in exI)
+        apply (rule_tac x=0 in exI)
+        apply auto
+        done
+    next
+      case (diff x y)
+      then obtain a b c d where
+        "a \<in> T" "b \<in> T" "x = a - b"
+        "c \<in> T" "d \<in> T" "y = c - d"
+        by auto
+      then show ?case
+        apply (rule_tac x="a + d" in exI)
+        apply (rule_tac x="b + c" in exI)
+        apply (auto intro: T)
+        done
+    qed
+  qed
+  finally obtain s' t' :: int
+    where "s' \<in> T" "t' \<in> T" "Gcd T = s' - t'"
+    by blast
+  moreover define s and t where "s = nat s'" and "t = nat t'"
+  moreover have "int (Gcd S) = - int t \<longleftrightarrow> S \<subseteq> {0} \<and> t = 0"
+    by auto (metis Gcd_dvd_nat dvd_0_right dvd_antisym nat_int nat_zminus_int) 
+  ultimately have 
+    st: "s = 0 \<or> s \<in> S" "t = 0 \<or> t \<in> S" and Gcd_S: "Gcd S = s - t"
+    using T_def by safe simp_all
+  with s
+  have "t < s"
+    by (rule_tac ccontr) auto
+
+  { fix s n have "0 < n \<Longrightarrow> s \<in> S \<Longrightarrow> n * s \<in> S"
+    proof (induct n)
+      case (Suc n) then show ?case
+        by (cases n) (auto intro: S)
+    qed simp }
+  note cmult_S = this
+
+  show ?thesis
+    unfolding eventually_sequentially
+  proof cases
+    assume "s = 0 \<or> t = 0"
+    with st Gcd_S s have *: "Gcd S \<in> S"
+      by (auto simp: int_eq_iff)
+    then show "\<exists>N. \<forall>n\<ge>N. n * Gcd S \<in> S" by (auto intro!: exI[of _ 1] cmult_S)
+  next
+    assume "\<not> (s = 0 \<or> t = 0)"
+    with st have "s \<in> S" "t \<in> S" "t \<noteq> 0" by auto
+    then have "Gcd S dvd t" by auto
+    then obtain a where a: "t = Gcd S * a" ..
+
+    show "\<exists>N. \<forall>n\<ge>N. n * Gcd S \<in> S"
+    proof (safe intro!: exI[of _ "a * a"])
+      fix n
+      define m where "m = (n - a * a) div a"
+      define r where "r = (n - a * a) mod a"
+      moreover define am where "am = a + m"
+      ultimately have "r < am" by simp
+      assume "a * a \<le> n" then have n: "n = a * a + (m * a + r)"
+        unfolding m_def r_def by simp
+      have "n * Gcd S = am * t + r * Gcd S"
+        unfolding n a by (simp add: field_simps am_def)
+      also have "\<dots> = r * s + (am - r) * t"
+      also have "\<dots> \<in> S"
+        by (cases "r = 0") (auto intro!: cmult_S S)
+      finally show "n * Gcd S \<in> S" .
+    qed
+  qed
+qed
+
+context MC_syntax
+begin
+
+
+definition "G s t = (\<integral>\<^sup>+\<omega>. scount (HLD {t}) (s ## \<omega>) \<partial>T s)"
+
+lemma G_eq: "G s t = (\<integral>\<^sup>+\<omega>. emeasure (count_space UNIV) {i. (s ## \<omega>) !! i = t} \<partial>T s)"
+  by (simp add: G_def scount_eq_emeasure HLD_iff)
+
+definition "p s t n = \<P>(\<omega> in T s. (s ## \<omega>) !! n = t)"
+
+definition "gf_G s t z = (\<Sum>n. p s t n *\<^sub>R z ^ n)"
+
+definition "convergence_G s t z \<longleftrightarrow> summable (\<lambda>n. p s t n * norm z ^ n)"
+
+lemma p_nonneg[simp]: "0 \<le> p x y n"
+  by (simp add: p_def)
+
+lemma p_le_1: "p x y n \<le> 1"
+  by (simp add: p_def)
+
+lemma p_x_x_0[simp]: "p x x 0 = 1"
+  by (simp add: p_def T.prob_space del: space_T)
+
+lemma p_0: "p x y 0 = (if x = y then 1 else 0)"
+  by (simp add: p_def T.prob_space del: space_T)
+
+lemma p_in_reachable: assumes "(x, y) \<notin> (SIGMA x:UNIV. K x)\<^sup>*" shows "p x y n = 0"
+  unfolding p_def
+proof (rule T.prob_eq_0_AE)
+  from AE_T_reachable show "AE \<omega> in T x. (x ## \<omega>) !! n \<noteq> y"
+  proof eventually_elim
+    fix \<omega> assume "alw (HLD ((SIGMA \<omega>:UNIV. K \<omega>)\<^sup>* `` {x})) \<omega>"
+    then have "alw (HLD (- {y})) \<omega>"
+      using assms by (auto intro: alw_mono simp: HLD_iff)
+    then show "(x ## \<omega>) !! n \<noteq> y"
+      using assms by (cases n) (auto simp: alw_HLD_iff_streams streams_iff_snth)
+  qed
+qed
+
+lemma p_Suc: "ennreal (p x y (Suc n)) = (\<integral>\<^sup>+ w. p w y n \<partial>K x)"
+  unfolding p_def T.emeasure_eq_measure[symmetric] by (subst emeasure_Collect_T) simp_all
+
+lemma p_Suc':
+  "p x y (Suc n) = (\<integral>x'. p x' y n \<partial>K x)"
+  using p_Suc[of x y n]
+  by (subst (asm) nn_integral_eq_integral)
+     (auto simp: p_le_1 intro!: measure_pmf.integrable_const_bound[where B=1])
+
+lemma p_add: "p x y (n + m) = (\<integral>\<^sup>+ w. p x w n * p w y m \<partial>count_space UNIV)"
+proof (induction n arbitrary: x)
+  case 0
+  have [simp]: "\<And>w. (if x = w then 1 else 0) * p w y m = ennreal (p x y m) * indicator {x} w"
+    by auto
+  show ?case
+    by (simp add: p_0 one_ennreal_def[symmetric] max_def)
+next
+  case (Suc n)
+  define X where "X = (SIGMA x:UNIV. K x)\<^sup>* `` K x"
+  then have X: "countable X"
+    by (blast intro: countable_Image countable_reachable countable_set_pmf)
+
+  then interpret X: sigma_finite_measure "count_space X"
+    by (rule sigma_finite_measure_count_space_countable)
+  interpret XK: pair_sigma_finite "K x" "count_space X"
+    by unfold_locales
+
+  have "ennreal (p x y (Suc n + m)) = (\<integral>\<^sup>+t. (\<integral>\<^sup>+w. p t w n * p w y m \<partial>count_space UNIV) \<partial>K x)"
+    by (simp add: p_Suc Suc)
+  also have "\<dots> = (\<integral>\<^sup>+t. (\<integral>\<^sup>+w. ennreal (p t w n * p w y m) * indicator X w \<partial>count_space UNIV) \<partial>K x)"
+    by (auto intro!: nn_integral_cong_AE simp: AE_measure_pmf_iff AE_count_space Image_iff p_in_reachable X_def             split: split_indicator)
+  also have "\<dots> = (\<integral>\<^sup>+t. (\<integral>\<^sup>+w. p t w n * p w y m \<partial>count_space X) \<partial>K x)"
+    by (subst nn_integral_restrict_space[symmetric]) (simp_all add: restrict_count_space)
+  also have "\<dots> = (\<integral>\<^sup>+w. (\<integral>\<^sup>+t. p t w n * p w y m \<partial>K x) \<partial>count_space X)"
+    apply (rule XK.Fubini'[symmetric])
+    unfolding measurable_split_conv
+    apply (rule measurable_compose_countable'[OF _ measurable_snd X])
+    apply (rule measurable_compose[OF measurable_fst])
+    apply simp
+    done
+  also have "\<dots> = (\<integral>\<^sup>+w. (\<integral>\<^sup>+t. ennreal (p t w n * p w y m) * indicator X w \<partial>K x) \<partial>count_space UNIV)"
+    by (simp add: nn_integral_restrict_space[symmetric] restrict_count_space nn_integral_multc)
+  also have "\<dots> = (\<integral>\<^sup>+w. (\<integral>\<^sup>+t. ennreal (p t w n * p w y m) \<partial>K x) \<partial>count_space UNIV)"
+    by (auto intro!: nn_integral_cong_AE simp: AE_measure_pmf_iff AE_count_space Image_iff p_in_reachable X_def             split: split_indicator)
+  also have "\<dots> = (\<integral>\<^sup>+w. (\<integral>\<^sup>+t. p t w n \<partial>K x) * p w y m \<partial>count_space UNIV)"
+    by (simp add: nn_integral_multc[symmetric] ennreal_mult)
+  finally show ?case
+    by (simp add: ennreal_mult p_Suc)
+qed
+
+lemma prob_reachable_le:
+  assumes [simp]: "m \<le> n"
+  shows "p x y m * p y w (n - m) \<le> p x w n"
+proof -
+  have "p x y m * p y w (n - m) = (\<integral>\<^sup>+y'. ennreal (p x y m * p y w (n - m)) * indicator {y} y' \<partial>count_space UNIV)"
+    by simp
+  also have "\<dots> \<le> p x w (m + (n - m))"
+    by (subst p_add)
+       (auto intro!: nn_integral_mono split: split_indicator simp del: nn_integral_indicator_singleton)
+  finally show ?thesis
+    by simp
+qed
+
+lemma G_eq_suminf: "G x y = (\<Sum>i. ennreal (p x y i))"
+proof -
+  have *: "\<And>i \<omega>. indicator {\<omega> \<in> space S. (x ## \<omega>) !! i = y} \<omega> = indicator {i. (x ## \<omega>) !! i = y} i"
+    by (auto simp: space_stream_space split: split_indicator)
+
+  have "G x y = (\<integral>\<^sup>+ \<omega>. (\<Sum>i. indicator {\<omega>\<in>space (T x). (x ## \<omega>) !! i = y} \<omega>) \<partial>T x)"
+    unfolding G_eq by (simp add: nn_integral_count_space_nat[symmetric] *)

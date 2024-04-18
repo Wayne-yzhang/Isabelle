@@ -1,0 +1,54 @@
+theory Worklist
+imports "HOL-Library.While_Combinator" RTranCl Quasi_Order
+begin
+
+definition
+  worklist_aux :: "('s \<Rightarrow> 'a \<Rightarrow> 'a list) \<Rightarrow> ('a \<Rightarrow> 's \<Rightarrow> 's)
+    \<Rightarrow> 'a list * 's \<Rightarrow> ('a list * 's)option"
+where
+"worklist_aux succs f =
+ while_option 
+   (\<lambda>(ws,s). ws \<noteq> [])
+   (\<lambda>(ws,s). case ws of x#ws' \<Rightarrow> (succs s x @ ws', f x s))"
+
+definition worklist :: "('s \<Rightarrow> 'a \<Rightarrow> 'a list) \<Rightarrow> ('a \<Rightarrow> 's \<Rightarrow> 's)
+    \<Rightarrow> 'a list \<Rightarrow> 's \<Rightarrow> 's option" where
+"worklist succs f ws s =
+  (case worklist_aux succs f (ws,s) of
+     None \<Rightarrow> None | Some(ws,s) \<Rightarrow> Some s)"
+
+lemma worklist_aux_Nil: "worklist_aux succs f ([],s) = Some([],s)"
+by(simp add: worklist_aux_def while_option_unfold)
+
+lemma worklist_aux_Cons:
+ "worklist_aux succs f (x#ws',s) = worklist_aux succs f (succs s x @ ws', f x s)"
+by(simp add: worklist_aux_def while_option_unfold)
+
+lemma worklist_aux_unfold[code]:
+ "worklist_aux succs f (ws,s) =
+ (case ws of [] \<Rightarrow> Some([],s)
+  | x#ws' \<Rightarrow> worklist_aux succs f (succs s x @ ws', f x s))"
+by(simp add: worklist_aux_Nil worklist_aux_Cons split: list.split)
+
+definition
+  worklist_tree_aux :: "('a \<Rightarrow> 'a list) \<Rightarrow> ('a \<Rightarrow> 's \<Rightarrow> 's)
+    \<Rightarrow> 'a list * 's \<Rightarrow> ('a list * 's)option"
+where
+"worklist_tree_aux succs = worklist_aux (\<lambda>s. succs)"
+
+lemma worklist_tree_aux_unfold[code]:
+"worklist_tree_aux succs f (ws,s) =
+ (case ws of [] \<Rightarrow> Some([],s) |
+  x#ws' \<Rightarrow> worklist_tree_aux succs f (succs x @ ws', f x s))"
+by(simp add: worklist_tree_aux_def worklist_aux_Nil worklist_aux_Cons split: list.split)
+
+
+abbreviation Rel :: "('a \<Rightarrow> 'a list) \<Rightarrow> ('a * 'a)set" where
+"Rel f == {(x,y). y : set(f x)}"
+
+lemma Image_Rel_set:
+  "(Rel succs)\<^sup>* `` set(succs x) = (Rel succs)\<^sup>+ `` {x}"
+by(auto simp add: trancl_unfold_left)
+
+lemma RTranCl_conv:
+  "g [succs]\<rightarrow>* h \<longleftrightarrow> (g,h) : ((Rel succs)\<^sup>*)" (is "?L = ?R")

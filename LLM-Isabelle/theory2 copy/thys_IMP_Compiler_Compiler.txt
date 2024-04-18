@@ -1,0 +1,140 @@
+theory Compiler
+  imports
+    "HOL-IMP.BExp"
+    "HOL-IMP.Star"
+begin
+
+
+subsection "Introduction"
+
+
+
+subsection "Definitions"
+
+
+declare [[coercion_enabled]]
+declare [[coercion "int :: nat \<Rightarrow> int"]]
+declare [[syntax_ambiguity_warning = false]]
+
+datatype com =
+  SKIP |
+  Assign vname aexp  ("_ ::= _" [1000, 61] 61) |
+  Seq com com  ("_;;/ _" [60, 61] 60) |
+  If bexp com com  ("(IF _/ THEN _/ ELSE _)" [0, 0, 61] 61) |
+  Or com com  ("(_ OR _)" [60, 61] 61) |
+  While bexp com  ("(WHILE _/ DO _)" [0, 61] 61)
+
+inductive big_step :: "com \<times> state \<Rightarrow> state \<Rightarrow> bool" (infix "\<Rightarrow>" 55) where
+Skip:  "(SKIP, s) \<Rightarrow> s" |
+Assign:  "(x ::= a, s) \<Rightarrow> s(x := aval a s)" |
+Seq:  "\<lbrakk>(c\<^sub>1, s\<^sub>1) \<Rightarrow> s\<^sub>2; (c\<^sub>2, s\<^sub>2) \<Rightarrow> s\<^sub>3\<rbrakk> \<Longrightarrow> (c\<^sub>1;; c\<^sub>2, s\<^sub>1) \<Rightarrow> s\<^sub>3" |
+IfTrue:  "\<lbrakk>bval b s; (c\<^sub>1, s) \<Rightarrow> t\<rbrakk> \<Longrightarrow> (IF b THEN c\<^sub>1 ELSE c\<^sub>2, s) \<Rightarrow> t" |
+IfFalse:  "\<lbrakk>\<not> bval b s; (c\<^sub>2, s) \<Rightarrow> t\<rbrakk> \<Longrightarrow> (IF b THEN c\<^sub>1 ELSE c\<^sub>2, s) \<Rightarrow> t" |
+Or1:  "(c\<^sub>1, s) \<Rightarrow> t \<Longrightarrow> (c\<^sub>1 OR c\<^sub>2, s) \<Rightarrow> t" |
+Or2:  "(c\<^sub>2, s) \<Rightarrow> t \<Longrightarrow> (c\<^sub>1 OR c\<^sub>2, s) \<Rightarrow> t" |
+WhileFalse:  "\<not> bval b s \<Longrightarrow> (WHILE b DO c, s) \<Rightarrow> s" |
+WhileTrue:  "\<lbrakk>bval b s\<^sub>1; (c, s\<^sub>1) \<Rightarrow> s\<^sub>2; (WHILE b DO c, s\<^sub>2) \<Rightarrow> s\<^sub>3\<rbrakk> \<Longrightarrow>
+  (WHILE b DO c, s\<^sub>1) \<Rightarrow> s\<^sub>3"
+
+declare big_step.intros [intro]
+
+abbreviation (output)
+"isize xs \<equiv> int (length xs)"
+
+notation isize ("size")
+
+primrec (nonexhaustive) inth :: "'a list \<Rightarrow> int \<Rightarrow> 'a" (infixl "!!" 100) where
+"(x # xs) !! i = (if i = 0 then x else xs !! (i - 1))"
+
+lemma inth_append [simp]:
+ "0 \<le> i \<Longrightarrow>
+    (xs @ ys) !! i = (if i < size xs then xs !! i else ys !! (i - size xs))"
+by (induction xs arbitrary: i, auto simp: algebra_simps)
+
+
+datatype instr = 
+  LOADI int | LOAD vname | ADD | STORE vname |
+  JMP int | JMPLESS int | JMPGE int | JMPND int
+
+type_synonym stack = "val list"
+type_synonym config = "int \<times> state \<times> stack"
+
+abbreviation "hd2 xs \<equiv> hd (tl xs)"
+abbreviation "tl2 xs \<equiv> tl (tl xs)"
+
+inductive iexec :: "instr \<times> config \<Rightarrow> config \<Rightarrow> bool" (infix "\<mapsto>" 55) where
+LoadI:  "(LOADI i, pc, s, stk) \<mapsto> (pc + 1, s, i # stk)" |
+Load:  "(LOAD x, pc, s, stk) \<mapsto> (pc + 1, s, s x # stk)" |
+Add:  "(ADD, pc, s, stk) \<mapsto> (pc + 1, s, (hd2 stk + hd stk) # tl2 stk)" |
+Store:  "(STORE x, pc, s, stk) \<mapsto> (pc + 1, s(x := hd stk), tl stk)" |
+Jmp:  "(JMP i, pc, s, stk) \<mapsto> (pc + i + 1, s, stk)" |
+JmpLessY:  "hd2 stk < hd stk \<Longrightarrow>
+  (JMPLESS i, pc, s, stk) \<mapsto> (pc + i + 1, s, tl2 stk)" |
+JmpLessN:  "hd stk \<le> hd2 stk \<Longrightarrow>
+  (JMPLESS i, pc, s, stk) \<mapsto> (pc + 1, s, tl2 stk)" |
+JmpGeY:  "hd stk \<le> hd2 stk \<Longrightarrow>
+  (JMPGE i, pc, s, stk) \<mapsto> (pc + i + 1, s, tl2 stk)" |
+JmpGeN:  "hd2 stk < hd stk \<Longrightarrow>
+  (JMPGE i, pc, s, stk) \<mapsto> (pc + 1, s, tl2 stk)" |
+JmpNdY:  "(JMPND i, pc, s, stk) \<mapsto> (pc + i + 1, s, stk)" |
+JmpNdN:  "(JMPND i, pc, s, stk) \<mapsto> (pc + 1, s, stk)"
+
+declare iexec.intros [intro]
+
+inductive_cases LoadIE  [elim!]:  "(LOADI i, pc, s, stk) \<mapsto> cf"
+inductive_cases LoadE  [elim!]:  "(LOAD x, pc, s, stk) \<mapsto> cf"
+inductive_cases AddE  [elim!]:  "(ADD, pc, s, stk) \<mapsto> cf"
+inductive_cases StoreE  [elim!]:  "(STORE x, pc, s, stk) \<mapsto> cf"
+inductive_cases JmpE  [elim!]:  "(JMP i, pc, s, stk) \<mapsto> cf"
+inductive_cases JmpLessE  [elim!]:  "(JMPLESS i, pc, s, stk) \<mapsto> cf"
+inductive_cases JmpGeE  [elim!]:  "(JMPGE i, pc, s, stk) \<mapsto> cf"
+inductive_cases JmpNdE  [elim!]:  "(JMPND i, pc, s, stk) \<mapsto> cf"
+
+definition exec1 :: "instr list \<Rightarrow> config \<Rightarrow> config \<Rightarrow> bool"
+  ("(_/ \<turnstile>/ _/ \<rightarrow>/ _)" 55) where
+"P \<turnstile> cf \<rightarrow> cf' \<equiv> (P !! fst cf, cf) \<mapsto> cf' \<and> 0 \<le> fst cf \<and> fst cf < size P"
+
+abbreviation exec :: "instr list \<Rightarrow> config \<Rightarrow> config \<Rightarrow> bool"
+  ("(_/ \<turnstile>/ _/ \<rightarrow>*/ _)" 55) where
+"exec P \<equiv> star (exec1 P)"
+
+
+primrec acomp :: "aexp \<Rightarrow> instr list" where
+"acomp (N i) = [LOADI i]" |
+"acomp (V x) = [LOAD x]" |
+"acomp (Plus a\<^sub>1 a\<^sub>2) = acomp a\<^sub>1 @ acomp a\<^sub>2 @ [ADD]"
+
+fun bcomp :: "bexp \<times> bool \<times> int \<Rightarrow> instr list" where
+"bcomp (Bc v, f, i) = (if v = f then [JMP i] else [])" |
+"bcomp (Not b, f, i) = bcomp (b, \<not> f, i)" |
+"bcomp (And b\<^sub>1 b\<^sub>2, f, i) =
+  (let cb\<^sub>2 = bcomp (b\<^sub>2, f, i);
+     cb\<^sub>1 = bcomp (b\<^sub>1, False, size cb\<^sub>2 + (if f then 0 else i))
+   in cb\<^sub>1 @ cb\<^sub>2)" |
+"bcomp (Less a\<^sub>1 a\<^sub>2, f, i) =
+  acomp a\<^sub>1 @ acomp a\<^sub>2 @ (if f then [JMPLESS i] else [JMPGE i])"
+
+primrec ccomp :: "com \<Rightarrow> instr list" where
+"ccomp SKIP = []" |
+"ccomp (x ::= a) = acomp a @ [STORE x]" |
+"ccomp (c\<^sub>1;; c\<^sub>2) = ccomp c\<^sub>1 @ ccomp c\<^sub>2" |
+"ccomp (IF b THEN c\<^sub>1 ELSE c\<^sub>2) =
+  (let cc\<^sub>1 = ccomp c\<^sub>1; cc\<^sub>2 = ccomp c\<^sub>2; cb = bcomp (b, False, size cc\<^sub>1 + 1)
+   in cb @ cc\<^sub>1 @ JMP (size cc\<^sub>2) # cc\<^sub>2)" |
+"ccomp (c\<^sub>1 OR c\<^sub>2) =
+  (let cc\<^sub>1 = ccomp c\<^sub>1; cc\<^sub>2 = ccomp c\<^sub>2
+   in JMPND (size cc\<^sub>1 + 1) # cc\<^sub>1 @ JMP (size cc\<^sub>2) # cc\<^sub>2)" |
+"ccomp (WHILE b DO c) =
+  (let cc = ccomp c; cb = bcomp (b, False, size cc + 1)
+   in cb @ cc @ [JMP (- (size cb + size cc + 1))])"
+
+
+lemma impCE2 [elim!]:
+ "\<lbrakk>P \<longrightarrow> Q; \<not> P \<Longrightarrow> R; P \<Longrightarrow> Q \<Longrightarrow> R\<rbrakk> \<Longrightarrow> R"
+by blast
+
+lemma Suc_lessI2 [intro!]:
+ "\<lbrakk>m < n; m \<noteq> n - 1\<rbrakk> \<Longrightarrow> Suc m < n"
+by simp
+
+end

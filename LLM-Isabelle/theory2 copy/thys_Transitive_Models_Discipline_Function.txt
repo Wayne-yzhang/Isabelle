@@ -1,0 +1,326 @@
+theory Discipline_Function
+  imports
+    Arities
+begin
+
+
+arity_theorem for "empty_fm"
+arity_theorem for "upair_fm"
+arity_theorem for "pair_fm"
+definition
+  is_fst :: "(i\<Rightarrow>o)\<Rightarrow>i\<Rightarrow>i\<Rightarrow>o" where
+  "is_fst(M,x,t) \<equiv> (\<exists>z[M]. pair(M,t,z,x)) \<or>
+                       (\<not>(\<exists>z[M]. \<exists>w[M]. pair(M,w,z,x)) \<and> empty(M,t))"
+synthesize "fst" from_definition "is_fst"
+
+arity_theorem for "fst_fm"
+
+definition fst_rel ::  "[i\<Rightarrow>o,i] \<Rightarrow> i"  where
+  "fst_rel(M,p) \<equiv> THE d. M(d) \<and> is_fst(M,p,d)"
+
+reldb_add relational "fst" "is_fst"
+reldb_add functional "fst" "fst_rel"
+
+definition
+  is_snd :: "(i\<Rightarrow>o)\<Rightarrow>i\<Rightarrow>i\<Rightarrow>o" where
+  "is_snd(M,x,t) \<equiv> (\<exists>z[M]. pair(M,z,t,x)) \<or>
+                       (\<not>(\<exists>z[M]. \<exists>w[M]. pair(M,z,w,x)) \<and> empty(M,t))"
+synthesize "snd" from_definition "is_snd"
+arity_theorem for "snd_fm"
+
+definition snd_rel ::  "[i\<Rightarrow>o,i] \<Rightarrow> i"  where
+  "snd_rel(M,p) \<equiv> THE d. M(d) \<and> is_snd(M,p,d)"
+
+reldb_add relational "snd" "is_snd"
+reldb_add functional "snd" "snd_rel"
+
+context M_trans
+begin
+
+lemma fst_snd_closed:
+  assumes "M(p)"
+  shows "M(fst(p)) \<and> M(snd(p))"
+  unfolding fst_def snd_def using assms
+  by (cases "\<exists>a. \<exists>b. p = \<langle>a, b\<rangle>";auto)
+
+lemma fst_closed[intro,simp]: "M(x) \<Longrightarrow> M(fst(x))"
+  using fst_snd_closed by auto
+
+lemma snd_closed[intro,simp]: "M(x) \<Longrightarrow> M(snd(x))"
+  using fst_snd_closed by auto
+
+lemma fst_abs [absolut]:
+  "\<lbrakk>M(p); M(x) \<rbrakk> \<Longrightarrow> is_fst(M,p,x) \<longleftrightarrow> x = fst(p)"
+  unfolding is_fst_def fst_def
+  by (cases "\<exists>a. \<exists>b. p = \<langle>a, b\<rangle>";auto)
+
+lemma snd_abs [absolut]:
+  "\<lbrakk>M(p); M(y) \<rbrakk> \<Longrightarrow> is_snd(M,p,y) \<longleftrightarrow> y = snd(p)"
+  unfolding is_snd_def snd_def
+  by (cases "\<exists>a. \<exists>b. p = \<langle>a, b\<rangle>";auto)
+
+lemma empty_rel_abs : "M(x) \<Longrightarrow> M(0) \<Longrightarrow> x = 0 \<longleftrightarrow> x = (THE d. M(d) \<and> empty(M, d))"
+  unfolding the_def
+  using transM
+  by auto
+
+lemma fst_rel_abs:
+  assumes "M(p)"
+  shows "fst_rel(M,p) = fst(p)"
+  using fst_abs assms
+  unfolding fst_def fst_rel_def
+  by (cases "\<exists>a. \<exists>b. p = \<langle>a, b\<rangle>";auto;rule_tac the_equality[symmetric],simp_all)
+
+lemma snd_rel_abs:
+  assumes "M(p)"
+  shows " snd_rel(M,p) = snd(p)"
+  using snd_abs assms
+  unfolding snd_def snd_rel_def
+  by (cases "\<exists>a. \<exists>b. p = \<langle>a, b\<rangle>";auto;rule_tac the_equality[symmetric],simp_all)
+
+
+
+relativize functional "first" "first_rel" external
+relativize functional "minimum" "minimum_rel" external
+context M_trans
+begin
+
+lemma minimum_closed[simp,intro]:
+  assumes "M(A)"
+  shows "M(minimum(r,A))"
+  by(cases "\<exists>x . first(x,A,r)",auto simp:minimum_def)
+
+lemma first_abs :
+  assumes "M(B)"
+  shows "first(z,B,r) \<longleftrightarrow> first_rel(M,z,B,r)"
+  unfolding first_def first_rel_def using assms by auto
+
+lemma minimum_abs:
+  assumes "M(B)"
+  shows "minimum(r,B) = minimum_rel(M,r,B)"
+proof -
+  from assms
+  have "first(b, B, r) \<longleftrightarrow> M(b) \<and> first_rel(M,b,B,r)" for b
+    using first_abs
+  proof (auto)
+    fix b
+    assume "first_rel(M,b,B,r)"
+    have "b\<in>B" using first_abs first_is_elem by simp
+  qed
+  with assms
+  show ?thesis unfolding minimum_rel_def minimum_def
+    by simp
+qed
+
+
+
+definition
+  is_function_space :: "[i\<Rightarrow>o,i,i,i] \<Rightarrow> o"  where
+  "is_function_space(M,A,B,fs) \<equiv> M(fs) \<and> is_funspace(M,A,B,fs)"
+
+definition
+  function_space_rel :: "[i\<Rightarrow>o,i,i] \<Rightarrow> i"  where
+  "function_space_rel(M,A,B) \<equiv> THE d. is_function_space(M,A,B,d)"
+
+reldb_rem absolute "Pi"
+reldb_add relational "Pi" "is_function_space"
+reldb_add functional "Pi" "function_space_rel"
+
+abbreviation
+  "A \<rightarrow>\<^bsup>M\<^esup> B \<equiv> function_space_rel(M,A,B)"
+
+abbreviation
+  "function_space_r_set(A,M) \<equiv> function_space_rel(##M,A)"
+
+context M_Pi
+begin
+
+lemma is_function_space_uniqueness:
+  assumes
+    "M(r)" "M(B)"
+    "is_function_space(M,r,B,d)" "is_function_space(M,r,B,d')"
+  shows
+    "d=d'"
+  using assms extensionality_trans
+  unfolding is_function_space_def is_funspace_def
+  by simp
+
+lemma is_function_space_witness:
+  assumes "M(A)" "M(B)"
+  shows "\<exists>d[M]. is_function_space(M,A,B,d)"
+proof -
+  from assms
+  interpret M_Pi_assumptions M A "\<lambda>_. B"
+    using Pi_replacement Pi_separation
+    by unfold_locales (auto dest:transM simp add:Sigfun_def)
+  have "\<forall>f[M]. f \<in> Pi_rel(M,A, \<lambda>_. B) \<longleftrightarrow> f \<in> A \<rightarrow> B"
+    using Pi_rel_char by simp
+  with assms
+  show ?thesis unfolding is_funspace_def is_function_space_def by auto
+qed
+
+lemma is_function_space_closed :
+  "is_function_space(M,A,B,d) \<Longrightarrow> M(d)"
+  unfolding is_function_space_def by simp
+
+lemma function_space_rel_closed[intro,simp]:
+  assumes "M(x)" "M(y)"
+  shows "M(function_space_rel(M,x,y))"
+proof -
+  have "is_function_space(M, x, y, THE xa. is_function_space(M, x, y, xa))"
+    using assms
+      theI[OF ex1I[of "is_function_space(M,x,y)"], OF _ is_function_space_uniqueness[of x y]]
+      is_function_space_witness
+    by auto
+  then show ?thesis
+    using assms is_function_space_closed
+    unfolding function_space_rel_def
+    by blast
+qed
+
+lemmas trans_function_space_rel_closed[trans_closed] = transM[OF _ function_space_rel_closed]
+
+lemma is_function_space_iff:
+  assumes "M(x)" "M(y)" "M(d)"
+  shows "is_function_space(M,x,y,d) \<longleftrightarrow> d = function_space_rel(M,x,y)"
+proof (intro iffI)
+  assume "d = function_space_rel(M,x,y)"
+  moreover
+  note assms
+  moreover from this
+  obtain e where "M(e)" "is_function_space(M,x,y,e)"
+    using is_function_space_witness by blast
+  ultimately
+  show "is_function_space(M, x, y, d)"
+    using is_function_space_uniqueness[of x y] is_function_space_witness
+      theI[OF ex1I[of "is_function_space(M,x,y)"], OF _ is_function_space_uniqueness[of x y], of e]
+    unfolding function_space_rel_def
+    by auto
+next
+  assume "is_function_space(M, x, y, d)"
+  with assms
+  show "d = function_space_rel(M,x,y)"
+    using is_function_space_uniqueness unfolding function_space_rel_def
+    by (blast del:the_equality intro:the_equality[symmetric])
+qed
+
+lemma def_function_space_rel:
+  assumes "M(A)" "M(y)"
+  shows "function_space_rel(M,A,y) = Pi_rel(M,A,\<lambda>_. y)"
+proof -
+  from assms
+  interpret M_Pi_assumptions M A "\<lambda>_. y"
+    using Pi_replacement Pi_separation
+    by unfold_locales (auto dest:transM simp add:Sigfun_def)
+  from assms
+  have "x\<in>function_space_rel(M,A,y) \<longleftrightarrow> x\<in>Pi_rel(M,A,\<lambda>_. y)" if "M(x)" for x
+    using that
+      is_function_space_iff[of A y, OF _ _ function_space_rel_closed, of A y]
+      def_Pi_rel Pi_rel_char mbnr.Pow_rel_char
+    unfolding is_function_space_def is_funspace_def by (simp add:Pi_def)
+  with assms
+      transM[OF _ Pi_rel_closed] by blast
+qed
+
+lemma function_space_rel_char:
+  assumes "M(A)" "M(y)"
+  shows "function_space_rel(M,A,y) = {f \<in> A \<rightarrow> y. M(f)}"
+proof -
+  from assms
+  interpret M_Pi_assumptions M A "\<lambda>_. y"
+    using Pi_replacement Pi_separation
+    by unfold_locales (auto dest:transM simp add:Sigfun_def)
+  show ?thesis
+    using assms def_function_space_rel Pi_rel_char
+    by simp
+qed
+
+lemma mem_function_space_rel_abs:
+  assumes "M(A)" "M(y)" "M(f)"
+  shows "f \<in> function_space_rel(M,A,y) \<longleftrightarrow>  f \<in> A \<rightarrow> y"
+  using assms function_space_rel_char by simp
+
+
+locale M_N_Pi = M:M_Pi + N:M_Pi N for N +
+  assumes
+    M_imp_N:"M(x) \<Longrightarrow> N(x)"
+begin
+
+lemma function_space_rel_transfer: "M(A) \<Longrightarrow> M(B) \<Longrightarrow>
+                          function_space_rel(M,A,B) \<subseteq> function_space_rel(N,A,B)"
+  using M.function_space_rel_char N.function_space_rel_char
+  by (auto dest!:M_imp_N)
+
+
+abbreviation
+  "is_apply \<equiv> fun_apply"
+  since it is absolute in this context\<close>
+subsection\<open>Discipline for \<^term>\<open>Collect\<close> terms.\<close>
+text\<open>We have to isolate the predicate involved and apply the
+Discipline to it.\<close>
+definition \<comment> \<open>completely relational\<close>
+\<comment> \<open>I'm undecided on keeping the relative quantifiers here.
+    @{thm [source] exI allI} to @{thm [source] rexI rallI} in some proofs.
+    I wonder if this escalates well. Assuming that all terms
+    @{thm [source] transM}, it might do.\<close>
+end \<comment> \<open>\<^locale>\<open>M_basic\<close>\<close>
+subsection\<open>Discipline for \<^term>\<open>inj\<close>\<close>
+definition \<comment> \<open>completely relational\<close>
+notation is_function_space_fm (\<open>\<cdot>_ \<rightarrow> _ is _\<cdot>\<close>)
+notation is_inj_fm (\<open>\<cdot>inj'(_,_') is _\<cdot>\<close>)
+  inj_rel :: "[i\<Rightarrow>o,i,i] \<Rightarrow> i" (\<open>inj\<^bsup>_\<^esup>'(_,_')\<close>) where
+  inj_r_set ::  "[i,i,i] \<Rightarrow> i" (\<open>inj\<^bsup>_\<^esup>'(_,_')\<close>) where
+      def_injP_rel transM[OF _ function_space_rel_closed, OF _ \<open>M(A)\<close> \<open>M(B)\<close>]
+      def_injP_rel transM[OF _ function_space_rel_closed, OF _ \<open>M(A)\<close> \<open>M(B)\<close>]
+      transM[OF _ \<open>M(A)\<close>] Pi_rel_char
+end \<comment> \<open>\<^locale>\<open>M_inj\<close>\<close>
+end \<comment> \<open>\<^locale>\<open>M_N_inj\<close>\<close>
+subsection\<open>Discipline for \<^term>\<open>surj\<close>\<close>
+end \<comment> \<open>\<^locale>\<open>M_basic\<close>\<close>
+subsection\<open>Discipline for \<^term>\<open>surj\<close>\<close>
+definition \<comment> \<open>completely relational\<close>
+notation is_surj_fm (\<open>\<cdot>surj'(_,_') is _\<cdot>\<close>)
+  surj_rel :: "[i\<Rightarrow>o,i,i] \<Rightarrow> i" (\<open>surj\<^bsup>_\<^esup>'(_,_')\<close>) where
+  surj_r_set ::  "[i,i,i] \<Rightarrow> i" (\<open>surj\<^bsup>_\<^esup>'(_,_')\<close>) where
+      def_surjP_rel transM[OF _ function_space_rel_closed, OF _ \<open>M(A)\<close> \<open>M(B)\<close>]
+      def_surjP_rel transM[OF _ function_space_rel_closed, OF _ \<open>M(A)\<close> \<open>M(B)\<close>]
+      transM[OF _ \<open>M(A)\<close>] transM[OF _ \<open>M(B)\<close>] Pi_rel_char
+end \<comment> \<open>\<^locale>\<open>M_surj\<close>\<close>
+end \<comment> \<open>\<^locale>\<open>M_N_surj\<close>\<close>
+subsection\<open>Discipline for \<^term>\<open>Inter\<close>\<close>
+notation is_Int_fm (\<open>_ \<inter> _ is _\<close>)
+  using assms transM[OF _ \<open>M(B)\<close>] transM[OF _ \<open>M(I)\<close>]
+text\<open>Note: @{thm [source] Int_closed} already in \<^theory>\<open>ZF-Constructible.Relative\<close>.\<close>
+end \<comment> \<open>\<^locale>\<open>M_basic\<close>\<close>
+subsection\<open>Discipline for \<^term>\<open>bij\<close>\<close>
+notation is_bij_fm (\<open>\<cdot>bij'(_,_') is _\<cdot>\<close>)
+  bij_r_class ::  "[i\<Rightarrow>o,i,i] \<Rightarrow> i" (\<open>bij\<^bsup>_\<^esup>'(_,_')\<close>) where
+  bij_r_set ::  "[i,i,i] \<Rightarrow> i" (\<open>bij\<^bsup>_\<^esup>'(_,_')\<close>) where
+    is_Int_abs\<comment> \<open>For absolute terms, "\_abs" replaces "\_iff".
+                 Also, in this case "\_closed" is in the simpset.\<close>
+  unfolding bij_def\<comment> \<open>Unfolding this might be a pattern already\<close>
+end \<comment> \<open>\<^locale>\<open>M_Perm\<close>\<close>
+end \<comment> \<open>\<^locale>\<open>M_N_Perm\<close>\<close>
+end \<comment> \<open>\<^locale>\<open>M_Perm\<close>\<close>
+subsection\<open>Discipline for \<^term>\<open>eqpoll\<close>\<close>
+notation is_eqpoll_fm (\<open>\<cdot>_ \<approx> _\<cdot>\<close>)
+end \<comment> \<open>\<^locale>\<open>M_Perm\<close>\<close>
+  eqpoll_r :: "[i,i\<Rightarrow>o,i] => o" (\<open>_ \<approx>\<^bsup>_\<^esup> _\<close> [51,1,51] 50) where
+  eqpoll_r_set ::  "[i,i,i] \<Rightarrow> o" (\<open>_ \<approx>\<^bsup>_\<^esup> _\<close> [51,1,51] 50) where
+end \<comment> \<open>\<^locale>\<open>M_Perm\<close>\<close>
+text\<open>The next lemma is not part of the discipline\<close>
+end \<comment> \<open>\<^locale>\<open>M_N_Perm\<close>\<close>
+subsection\<open>Discipline for \<^term>\<open>lepoll\<close>\<close>
+notation is_lepoll_fm (\<open>\<cdot>_ \<lesssim> _\<cdot>\<close>)
+end \<comment> \<open>\<^locale>\<open>M_inj\<close>\<close>
+  lepoll_r :: "[i,i\<Rightarrow>o,i] => o" (\<open>_ \<lesssim>\<^bsup>_\<^esup> _\<close> [51,1,51] 50) where
+  lepoll_r_set ::  "[i,i,i] \<Rightarrow> o" (\<open>_ \<lesssim>\<^bsup>_\<^esup> _\<close> [51,1,51] 50) where
+end \<comment> \<open>\<^locale>\<open>M_Perm\<close>\<close>
+\<comment> \<open>This lemma is not part of the discipline.\<close>
+end \<comment> \<open>\<^locale>\<open>M_N_Perm\<close>\<close>
+subsection\<open>Discipline for \<^term>\<open>lesspoll\<close>\<close>
+notation is_lesspoll_fm (\<open>\<cdot>_ \<prec> _\<cdot>\<close>)
+end \<comment> \<open>\<^locale>\<open>M_Perm\<close>\<close>
+  lesspoll_r :: "[i,i\<Rightarrow>o,i] => o" (\<open>_ \<prec>\<^bsup>_\<^esup> _\<close> [51,1,51] 50) where
+  lesspoll_r_set ::  "[i,i,i] \<Rightarrow> o" (\<open>_ \<prec>\<^bsup>_\<^esup> _\<close> [51,1,51] 50) where
+text\<open>Since \<^term>\<open>lesspoll_rel\<close> is defined as a propositional

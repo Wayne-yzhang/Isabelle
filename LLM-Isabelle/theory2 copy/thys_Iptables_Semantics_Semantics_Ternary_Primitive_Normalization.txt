@@ -1,0 +1,424 @@
+theory Primitive_Normalization
+imports Negation_Type_Matching
+begin
+
+
+
+fun has_disc :: "('a \<Rightarrow> bool) \<Rightarrow> 'a match_expr \<Rightarrow> bool" where
+  "has_disc _ MatchAny = False" |
+  "has_disc disc (Match a) = disc a" |
+  "has_disc disc (MatchNot m) = has_disc disc m" |
+  "has_disc disc (MatchAnd m1 m2) = (has_disc disc m1 \<or> has_disc disc m2)"
+
+fun has_disc_negated :: "('a \<Rightarrow> bool) \<Rightarrow> bool \<Rightarrow> 'a match_expr \<Rightarrow> bool" where
+  "has_disc_negated _    _   MatchAny = False" |
+  "has_disc_negated disc neg (Match a) = (if disc a then neg else False)" |
+  "has_disc_negated disc neg (MatchNot m) = has_disc_negated disc (\<not> neg) m" |
+  "has_disc_negated disc neg (MatchAnd m1 m2) = (has_disc_negated disc neg m1 \<or> has_disc_negated disc neg m2)"
+
+lemma "\<not> has_disc_negated (\<lambda>x::nat. x = 0) False (MatchAnd (Match 0) (MatchNot (Match 1)))" by eval
+lemma "has_disc_negated (\<lambda>x::nat. x = 0) False (MatchAnd (Match 0) (MatchNot (Match 0)))" by eval
+lemma "has_disc_negated (\<lambda>x::nat. x = 0) True (MatchAnd (Match 0) (MatchNot (Match 1)))" by eval
+lemma "\<not> has_disc_negated (\<lambda>x::nat. x = 0) True (MatchAnd (Match 1) (MatchNot (Match 0)))" by eval
+lemma "has_disc_negated (\<lambda>x::nat. x = 0) True (MatchAnd (Match 0) (MatchNot (Match 0)))" by eval
+
+lemma has_disc_negated_MatchNot:
+  "has_disc_negated disc True (MatchNot m) \<longleftrightarrow> has_disc_negated disc False m"
+  "has_disc_negated disc True m \<longleftrightarrow> has_disc_negated disc False (MatchNot m)"
+  by(induction m) (simp_all)
+
+lemma has_disc_negated_has_disc: "has_disc_negated disc neg m \<Longrightarrow> has_disc disc m"
+  apply(induction m arbitrary: neg)
+     apply(simp_all split: if_split_asm)
+  by blast
+
+lemma has_disc_negated_positiv_has_disc: "has_disc_negated disc neg m \<or> has_disc_negated disc (\<not> neg) m \<longleftrightarrow> has_disc disc m"
+by(induction disc neg m arbitrary: neg rule:has_disc_negated.induct) auto
+
+
+lemma has_disc_negated_disj_split: 
+    "has_disc_negated (\<lambda>a. P a \<or> Q a) neg m \<longleftrightarrow> has_disc_negated P neg m \<or> has_disc_negated Q neg m"
+  apply(induction "(\<lambda>a. P a \<or> Q a)" neg m rule: has_disc_negated.induct)
+     apply(simp_all)
+  by blast
+
+lemma has_disc_alist_and: "has_disc disc (alist_and as) \<longleftrightarrow> (\<exists> a \<in> set as. has_disc disc (negation_type_to_match_expr a))"
+  proof(induction as rule: alist_and.induct)
+  qed(simp_all add: negation_type_to_match_expr_simps)
+lemma has_disc_negated_alist_and: "has_disc_negated disc neg (alist_and as) \<longleftrightarrow> (\<exists> a \<in> set as. has_disc_negated disc neg (negation_type_to_match_expr a))"
+  proof(induction as rule: alist_and.induct)
+  qed(simp_all add: negation_type_to_match_expr_simps)
+  
+
+lemma has_disc_alist_and': "has_disc disc (alist_and' as) \<longleftrightarrow> (\<exists> a \<in> set as. has_disc disc (negation_type_to_match_expr a))"
+  proof(induction as rule: alist_and'.induct)
+  qed(simp_all add: negation_type_to_match_expr_simps)
+lemma has_disc_negated_alist_and': "has_disc_negated disc neg (alist_and' as) \<longleftrightarrow> (\<exists> a \<in> set as. has_disc_negated disc neg (negation_type_to_match_expr a))"
+  proof(induction as rule: alist_and'.induct)
+  qed(simp_all add: negation_type_to_match_expr_simps)
+
+
+lemma has_disc_alist_and'_append:
+  "has_disc disc' (alist_and' (ls1 @ ls2)) \<longleftrightarrow>
+      has_disc disc' (alist_and' ls1) \<or> has_disc disc' (alist_and' ls2)"
+apply(induction ls1 arbitrary: ls2 rule: alist_and'.induct)
+    apply(simp_all)
+ apply(case_tac [!] ls2)
+   apply(simp_all)
+done
+lemma has_disc_negated_alist_and'_append:
+  "has_disc_negated disc' neg (alist_and' (ls1 @ ls2)) \<longleftrightarrow>
+      has_disc_negated disc' neg (alist_and' ls1) \<or> has_disc_negated disc' neg (alist_and' ls2)"
+apply(induction ls1 arbitrary: ls2 rule: alist_and'.induct)
+    apply(simp_all)
+ apply(case_tac [!] ls2)
+   apply(simp_all)
+done
+
+lemma match_list_to_match_expr_not_has_disc: 
+    "\<forall>a. \<not> disc (X a) \<Longrightarrow> \<not> has_disc disc (match_list_to_match_expr (map (Match \<circ> X) ls))"
+  apply(induction ls)
+   apply(simp; fail)
+  by(simp add: MatchOr_def)
+
+
+lemma "matches ((\<lambda>x _. bool_to_ternary (disc x)), (\<lambda>_ _. False)) (Match x) a p \<longleftrightarrow> has_disc disc (Match x)"
+by(simp add: match_raw_ternary bool_to_ternary_simps split: ternaryvalue.split )
+
+
+fun normalized_n_primitive :: "(('a \<Rightarrow> bool) \<times> ('a \<Rightarrow> 'b)) \<Rightarrow> ('b \<Rightarrow> bool) \<Rightarrow> 'a match_expr \<Rightarrow> bool" where
+  "normalized_n_primitive _ _ MatchAny = True" |
+  "normalized_n_primitive (disc, sel) n (Match P) = (if disc P then n (sel P) else True)" |
+  "normalized_n_primitive (disc, sel) n (MatchNot (Match P)) = (if disc P then False else True)" |
+  "normalized_n_primitive (disc, sel) n (MatchAnd m1 m2) = (normalized_n_primitive (disc, sel) n m1 \<and> normalized_n_primitive (disc, sel) n m2)" |
+  "normalized_n_primitive _ _ (MatchNot (MatchAnd _ _)) = False" |
+  "normalized_n_primitive _ _ (MatchNot MatchAny) = True"
+
+
+lemma normalized_nnf_match_opt_MatchAny_match_expr:
+  "normalized_nnf_match m \<Longrightarrow> normalized_nnf_match (opt_MatchAny_match_expr m)"
+  proof-
+  have "normalized_nnf_match m \<Longrightarrow> normalized_nnf_match (opt_MatchAny_match_expr_once m)"
+  for m :: "'a match_expr"
+  by(induction m rule: opt_MatchAny_match_expr_once.induct) (simp_all)
+  thus "normalized_nnf_match m \<Longrightarrow> normalized_nnf_match (opt_MatchAny_match_expr m)"
+    apply(simp add: opt_MatchAny_match_expr_def)
+    apply(induction rule: repeat_stabilize_induct)
+     by(simp)+
+  qed
+
+lemma normalized_n_primitive_opt_MatchAny_match_expr:
+  "normalized_n_primitive disc_sel f m \<Longrightarrow> normalized_n_primitive disc_sel f (opt_MatchAny_match_expr m)"
+  proof-
+
+  have "normalized_n_primitive disc_sel f m \<Longrightarrow> normalized_n_primitive disc_sel f (opt_MatchAny_match_expr_once m)"
+  for m
+    proof-
+    { fix disc::"('a \<Rightarrow> bool)" and sel::"('a \<Rightarrow> 'b)" and n m1 m2
+      have "normalized_n_primitive (disc, sel) n (opt_MatchAny_match_expr_once m1) \<Longrightarrow>
+           normalized_n_primitive (disc, sel) n (opt_MatchAny_match_expr_once m2) \<Longrightarrow>
+           normalized_n_primitive (disc, sel) n m1 \<and> normalized_n_primitive (disc, sel) n m2 \<Longrightarrow>
+           normalized_n_primitive (disc, sel) n (opt_MatchAny_match_expr_once (MatchAnd m1 m2))"
+    by(induction "(MatchAnd m1 m2)" rule: opt_MatchAny_match_expr_once.induct) (auto)
+    }note x=this
+    assume "normalized_n_primitive disc_sel f m"
+    thus ?thesis
+      apply(induction disc_sel f m rule: normalized_n_primitive.induct)
+            apply simp_all
+      using x by simp
+    qed
+  from this show
+    "normalized_n_primitive disc_sel f m \<Longrightarrow> normalized_n_primitive disc_sel f (opt_MatchAny_match_expr m)"
+    apply(simp add: opt_MatchAny_match_expr_def)
+    apply(induction rule: repeat_stabilize_induct)
+     by(simp)+ 
+  qed
+
+
+lemma normalized_n_primitive_imp_not_disc_negated:
+  "wf_disc_sel (disc,sel) C \<Longrightarrow> normalized_n_primitive (disc,sel) f m \<Longrightarrow> \<not> has_disc_negated disc False m"
+  apply(induction "(disc,sel)" f m rule: normalized_n_primitive.induct)
+  by(simp add: wf_disc_sel.simps split: if_split_asm)+
+
+lemma normalized_n_primitive_alist_and: "normalized_n_primitive disc_sel P (alist_and as) \<longleftrightarrow>
+      (\<forall> a \<in> set as. normalized_n_primitive disc_sel P (negation_type_to_match_expr a))"
+  proof(induction as)
+  case Nil thus ?case by simp
+  next
+  case (Cons a as) thus ?case
+    apply(cases disc_sel, cases a)
+    by(simp_all add: negation_type_to_match_expr_simps)
+  qed
+
+lemma normalized_n_primitive_alist_and': "normalized_n_primitive disc_sel P (alist_and' as) \<longleftrightarrow>
+      (\<forall> a \<in> set as. normalized_n_primitive disc_sel P (negation_type_to_match_expr a))"
+  apply(cases disc_sel)
+  apply(induction as rule: alist_and'.induct)
+      by(simp_all add: negation_type_to_match_expr_simps)
+
+lemma not_has_disc_NegPos_map: "\<forall>a. \<not> disc (C a) \<Longrightarrow> \<forall>a\<in>set (NegPos_map C ls).
+        \<not> has_disc disc (negation_type_to_match_expr a)"
+by(induction C ls rule: NegPos_map.induct) (simp add: negation_type_to_match_expr_def)+
+
+lemma not_has_disc_negated_NegPos_map: "\<forall>a. \<not> disc (C a) \<Longrightarrow> \<forall>a\<in>set (NegPos_map C ls).
+        \<not> has_disc_negated disc False (negation_type_to_match_expr a)"
+by(induction C ls rule: NegPos_map.induct) (simp add: negation_type_to_match_expr_def)+
+
+lemma normalized_n_primitive_impossible_map: "\<forall>a. \<not> disc (C a) \<Longrightarrow>
+  \<forall>m\<in>set (map (Match \<circ> (C \<circ> x)) ls).
+     normalized_n_primitive (disc, sel) f m"
+  apply(intro ballI)
+  apply(induction ls)
+   apply(simp; fail)
+  apply(simp)
+   apply(fastforce)
+  by force
+
+lemma normalized_n_primitive_alist_and'_append:
+  "normalized_n_primitive (disc, sel) f (alist_and' (ls1 @ ls2)) \<longleftrightarrow>
+      normalized_n_primitive (disc, sel) f (alist_and' ls1) \<and> normalized_n_primitive (disc, sel) f (alist_and' ls2)"
+apply(induction ls1 arbitrary: ls2 rule: alist_and'.induct)
+    apply(simp_all)
+ apply(case_tac [!] ls2)
+   apply(simp_all)
+done
+
+lemma normalized_n_primitive_if_no_primitive: "normalized_nnf_match m \<Longrightarrow> \<not> has_disc disc m \<Longrightarrow> 
+       normalized_n_primitive (disc, sel) f m"
+  by(induction "(disc, sel)" f m rule: normalized_n_primitive.induct) (simp)+
+
+lemma normalized_n_primitive_false_eq_notdisc: "normalized_nnf_match m \<Longrightarrow>
+  normalized_n_primitive (disc, sel) (\<lambda>_. False) m \<longleftrightarrow> \<not> has_disc disc m"
+proof -
+  have "normalized_nnf_match m \<Longrightarrow> false = (\<lambda>_. False) \<Longrightarrow>
+  \<not> has_disc disc m \<longleftrightarrow> normalized_n_primitive (disc, sel) false m" for false
+  by(induction "(disc, sel)" false m rule: normalized_n_primitive.induct)
+  (simp)+
+  thus "normalized_nnf_match m \<Longrightarrow> ?thesis" by simp
+qed
+
+lemma normalized_n_primitive_MatchAnd_combine_map: "normalized_n_primitive disc_sel f rst \<Longrightarrow>
+       \<forall>m' \<in> (\<lambda>spt. Match (C spt)) ` set pts. normalized_n_primitive disc_sel f m' \<Longrightarrow>
+        m' \<in> (\<lambda>spt. MatchAnd (Match (C spt)) rst) ` set pts \<Longrightarrow> normalized_n_primitive disc_sel f m'"
+  by(induction disc_sel f m' rule: normalized_n_primitive.induct)
+     fastforce+
+
+
+fun primitive_extractor :: "(('a \<Rightarrow> bool) \<times> ('a \<Rightarrow> 'b)) \<Rightarrow> 'a match_expr \<Rightarrow> ('b negation_type list \<times> 'a match_expr)" where
+ "primitive_extractor _ MatchAny = ([], MatchAny)" |
+ "primitive_extractor (disc,sel) (Match a) = (if disc a then ([Pos (sel a)], MatchAny) else ([], Match a))" |
+ "primitive_extractor (disc,sel) (MatchNot (Match a)) = (if disc a then ([Neg (sel a)], MatchAny) else ([], MatchNot (Match a)))" |
+ "primitive_extractor C (MatchAnd ms1 ms2) = (
+        let (a1', ms1') = primitive_extractor C ms1; 
+            (a2', ms2') = primitive_extractor C ms2
+        in (a1'@a2', MatchAnd ms1' ms2'))" |
+ "primitive_extractor _ _ = undefined"
+
+
+
+lemma primitive_extractor_fst_simp2:
+  fixes m'::"'a match_expr \<Rightarrow> 'a match_expr \<Rightarrow> 'a match_expr"
+  shows "fst (case primitive_extractor (disc, sel) m1 of (a1', ms1') \<Rightarrow> case primitive_extractor (disc, sel) m2 of (a2', ms2') \<Rightarrow> (a1' @ a2', m' ms1' ms2')) =
+           fst (primitive_extractor (disc, sel) m1) @ fst (primitive_extractor (disc, sel) m2)"
+      apply(cases "primitive_extractor (disc, sel) m1", simp)
+      apply(cases "primitive_extractor (disc, sel) m2", simp)
+      done
+
+theorem primitive_extractor_correct: assumes 
+  "normalized_nnf_match m" and "wf_disc_sel (disc, sel) C" and "primitive_extractor (disc, sel) m = (as, ms)" 
+  shows "matches \<gamma> (alist_and (NegPos_map C as)) a p \<and> matches \<gamma> ms a p \<longleftrightarrow> matches \<gamma> m a p"
+  and "normalized_nnf_match ms"
+  and "\<not> has_disc disc ms"
+  and "\<forall>disc2. \<not> has_disc disc2 m \<longrightarrow> \<not> has_disc disc2 ms"
+  and "\<forall>disc2 sel2. normalized_n_primitive (disc2, sel2) P m \<longrightarrow> normalized_n_primitive (disc2, sel2) P ms"
+  and "\<forall>disc2. \<not> has_disc_negated disc2 neg m \<longrightarrow> \<not> has_disc_negated disc2 neg ms"
+  and "\<not> has_disc disc m \<longleftrightarrow> as = [] \<and> ms = m"
+  and "\<not> has_disc_negated disc False m \<longleftrightarrow> getNeg as = []"
+  and "has_disc disc m \<Longrightarrow> as \<noteq> []"
+proof -
+  from assms have assm3': "(as, ms) = primitive_extractor (disc, sel) m" by simp
+  with assms(1) assms(2) show "matches \<gamma> (alist_and (NegPos_map C as)) a p \<and> matches \<gamma> ms a p \<longleftrightarrow> matches \<gamma> m a p"
+    proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+    case 4 thus ?case
+      apply(simp split: if_split_asm prod.split_asm add: NegPos_map_append)
+      apply(auto simp add: alist_and_append bunch_of_lemmata_about_matches)
+      done
+    qed(simp_all add: bunch_of_lemmata_about_matches wf_disc_sel.simps split: if_split_asm)
+
+  from assms(1) assm3' show "normalized_nnf_match ms"
+    proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+         case 2 thus ?case by(simp split: if_split_asm)
+         next
+         case 3 thus ?case by(simp split: if_split_asm)
+         next
+         case 4 thus ?case 
+           apply(simp split: prod.split_asm)
+           done
+    qed(simp_all)
+
+  from assms(1) assm3' show "\<not> has_disc disc ms"
+    proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+    qed(simp_all split: if_split_asm prod.split_asm)
+
+
+  from assms(1) assm3' show "\<forall>disc2. \<not> has_disc disc2 m \<longrightarrow> \<not> has_disc disc2 ms"
+    proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+         case 2 thus ?case by(simp split: if_split_asm)
+         next
+         case 3 thus ?case by(simp split: if_split_asm)
+         next
+         case 4 thus ?case by(simp split: prod.split_asm)
+    qed(simp_all)
+
+
+  from assms(1) assm3' show "\<forall>disc2. \<not> has_disc_negated disc2 neg m \<longrightarrow> \<not> has_disc_negated disc2 neg ms"
+    proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+         case 2 thus ?case by(simp split: if_split_asm)
+         next
+         case 3 thus ?case by(simp split: if_split_asm)
+         next
+         case 4 thus ?case by(simp split: prod.split_asm)
+    qed(simp_all)
+
+
+  from assms(1) assm3' show "\<forall>disc2 sel2. normalized_n_primitive (disc2, sel2) P m \<longrightarrow> normalized_n_primitive (disc2, sel2) P ms"
+    apply(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+          apply(simp)
+         apply(simp split: if_split_asm)
+        apply(simp split: if_split_asm)
+       apply(simp split: prod.split_asm)
+      apply(simp_all)
+    done
+
+   from assms(1) assm3' show "\<not> has_disc disc m \<longleftrightarrow> as = [] \<and> ms = m"
+    proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+    case 2 thus ?case by(simp split: if_split_asm)
+    next
+    case 3 thus ?case by(simp split: if_split_asm)
+    next
+    case 4 thus ?case by(auto split: prod.split_asm)
+    qed(simp_all)
+
+   from assms(1) assm3' show "\<not> has_disc_negated disc False m \<longleftrightarrow> getNeg as = []"
+    proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+    case 2 thus ?case by(simp split: if_split_asm)
+    next
+    case 3 thus ?case by(simp split: if_split_asm)
+    next
+    case 4 thus ?case by(simp add: getNeg_append split: prod.split_asm)
+    qed(simp_all)
+
+   from assms(1) assm3' show "has_disc disc m \<Longrightarrow> as \<noteq> []"
+    proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+    case 4 thus ?case apply(simp split: prod.split_asm)
+      by metis
+    qed(simp_all)
+qed
+
+
+lemma has_disc_negated_primitive_extractor:
+  assumes "normalized_nnf_match m"
+  shows "has_disc_negated disc False m \<longleftrightarrow> (\<exists>a. Neg a \<in> set (fst (primitive_extractor (disc, sel) m)))"
+proof -
+  obtain as ms where asms: "primitive_extractor (disc, sel) m = (as, ms)" by fastforce
+  hence "has_disc_negated disc False m \<longleftrightarrow> (\<exists>a. Neg a \<in> set as)"
+    using assms proof(induction m arbitrary: as ms)
+    case Match thus ?case
+       by(simp split: if_split_asm) fastforce
+    next
+    case (MatchNot m)
+      thus ?case
+      proof(induction m)
+      case Match thus ?case by (simp, fastforce)
+      qed(simp_all)
+    next
+    case (MatchAnd m1 m2) thus ?case
+      apply(cases "primitive_extractor (disc, sel) m1")
+      apply(cases "primitive_extractor (disc, sel) m2")
+      by auto
+  qed(simp_all split: if_split_asm)
+  thus ?thesis using asms by simp
+qed
+
+
+
+lemma primitive_extractor_reassemble_preserves:
+  "wf_disc_sel (disc, sel) C \<Longrightarrow>
+   normalized_nnf_match m \<Longrightarrow>
+   P m \<Longrightarrow>
+   P MatchAny \<Longrightarrow>
+   (\<And>m1 m2. P (MatchAnd m1 m2) \<longleftrightarrow> P m1 \<and> P m2) \<Longrightarrow>
+   (\<And>ls1 ls2. P (alist_and' (ls1 @ ls2)) \<longleftrightarrow> P (alist_and' ls1) \<and> P (alist_and' ls2)) \<Longrightarrow>
+   P (alist_and' (NegPos_map C as))"
+  proof(induction "(disc, sel)" m  arbitrary: as ms rule: primitive_extractor.induct)
+  case 2 thus ?case
+    apply(simp split: if_split_asm)
+    apply(clarify)
+    by(simp add: wf_disc_sel.simps)
+  next
+  case 3 thus ?case
+    apply(simp split: if_split_asm)
+    apply(clarify)
+    by(simp add: wf_disc_sel.simps)
+  next
+  case (4 m1 m2 as ms)
+    from 4 show ?case
+      apply(simp)
+      apply(simp split: prod.split_asm)
+      apply(clarify)
+      apply(simp add: NegPos_map_append)
+    done
+qed(simp_all split: if_split_asm)
+
+lemma primitive_extractor_reassemble_not_has_disc:
+  "wf_disc_sel (disc, sel) C \<Longrightarrow>
+   normalized_nnf_match m \<Longrightarrow> \<not> has_disc disc' m \<Longrightarrow>
+   primitive_extractor (disc, sel) m = (as, ms) \<Longrightarrow>
+     \<not> has_disc disc' (alist_and' (NegPos_map C as))"
+  apply(rule primitive_extractor_reassemble_preserves)
+        by(simp_all add: NegPos_map_append has_disc_alist_and'_append)
+
+lemma primitive_extractor_reassemble_not_has_disc_negated:
+  "wf_disc_sel (disc, sel) C \<Longrightarrow>
+   normalized_nnf_match m \<Longrightarrow> \<not> has_disc_negated disc' neg m \<Longrightarrow>
+   primitive_extractor (disc, sel) m = (as, ms) \<Longrightarrow> 
+     \<not> has_disc_negated disc' neg (alist_and' (NegPos_map C as))"
+  apply(rule primitive_extractor_reassemble_preserves)
+        by(simp_all add: NegPos_map_append has_disc_negated_alist_and'_append)
+
+lemma primitive_extractor_reassemble_normalized_n_primitive:
+  "wf_disc_sel (disc, sel) C \<Longrightarrow>
+   normalized_nnf_match m \<Longrightarrow> normalized_n_primitive (disc1, sel1) f m \<Longrightarrow>
+   primitive_extractor (disc, sel) m = (as, ms) \<Longrightarrow>
+     normalized_n_primitive (disc1, sel1) f (alist_and' (NegPos_map C as))"
+  apply(rule primitive_extractor_reassemble_preserves)
+        by(simp_all add: NegPos_map_append normalized_n_primitive_alist_and'_append)
+
+
+
+lemma primitive_extractor_matchesE: "wf_disc_sel (disc,sel) C \<Longrightarrow> normalized_nnf_match m \<Longrightarrow> primitive_extractor (disc, sel) m = (as, ms)
+  \<Longrightarrow>
+  (normalized_nnf_match ms \<Longrightarrow> \<not> has_disc disc ms \<Longrightarrow> (\<forall>disc2. \<not> has_disc disc2 m \<longrightarrow> \<not> has_disc disc2 ms) \<Longrightarrow> matches_other \<longleftrightarrow>  matches \<gamma> ms a p)
+  \<Longrightarrow>
+  matches \<gamma> (alist_and (NegPos_map C as)) a p \<and> matches_other \<longleftrightarrow>  matches \<gamma> m a p"
+using primitive_extractor_correct(1,2,3,4) by metis
+
+lemma primitive_extractor_matches_lastE: "wf_disc_sel (disc,sel) C \<Longrightarrow> normalized_nnf_match m \<Longrightarrow> primitive_extractor (disc, sel) m = (as, ms)
+  \<Longrightarrow>
+  (normalized_nnf_match ms \<Longrightarrow> \<not> has_disc disc ms \<Longrightarrow> (\<forall>disc2. \<not> has_disc disc2 m \<longrightarrow> \<not> has_disc disc2 ms) \<Longrightarrow> matches \<gamma> ms a p)
+  \<Longrightarrow>
+  matches \<gamma> (alist_and (NegPos_map C as)) a p  \<longleftrightarrow>  matches \<gamma> m a p"
+using primitive_extractor_correct(1,2,3,4) by metis
+
+
+
+
+  definition normalize_primitive_extract :: "(('a \<Rightarrow> bool) \<times> ('a \<Rightarrow> 'b)) \<Rightarrow>
+                               ('b \<Rightarrow> 'a) \<Rightarrow>
+                               ('b negation_type list \<Rightarrow> 'b list) \<Rightarrow>
+                               'a match_expr \<Rightarrow> 
+                               'a match_expr list" where 
+    "normalize_primitive_extract (disc_sel) C f m \<equiv> (case primitive_extractor (disc_sel) m 
+                of (spts, rst) \<Rightarrow> map (\<lambda>spt. (MatchAnd (Match (C spt))) rst) (f spts))"
+  
+  

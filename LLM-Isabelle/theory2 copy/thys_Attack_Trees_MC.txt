@@ -1,0 +1,230 @@
+theory MC
+imports Main
+begin
+
+subsection "Lemmas to support least and greatest fixpoints"
+
+lemma predtrans_empty: 
+  assumes "mono (\<tau> :: 'a set \<Rightarrow> 'a set)"
+  shows "\<forall> i. (\<tau> ^^ i) ({}) \<subseteq> (\<tau> ^^(i + 1))({})"
+  using assms funpow_decreasing le_add1 by blast
+
+lemma ex_card: "finite S \<Longrightarrow> \<exists> n:: nat. card S = n"
+by simp
+
+lemma less_not_le: "\<lbrakk>(x:: nat) < y; y \<le> x\<rbrakk> \<Longrightarrow> False"
+by arith
+
+lemma infchain_outruns_all: 
+  assumes "finite (UNIV :: 'a set)" 
+    and "\<forall>i :: nat. ((\<tau> :: 'a set \<Rightarrow> 'a set)^^ i) ({}:: 'a set) \<subset> (\<tau> ^^ (i + 1)) {}"
+  shows "\<forall>j :: nat. \<exists>i :: nat. j < card ((\<tau> ^^ i) {})"
+proof (rule allI, induct_tac j)
+  show "\<exists>i. 0 < card ((\<tau> ^^ i) {})" using assms
+    by (metis bot.not_eq_extremum card_gt_0_iff finite_subset subset_UNIV)
+next show "\<And>j n. \<exists>i. n < card ((\<tau> ^^ i) {}) 
+             \<Longrightarrow> \<exists>i. Suc n < card ((\<tau> ^^ i) {})"
+    proof -
+      fix j n
+      assume a: "\<exists>i. n < card ((\<tau> ^^ i) {})"
+      obtain i where "n < card ((\<tau> ^^ i) {})"
+        using a by blast 
+      thus "\<exists> i. Suc n < card ((\<tau> ^^ i) {})" using assms
+        by (meson finite_subset le_less_trans le_simps(3) psubset_card_mono subset_UNIV)
+    qed
+  qed
+
+lemma no_infinite_subset_chain: 
+   assumes "finite (UNIV :: 'a set)"
+    and    "mono (\<tau> :: ('a set \<Rightarrow> 'a set))"
+    and    "\<forall>i :: nat. ((\<tau> :: 'a set \<Rightarrow> 'a set) ^^ i) {} \<subset> (\<tau> ^^ (i + (1 :: nat))) ({} :: 'a set)" 
+  shows   "False"
+    contradiction point that
+    @{term "\<exists> i :: nat. card UNIV < card ((\<tau> ^^ i) {})"}. 
+    Since all sets are subsets of @{term "UNIV"}, we also have 
+    @{term "card ((\<tau> ^^ i) {}) \<le> card UNIV"}:
+    Contradiction!, i.e. proof of False  \<close>
+text \<open>Proof idea: 
+with @{text predtrans_empty} we know 
+
+@{term "\<forall> i. (\<tau> ^^ i){} \<subseteq> (\<tau> ^^(i + 1))({})"} (1).
+
+If we can additionally show 
+
+@{term "\<exists> i.  (\<tau> ^^ i)({}) \<supseteq> (\<tau> ^^(i + 1))({})"} (2),
+
+we can get the goal together with equalityI 
+@{text "\<subseteq> + \<supseteq> \<longrightarrow> ="}. 
+To prove (1) we observe that 
+@{term "(\<tau> ^^ i)({}) \<supseteq> (\<tau> ^^(i + 1))({})"} 
+can be inferred from 
+@{term "\<not>((\<tau> ^^ i)({}) \<subseteq> (\<tau> ^^(i + 1))({}))"} 
+and (1).
+proof -
+  have a: "\<forall>i. (\<tau> ^^ i) ({}:: 'a set) \<subseteq> (\<tau> ^^ (i + (1))) {}" 
+    by(rule predtrans_empty, rule assms(2))
+  have a3: "\<not> (\<forall> i :: nat. (\<tau> ^^ i) {} \<subset> (\<tau> ^^(i + 1)) {})" 
+    by (rule notI, rule no_infinite_subset_chain, (rule assms)+)
+  hence b: "(\<exists> i :: nat. \<not>((\<tau> ^^ i) {} \<subset> (\<tau> ^^(i + 1)) {}))" using assms a3
+    by blast
+  thus "\<exists> i. (\<tau> ^^ i) ({}) = (\<tau> ^^(i + 1))({})" using a
+    by blast
+qed
+
+lemma predtrans_UNIV: 
+  assumes "mono (\<tau> :: ('a set \<Rightarrow> 'a set))"
+  shows "\<forall> i. (\<tau> ^^ i) (UNIV) \<supseteq> (\<tau> ^^(i + 1))(UNIV)"
+proof (rule allI, induct_tac i)
+  show "(\<tau> ^^ ((0) + (1))) UNIV \<subseteq> (\<tau> ^^ (0)) UNIV" 
+    by simp
+next show "\<And>(i) n.
+       (\<tau> ^^ (n + (1))) UNIV \<subseteq> (\<tau> ^^ n) UNIV \<Longrightarrow> (\<tau> ^^ (Suc n + (1))) UNIV \<subseteq> (\<tau> ^^ Suc n) UNIV"
+  proof -
+    fix i n
+    assume a: "(\<tau> ^^ (n + (1))) UNIV \<subseteq> (\<tau> ^^ n) UNIV"
+    have "(\<tau> ((\<tau> ^^ n) UNIV)) \<supseteq> (\<tau> ((\<tau> ^^ (n + (1 :: nat))) UNIV))" using assms a
+      by (rule monoE)
+    thus "(\<tau> ^^ (Suc n + (1))) UNIV \<subseteq> (\<tau> ^^ Suc n) UNIV" by simp
+   qed
+ qed
+
+lemma Suc_less_le: "x < (y - n) \<Longrightarrow> x \<le> (y - (Suc n))"
+ by simp
+
+lemma card_univ_subtract: 
+  assumes "finite (UNIV :: 'a set)" and  "mono \<tau>"
+     and  "(\<forall>i :: nat. ((\<tau> :: 'a set \<Rightarrow> 'a set) ^^ (i + (1 :: nat)))(UNIV :: 'a set) \<subset> (\<tau> ^^ i) UNIV)"
+   shows "(\<forall> i :: nat. card((\<tau> ^^ i) (UNIV ::'a set)) \<le> (card (UNIV :: 'a set)) - i)"
+proof (rule allI, induct_tac i) 
+  show "card ((\<tau> ^^ (0)) UNIV) \<le> card (UNIV :: 'a set) - (0)" using assms
+    by (simp)
+next show "\<And>(i) n.
+       card ((\<tau> ^^ n) (UNIV :: 'a set)) \<le> card (UNIV :: 'a set) - n \<Longrightarrow>
+       card ((\<tau> ^^ Suc n) (UNIV :: 'a set)) \<le> card (UNIV :: 'a set) - Suc n" using assms
+  proof -
+    fix i n
+    assume a: "card ((\<tau> ^^ n) (UNIV :: 'a set)) \<le> card (UNIV :: 'a set) - n"
+    have b: "(\<tau> ^^ (n + (1)))(UNIV :: 'a set) \<subset> (\<tau> ^^ n) UNIV" using assms
+      by (erule_tac x = n in spec)
+    have "card((\<tau> ^^ (n + (1 :: nat)))(UNIV :: 'a set)) < card((\<tau> ^^ n) (UNIV :: 'a set))"       
+      by (rule psubset_card_mono, rule finite_subset, rule subset_UNIV, rule assms(1), rule b)
+    thus "card ((\<tau> ^^ Suc n) (UNIV :: 'a set)) \<le> card (UNIV :: 'a set) - Suc n" using a
+      by simp
+    qed
+  qed
+
+lemma card_UNIV_tau_i_below_zero: 
+  assumes "finite (UNIV :: 'a set)" and "mono \<tau>"
+   and  "(\<forall>i :: nat. ((\<tau> :: ('a set \<Rightarrow> 'a set)) ^^ (i + (1 :: nat)))(UNIV :: 'a set) \<subset> (\<tau> ^^ i) UNIV)"
+ shows "card((\<tau> ^^ (card (UNIV ::'a set))) (UNIV ::'a set)) \<le> 0"
+proof -
+  have "(\<forall> i :: nat. card((\<tau> ^^ i) (UNIV ::'a set)) \<le> (card (UNIV :: 'a set)) - i)" using assms
+    by (rule card_univ_subtract)
+  thus "card((\<tau> ^^ (card (UNIV ::'a set))) (UNIV ::'a set)) \<le> 0"
+   by (drule_tac x = "card (UNIV ::'a set)" in spec, simp)
+qed
+
+lemma finite_card_zero_empty: "\<lbrakk> finite S; card S \<le> 0\<rbrakk> \<Longrightarrow> S = {}"
+by simp
+
+lemma UNIV_tau_i_is_empty:
+  assumes "finite (UNIV :: 'a set)" and "mono (\<tau> :: ('a set \<Rightarrow> 'a set))"
+    and   "(\<forall>i :: nat. ((\<tau> :: 'a set \<Rightarrow> 'a set) ^^ (i + (1 :: nat)))(UNIV :: 'a set) \<subset> (\<tau> ^^ i) UNIV)"
+  shows "(\<tau> ^^ (card (UNIV ::'a set))) (UNIV ::'a set) = {}"
+  by (meson assms card_UNIV_tau_i_below_zero finite_card_zero_empty finite_subset subset_UNIV)
+
+lemma down_chain_reaches_empty:
+  assumes "finite (UNIV :: 'a set)" and "mono (\<tau> :: 'a set \<Rightarrow> 'a set)"
+   and "(\<forall>i :: nat. ((\<tau> :: 'a set \<Rightarrow> 'a set) ^^ (i + (1 :: nat))) UNIV \<subset> (\<tau> ^^ i) UNIV)"
+ shows "\<exists> (j :: nat). (\<tau> ^^ j) UNIV = {}"
+  using UNIV_tau_i_is_empty assms by blast
+
+lemma no_infinite_subset_chain2: 
+  assumes "finite (UNIV :: 'a set)" and "mono (\<tau> :: ('a set \<Rightarrow> 'a set))"
+      and "\<forall>i :: nat. (\<tau> ^^ i) UNIV \<supset> (\<tau> ^^ (i + (1 :: nat))) UNIV"
+  shows "False"
+proof -
+  have "\<exists> j :: nat. (\<tau> ^^ j) UNIV = {}" using assms
+    by (rule down_chain_reaches_empty)
+  from this obtain j where a: "(\<tau> ^^ j) UNIV = {}" by (erule exE)
+  have "(\<tau> ^^ (j + (1))) UNIV \<subset> (\<tau> ^^ j) UNIV" using assms
+    by (erule_tac x = j in spec)
+  thus False using a by simp 
+qed
+
+lemma finite_fixp2: 
+  assumes "finite(UNIV :: 'a set)" and "mono (\<tau> :: ('a set \<Rightarrow> 'a set))"
+  shows "\<exists> i. (\<tau> ^^ i) UNIV = (\<tau> ^^(i + 1)) UNIV"
+proof -
+  have "\<forall>i. (\<tau> ^^ (i + (1))) UNIV \<subseteq> (\<tau> ^^ i) UNIV" 
+    by (rule predtrans_UNIV , simp add: assms(2))  
+  moreover have "\<exists>i. \<not> (\<tau> ^^ (i + (1))) UNIV \<subset> (\<tau> ^^ i) UNIV" using assms
+  proof -
+    have "\<not> (\<forall> i :: nat. (\<tau> ^^ i) UNIV \<supset> (\<tau> ^^(i + 1)) UNIV)"
+      using assms(1) assms(2) no_infinite_subset_chain2 by blast 
+    thus "\<exists>i. \<not> (\<tau> ^^ (i + (1))) UNIV \<subset> (\<tau> ^^ i) UNIV" by blast
+  qed
+  ultimately show "\<exists> i. (\<tau> ^^ i) UNIV = (\<tau> ^^(i + 1)) UNIV" 
+    by blast
+qed
+
+lemma lfp_loop: 
+  assumes "finite (UNIV :: 'b set)" and "mono (\<tau> :: ('b set \<Rightarrow> 'b set))"
+  shows "\<exists> n . lfp \<tau>  = (\<tau> ^^ n) {}"
+proof -
+  have "\<exists>i. (\<tau> ^^ i) {} = (\<tau> ^^ (i + (1))) {}"  using assms
+    by (rule finite_fixp)
+  from this obtain i where " (\<tau> ^^ i) {} = (\<tau> ^^ (i + (1))) {}"
+    by (erule exE)
+  hence "(\<tau> ^^ i) {} = (\<tau> ^^ Suc i) {}"
+    by simp
+  hence "(\<tau> ^^ Suc i) {} = (\<tau> ^^ i) {}"
+    by (rule sym)
+  hence "lfp \<tau> = (\<tau> ^^ i) {}"
+     by (simp add: assms(2) lfp_Kleene_iter)
+   thus "\<exists> n . lfp \<tau>  = (\<tau> ^^ n) {}" 
+   by (rule exI) 
+qed
+
+lemma Kleene_iter_gpfp:
+  assumes "mono f" and "p \<le> f p" shows "p \<le> (f^^k) (top::'a::order_top)"
+proof(induction k)
+  case 0 show ?case by simp
+next
+  case Suc
+  from monoD[OF assms(1) Suc] assms(2)
+  show ?case by simp
+qed
+
+lemma gfp_loop: 
+  assumes "finite (UNIV :: 'b set)"
+   and "mono (\<tau> :: ('b set \<Rightarrow> 'b set))"
+    shows "\<exists> n . gfp \<tau>  = (\<tau> ^^ n)UNIV"
+proof -
+  have " \<exists>i. (\<tau> ^^ i)(UNIV :: 'b set) = (\<tau> ^^ (i + (1))) UNIV" using assms
+    by (rule finite_fixp2)
+  from this obtain i where "(\<tau> ^^ i)UNIV = (\<tau> ^^ (i + (1))) UNIV" by (erule exE)
+  thus "\<exists> n . gfp \<tau>  = (\<tau> ^^ n)UNIV" using assms
+    by (metis Suc_eq_plus1 gfp_Kleene_iter)
+qed
+
+definition AF where "AF f \<equiv> lfp (\<lambda> Z. f \<union> AX Z)"
+definition EF where "EF f \<equiv> lfp (\<lambda> Z. f \<union> EX' Z)"
+definition AG where "AG f \<equiv> gfp (\<lambda> Z. f \<inter> AX Z)"
+definition EG where "EG f \<equiv> gfp (\<lambda> Z. f \<inter> EX' Z)"
+definition AU where "AU f1 f2 \<equiv> lfp(\<lambda> Z. f2 \<union> (f1 \<inter> AX Z))"
+definition EU where "EU f1 f2 \<equiv> lfp(\<lambda> Z. f2 \<union> (f1 \<inter> EX' Z))"
+definition AR where "AR f1 f2 \<equiv> gfp(\<lambda> Z. f2 \<inter> (f1 \<union> AX Z))"
+definition ER where "ER f1 f2 \<equiv> gfp(\<lambda> Z. f2 \<inter> (f1 \<union> EX' Z))"
+
+datatype 'a kripke = 
+  Kripke "'a set" "'a set"
+
+primrec states where "states (Kripke S I) = S" 
+primrec init where "init (Kripke S I) = I" 
+
+definition check ("_ \<turnstile> _" 50)
+ where "M \<turnstile> f \<equiv> (init M) \<subseteq> {s \<in> (states M). s \<in> f }"
+
+definition state_transition_refl (infixr "\<rightarrow>\<^sub>i*" 50)
+where "s \<rightarrow>\<^sub>i* s' \<equiv> ((s,s') \<in> {(x,y). state_transition x y}\<^sup>*)"

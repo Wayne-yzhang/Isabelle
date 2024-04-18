@@ -1,0 +1,937 @@
+theory ReduceStoreBuffer
+imports Main
+begin
+
+
+
+
+
+type_synonym addr = nat 
+type_synonym val = nat
+type_synonym tmp = nat
+
+
+type_synonym tmps = "tmp \<Rightarrow> val option" 
+
+locale valid_sop =
+fixes sop :: "sop"
+assumes valid_sop: "\<And>D f \<theta>. 
+          \<lbrakk>sop=(D,f); D \<subseteq> dom \<theta>\<rbrakk> 
+          \<Longrightarrow> 
+          f \<theta> = f (\<theta>|`D)"
+
+type_synonym memory = "addr \<Rightarrow> val"
+type_synonym owns = "addr set"
+type_synonym rels = "addr \<Rightarrow> bool option"
+type_synonym shared = "addr \<Rightarrow> bool option" 
+type_synonym acq = "addr set"
+type_synonym rel = "addr set"
+type_synonym lcl = "addr set"
+type_synonym wrt = "addr set"
+type_synonym cond = "tmps \<Rightarrow> bool"
+type_synonym ret = "val \<Rightarrow> val \<Rightarrow> val"
+
+datatype instr = Read bool addr tmp 
+               | Write bool addr sop acq lcl rel wrt
+               | RMW addr tmp sop cond ret acq lcl rel wrt  
+               | Fence 
+               | Ghost acq lcl rel wrt
+
+type_synonym instrs = "instr list"
+
+
+type_synonym ('p,'sb,'dirty,'owns,'rels) thread_config = 
+  "'p \<times> instrs \<times> tmps \<times> 'sb \<times> 'dirty \<times> 'owns \<times> 'rels"
+type_synonym ('p,'sb,'dirty,'owns,'rels,'shared) global_config = 
+  "('p,'sb,'dirty,'owns,'rels) thread_config list \<times> memory \<times> 'shared "
+
+definition "owned t = (let (p,instrs,\<theta>,sb,\<D>,\<O>,\<R>) = t in \<O>)" 
+
+lemma owned_simp [simp]: "owned (p,instrs,\<theta>,sb,\<D>,\<O>,\<R>) = (\<O>)"
+  by (simp add: owned_def)
+
+definition "\<O>_sb t = (let (p,instrs,\<theta>,sb,\<D>,\<O>,\<R>) = t in (\<O>,sb))" 
+
+lemma \<O>_sb_simp [simp]: "\<O>_sb (p,instrs,\<theta>,sb,\<D>,\<O>,\<R>) = (\<O>,sb)"
+  by (simp add: \<O>_sb_def)
+
+definition "released t = (let (p,instrs,\<theta>,sb,\<D>,\<O>,\<R>) = t in \<R>)" 
+
+lemma released_simp [simp]: "released (p,instrs,\<theta>,sb,\<D>,\<O>,\<R>) = (\<R>)"
+  by (simp add: released_def)
+
+lemma list_update_id': "v = xs ! i \<Longrightarrow> xs[i := v] = xs"
+  by simp
+
+lemmas converse_rtranclp_induct5 = 
+converse_rtranclp_induct [where a="(m,sb,\<O>,\<R>,\<S>)" and b="(m',sb',\<O>',\<R>',\<S>')", split_rule,consumes 1, case_names refl step]
+
+
+locale memory_system = 
+  fixes
+  memop_step ::  "(instrs \<times> tmps \<times> 'sb \<times> memory \<times> 'dirty \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> 
+                  (instrs \<times> tmps \<times> 'sb \<times> memory \<times> 'dirty \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> bool" 
+                    ("_ \<rightarrow>\<^sub>m _" [60,60] 100) and
+  
+  storebuffer_step:: "(memory \<times> 'sb \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> (memory \<times> 'sb \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> bool" ("_ \<rightarrow>\<^sub>s\<^sub>b _" [60,60] 100)
+
+
+locale program =
+  fixes
+  program_step :: "tmps \<Rightarrow> 'p \<Rightarrow> 'p \<times> instrs \<Rightarrow> bool" ("_\<turnstile> _ \<rightarrow>\<^sub>p _" [60,60,60] 100) 
+
+locale computation = memory_system + program +
+  constrains
+  storebuffer_step:: "(memory \<times> 'sb \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> (memory \<times> 'sb \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> bool" and
+  memop_step :: "
+                  (instrs \<times> tmps \<times> 'sb \<times> memory \<times> 'dirty \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> 
+                  (instrs \<times> tmps \<times> 'sb \<times> memory \<times> 'dirty \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> bool" 
+                     and
+  program_step :: "tmps \<Rightarrow> 'p \<Rightarrow> 'p \<times> instrs \<Rightarrow> bool" 
+  fixes
+  "record" :: "'p \<Rightarrow> 'p \<Rightarrow> instrs \<Rightarrow> 'sb \<Rightarrow> 'sb"
+begin
+
+inductive concurrent_step :: 
+  "('p,'sb,'dirty,'owns,'rels,'shared) global_config \<Rightarrow> ('p,'sb,'dirty,'owns,'rels,'shared) global_config \<Rightarrow> bool"
+                               ("_ \<Rightarrow> _" [60,60] 100)
+where
+  Program: 
+   "\<lbrakk>i < length ts; ts!i = (p,is,\<theta>,sb,\<D>,\<O>,\<R>);
+     \<theta>\<turnstile>p \<rightarrow>\<^sub>p (p',is') \<rbrakk> \<Longrightarrow> 
+     (ts,m,\<S>) \<Rightarrow> (ts[i:=(p',is@is',\<theta>,record p p' is' sb,\<D>,\<O>,\<R>)],m,\<S>)"
+
+| Memop:
+   "\<lbrakk>i < length ts; ts!i = (p,is,\<theta>,sb,\<D>,\<O>,\<R>);
+      (is,\<theta>,sb,m,\<D>,\<O>,\<R>,\<S>) \<rightarrow>\<^sub>m (is',\<theta>',sb',m',\<D>',\<O>',\<R>',\<S>') \<rbrakk> 
+     \<Longrightarrow> 
+     (ts,m,\<S>) \<Rightarrow> (ts[i:=(p,is',\<theta>',sb',\<D>',\<O>',\<R>')],m',\<S>')"
+
+
+| StoreBuffer: 
+   "\<lbrakk>i < length ts; ts!i = (p,is,\<theta>,sb,\<D>,\<O>,\<R>);
+     (m,sb,\<O>,\<R>,\<S>) \<rightarrow>\<^sub>s\<^sub>b (m',sb',\<O>',\<R>',\<S>') \<rbrakk> \<Longrightarrow> 
+     (ts,m,\<S>) \<Rightarrow> (ts[i:=(p,is,\<theta>,sb',\<D>,\<O>',\<R>')],m',\<S>')"
+
+definition final:: "('p,'sb,'dirty,'owns,'rels,'shared) global_config \<Rightarrow> bool"
+where
+ "final c = (\<not> (\<exists>c'. c \<Rightarrow> c'))"
+
+
+lemma store_buffer_steps:
+assumes sb_step: "storebuffer_step^** (m,sb,\<O>,\<R>,\<S>) (m',sb',\<O>',\<R>',\<S>')"
+shows "\<And>ts. i < length ts \<Longrightarrow> ts!i = (p,is,\<theta>,sb,\<D>,\<O>,\<R>) \<Longrightarrow> 
+         concurrent_step^** (ts,m,\<S>) (ts[i:=(p,is,\<theta>,sb',\<D>,\<O>',\<R>')],m',\<S>')"
+using sb_step 
+proof (induct rule: converse_rtranclp_induct5)
+  case refl then show ?case 
+    by (simp add: list_update_id')
+next
+  case (step m sb \<O> \<R> \<S> m'' sb'' \<O>'' \<R>'' \<S>'')
+  let ?ts' = "ts[i := (p, is, \<theta>, sb'',\<D>, \<O>'',\<R>'')]"
+  from StoreBuffer [OF i_bound ts_i step] 
+  have "(ts, m, \<S>) \<Rightarrow> (?ts', m'', \<S>'')".
+  also
+  from i_bound have i_bound': "i < length ?ts'" by simp
+  from i_bound have ts'_i: "?ts'!i = (p,is,\<theta>,sb'',\<D>,\<O>'',\<R>'')"
+    by simp
+  from step.hyps (3) [OF i_bound' ts'_i] i_bound
+  have "concurrent_step\<^sup>*\<^sup>* (?ts', m'', \<S>'') (ts[i := (p, is, \<theta>, sb',\<D>, \<O>',\<R>')], m', \<S>')"
+    by (simp)
+  finally
+  show ?case .
+qed
+
+lemma step_preserves_length_ts: 
+  assumes step: "(ts,m,\<S>) \<Rightarrow> (ts',m',\<S>')"
+  shows "length ts' = length ts"
+using step
+apply (cases)
+apply auto
+done
+end
+
+lemmas concurrent_step_cases = computation.concurrent_step.cases 
+[cases set, consumes 1, case_names Program Memop StoreBuffer]
+
+definition augment_shared:: "shared \<Rightarrow> addr set \<Rightarrow> addr set \<Rightarrow> shared" ("_ \<oplus>\<^bsub>_\<^esub> _" [61,1000,60] 61)
+where
+"\<S> \<oplus>\<^bsub>W\<^esub> S \<equiv> (\<lambda>a. if a \<in> S then Some (a \<in> W) else \<S> a)"
+
+definition restrict_shared:: "shared \<Rightarrow> addr set \<Rightarrow> addr set \<Rightarrow> shared" ("_ \<ominus>\<^bsub>_\<^esub> _" [51,1000,50] 51)
+where
+"\<S> \<ominus>\<^bsub>A\<^esub> L \<equiv> (\<lambda>a. if a \<in> L then None 
+                     else (case \<S> a of None \<Rightarrow> None
+                            | Some writeable \<Rightarrow> Some (a \<in> A \<or> writeable)))"
+                      
+definition read_only :: "shared \<Rightarrow> addr set"
+where
+"read_only \<S> \<equiv> {a. (\<S> a = Some False)}"
+
+definition shared_le:: "shared \<Rightarrow> shared \<Rightarrow> bool" (infix "\<subseteq>\<^sub>s" 50)
+where 
+"m\<^sub>1 \<subseteq>\<^sub>s m\<^sub>2 \<equiv> m\<^sub>1 \<subseteq>\<^sub>m m\<^sub>2 \<and> read_only m\<^sub>1 \<subseteq> read_only m\<^sub>2"
+
+lemma shared_leD: "m\<^sub>1 \<subseteq>\<^sub>s m\<^sub>2 \<Longrightarrow> m\<^sub>1 \<subseteq>\<^sub>m m\<^sub>2 \<and> read_only m\<^sub>1 \<subseteq> read_only m\<^sub>2"
+  by (simp add: shared_le_def)
+
+lemma shared_le_map_le: "m\<^sub>1 \<subseteq>\<^sub>s m\<^sub>2 \<Longrightarrow> m\<^sub>1 \<subseteq>\<^sub>m m\<^sub>2"
+  by (simp add: shared_le_def)
+
+lemma shared_le_read_only_le: "m\<^sub>1 \<subseteq>\<^sub>s m\<^sub>2 \<Longrightarrow> read_only m\<^sub>1 \<subseteq> read_only m\<^sub>2"
+  by (simp add: shared_le_def)
+
+lemma dom_augment [simp]: "dom (m \<oplus>\<^bsub>W\<^esub> S) = dom m \<union> S"
+  by (auto simp add: augment_shared_def)
+
+lemma augment_empty [simp]: "S  \<oplus>\<^bsub>x\<^esub> {} = S"
+  by (simp add: augment_shared_def)
+
+
+lemma inter_neg [simp]: "X \<inter> - L = X - L"
+  by blast
+
+lemma dom_restrict_shared [simp]: "dom (m \<ominus>\<^bsub>A\<^esub> L) = dom m - L"
+  by (auto simp add: restrict_shared_def split: option.splits)
+
+lemma restrict_shared_UNIV [simp]: "(m \<ominus>\<^bsub>A\<^esub> UNIV) = Map.empty"
+  by (auto simp add: restrict_shared_def split: if_split_asm option.splits)
+
+lemma restrict_shared_empty [simp]: "(Map.empty \<ominus>\<^bsub>A\<^esub> L) = Map.empty"
+  apply (rule ext)
+  by (auto simp add: restrict_shared_def split: if_split_asm option.splits)
+
+lemma restrict_shared_in [simp]: "a \<in> L \<Longrightarrow> (m \<ominus>\<^bsub>A\<^esub> L) a = None"
+  by (auto simp add: restrict_shared_def split: if_split_asm option.splits)
+
+lemma restrict_shared_out: "a \<notin> L \<Longrightarrow> (m \<ominus>\<^bsub>A\<^esub> L) a = 
+  map_option (\<lambda>writeable. (a \<in> A \<or> writeable)) (m a)"
+  by (auto simp add: restrict_shared_def split: if_split_asm option.splits)
+
+lemma restrict_shared_out'[simp]: 
+  "a \<notin> L \<Longrightarrow> m a = Some writeable \<Longrightarrow> (m \<ominus>\<^bsub>A\<^esub> L) a = Some (a \<in> A \<or> writeable)"
+  by (simp add: restrict_shared_out)
+
+lemma augment_mono_map': "A \<subseteq>\<^sub>m B \<Longrightarrow> (A \<oplus>\<^bsub>x\<^esub> C) \<subseteq>\<^sub>m (B \<oplus>\<^bsub>x\<^esub> C)"
+  by (auto simp add: augment_shared_def map_le_def domIff)
+
+lemma augment_mono_map: "A \<subseteq>\<^sub>s B \<Longrightarrow> (A \<oplus>\<^bsub>x\<^esub> C) \<subseteq>\<^sub>s (B \<oplus>\<^bsub>x\<^esub> C)"
+  by (auto simp add:  augment_shared_def shared_le_def map_le_def read_only_def dom_def split: option.splits if_split_asm)
+
+lemma restrict_mono_map: "A \<subseteq>\<^sub>s B \<Longrightarrow>  (A \<ominus>\<^bsub>x\<^esub> C) \<subseteq>\<^sub>s (B \<ominus>\<^bsub>x\<^esub> C)"
+  by (auto simp add:  restrict_shared_def shared_le_def map_le_def read_only_def dom_def split: option.splits if_split_asm)
+
+lemma augment_mono_aux: "dom A \<subseteq> dom B \<Longrightarrow> dom (A \<oplus>\<^bsub>x\<^esub> C) \<subseteq> dom (B \<oplus>\<^bsub>x\<^esub> C)"
+  by auto
+
+lemma restrict_mono_aux: "dom A \<subseteq> dom B \<Longrightarrow> dom (A \<ominus>\<^bsub>x\<^esub> C) \<subseteq> dom (B \<ominus>\<^bsub>x\<^esub> C)"
+  by auto
+
+lemma read_only_mono: "S \<subseteq>\<^sub>m S' \<Longrightarrow> a \<in> read_only S \<Longrightarrow> a \<in> read_only S'"
+    by (auto simp add:  map_le_def domIff read_only_def dest!: bspec)
+
+lemma in_read_only_restrict_conv: 
+  "a \<in> read_only (\<S> \<ominus>\<^bsub>A\<^esub> L) = (a \<in> read_only \<S> \<and> a \<notin> L \<and> a \<notin> A)"
+  by (auto simp add: read_only_def restrict_shared_def split: option.splits if_split_asm)
+
+
+
+lemma in_read_only_augment_conv: "a \<in> read_only (\<S> \<oplus>\<^bsub>W\<^esub> R) = (if a \<in> R then a \<notin> W else a \<in> read_only \<S>)"
+  by (auto simp add: read_only_def augment_shared_def)
+
+lemmas in_read_only_convs = in_read_only_restrict_conv in_read_only_augment_conv
+
+lemma read_only_dom: "read_only \<S> \<subseteq> dom \<S>"
+  by (auto simp add: read_only_def dom_def)
+
+lemma read_only_empty [simp]: "read_only Map.empty = {}"
+  by (auto simp add: read_only_def)
+
+lemma restrict_shared_fuse: "S \<ominus>\<^bsub>A\<^esub> L \<ominus>\<^bsub>B\<^esub> M = (S \<ominus>\<^bsub>(A \<union> B)\<^esub> (L \<union> M))"
+apply (rule ext)
+apply (auto simp add: restrict_shared_def split: option.splits if_split_asm)
+done
+
+lemma restrict_shared_empty_set [simp]: "S \<ominus>\<^bsub>{}\<^esub> {} = S"
+  apply (rule ext)
+  apply (auto simp add: restrict_shared_def split: option.splits if_split_asm)
+  done
+
+definition augment_rels:: "addr set \<Rightarrow> addr set \<Rightarrow> rels \<Rightarrow> rels"
+where
+"augment_rels S R \<R> = (\<lambda>a. if a \<in> R
+                             then (case \<R> a of 
+                                     None \<Rightarrow> Some (a \<in> S)
+                                   | Some s \<Rightarrow> Some (s \<and> (a \<in> S)))
+                             else \<R> a)"
+
+declare domIff [iff del]
+
+
+locale gen_direct_memop_step = 
+fixes emp::'rels and aug::"owns \<Rightarrow> rel \<Rightarrow> 'rels \<Rightarrow> 'rels"
+begin
+inductive gen_direct_memop_step :: "(instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> 'rels \<times> shared ) \<Rightarrow> 
+                  (instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> 'rels \<times> shared ) \<Rightarrow> bool" 
+                    ("_ \<rightarrow> _" [60,60] 100)
+where
+  Read: "(Read volatile a t # is,\<theta>, x, m,\<D>, \<O>, \<R>, \<S>) \<rightarrow>
+               (is, \<theta> (t\<mapsto>m a), x, m, \<D>, \<O>, \<R>, \<S>)"
+
+| WriteNonVolatile:
+  "(Write False a (D,f) A L R W#is, \<theta>, x, m, \<D>, \<O>, \<R>, \<S>) \<rightarrow> 
+          (is, \<theta>, x, m(a := f \<theta>), \<D>, \<O>, \<R>, \<S>)"
+
+| WriteVolatile:
+  "(Write True a (D,f) A L R W# is, \<theta>, x, m, \<D>, \<O>, \<R>, \<S>) \<rightarrow>
+         (is, \<theta>,  x, m(a:=f \<theta>), True, \<O> \<union> A - R, emp, \<S> \<oplus>\<^bsub>W\<^esub> R \<ominus>\<^bsub>A\<^esub> L)"
+
+| Fence:
+  "(Fence # is, \<theta>, x, m, \<D>, \<O>, \<R>, \<S>) \<rightarrow> (is, \<theta>,x, m, False, \<O>, emp, \<S>)"
+
+| RMWReadOnly:
+  "\<lbrakk>\<not> cond (\<theta>(t\<mapsto>m a))\<rbrakk> \<Longrightarrow> 
+   (RMW a t (D,f) cond ret A L R W # is, \<theta>, x, m, \<D>, \<O>, \<R>, \<S>) \<rightarrow> (is, \<theta>(t\<mapsto>m a),x,m, False, \<O>, emp, \<S>)"
+
+| RMWWrite:
+  "\<lbrakk>cond (\<theta>(t\<mapsto>m a))\<rbrakk> \<Longrightarrow> 
+   (RMW a t (D,f) cond ret A L R W# is, \<theta>, x, m, \<D>, \<O>, \<R>, \<S>) \<rightarrow> 
+         (is, \<theta>(t\<mapsto>ret (m a) (f(\<theta>(t\<mapsto>m a)))),x, m(a:= f(\<theta>(t\<mapsto>m a))), False,\<O> \<union> A - R, emp, \<S> \<oplus>\<^bsub>W\<^esub> R \<ominus>\<^bsub>A\<^esub> L)"
+
+| Ghost:
+  "(Ghost A L R W # is, \<theta>, x, m, \<D>, \<O>, \<R>,  \<S>) \<rightarrow>
+         (is, \<theta>, x, m, \<D>, \<O> \<union> A - R, aug (dom \<S>) R \<R> , \<S> \<oplus>\<^bsub>W\<^esub> R \<ominus>\<^bsub>A\<^esub> L)"
+end
+
+interpretation direct_memop_step: gen_direct_memop_step Map.empty augment_rels .
+
+term direct_memop_step.gen_direct_memop_step
+abbreviation direct_memop_step :: "(instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> rels \<times> shared ) \<Rightarrow> 
+                  (instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> rels \<times> shared ) \<Rightarrow> bool" 
+                    ("_ \<rightarrow> _" [60,60] 100)
+where
+"direct_memop_step \<equiv> direct_memop_step.gen_direct_memop_step"
+
+term "x \<rightarrow> Y"
+
+abbreviation direct_memop_steps :: "
+                  (instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> rels \<times> shared ) \<Rightarrow> 
+                  (instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> rels \<times> shared )  
+                   \<Rightarrow> bool" 
+                    ("_ \<rightarrow>\<^sup>* _" [60,60] 100)
+where 
+"direct_memop_steps == (direct_memop_step)^**"
+
+term "x \<rightarrow>\<^sup>* Y"
+
+interpretation virtual_memop_step: gen_direct_memop_step "()" "(\<lambda>S R \<R>. ())" .
+
+abbreviation virtual_memop_step :: "(instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> unit \<times> shared ) \<Rightarrow> 
+                  (instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> unit \<times> shared ) \<Rightarrow> bool" 
+                    ("_ \<rightarrow>\<^sub>v _" [60,60] 100)
+where
+"virtual_memop_step \<equiv> virtual_memop_step.gen_direct_memop_step"
+
+term "x \<rightarrow>\<^sub>v Y"
+
+abbreviation virtual_memop_steps :: "
+                  (instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> unit \<times> shared ) \<Rightarrow> 
+                  (instrs \<times> tmps \<times> unit \<times> memory \<times> bool \<times> owns \<times> unit \<times> shared )  
+                   \<Rightarrow> bool" 
+                    ("_ \<rightarrow>\<^sub>v\<^sup>* _" [60,60] 100)
+where 
+"virtual_memop_steps == (virtual_memop_step)^**"
+
+term "x \<rightarrow>\<^sup>* Y"
+
+
+
+lemma virtual_memop_step_simulates_direct_memop_step: 
+  assumes step:
+  "(is, \<theta>, x, m, \<D>, \<O>, \<R>, \<S>) \<rightarrow> (is', \<theta>', x', m', \<D>', \<O>', \<R>', \<S>')"
+  shows "(is, \<theta>, x, m, \<D>, \<O>, (), \<S>) \<rightarrow>\<^sub>v (is', \<theta>', x', m', \<D>', \<O>', (), \<S>')"
+using step
+apply (cases)
+apply (auto intro: virtual_memop_step.gen_direct_memop_step.intros)
+done
+
+
+inductive safe_direct_memop_state :: "owns list \<Rightarrow> nat \<Rightarrow>  
+                  (instrs \<times> tmps \<times> memory \<times> bool \<times> owns \<times> shared) \<Rightarrow> bool " 
+                    ("_,_\<turnstile> _ \<surd>" [60,60,60] 100)
+where
+  Read: "\<lbrakk>a \<in> \<O> \<or> a \<in> read_only \<S> \<or> (volatile \<and> a \<in> dom \<S>);
+          volatile \<longrightarrow> \<not> \<D> \<rbrakk>
+        \<Longrightarrow>
+        \<O>s,i\<turnstile>(Read volatile a t # is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| WriteNonVolatile:
+  "\<lbrakk>a \<in> \<O>; a \<notin> dom \<S>\<rbrakk> 
+   \<Longrightarrow>
+   \<O>s,i\<turnstile>(Write False a (D,f) A L R W#is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| WriteVolatile:
+  "\<lbrakk>\<forall>j < length \<O>s. i\<noteq>j \<longrightarrow> a \<notin> \<O>s!j;     
+    A \<subseteq> dom \<S> \<union> \<O>; L \<subseteq> A; R \<subseteq> \<O>; A \<inter> R = {}; 
+    \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow>  A \<inter>  \<O>s!j = {};
+   a \<notin> read_only \<S>\<rbrakk>
+   \<Longrightarrow> 
+   \<O>s,i\<turnstile>(Write True a (D,f) A L R W# is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| Fence:
+  "\<O>s,i\<turnstile>(Fence # is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| Ghost:
+  "\<lbrakk>A \<subseteq> dom \<S> \<union> \<O>; L \<subseteq> A; R \<subseteq> \<O>; A \<inter> R = {}; 
+    \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow>  A \<inter> \<O>s!j = {}\<rbrakk>
+   \<Longrightarrow> 
+   \<O>s,i\<turnstile>(Ghost A L R W# is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| RMWReadOnly:
+  "\<lbrakk>\<not> cond (\<theta>(t\<mapsto>m a)); a \<in> \<O> \<or> a \<in> dom \<S>\<rbrakk> \<Longrightarrow> 
+   \<O>s,i\<turnstile>(RMW a t (D,f) cond ret A L R W# is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| RMWWrite:
+  "\<lbrakk>cond (\<theta>(t\<mapsto>m a));  
+    \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow> a \<notin> \<O>s!j;
+    A \<subseteq> dom \<S> \<union> \<O>; L \<subseteq> A; R \<subseteq> \<O>; A \<inter> R = {}; 
+    \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow> A \<inter> \<O>s!j  = {};
+    a \<notin> read_only \<S>\<rbrakk> 
+   \<Longrightarrow> 
+   \<O>s,i\<turnstile>(RMW a t (D,f) cond ret A L R W# is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| Nil:   "\<O>s,i\<turnstile>([], \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+inductive safe_delayed_direct_memop_state :: "owns list \<Rightarrow> rels list \<Rightarrow> nat \<Rightarrow>  
+                  (instrs \<times> tmps \<times> memory \<times> bool \<times> owns \<times> shared) \<Rightarrow> bool " 
+                    ("_,_,_\<turnstile> _ \<surd>" [60,60,60,60] 100)
+where
+  Read: "\<lbrakk>a \<in> \<O> \<or> a \<in> read_only \<S> \<or> (volatile \<and> a \<in> dom \<S>);
+          \<not> volatile \<longrightarrow> (\<forall>j < length \<O>s. i\<noteq>j \<longrightarrow> a \<notin> dom (\<R>s!j));
+          volatile \<longrightarrow> \<not> \<D> \<rbrakk>
+        \<Longrightarrow>
+        \<O>s,\<R>s,i\<turnstile>(Read volatile a t # is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| WriteNonVolatile:
+  "\<lbrakk>a \<in> \<O>; a \<notin> dom \<S>; \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow> a \<notin> dom (\<R>s!j)\<rbrakk> 
+   \<Longrightarrow>
+   \<O>s,\<R>s,i\<turnstile>(Write False a (D,f) A L R W#is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| WriteVolatile:
+  "\<lbrakk>\<forall>j < length \<O>s. i\<noteq>j \<longrightarrow> a \<notin> (\<O>s!j \<union> dom (\<R>s!j));     
+    A \<subseteq> dom \<S> \<union> \<O>; L \<subseteq> A; R \<subseteq> \<O>; A \<inter> R = {}; 
+    \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow>  A \<inter>  (\<O>s!j \<union> dom (\<R>s!j)) = {};
+   a \<notin> read_only \<S>\<rbrakk>
+   \<Longrightarrow> 
+   \<O>s,\<R>s,i\<turnstile>(Write True a (D,f) A L R W# is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| Fence:
+  "\<O>s,\<R>s,i\<turnstile>(Fence # is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| Ghost:
+  "\<lbrakk>A \<subseteq> dom \<S> \<union> \<O>; L \<subseteq> A; R \<subseteq> \<O>; A \<inter> R = {}; 
+    \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow>  A \<inter> (\<O>s!j \<union> dom (\<R>s!j)) = {}\<rbrakk>
+   \<Longrightarrow> 
+   \<O>s,\<R>s,i\<turnstile>(Ghost A L R W# is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| RMWReadOnly:
+  "\<lbrakk>\<not> cond (\<theta>(t\<mapsto>m a)); a \<in> \<O> \<or> a \<in> dom \<S>; 
+   \<Longrightarrow> 
+   \<O>s,\<R>s,i\<turnstile>(RMW a t (D,f) cond ret A L R W# is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| RMWWrite:
+  "\<lbrakk>cond (\<theta>(t\<mapsto>m a));  a \<in> \<O> \<or> a \<in> dom \<S>; 
+    \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow> a \<notin> (\<O>s!j \<union> dom (\<R>s!j));
+    A \<subseteq> dom \<S> \<union> \<O>; L \<subseteq> A; R \<subseteq> \<O>; A \<inter> R = {}; 
+    \<forall>j < length \<O>s. i\<noteq>j \<longrightarrow> A \<inter> (\<O>s!j \<union> dom (\<R>s!j))  = {};
+    a \<notin> read_only \<S>\<rbrakk> 
+   \<Longrightarrow> 
+   \<O>s,\<R>s,i\<turnstile>(RMW a t (D,f) cond ret A L R W# is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+| Nil:   "\<O>s,\<R>s,i\<turnstile>([], \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+
+lemma memop_safe_delayed_implies_safe_free_flowing: 
+  assumes safe_delayed: "\<O>s,\<R>s,i\<turnstile>(is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+  shows "\<O>s,i\<turnstile>(is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+using safe_delayed
+proof (cases)
+  case Read thus ?thesis
+    by (fastforce intro!: safe_direct_memop_state.intros)
+next
+  case WriteNonVolatile thus ?thesis
+    by (fastforce intro!: safe_direct_memop_state.intros)
+next
+  case WriteVolatile thus ?thesis
+    by (fastforce intro!: safe_direct_memop_state.intros)
+next
+  case Fence thus ?thesis
+    by (fastforce intro!: safe_direct_memop_state.intros)
+next
+  case Ghost thus ?thesis
+  by (fastforce intro!: safe_direct_memop_state.Ghost)
+next
+  case RMWReadOnly thus ?thesis
+    by (fastforce intro!: safe_direct_memop_state.intros)
+next
+  case RMWWrite thus ?thesis
+    by (fastforce intro!: safe_direct_memop_state.RMWWrite)
+next
+  case Nil thus ?thesis
+    by (fastforce intro!: safe_direct_memop_state.Nil)
+qed
+
+lemma memop_empty_rels_safe_free_flowing_implies_safe_delayed: 
+  assumes safe: "\<O>s,i\<turnstile>(is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>" 
+  assumes empty: "\<forall>\<R> \<in> set \<R>s. \<R> = Map.empty"
+  assumes leq: "length \<O>s = length \<R>s"
+  assumes unowned_shared: "(\<forall>a. (\<forall>i < length \<O>s. a \<notin> (\<O>s!i)) \<longrightarrow> a \<in> dom \<S>)"
+  assumes Os_i: "\<O>s!i = \<O>"
+  shows "\<O>s,\<R>s,i\<turnstile>(is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>"
+using safe
+proof (cases)
+  case Read thus ?thesis
+    using leq empty
+    by (fastforce intro!: safe_delayed_direct_memop_state.Read dest: nth_mem)
+next
+  case WriteNonVolatile thus ?thesis
+    using leq empty
+    by (fastforce intro!: safe_delayed_direct_memop_state.intros dest: nth_mem)
+next
+  case WriteVolatile thus ?thesis
+  using leq empty
+    apply clarsimp
+    apply (rule safe_delayed_direct_memop_state.WriteVolatile)
+    apply (auto)
+    apply  (drule nth_mem)
+    apply  fastforce
+    apply (drule nth_mem)
+    apply fastforce
+    done
+next
+  case Fence thus ?thesis
+    by (fastforce intro!: safe_delayed_direct_memop_state.intros)
+next
+  case Ghost thus ?thesis
+  using leq empty
+    apply clarsimp
+    apply (rule safe_delayed_direct_memop_state.Ghost)
+    apply (auto)
+    apply (drule nth_mem)
+    apply fastforce
+    done
+next
+  case RMWReadOnly thus ?thesis
+  using leq empty
+    by (fastforce intro!: safe_delayed_direct_memop_state.intros dest: nth_mem)
+next
+  case (RMWWrite cond t a A L R D f ret W) thus ?thesis
+  using leq empty unowned_shared [rule_format, where a=a] Os_i
+    apply clarsimp
+    apply (rule safe_delayed_direct_memop_state.RMWWrite)
+    apply (auto)
+    apply  (drule nth_mem)
+    apply  fastforce
+    apply (drule nth_mem)
+    apply fastforce
+    done
+next
+  case Nil thus ?thesis
+    by (fastforce intro!: safe_delayed_direct_memop_state.Nil)
+qed
+
+
+inductive id_storebuffer_step:: 
+  "(memory \<times> unit \<times> owns \<times> rels \<times> shared) \<Rightarrow> (memory \<times> unit \<times> owns \<times> rels \<times> shared) \<Rightarrow> bool" ("_ \<rightarrow>\<^sub>I _" [60,60] 100)
+where
+  Id: "(m,x,\<O>,\<R>,\<S>) \<rightarrow>\<^sub>I (m,x,\<O>,\<R>,\<S>)"
+
+definition empty_storebuffer_step:: "(memory \<times> 'sb \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> (memory \<times> 'sb \<times> 'owns \<times> 'rels \<times> 'shared) \<Rightarrow> bool"
+where
+"empty_storebuffer_step c c' = False"
+
+context program
+begin
+
+abbreviation direct_concurrent_step ::
+  "('p,unit,bool,owns,rels,shared) global_config \<Rightarrow> ('p,unit,bool,owns,rels,shared) global_config \<Rightarrow> bool"
+   ("_ \<Rightarrow>\<^sub>d _" [100,60] 100)
+where
+  "direct_concurrent_step \<equiv> 
+     computation.concurrent_step direct_memop_step.gen_direct_memop_step empty_storebuffer_step program_step
+      (\<lambda>p p' is sb. sb)"
+
+abbreviation direct_concurrent_steps::  
+  "('p,unit,bool,owns,rels,shared) global_config \<Rightarrow> ('p,unit,bool,owns,rels,shared) global_config \<Rightarrow> bool" 
+    ("_ \<Rightarrow>\<^sub>d\<^sup>* _" [60,60] 100)
+where
+"direct_concurrent_steps == direct_concurrent_step^**"  
+
+abbreviation virtual_concurrent_step ::
+  "('p,unit,bool,owns,unit,shared) global_config \<Rightarrow> ('p,unit,bool,owns,unit,shared) global_config \<Rightarrow> bool"
+   ("_ \<Rightarrow>\<^sub>v _" [100,60] 100)
+where
+  "virtual_concurrent_step \<equiv> 
+     computation.concurrent_step virtual_memop_step.gen_direct_memop_step empty_storebuffer_step program_step
+      (\<lambda>p p' is sb. sb)"
+
+abbreviation virtual_concurrent_steps::  
+  "('p,unit,bool,owns,unit,shared) global_config \<Rightarrow> ('p,unit,bool,owns,unit,shared) global_config \<Rightarrow> bool" 
+    ("_ \<Rightarrow>\<^sub>v\<^sup>* _" [60,60] 100)
+where
+"virtual_concurrent_steps == virtual_concurrent_step^**"  
+
+term "x \<Rightarrow>\<^sub>v Y"
+term "x \<Rightarrow>\<^sub>d Y"
+
+term "x \<Rightarrow>\<^sub>d\<^sup>* Y"
+term "x \<Rightarrow>\<^sub>v\<^sup>* Y"
+
+end
+
+definition
+ "safe_reach step safe cfg \<equiv> 
+       \<forall> cfg'. step^** cfg cfg' \<longrightarrow> safe cfg'"
+
+lemma safe_reach_safe_refl: "safe_reach step safe cfg \<Longrightarrow> safe cfg"       
+  apply (auto simp add: safe_reach_def)
+  done
+
+lemma safe_reach_safe_rtrancl: "safe_reach step safe cfg \<Longrightarrow> step^** cfg cfg' \<Longrightarrow> safe cfg'"       
+  by (simp only: safe_reach_def)
+
+lemma safe_reach_steps: "safe_reach step safe cfg \<Longrightarrow> step^** cfg cfg' \<Longrightarrow> safe_reach step safe  cfg'" 
+  apply (auto simp add: safe_reach_def intro: rtranclp_trans)
+  done
+  
+lemma safe_reach_step: "safe_reach step safe cfg \<Longrightarrow> step cfg cfg' \<Longrightarrow> safe_reach step safe cfg'"
+  apply (erule safe_reach_steps)
+  apply (erule r_into_rtranclp)
+  done
+
+context program
+begin
+
+abbreviation
+ "safe_reach_direct \<equiv> safe_reach direct_concurrent_step"
+
+lemma safe_reac_direct_def':
+ "safe_reach_direct safe cfg \<equiv> 
+       \<forall> cfg'. cfg \<Rightarrow>\<^sub>d\<^sup>* cfg' \<longrightarrow> safe cfg'"
+  by( simp add: safe_reach_def)
+
+abbreviation
+ "safe_reach_virtual \<equiv> safe_reach virtual_concurrent_step"
+
+lemma safe_reac_virtual_def':
+ "safe_reach_virtual safe cfg \<equiv> 
+       \<forall> cfg'. cfg \<Rightarrow>\<^sub>v\<^sup>* cfg' \<longrightarrow> safe cfg'"
+  by( simp add: safe_reach_def)
+end
+
+definition
+ "safe_free_flowing cfg \<equiv> let (ts,m,\<S>) = cfg 
+             in (\<forall>i < length ts. let (p,is,\<theta>,x,\<D>,\<O>,\<R>) = ts!i in 
+                 map owned ts,i \<turnstile>(is,\<theta>,m,\<D>,\<O>,\<S>)\<surd>)"
+
+lemma safeE: "\<lbrakk>safe_free_flowing (ts,m,\<S>);i<length ts; ts!i=(p,is,\<theta>,x,\<D>,\<O>,\<R>)\<rbrakk>
+              \<Longrightarrow> map owned ts,i \<turnstile>(is,\<theta>,m,\<D>,\<O>,\<S>)\<surd>"
+  by (auto simp add: safe_free_flowing_def)
+
+definition
+ "safe_delayed cfg \<equiv> let (ts,m,\<S>) = cfg 
+             in (\<forall>i < length ts. let (p,is,\<theta>,x,\<D>,\<O>,\<R>) = ts!i in 
+                 map owned ts,map released ts,i \<turnstile>(is,\<theta>,m,\<D>,\<O>,\<S>)\<surd>)"
+
+lemma safe_delayedE: "\<lbrakk>safe_delayed (ts,m,\<S>);i<length ts; ts!i=(p,is,\<theta>,x,\<D>,\<O>,\<R>)\<rbrakk>
+              \<Longrightarrow> map owned ts,map released ts,i \<turnstile>(is,\<theta>,m,\<D>,\<O>,\<S>)\<surd>"
+  by (auto simp add: safe_delayed_def)
+
+definition "remove_rels  \<equiv> map (\<lambda>(p,is,\<theta>,sb,\<D>,\<O>,\<R>). (p,is,\<theta>,sb,\<D>,\<O>,()))"
+
+theorem (in program) virtual_simulates_direct_step:
+  assumes step: "(ts,m,\<S>) \<Rightarrow>\<^sub>d (ts',m',\<S>')"
+  shows "(remove_rels ts,m,\<S>) \<Rightarrow>\<^sub>v (remove_rels ts',m',\<S>')"
+using step
+proof -
+  interpret direct_computation:
+    computation direct_memop_step empty_storebuffer_step program_step "\<lambda>p p' is sb. sb" .
+  interpret virtual_computation:
+    computation virtual_memop_step empty_storebuffer_step program_step "\<lambda>p p' is sb. sb" .
+  from step show ?thesis
+  proof (cases)
+    case (Program j p "is" \<theta> sb \<D> \<O> \<R> p' is')
+    then obtain
+      ts': "ts' = ts[j:=(p',is@is',\<theta>,sb,\<D>,\<O>,\<R>)]" and
+      \<S>': "\<S>'=\<S>" and
+      m': "m'=m" and
+      j_bound: "j < length ts" and
+      ts_j: "ts!j = (p,is,\<theta>,sb,\<D>,\<O>,\<R>)" and
+      prog_step: "\<theta>\<turnstile> p \<rightarrow>\<^sub>p (p', is')"
+      by auto
+    from ts_j j_bound have 
+      vts_j: "remove_rels ts!j = (p,is,\<theta>,sb,\<D>,\<O>,())" by (auto simp add: remove_rels_def)
+    
+    from virtual_computation.Program [OF _ vts_j prog_step, of m \<S>] j_bound ts'
+    show ?thesis
+      by (clarsimp simp add: \<S>' m' remove_rels_def map_update)
+  next
+    case (Memop j p "is" \<theta> sb \<D> \<O> \<R> is' \<theta>' sb' \<D>' \<O>' \<R>')
+    then obtain
+      ts': "ts' = ts[j:=(p,is',\<theta>',sb',\<D>',\<O>',\<R>')]" and
+      j_bound: "j < length ts" and
+      ts_j: "ts!j = (p,is,\<theta>,sb,\<D>,\<O>,\<R>)"  and
+      mem_step: "(is, \<theta>, sb, m, \<D>, \<O>, \<R>, \<S>) \<rightarrow> (is', \<theta>', sb',m', \<D>',  \<O>', \<R>', \<S>')"
+      by auto
+
+    from ts_j j_bound have 
+      vts_j: "remove_rels ts!j = (p,is,\<theta>,sb,\<D>,\<O>,())" by (auto simp add: remove_rels_def)
+
+    from virtual_computation.Memop[OF _ vts_j virtual_memop_step_simulates_direct_memop_step [OF mem_step]] j_bound ts'
+    show ?thesis
+      by (clarsimp simp add: remove_rels_def map_update)
+  next
+    case (StoreBuffer _ p "is" \<theta> sb \<D> \<O> \<R> sb' \<O>' \<R>')
+    hence False 
+      by (auto simp add: empty_storebuffer_step_def)
+    thus ?thesis ..
+  qed
+qed
+
+lemmas converse_rtranclp_induct_sbh_steps = converse_rtranclp_induct
+[of _ "(ts,m,\<S>)" "(ts',m',\<S>')", split_rule,
+   consumes 1, case_names refl step]
+
+
+theorem (in program) virtual_simulates_direct_steps:
+  assumes steps: "(ts,m,\<S>) \<Rightarrow>\<^sub>d\<^sup>* (ts',m',\<S>')"
+  shows "(remove_rels ts,m,\<S>) \<Rightarrow>\<^sub>v\<^sup>* (remove_rels ts',m',\<S>')"
+using steps
+proof (induct rule: converse_rtranclp_induct_sbh_steps)
+  case refl thus ?case by auto
+next
+  case (step ts m \<S> ts'' m'' \<S>'')
+  then obtain 
+    first: "(ts, m, \<S>) \<Rightarrow>\<^sub>d (ts'', m'', \<S>'')" and
+    hyp: "(remove_rels ts'', m'', \<S>'') \<Rightarrow>\<^sub>v\<^sup>* (remove_rels ts', m', \<S>')"
+    by blast
+  note virtual_simulates_direct_step [OF first] also note hyp
+  finally
+  show ?case by blast
+qed
+
+locale simple_ownership_distinct =
+fixes ts::"('p,'sb,'dirty,owns,'rels) thread_config list"
+assumes simple_ownership_distinct:
+   "\<And>i j p\<^sub>i is\<^sub>i \<O>\<^sub>i \<R>\<^sub>i \<D>\<^sub>i \<theta>\<^sub>i sb\<^sub>i p\<^sub>j is\<^sub>j \<O>\<^sub>j \<R>\<^sub>j \<D>\<^sub>j \<theta>\<^sub>j sb\<^sub>j. 
+      \<lbrakk>i < length ts; j < length ts; i \<noteq> j; 
+    ts!i = (p\<^sub>i,is\<^sub>i,\<theta>\<^sub>i,sb\<^sub>i,\<D>\<^sub>i,\<O>\<^sub>i,\<R>\<^sub>i); ts!j = (p\<^sub>j,is\<^sub>j,\<theta>\<^sub>j,sb\<^sub>j,\<D>\<^sub>j,\<O>\<^sub>j,\<R>\<^sub>j)
+      \<rbrakk> \<Longrightarrow> \<O>\<^sub>i \<inter> \<O>\<^sub>j = {}"
+
+lemma (in simple_ownership_distinct)
+  simple_ownership_distinct_nth_update:
+ "\<And>i p is \<theta> \<O> \<R> \<D> xs sb. 
+   \<lbrakk>i < length ts; ts!i = (p,is,\<theta>,sb,\<D>,\<O>,\<R>);
+    \<forall>j < length ts. i\<noteq>j \<longrightarrow> (let (p\<^sub>j,is\<^sub>j,\<theta>\<^sub>j,sb\<^sub>j,\<D>\<^sub>j,\<O>\<^sub>j,\<R>\<^sub>j) = ts!j 
+          in (\<O>') \<inter> (\<O>\<^sub>j) ={}) \<rbrakk> \<Longrightarrow> 
+     simple_ownership_distinct (ts[i := (p',is',\<theta>',sb',\<D>',\<O>',\<R>')])"
+  apply (unfold_locales)
+  apply (clarsimp simp add: nth_list_update split: if_split_asm)
+  apply   (force dest: simple_ownership_distinct simp add: Let_def)
+  apply  (fastforce dest: simple_ownership_distinct simp add: Let_def)
+  apply (fastforce dest: simple_ownership_distinct simp add: Let_def)
+  done
+
+locale read_only_unowned =
+fixes \<S>::shared and ts::"('p,'sb,'dirty,owns,'rels) thread_config list"
+assumes read_only_unowned:
+  "\<And>i p is \<O> \<R> \<D> \<theta> sb. 
+   \<lbrakk>i < length ts; ts!i = (p,is,\<theta>,sb,\<D>,\<O>,\<R>) \<rbrakk> 
+   \<Longrightarrow>
+   \<O> \<inter> read_only \<S> = {}"
+
+lemma (in read_only_unowned)
+  read_only_unowned_nth_update:
+ "\<And>i p is \<O> \<R> \<D> acq \<theta> sb. 
+   \<lbrakk>i < length ts; \<O> \<inter> read_only \<S>  = {}\<rbrakk> \<Longrightarrow> 
+     read_only_unowned \<S> (ts[i := (p,is,\<theta>,sb,\<D>,\<O>,\<R>)])"
+  apply (unfold_locales)
+  apply   (auto dest: read_only_unowned
+       simp add:  nth_list_update split: if_split_asm)
+  done
+
+locale unowned_shared =
+fixes \<S>::shared and ts::"('p,'sb,'dirty,owns,'rels) thread_config list"
+assumes unowned_shared: "- \<Union> ((\<lambda>(_,_,_,_,_,\<O>,_).  \<O>) ` set ts) \<subseteq> dom \<S>"
+
+lemma (in unowned_shared)
+  unowned_shared_nth_update:
+  assumes i_bound: "i < length ts" 
+  assumes ith: "ts!i=(p,is,xs,sb,\<D>,\<O>,\<R>)" 
+  assumes subset: "\<O>  \<subseteq> \<O>'"
+  shows "unowned_shared \<S> (ts[i := (p',is',xs',sb',\<D>',\<O>',\<R>')])"
+proof -
+  from i_bound ith subset
+  have "\<Union> ((\<lambda>(_,_,_,_,_,\<O>,_).  \<O>) ` set ts) \<subseteq> 
+        \<Union> ((\<lambda>(_,_,_,_,_,\<O>,_).  \<O>) ` set (ts[i := (p',is',xs',sb',\<D>',\<O>',\<R>')]))"
+
+    apply (auto simp add: in_set_conv_nth nth_list_update split: if_split_asm)
+    subgoal for x p'' is'' xs'' sb'' \<D>''  \<O>'' \<R>'' j
+    apply (case_tac "j=i")
+    apply  (rule_tac x="(p',is',xs',sb',\<D>',\<O>',\<R>')" in bexI)
+    apply   fastforce
+    apply  (fastforce simp add: in_set_conv_nth)
+    apply (rule_tac x="(p'',is'',xs'',sb'',\<D>'',\<O>'',\<R>'')" in bexI)
+    apply  fastforce
+    apply (fastforce simp add: in_set_conv_nth)
+    done 
+    done
+  hence "- \<Union> ((\<lambda>(_,_,_,_,_,\<O>,_).  \<O>) ` set (ts[i := (p',is',xs',sb',\<D>',\<O>',\<R>')])) \<subseteq> 
+         - \<Union> ((\<lambda>(_,_,_,_,_,\<O>,_).  \<O>) ` set ts)"
+    by blast
+  also note unowned_shared
+  finally
+  show ?thesis
+    by (unfold_locales)
+qed
+
+lemma (in unowned_shared) a_unowned_by_others_owned_or_shared:
+  assumes i_bound: "i < length ts"
+  assumes ts_i: "ts!i = (p,is,\<theta>,sb,\<D>,\<O>,\<R>)"
+  assumes a_unowned_others:
+        "\<forall>j<length (map owned ts). i \<noteq> j \<longrightarrow> 
+          (let \<O>\<^sub>j = (map owned ts)!j in a \<notin> \<O>\<^sub>j)" 
+
+  shows "a \<in> \<O> \<or> a \<in> dom \<S>"
+proof -
+  {
+    fix j p\<^sub>j is\<^sub>j \<O>\<^sub>j \<R>\<^sub>j \<D>\<^sub>j xs\<^sub>j sb\<^sub>j
+    assume a_unowned: "a \<notin> \<O>"
+    assume j_bound: "j < length ts"
+    assume jth: "ts!j = (p\<^sub>j,is\<^sub>j,xs\<^sub>j, sb\<^sub>j, \<D>\<^sub>j, \<O>\<^sub>j,\<R>\<^sub>j)"
+    have "a \<notin> \<O>\<^sub>j"
+    proof (cases "i=j")
+      case True with a_unowned ts_i jth
+      show ?thesis
+	by auto
+    next
+      case False
+      from a_unowned_others [rule_format, of j] j_bound jth False
+      show ?thesis
+	by auto
+    qed
+  } note lem = this
+  {
+    assume "a \<notin> \<O>"
+    from lem [OF this]
+    have "a \<in>  - \<Union> ((\<lambda>(_,_,_,_,_,\<O>,_).  \<O>) ` set ts)"
+      by (fastforce simp add: in_set_conv_nth)
+    with unowned_shared have "a \<in> dom \<S>"
+      by auto
+  } 
+  then
+  show ?thesis
+    by auto
+qed
+
+lemma (in unowned_shared) unowned_shared': 
+  assumes notin: "\<forall>i < length ts. a \<notin> owned (ts!i)"
+  shows "a \<in> dom \<S>"
+proof -
+  from notin  have "a \<in> - \<Union>((\<lambda>(_, _, _, _, _, \<O>, _). \<O>) ` set ts)"
+    by (force simp add: in_set_conv_nth)
+  with unowned_shared show ?thesis by blast
+qed
+
+lemma unowned_shared_def': "unowned_shared \<S> ts = (\<forall>a. (\<forall>i < length ts. a \<notin> owned (ts!i)) \<longrightarrow> a \<in> dom \<S>)"
+apply rule
+apply  clarsimp
+apply (rule unowned_shared.unowned_shared')
+apply   fastforce
+apply  fastforce
+apply (unfold unowned_shared_def)
+apply clarsimp
+subgoal for x
+apply (drule_tac x=x in spec)
+apply (erule impE)
+apply  clarsimp
+apply  (case_tac "(ts!i)")
+apply  (drule nth_mem)
+apply auto
+done
+done 
+
+definition
+ "initial cfg \<equiv> let (ts,m,\<S>) = cfg 
+             in unowned_shared \<S> ts \<and>
+                (\<forall>i < length ts. let (p,is,\<theta>,x,\<D>,\<O>,\<R>) = ts!i in 
+                  \<R> = Map.empty )"
+
+lemma initial_empty_rels: "initial (ts,m,\<S>) \<Longrightarrow> \<forall>\<R> \<in> set (map released ts). \<R> = Map.empty"
+  by (fastforce simp add: initial_def simp add: in_set_conv_nth)
+
+lemma initial_unowned_shared: "initial (ts,m,\<S>) \<Longrightarrow> unowned_shared \<S> ts"
+  by (fastforce simp add: initial_def )
+
+lemma initial_safe_free_flowing_implies_safe_delayed:
+assumes init: "initial c" 
+assumes safe: "safe_free_flowing c"
+shows "safe_delayed c"
+proof -
+  obtain ts \<S> m where c: "c=(ts,m,\<S>)" by (cases c)
+  from initial_empty_rels [OF init [simplified c]]
+  have rels_empty: "\<forall>\<R>\<in>set (map released ts). \<R> = Map.empty".
+  from initial_unowned_shared [OF init [simplified c]] have "unowned_shared \<S> ts"
+    by auto
+  hence us:"(\<forall>a. (\<forall>i < length (map owned ts). a \<notin> (map owned ts!i)) \<longrightarrow> a \<in> dom \<S>)"
+    by (simp add:unowned_shared_def')
+  {
+    fix i p "is" \<theta> x \<D> \<O> \<R>
+    assume i_bound: "i < length ts"
+    assume ts_i: "ts!i = (p,is,\<theta>,x,\<D>,\<O>,\<R>)"
+    have "map owned ts,map released ts,i \<turnstile>(is,\<theta>,m,\<D>,\<O>,\<S>)\<surd>"
+    proof -
+      from safeE [OF safe [simplified c] i_bound ts_i] 
+      have "map owned ts,i\<turnstile>(is, \<theta>, m, \<D>, \<O>, \<S>)\<surd>".
+      from memop_empty_rels_safe_free_flowing_implies_safe_delayed [OF this rels_empty _ us] i_bound ts_i
+      show ?thesis
+        by simp
+    qed
+  }
+  then show ?thesis 
+    by (fastforce simp add: c safe_delayed_def)
+qed
+
+
+locale program_progress = program +
+assumes progress: "\<theta>\<turnstile> p \<rightarrow>\<^sub>p (p',is') \<Longrightarrow> p' \<noteq> p \<or> is' \<noteq> []"
+or make the scheduling of threads explicit, such that we can directly express that `thread i does not make a step'.
+\<close>
+assumes safe_delayed_undo: "safe_delayed (u_ts,u_m,u_shared)" \<comment> \<open>proof should also work with weaker @{const safe_free_flowing}\<close>
+         \<comment> \<open>thread i is unchanged\<close>
+         \<comment> \<open>other threads are simulated\<close>
+fixes c       \<comment> \<open>enumeration of configurations: @{text "c n  \<Rightarrow>\<^sub>d c (n + 1) ... \<Rightarrow>\<^sub>d c (n + k)"}\<close> 
+fixes n::nat  \<comment> \<open>starting index\<close>
+fixes k::nat  \<comment> \<open>steps\<close>
+  "\<comment> \<open>thread i never executes\<close>  
+  \<comment> \<open>thread i has a last step in the trace\<close>
+      note \<open>read_only \<S> \<subseteq> read_only \<S>'\<close>
+    note \<open>read_only \<S> \<subseteq> read_only \<S>'\<close>
+\<comment> \<open>Nice lemma, ugly proof.\<close>
+text \<open>The value stored in a non-volatile @{const "Read\<^sub>s\<^sub>b"} in the store-buffer has to match the
+ last value written to the same address in the store buffer 
+ or the memory content if there is no corresponding write in the store buffer.
+ No volatile read may follow a volatile write.
+ Volatile reads in the store buffer may refer to a stale value:
+  e.g. imagine one writer and multiple readers
+\<close>
+  \<comment> \<open>We could be even more restrictive here, only the non volatile reads that are
+        not buffered in @{term "sb"} have to be the same.\<close>
+  note mem_eq = \<open>\<forall>a \<in> A. m' a = m a\<close>
+  note subset = \<open>outstanding_refs (is_non_volatile_Read\<^sub>s\<^sub>b) (r#sb) \<subseteq> A\<close>
+  note consis_m = \<open>reads_consistent pending_write \<O> m (r#sb)\<close>
+  \<comment> \<open>We could be even more restrictive here, only the non volatile reads that are
+        not buffered in @{term "sb"} have to be the same.\<close>
+  note mem_eq = \<open>\<forall>a \<in> A. m' a = m a\<close>
+  note subset = \<open>outstanding_refs (is_volatile_Read\<^sub>s\<^sub>b) (r#sb) \<subseteq> A\<close>
+  note consis_m = \<open>volatile_reads_consistent m (r#sb)\<close>
+text \<open>\<open>Read\<^sub>s\<^sub>bs\<close> and writes have in the store-buffer have to conform to the 

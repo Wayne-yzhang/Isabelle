@@ -1,0 +1,533 @@
+theory Multisets_Extras imports 
+  "HOL-Library.Multiset" 
+  Card_Partitions.Set_Partition
+  Nested_Multisets_Ordinals.Multiset_More 
+  Nested_Multisets_Ordinals.Duplicate_Free_Multiset
+  "HOL-Library.Disjoint_Sets"
+begin
+
+
+
+lemma card_Pow_filter_one: 
+  assumes "finite A" 
+  shows "card {x \<in> Pow A . card x = 1}  = card (A)"
+  using assms 
+proof (induct rule: finite_induct)
+  case empty
+  then show ?case by auto 
+next
+  case (insert x F)
+  have "Pow (insert x F) = Pow F \<union> insert x ` Pow F"
+    by (simp add: Pow_insert) 
+  then have split: "{y \<in> Pow (insert x F) . card y = 1} = 
+      {y \<in> (Pow F) . card y = 1} \<union> {y \<in> (insert x ` Pow F) . card y = 1}"
+    by blast 
+  have "\<And> y . y \<in> (insert x ` Pow F) \<Longrightarrow> finite y"
+    using finite_subset insert.hyps(1) by fastforce 
+  then have single: "\<And> y . y \<in> (insert x ` Pow F) \<Longrightarrow> card y = 1 \<Longrightarrow> y = {x}"
+    by (metis card_1_singletonE empty_iff image_iff insertCI insertE) 
+  then have "card {y \<in> (insert x ` Pow F) . card y = 1} = 1"
+    by (metis (full_types, lifting) Collect_empty_eq_bot Pow_bottom bot_empty_eq  mem_Collect_eq)  
+  then have " {y \<in> (insert x ` Pow F) . card y = 1} = {{x}}"
+    using single card_1_singletonE card_eq_0_iff
+    by (smt empty_Collect_eq mem_Collect_eq singletonD zero_neq_one) 
+  then have split2:"{y \<in> Pow (insert x F) . card y = 1} = {y \<in> (Pow F) . card y = 1} \<union> {{x}}" 
+    using split by simp
+  then show ?case 
+  proof (cases "x \<in> F")
+    case True
+    then show ?thesis using insert.hyps(2) by auto
+  next
+    case False
+    then have "{y \<in> (Pow F) . card y = 1} \<inter> {{x}} = {}" by blast
+    then have fact:"card {y \<in> Pow (insert x F) . card y = 1} = 
+        card {y \<in> (Pow F) . card y = 1} + card {{x}}" 
+      using split2 card_Un_disjoint insert.hyps(1) by auto 
+    have "card (insert x F) = card F + 1" 
+      using False card_insert_disjoint by (metis Suc_eq_plus1 insert.hyps(1)) 
+    then show ?thesis using fact insert.hyps(3) by auto
+  qed
+qed
+
+lemma elem_exists_non_empty_set:
+  assumes "card A > 0"
+  obtains x where "x \<in> A"
+  using assms card_gt_0_iff by fastforce
+
+lemma set_self_img_compr: "{a | a . a \<in> A} = A"
+  by blast 
+
+lemma card_subset_not_gt_card: "finite A \<Longrightarrow> card ps > card A \<Longrightarrow> \<not> (ps \<subseteq> A)"
+  using card_mono leD by auto
+
+lemma card_inter_lt_single: "finite A \<Longrightarrow> finite B \<Longrightarrow> card (A \<inter> B) \<le> card A"
+  by (simp add: card_mono)
+
+lemma set_diff_non_empty_not_subset: 
+  assumes "A \<subseteq> (B - C)"
+  assumes "C \<noteq> {}"
+  assumes "A \<noteq> {}" 
+  assumes "B \<noteq> {}"
+  shows " \<not> (A \<subseteq> C)"
+proof (rule ccontr)
+  assume " \<not> \<not> (A \<subseteq> C)"
+  then have a: "\<And> x . x \<in> A \<Longrightarrow> x \<in> C" by blast
+  thus False using a assms by blast 
+qed
+
+lemma set_card_diff_ge_zero: "finite A \<Longrightarrow> finite B \<Longrightarrow> A \<noteq> B \<Longrightarrow> card A = card B \<Longrightarrow> 
+    card (A - B) > 0"
+  by (meson Diff_eq_empty_iff card_0_eq card_subset_eq finite_Diff neq0_conv)
+
+lemma set_filter_diff: "{a \<in> A . P a } - {x} = {a \<in> (A - {x}) . (P a )}"
+  by (auto)
+
+lemma set_filter_diff_card: "card ({a \<in> A . P a } - {x}) = card {a \<in> (A - {x}) . (P a )}"
+  by (simp add: set_filter_diff)
+
+lemma obtain_subset_with_card_int_n:
+  assumes "(n ::int) \<le> of_nat (card S)"
+  assumes "(n ::int) \<ge> 0"
+  obtains T where "T \<subseteq> S" "of_nat (card T) = (n ::int)" "finite T"
+  using obtain_subset_with_card_n assms
+  by (metis nonneg_int_cases of_nat_le_iff)
+
+lemma transform_filter_img_empty_rm: 
+  assumes "\<And> g . g \<in> G \<Longrightarrow> g \<noteq> {}"
+  shows "{g - {x} | g. g \<in> G \<and> g \<noteq> {x}} = {g - {x} | g. g \<in> G } - {{}}"
+proof -
+  let ?f = "\<lambda> g . g - {x}"
+  have "\<And> g . g \<in> G \<Longrightarrow> g \<noteq> {x} \<longleftrightarrow> ?f g \<noteq> {}" using assms
+    by (metis Diff_cancel Diff_empty Diff_insert0 insert_Diff) 
+  thus ?thesis by auto
+qed
+
+lemma bij_betw_inter_subsets: "bij_betw f A B \<Longrightarrow> a1 \<subseteq> A \<Longrightarrow> a2 \<subseteq> A 
+    \<Longrightarrow> f ` (a1 \<inter> a2) = (f ` a1) \<inter> (f ` a2)"
+  by (meson bij_betw_imp_inj_on inj_on_image_Int)
+
+
+lemma partition_on_remove_pt: 
+  assumes "partition_on A G"
+  shows "partition_on (A - {x}) {g - {x} | g. g \<in> G \<and> g \<noteq> {x}}"
+proof (intro partition_onI) 
+  show "\<And>p. p \<in> {g - {x} |g. g \<in> G \<and> g \<noteq> {x}} \<Longrightarrow> p \<noteq> {}"
+    using assms partition_onD3 subset_singletonD by force
+  let ?f =  "(\<lambda> g . g - {x})"
+  have un_img: "\<Union>({?f g | g. g \<in> G }) = ?f (\<Union> G)" by blast
+  have empty: "\<Union> {g - {x} |g. g \<in> G \<and> g \<noteq> {x}} = \<Union>({g - {x} | g. g \<in> G } - {{}})"
+    by blast 
+  then have "\<Union>({g - {x} | g. g \<in> G } - {{}}) = \<Union>({g - {x} | g. g \<in> G })" by blast
+  then show " \<Union> {g - {x} |g. g \<in> G \<and> g \<noteq> {x}} = A - {x}" using partition_onD1 assms un_img
+    by (metis empty) 
+  then show "\<And>p p'.
+       p \<in> {g - {x} |g. g \<in> G \<and> g \<noteq> {x}} \<Longrightarrow>
+       p' \<in> {g - {x} |g. g \<in> G \<and> g \<noteq> {x}} \<Longrightarrow> p \<noteq> p' \<Longrightarrow> p \<inter> p' = {}"
+  proof -
+    fix p1 p2
+    assume p1: "p1 \<in> {g - {x} |g. g \<in> G \<and> g \<noteq> {x}}" 
+       and p2: "p2 \<in> {g - {x} |g. g \<in> G \<and> g \<noteq> {x}}"
+       and ne: "p1 \<noteq> p2"
+    obtain p1' p2' where orig1: "p1 = p1' - {x}" and orig2: "p2 = p2' - {x}" 
+       and origne: "p1' \<noteq> p2'" and ne1: "p1' \<noteq> {x}" and ne2:"p2' \<noteq> {x}" and ing1: "p1' \<in> G" 
+       and ing2: "p2' \<in> G"
+      using p1 p2 using mem_Collect_eq ne by blast 
+    then have "p1' \<inter> p2' = {}" using assms partition_onD2 ing1 ing2 origne disjointD by blast
+    thus "p1 \<inter> p2 = {}" using orig1 orig2 by blast
+  qed
+qed
+
+lemma partition_on_cart_prod:
+  assumes "card I > 0"
+  assumes "A \<noteq> {}"
+  assumes "G \<noteq> {}"
+  assumes "partition_on A G"
+  shows "partition_on (A \<times> I) {g \<times> I |g. g \<in> G}"
+proof (intro partition_onI)
+  show "\<And>p. p \<in> {g \<times> I |g. g \<in> G} \<Longrightarrow> p \<noteq> {}"
+    using assms(1) assms(4) partition_onD3 by fastforce
+  show "\<Union> {g \<times> I |g. g \<in> G} = A \<times> I"
+    by (metis Setcompr_eq_image Sigma_Union assms(4) partition_onD1)
+  show "\<And>p p'. p \<in> {g \<times> I |g. g \<in> G} \<Longrightarrow> p' \<in> {g \<times> I |g. g \<in> G} \<Longrightarrow> p \<noteq> p' \<Longrightarrow> p \<inter> p' = {}"
+    by (smt (verit, best) Sigma_Int_distrib1 Sigma_empty1 assms(4) mem_Collect_eq partition_onE)
+qed
+
+
+
+lemma count_size_set_repr: "size {# x \<in># A . x = g#} = count A g"
+  by (simp add: filter_eq_replicate_mset) 
+
+lemma mset_nempty_set_nempty: "A \<noteq> {#} \<longleftrightarrow> (set_mset A) \<noteq> {}"
+  by simp
+
+lemma mset_size_ne0_set_card: "size A > 0 \<Longrightarrow> card (set_mset A) > 0"
+  using mset_nempty_set_nempty by fastforce 
+
+lemma set_count_size_min: "count A a \<ge> n \<Longrightarrow> size A \<ge> n"
+  by (metis (full_types) count_le_replicate_mset_subset_eq size_mset_mono size_replicate_mset)
+
+lemma card_size_filter_eq: "finite A \<Longrightarrow>  card {a \<in> A . P a} = size {#a \<in># mset_set A . P a#}"
+  by simp
+
+lemma size_multiset_set_mset_const_count:
+  assumes "card (set_mset A) = ca"
+  assumes "\<And>p. p \<in># A \<Longrightarrow> count A p = ca2"
+  shows "size A =  (ca * ca2)"
+proof -
+  have "size A = (\<Sum> p \<in> (set_mset A) . count A p)" using size_multiset_overloaded_eq by auto
+  then have "size A = (\<Sum> p \<in> (set_mset A) . ca2)" using assms by simp
+  thus ?thesis using assms(1) by auto 
+qed
+
+lemma size_multiset_int_count:
+  assumes "of_nat (card (set_mset A)) = (ca :: int)"
+  assumes "\<And>p. p \<in># A \<Longrightarrow> of_nat (count A p) = (ca2 :: int)"
+  shows "of_nat (size A) =  ((ca :: int) * ca2)"
+proof -
+  have "size A = (\<Sum> p \<in> (set_mset A) . count A p)" using size_multiset_overloaded_eq by auto
+  then have "of_nat (size A) = (\<Sum> p \<in> (set_mset A) . ca2)" using assms by simp
+  thus ?thesis using assms(1) by auto 
+qed
+
+lemma mset_union_size: "size (A \<union># B) = size (A) + size (B - A)"
+  by (simp add: union_mset_def)
+
+lemma mset_union_size_inter: "size (A \<union># B) = size (A) + size B - size (A \<inter># B)"
+  by (metis diff_add_inverse2 size_Un_Int) 
+
+
+lemma repeat_mset_size [simp]: "size (repeat_mset n A) = n * size A"
+  by (induction n) auto
+
+lemma repeat_mset_subset_in:
+  assumes "\<And> a . a \<in># A \<Longrightarrow> a \<subseteq> B"
+  assumes "X \<in># repeat_mset n A"
+  assumes "x \<in> X"
+  shows " x \<in> B"
+  using assms by (induction n) auto
+
+lemma repeat_mset_not_empty: "n > 0 \<Longrightarrow> A \<noteq> {#} \<Longrightarrow> repeat_mset n A \<noteq> {#}"
+  by (induction n) auto
+
+lemma elem_in_repeat_in_original: "a \<in># repeat_mset n A \<Longrightarrow> a \<in># A"
+  by (metis count_inI count_repeat_mset in_countE mult.commute mult_zero_left nat.distinct(1))
+
+lemma elem_in_original_in_repeat: "n > 0 \<Longrightarrow> a \<in># A \<Longrightarrow> a \<in># repeat_mset n A"
+  by (metis count_greater_zero_iff count_repeat_mset nat_0_less_mult_iff)
+
+
+lemma multiset_add_filter_size: "size {# a \<in># (A1 + A2) . P a #} = size {# a \<in># A1 . P a #} + 
+    size {# a \<in># A2 . P a #}" 
+  by simp
+
+lemma size_filter_neg: "size {#a \<in># A . P a #} = size A - size {# a \<in># A . \<not> P a #}"
+  using size_filter_mset_lesseq size_union union_filter_mset_complement
+  by (metis ordered_cancel_comm_monoid_diff_class.le_imp_diff_is_add) 
+
+lemma filter_filter_mset_cond_simp: 
+  assumes "\<And> a . P a \<Longrightarrow> Q a"
+  shows "filter_mset P A = filter_mset P (filter_mset Q A)"
+proof -
+  have "filter_mset P (filter_mset Q A) = filter_mset (\<lambda> a. Q a \<and> P a) A" 
+    by (simp add: filter_filter_mset)
+  thus ?thesis using assms
+    by (metis (mono_tags, lifting) filter_mset_cong)
+qed
+
+lemma filter_filter_mset_ss_member: "filter_mset (\<lambda> a . {x, y} \<subseteq> a) A = 
+  filter_mset (\<lambda> a . {x, y} \<subseteq> a) (filter_mset (\<lambda> a . x \<in> a) A)"
+proof - 
+  have filter: "filter_mset (\<lambda> a . {x, y} \<subseteq> a) (filter_mset (\<lambda> a . x \<in> a) A) = 
+    filter_mset (\<lambda> a . x \<in> a \<and> {x, y} \<subseteq> a) A" by (simp add: filter_filter_mset)
+  have "\<And> a. {x, y} \<subseteq> a \<Longrightarrow> x \<in> a" by simp
+  thus ?thesis using filter by auto
+qed
+
+lemma multiset_image_do_nothing: "(\<And> x .x \<in># A \<Longrightarrow> f x = x) \<Longrightarrow> image_mset f A = A"
+  by (induct A) auto
+
+lemma set_mset_filter: "set_mset {# f a . a \<in># A #} = {f a | a. a \<in># A}"
+  by (simp add: Setcompr_eq_image)  
+
+lemma mset_exists_imply: "x \<in># {# f a . a \<in># A #} \<Longrightarrow> \<exists> y \<in># A . x = f y"
+  by auto
+
+lemma filter_mset_image_mset:
+  "filter_mset P (image_mset f A) = image_mset f (filter_mset (\<lambda>x. P (f x)) A)"
+  by (induction A) auto
+
+lemma mset_bunion_filter: "{# a \<in># A . P a \<or> Q a #} = {# a \<in># A . P a #} \<union># {# a \<in># A . Q a #}" 
+  by (rule multiset_eqI) simp
+
+lemma mset_inter_filter: "{# a \<in># A . P a \<and> Q a #} = {# a \<in># A . P a #} \<inter># {# a \<in># A . Q a #}" 
+  by (rule multiset_eqI) simp
+
+lemma image_image_mset: "image_mset (\<lambda> x . f x) (image_mset (\<lambda> y . g y) A) = 
+    image_mset (\<lambda> x. f (g x)) A"
+  by simp
+
+
+lemma mset_big_union_obtain: 
+  assumes "x \<in># \<Sum>\<^sub># A"
+  obtains a where "a \<in># A" and "x \<in># a"
+  using assms by blast
+
+lemma size_big_union_sum: "size (\<Sum>\<^sub># (M :: 'a multiset multiset)) = (\<Sum>x \<in>#M . size x)"
+  by (induct M) auto
+
+
+lemma size_cartesian_product_singleton [simp]: "size ({#a#} \<times># B) = size B" 
+  by (simp add: Times_mset_single_left)  
+
+lemma size_cartesian_product_singleton_right [simp]: "size (A \<times># {#b#}) = size A"
+  by (simp add: Times_mset_single_right)
+
+lemma size_cartesian_product_empty [simp]: "size (A \<times># {#}) = 0"
+  by simp
+
+lemma size_add_elem_step_eq: 
+  assumes "size (A \<times># B) = size A * size B" 
+  shows "size (add_mset x A \<times># B) = size (add_mset x A) * size B"
+proof -
+  have "(add_mset x A \<times># B) = A \<times># B + {#x#} \<times># B"
+    by (metis Sigma_mset_plus_distrib1 add_mset_add_single) 
+  then have "size (add_mset x A \<times># B) = size (A \<times># B) + size B" by auto
+  also have "... = size A * size B + size B"
+    by (simp add: assms)
+  finally have "size (add_mset x A \<times># B) = (size A + 1) * size B"
+    by auto
+  thus ?thesis by simp
+qed
+
+lemma size_cartesian_product: "size (A \<times># B) = size A * size B"
+  by (induct A) (simp_all add: size_add_elem_step_eq)
+ 
+lemma cart_prod_distinct_mset:
+  assumes assm1: "distinct_mset A"
+  assumes assm2: "distinct_mset B"
+  shows "distinct_mset (A \<times># B)"
+  unfolding distinct_mset_count_less_1
+proof (rule allI)
+  fix x
+  have count_mult: "count (A \<times># B) x = count A (fst x) * count B (snd x)" 
+    using count_Sigma_mset by (metis prod.exhaust_sel) 
+  then have "count A (fst x) * count B (snd x) \<le> 1" using assm1 assm2 
+    unfolding distinct_mset_count_less_1 using mult_le_one by blast 
+  thus "count (A \<times># B) x \<le> 1" using count_mult by simp
+qed
+
+lemma cart_product_single_intersect: "x1 \<noteq> x2 \<Longrightarrow> ({#x1#} \<times># A) \<inter># ({#x2#} \<times># B) = {#}"
+  using multiset_inter_single by fastforce
+
+lemma size_union_distinct_cart_prod: "x1 \<noteq> x2 \<Longrightarrow> size (({#x1#} \<times># A) \<union># ({#x2#} \<times># B)) = 
+    size ({#x1#} \<times># A) + size ({#x2#} \<times># B)"
+  by (simp add: cart_product_single_intersect size_Un_disjoint) 
+
+lemma size_Union_distinct_cart_prod: "distinct_mset M \<Longrightarrow> 
+    size (\<Sum>p\<in>#M. ({#p#} \<times># B)) = size (M) * size (B)"
+  by (induction M) auto
+
+lemma size_Union_distinct_cart_prod_filter: "distinct_mset M \<Longrightarrow> 
+    (\<And> p . p \<in># M \<Longrightarrow> size ({# b \<in># B . P p b #}) = c) \<Longrightarrow> 
+    size (\<Sum>p\<in>#M. ({#p#} \<times># {# b \<in># B . P p b #})) = size (M) * c"
+  by (induction M) auto
+
+lemma size_Union_distinct_cart_prod_filter2: "distinct_mset V \<Longrightarrow> 
+    (\<And> b . b \<in># B \<Longrightarrow> size ({# v \<in># V . P v b #}) = c) \<Longrightarrow> 
+    size (\<Sum>b\<in>#B. ( {# v \<in># V . P v b #} \<times># {#b#})) = size (B) * c"
+  by (induction B) auto
+
+lemma cart_product_add_1: "(add_mset a A) \<times># B = ({#a#} \<times># B) + (A \<times># B)"
+  by (metis Sigma_mset_plus_distrib1 add_mset_add_single union_commute)
+
+lemma cart_product_add_1_filter: "{#m \<in># ((add_mset a M) \<times># N) . P m #} = 
+    {#m \<in># (M \<times># N) . P m #} + {#m \<in># ({#a#} \<times>#  N) . P m #}"
+  unfolding add_mset_add_single [of a M] Sigma_mset_plus_distrib1
+  by (simp add: Times_mset_single_left)
+
+lemma cart_product_add_1_filter2: "{#m \<in># (M \<times># (add_mset b N)) . P m #} = 
+    {#m \<in># (M \<times># N) . P m #} + {#m \<in># (M \<times>#  {#b#}) . P m #}"
+  unfolding add_mset_add_single [of b N] Sigma_mset_plus_distrib1
+  by (metis Times_insert_left Times_mset_single_right add_mset_add_single filter_union_mset)
+
+lemma cart_prod_singleton_right_gen: 
+  assumes "\<And> x . x \<in># (A \<times># {#b#}) \<Longrightarrow> P x \<longleftrightarrow> Q (fst x)"
+  shows "{#x \<in># (A \<times># {#b#}). P x#} = {# a \<in># A . Q a#} \<times># {#b#}"
+  using assms
+proof (induction A)
+  case empty
+  then show ?case by simp
+next
+  case (add x A)
+  have "add_mset x A \<times># {#b#} = add_mset (x, b) (A \<times># {#b#})"
+    by (simp add: Times_mset_single_right) 
+  then have lhs: "filter_mset P (add_mset x A \<times># {#b#}) = filter_mset P (A \<times># {#b#}) + 
+    filter_mset P {#(x, b)#}" by simp
+  have rhs: "filter_mset Q (add_mset x A) \<times># {#b#} = filter_mset Q A \<times># {#b#} + 
+    filter_mset Q {#x#} \<times># {#b#}"
+    by (metis Sigma_mset_plus_distrib1 add_mset_add_single filter_union_mset)
+  have "filter_mset P {#(x, b)#} = filter_mset Q {#x#} \<times># {#b#}"
+    using add.prems by fastforce
+  then show ?case using lhs rhs add.IH add.prems by force 
+qed
+
+lemma cart_prod_singleton_left_gen: 
+  assumes "\<And> x . x \<in># ({#a#} \<times># B) \<Longrightarrow> P x \<longleftrightarrow> Q (snd x)"
+  shows "{#x \<in># ({#a#} \<times># B). P x#} = {#a#} \<times># {#b \<in># B . Q b#}"
+  using assms
+proof (induction B)
+  case empty
+  then show ?case by simp
+next
+  case (add x B)
+  have lhs: "filter_mset P ({#a#} \<times># add_mset x B) = filter_mset P ({#a#} \<times># B) + 
+    filter_mset P {#(a, x)#}"
+    by (simp add: cart_product_add_1_filter2) 
+  have rhs: "{#a#} \<times># filter_mset Q (add_mset x B) = {#a#} \<times># filter_mset Q B + 
+    {#a#} \<times># filter_mset Q {#x#}"
+    using add_mset_add_single filter_union_mset by (metis Times_mset_single_left image_mset_union) 
+  have "filter_mset P {#(a, x)#} = {#a#} \<times># filter_mset Q {#x#}"
+    using add.prems by fastforce
+  then show ?case using lhs rhs add.IH add.prems by force 
+qed
+
+lemma cart_product_singleton_left: "{#m \<in># ({#a#} \<times>#  N) . fst m \<in> snd m #} = 
+  ({#a#} \<times># {# n \<in># N . a \<in> n #})" (is "?A = ?B")
+proof -
+  have stmt: "\<And>m. m \<in># ({#a#} \<times># N) \<Longrightarrow> fst m \<in> snd m \<longleftrightarrow> a \<in> snd m"
+    by (simp add: mem_Times_mset_iff)
+  thus ?thesis by (metis (no_types, lifting) Sigma_mset_cong stmt cart_prod_singleton_left_gen)
+qed
+
+lemma cart_product_singleton_right: "{#m \<in># (N \<times># {#b#}) . fst m \<in> snd m #} = 
+  ({# n \<in># N . n \<in> b #} \<times># {# b #})" (is "?A = ?B")
+proof - 
+  have stmt: "\<And>m. m \<in># (N \<times># {#b#}) \<Longrightarrow> fst m \<in> snd m \<longleftrightarrow> fst m \<in>b"
+    by (simp add: mem_Times_mset_iff)
+  thus ?thesis by (metis (no_types, lifting) Sigma_mset_cong stmt cart_prod_singleton_right_gen)
+qed
+
+lemma cart_product_add_1_filter_eq: "{#m \<in># ((add_mset a M) \<times># N) . (fst m \<in> snd m) #} = 
+    {#m \<in># (M \<times># N) . (fst m \<in> snd m) #} + ({#a#} \<times># {# n \<in># N . a \<in> n #})"
+  unfolding add_mset_add_single [of a M] Sigma_mset_plus_distrib1
+  using cart_product_singleton_left cart_product_add_1_filter by fastforce 
+
+lemma cart_product_add_1_filter_eq_mirror: "{#m \<in># M \<times># (add_mset b N) . (fst m \<in> snd m) #} = 
+    {#m \<in># (M \<times># N) . (fst m \<in> snd m) #} + ({# n \<in># M . n \<in> b #} \<times># {#b#})"
+  by (metis (no_types) add_mset_add_single cart_product_add_1_filter2 cart_product_singleton_right) 
+
+lemma set_break_down_left:
+  shows "{# m \<in># (M \<times># N) . (fst m) \<in> (snd m)  #} = (\<Sum>m\<in>#M. ({#m#} \<times># {#n \<in># N. m \<in> n#}))"
+  by (induction M) (auto simp add: cart_product_add_1_filter_eq)
+
+lemma set_break_down_right:
+  shows "{# x \<in># M \<times># N . (fst x) \<in> (snd x)  #} = (\<Sum>n\<in>#N. ({#m \<in># M. m \<in> n#} \<times># {#n#}))"
+  by (induction N) (auto simp add: cart_product_add_1_filter_eq_mirror)
+
+
+lemma sum_over_fun_eq: 
+  assumes "\<And> x . x \<in># A \<Longrightarrow> f x = g x" 
+  shows "(\<Sum>x \<in># A . f(x)) = (\<Sum> x \<in># A . g (x))"
+  using assms by auto
+
+lemma sum_mset_add_diff_nat: 
+  fixes x:: 'a and  f g :: "'a \<Rightarrow> nat"
+  assumes "\<And>x . x \<in># A \<Longrightarrow> f x \<ge> g x"
+  shows "(\<Sum> x \<in># A. f x - g x) = (\<Sum> x \<in># A . f x) -  (\<Sum> x \<in># A . g x)"
+  using assms by (induction A) (simp_all add: sum_mset_mono)
+
+lemma sum_mset_add_diff_int: 
+  fixes x:: 'a and  f g :: "'a \<Rightarrow> int"
+  shows "(\<Sum> x \<in># A. f x - g x) = (\<Sum> x \<in># A . f x) -  (\<Sum> x \<in># A . g x)"
+  by (induction A) (simp_all add: sum_mset_mono)
+
+context ring_1
+begin
+
+lemma sum_mset_add_diff: "(\<Sum> x \<in># A. f x - g x) = (\<Sum> x \<in># A . f x) -  (\<Sum> x \<in># A . g x)"
+  by (induction A) (auto simp add: algebra_simps)
+
+end
+
+context ordered_semiring
+begin
+
+lemma sum_mset_ge0:"(\<And> x . f x \<ge> 0) \<Longrightarrow> (\<Sum> x \<in># A. f x ) \<ge> 0"
+proof (induction A)
+  case empty
+  then show ?case by simp
+next
+  case (add x A)
+  then have hyp2: "0 \<le> sum_mset (image_mset f A)" by blast
+  then have " sum_mset (image_mset f (add_mset x A)) =  sum_mset (image_mset f  A) + f x"
+    by (simp add: add_commute) 
+  then show ?case
+    by (simp add: add.IH add.prems)
+qed
+
+lemma sum_order_add_mset: "(\<And> x . f x \<ge> 0) \<Longrightarrow> (\<Sum> x \<in># A. f x ) \<le> (\<Sum> x \<in># add_mset a A. f x )"
+  by (simp add: local.add_increasing)
+
+lemma sum_mset_0_left: "(\<And> x . f x \<ge> 0) \<Longrightarrow> (\<Sum> x \<in># A. f x ) = 0 \<Longrightarrow> (\<forall> x \<in># A .f x = 0)"
+  apply (induction A)
+   apply auto
+    using local.add_nonneg_eq_0_iff sum_mset_ge0 apply blast
+    using local.add_nonneg_eq_0_iff sum_mset_ge0 by blast
+
+lemma sum_mset_0_iff_ge_0:
+  assumes "(\<And> x . f x \<ge> 0)"
+  shows "(\<Sum> x \<in># A. f x ) = 0 \<longleftrightarrow> (\<forall> x \<in> set_mset A .f x = 0)"
+  using sum_mset_0_left assms by auto 
+
+end
+
+lemma mset_set_size_card_count: "(\<Sum>x \<in># A. x) = (\<Sum>x \<in> set_mset A . x * (count A x))"
+proof (induction A)
+  case empty
+  then show ?case by simp
+next
+  case (add y A)
+  have lhs: "(\<Sum>x\<in>#add_mset y A. x) = (\<Sum>x\<in># A. x) + y" by simp
+  have rhs: "(\<Sum>x\<in>set_mset (add_mset y A). x * count (add_mset y A) x) = 
+      (\<Sum>x\<in>(insert y (set_mset A)) . x * count (add_mset y A) x)"
+    by simp 
+  then show ?case 
+  proof (cases "y \<in># A")
+    case True
+    have x_val: "\<And> x . x \<in> (insert y (set_mset A)) \<Longrightarrow> x \<noteq> y \<Longrightarrow> 
+        x* count (add_mset y A) x = x * (count A x)" 
+      by auto 
+    have y_count: "count (add_mset y A) y = 1 + count A y" 
+      using True count_inI by fastforce
+    then have "(\<Sum>x\<in>set_mset (add_mset y A). x * count (add_mset y A) x) = 
+        (y * (count (add_mset y A) y)) + (\<Sum>x\<in>(set_mset A) - {y}. x * count A x)" 
+      using x_val finite_set_mset sum.cong sum.insert rhs
+      by (smt DiffD1 Diff_insert_absorb insert_absorb mk_disjoint_insert sum.insert_remove) 
+    then have s1: "(\<Sum>x\<in>set_mset (add_mset y A). x * count (add_mset y A) x) = 
+        y + y * (count A y) + (\<Sum>x\<in>(set_mset A) - {y}. x * count A x)" 
+      using y_count by simp
+    then have "(\<Sum>x\<in>set_mset (add_mset y A). x * count (add_mset y A) x) = 
+        y + (\<Sum>x\<in>insert y ((set_mset A) - {y} ) . x * count A x)" 
+      by (simp add: sum.insert_remove) 
+    then have "(\<Sum>x\<in>set_mset (add_mset y A). x * count (add_mset y A) x) = 
+        y + (\<Sum>x\<in>(set_mset A) . x * count A x)"
+      by (simp add:  True insert_absorb)
+    then show ?thesis using lhs add.IH
+      by linarith 
+  next
+    case False
+    have x_val: "\<And> x . x \<in> set_mset A \<Longrightarrow> x* count (add_mset y A) x = x * (count A x)" 
+      using False by auto 
+    have y_count: "count (add_mset y A) y = 1" using False count_inI by fastforce
+    have lhs: "(\<Sum>x\<in>#add_mset y A. x) = (\<Sum>x\<in># A. x) + y" by simp
+    have "(\<Sum>x\<in>set_mset (add_mset y A). x * count (add_mset y A) x) = 
+        (y * count (add_mset y A) y) + (\<Sum>x\<in>set_mset A. x * count A x)" 
+      using x_val rhs by (metis (no_types, lifting) False finite_set_mset sum.cong sum.insert) 
+    then have "(\<Sum>x\<in>set_mset (add_mset y A). x * count (add_mset y A) x) = 
+        y + (\<Sum>x\<in>set_mset A. x * count A x)" 
+      using y_count by simp 
+    then show ?thesis using lhs add.IH by linarith 
+  qed
+qed
+
+

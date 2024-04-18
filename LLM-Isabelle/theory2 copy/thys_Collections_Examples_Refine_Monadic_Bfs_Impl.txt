@@ -1,0 +1,103 @@
+theory Bfs_Impl
+imports 
+  Refine_Monadic.Breadth_First_Search
+  Collections.Refine_Dflt_Only_ICF
+begin
+
+
+
+
+  definition bfs_impl :: "(nat \<Rightarrow> nat ls) \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> (nat option nres)"
+    where "bfs_impl succ src dst \<equiv> do {
+    (f,_,_,_,d) \<leftarrow> WHILE
+      (\<lambda>(f,V,C,N,d). f=False \<and> \<not> ls.isEmpty C)
+      (\<lambda>(f,V,C,N,d). do {
+        v \<leftarrow> RETURN (the (ls.sel C (\<lambda>_. True))); let C = ls.delete v C;
+        if v=dst then RETURN (True,hs.empty (),ls.empty (),ls.empty (),d)
+        else do {
+          (V,N) \<leftarrow> FOREACH (ls.\<alpha> (succ v)) (\<lambda>w (V,N). 
+            if (\<not> hs.memb w V) then 
+               RETURN (hs.ins w V, ls.ins_dj w N) 
+            else RETURN (V,N)
+          ) (V,N);
+          if (ls.isEmpty C) then do {
+            let C=N; 
+            let N=ls.empty (); 
+            let d=d+1;
+            RETURN (f,V,C,N,d)
+          } else RETURN (f,V,C,N,d)
+        }
+      })
+      (False,hs.sng src,ls.sng src, ls.empty (),0::nat);
+    if f then RETURN (Some d) else RETURN None
+    }"
+
+
+
+  theorem bfs_impl_correct:
+    shows "bfs_impl succ src dst \<le> Graph.bfs_spec (ls.\<alpha>\<circ>succ) src dst"
+  proof -
+    interpret Graph "ls.\<alpha>\<circ>succ"
+      by unfold_locales simp
+
+
+    have "bfs_impl succ src dst \<le> \<Down>Id (Graph.bfs (ls.\<alpha>\<circ>succ) src dst)"
+      unfolding bfs_impl_def bfs_def
+
+      apply (refine_rcg)
+      apply (refine_dref_type)
+
+      apply (simp_all add: refine_hsimp refine_rel_defs
+        hs.correct hs.sng_correct ls.correct ls.sng_correct
+        split: prod.split prod.split_asm)
+      apply (rule inj_on_id)
+      apply (simp_all add: refine_hsimp refine_rel_defs
+        hs.correct hs.sng_correct ls.correct ls.sng_correct
+        split: prod.split prod.split_asm)
+      done
+    also have "\<dots> \<le> bfs_spec src dst"
+      by (simp add: bfs_correct)
+    finally show ?thesis .
+  qed
+
+
+  schematic_goal bfs_code_refine_aux: 
+    "nres_of ?bfs_code \<le> bfs_impl succ src dst"
+    unfolding bfs_impl_def
+    apply (refine_transfer)
+    done
+
+  concrete_definition bfs_code for succ src dst uses bfs_code_refine_aux
+
+  theorem bfs_code_correct:
+    "bfs_code succ src dst = dRETURN None 
+      \<Longrightarrow> \<not>(Graph.conn (ls.\<alpha> \<circ> succ) src dst)" 
+    "bfs_code succ src dst = dRETURN (Some d) 
+      \<Longrightarrow> Graph.conn (ls.\<alpha> \<circ> succ) src dst 
+          \<and> Graph.min_dist (ls.\<alpha> \<circ> succ) src dst = d"
+    "bfs_code succ src dst \<noteq> dFAIL"
+  proof -
+    interpret Graph "ls.\<alpha>\<circ>succ"
+      by unfold_locales simp
+    
+    from order_trans[OF bfs_code.refine bfs_impl_correct, of succ src dst]
+    show "bfs_code succ src dst = dRETURN None 
+      \<Longrightarrow> \<not>(Graph.conn (ls.\<alpha> \<circ> succ) src dst)" 
+      "bfs_code succ src dst = dRETURN (Some d) 
+      \<Longrightarrow> Graph.conn (ls.\<alpha> \<circ> succ) src dst 
+          \<and> Graph.min_dist (ls.\<alpha> \<circ> succ) src dst = d"
+      "bfs_code succ src dst \<noteq> dFAIL"
+      apply (unfold bfs_spec_def)
+      apply (auto split: option.split_asm)
+      done
+  qed
+      
+  export_code bfs_code checking SML
+  export_code bfs_code checking OCaml?
+  export_code bfs_code checking Haskell?
+  export_code bfs_code checking Scala
+
+
+  definition nat_list:: "nat list \<Rightarrow> _" where "nat_list \<equiv> dlist_of_list"
+
+end

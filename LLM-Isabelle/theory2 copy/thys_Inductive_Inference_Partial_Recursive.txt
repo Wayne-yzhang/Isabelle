@@ -1,0 +1,778 @@
+theory Partial_Recursive
+  imports Main "HOL-Library.Nat_Bijection"
+begin
+
+
+
+
+
+
+
+datatype recf =
+  Z
+| S
+| Id nat nat
+| Cn nat recf "recf list"
+| Pr nat recf recf
+| Mn nat recf
+
+fun arity :: "recf \<Rightarrow> nat" where
+  "arity Z = 1"
+| "arity S = 1"
+| "arity (Id m n) = m"
+| "arity (Cn n f gs) = n"
+| "arity (Pr n f g) = Suc n"
+| "arity (Mn n f) = n"
+
+
+fun wellf :: "recf \<Rightarrow> bool" where
+  "wellf Z = True"
+| "wellf S = True"
+| "wellf (Id m n) = (n < m)"
+| "wellf (Cn n f gs) =
+    (n > 0 \<and> (\<forall>g \<in> set gs. arity g = n \<and> wellf g) \<and> arity f = length gs \<and> wellf f)"
+| "wellf (Pr n f g) =
+    (arity g = Suc (Suc n) \<and> arity f = n \<and> wellf f \<and> wellf g)"
+| "wellf (Mn n f) = (n > 0 \<and> arity f = Suc n \<and> wellf f)"
+
+lemma wellf_arity_nonzero: "wellf f \<Longrightarrow> arity f > 0"
+  by (induction f rule: arity.induct) simp_all
+
+lemma wellf_Pr_arity_greater_1: "wellf (Pr n f g) \<Longrightarrow> arity (Pr n f g) > 1"
+  using wellf_arity_nonzero by auto
+
+
+abbreviation recfn :: "nat \<Rightarrow> recf \<Rightarrow> bool" where
+  "recfn n f \<equiv> wellf f \<and> arity f = n"
+
+
+abbreviation divergent :: "nat option \<Rightarrow> bool" ("_ \<up>" [50] 50) where
+  "x \<up> \<equiv> x = None"
+
+abbreviation convergent :: "nat option \<Rightarrow> bool" ("_ \<down>" [50] 50) where
+  "x \<down> \<equiv> x \<noteq> None"
+
+abbreviation convergent_eq :: "nat option \<Rightarrow> nat \<Rightarrow> bool" (infix "\<down>=" 50) where
+  "x \<down>= y \<equiv> x = Some y"
+
+abbreviation convergent_neq :: "nat option \<Rightarrow> nat \<Rightarrow> bool" (infix "\<down>\<noteq>" 50) where
+  "x \<down>\<noteq> y \<equiv> x \<down> \<and> x \<noteq> Some y"
+
+
+
+fun eval_wellf :: "recf \<Rightarrow> nat list \<Rightarrow> nat option" where
+  "eval_wellf Z xs \<down>= 0"
+| "eval_wellf S xs \<down>= Suc (xs ! 0)"
+| "eval_wellf (Id m n) xs \<down>= xs ! n"
+| "eval_wellf (Cn n f gs) xs =
+   (if \<forall>g \<in> set gs. eval_wellf g xs \<down>
+    then eval_wellf f (map (\<lambda>g. the (eval_wellf g xs)) gs)
+    else None)"
+| "eval_wellf (Pr n f g) [] = undefined"
+| "eval_wellf (Pr n f g) (0 # xs) = eval_wellf f xs"
+| "eval_wellf (Pr n f g) (Suc x # xs) =
+   Option.bind (eval_wellf (Pr n f g) (x # xs)) (\<lambda>v. eval_wellf g (x # v # xs))"
+| "eval_wellf (Mn n f) xs =
+   (let E = \<lambda>z. eval_wellf f (z # xs)
+    in if \<exists>z. E z \<down>= 0 \<and> (\<forall>y<z. E y \<down>)
+       then Some (LEAST z. E z \<down>= 0 \<and> (\<forall>y<z. E y \<down>))
+       else None)"
+
+
+definition eval :: "recf \<Rightarrow> nat list \<Rightarrow> nat option" where
+  "recfn (length xs) f \<Longrightarrow> eval f xs \<equiv> eval_wellf f xs"
+
+lemma eval_Z [simp]: "eval Z [x] \<down>= 0"
+  by (simp add: eval_def)
+
+lemma eval_Z' [simp]: "length xs = 1 \<Longrightarrow> eval Z xs \<down>= 0"
+  by (simp add: eval_def)
+
+lemma eval_S [simp]: "eval S [x] \<down>= Suc x"
+  by (simp add: eval_def)
+
+lemma eval_S' [simp]: "length xs = 1 \<Longrightarrow> eval S xs \<down>= Suc (hd xs)"
+  using eval_def hd_conv_nth[of xs] by fastforce
+
+lemma eval_Id [simp]:
+  assumes "n < m" and "m = length xs"
+  shows "eval (Id m n) xs \<down>= xs ! n"
+  using assms by (simp add: eval_def)
+
+lemma eval_Cn [simp]:
+  assumes "recfn (length xs) (Cn n f gs)"
+  shows "eval (Cn n f gs) xs =
+    (if \<forall>g\<in>set gs. eval g xs \<down>
+     then eval f (map (\<lambda>g. the (eval g xs)) gs)
+     else None)"
+proof -
+  have "eval (Cn n f gs) xs = eval_wellf (Cn n f gs) xs"
+    using assms eval_def by blast
+  moreover have "\<And>g. g \<in> set gs \<Longrightarrow> eval_wellf g xs = eval g xs"
+    using assms eval_def by simp
+  ultimately have "eval (Cn n f gs) xs =
+    (if \<forall>g\<in>set gs. eval g xs \<down>
+     then eval_wellf f (map (\<lambda>g. the (eval g xs)) gs)
+     else None)"
+    using map_eq_conv[of "\<lambda>g. the (eval_wellf g xs)" gs "\<lambda>g. the (eval g xs)"]
+    by (auto, metis)
+  moreover have "\<And>ys. length ys = length gs \<Longrightarrow> eval f ys = eval_wellf f ys"
+    using assms eval_def by simp
+  ultimately show ?thesis by auto
+qed
+
+lemma eval_Pr_0 [simp]:
+  assumes "recfn (Suc n) (Pr n f g)" and "n = length xs"
+  shows "eval (Pr n f g) (0 # xs) = eval f xs"
+  using assms by (simp add: eval_def)
+
+lemma eval_Pr_diverg_Suc [simp]:
+  assumes "recfn (Suc n) (Pr n f g)"
+    and "n = length xs"
+    and "eval (Pr n f g) (x # xs) \<up>"
+  shows "eval (Pr n f g) (Suc x # xs) \<up>"
+  using assms by (simp add: eval_def)
+
+lemma eval_Pr_converg_Suc [simp]:
+  assumes "recfn (Suc n) (Pr n f g)"
+    and "n = length xs"
+    and "eval (Pr n f g) (x # xs) \<down>"
+  shows "eval (Pr n f g) (Suc x # xs) = eval g (x # the (eval (Pr n f g) (x # xs)) # xs)"
+  using assms eval_def by auto
+
+lemma eval_Pr_diverg_add:
+  assumes "recfn (Suc n) (Pr n f g)"
+    and "n = length xs"
+    and "eval (Pr n f g) (x # xs) \<up>"
+  shows "eval (Pr n f g) ((x + y) # xs) \<up>"
+  using assms by (induction y) auto
+
+lemma eval_Pr_converg_le:
+  assumes "recfn (Suc n) (Pr n f g)"
+    and "n = length xs"
+    and "eval (Pr n f g) (x # xs) \<down>"
+    and "y \<le> x"
+  shows "eval (Pr n f g) (y # xs) \<down>"
+  using assms eval_Pr_diverg_add le_Suc_ex by metis
+
+lemma eval_Pr_Suc_converg:
+  assumes "recfn (Suc n) (Pr n f g)"
+    and "n = length xs"
+    and "eval (Pr n f g) (Suc x # xs) \<down>"
+  shows "eval g (x # (the (eval (Pr n f g) (x # xs))) # xs) \<down>"
+    and "eval (Pr n f g) (Suc x # xs) = eval g (x # the (eval (Pr n f g) (x # xs)) # xs)"
+  using eval_Pr_converg_Suc[of n f g xs x, OF assms(1,2)]
+    eval_Pr_converg_le[of n f g xs "Suc x" x, OF assms] assms(3)
+  by simp_all
+
+lemma eval_Mn [simp]:
+  assumes "recfn (length xs) (Mn n f)"
+  shows "eval (Mn n f) xs =
+   (if (\<exists>z. eval f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval f (y # xs) \<down>))
+    then Some (LEAST z. eval f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval f (y # xs) \<down>))
+    else None)"
+  using assms eval_def by auto
+
+
+lemma eval_wellf_Mn:
+  "eval_wellf (Mn n f) xs =
+    (if (\<exists>z. eval_wellf f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval_wellf f (y # xs) \<down>))
+     then Some (LEAST z. eval_wellf f (z # xs) \<down>= 0)
+     else None)"
+proof -
+  let ?P = "\<lambda>z. eval_wellf f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval_wellf f (y # xs) \<down>)"
+  {
+    assume "\<exists>z. ?P z"
+    moreover define z where "z = Least ?P"
+    ultimately have "?P z"
+      using LeastI[of ?P] by blast
+    have "(LEAST z. eval_wellf f (z # xs) \<down>= 0) = z"
+    proof (rule Least_equality)
+      show "eval_wellf f (z # xs) \<down>= 0"
+      show "z \<le> y" if "eval_wellf f (y # xs) \<down>= 0" for y
+      proof (rule ccontr)
+        assume "\<not> z \<le> y"
+        then have "y < z" by simp
+        moreover from this have "?P y"
+        ultimately show False
+          using that not_less_Least z_def by blast
+      qed
+    qed
+  }
+  then show ?thesis by simp
+qed
+
+lemma eval_Mn':
+  assumes "recfn (length xs) (Mn n f)"
+  shows "eval (Mn n f) xs =
+   (if (\<exists>z. eval f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval f (y # xs) \<down>))
+    then Some (LEAST z. eval f (z # xs) \<down>= 0)
+    else None)"
+  using assms eval_def eval_wellf_Mn by auto
+
+
+lemma eval_Mn_convergI:
+  assumes "recfn (length xs) (Mn n f)"
+    and "eval f (z # xs) \<down>= 0"
+    and "\<And>y. y < z \<Longrightarrow> eval f (y # xs) \<down>\<noteq> 0"
+  shows "eval (Mn n f) xs \<down>= z"
+proof -
+  let ?P = "\<lambda>z. eval f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval f (y # xs) \<down>)"
+  have "z = Least ?P"
+    using Least_equality[of ?P z] assms(2,3) not_le_imp_less by blast
+  moreover have "?P z" using assms(2,3) by simp
+  ultimately show "eval (Mn n f) xs \<down>= z"
+    using eval_Mn[OF assms(1)] by meson
+qed
+
+
+lemma eval_Mn_convergE:
+  assumes "recfn (length xs) (Mn n f)" and "eval (Mn n f) xs \<down>= z"
+  shows "z = (LEAST z. eval f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval f (y # xs) \<down>))"
+    and "eval f (z # xs) \<down>= 0"
+    and "\<And>y. y < z \<Longrightarrow> eval f (y # xs) \<down>\<noteq> 0"
+proof -
+  let ?P = "\<lambda>z. eval f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval f (y # xs) \<down>)"
+  show "z = Least ?P"
+    using assms eval_Mn[OF assms(1)]
+    by (metis (no_types, lifting) option.inject option.simps(3))
+  moreover have "\<exists>z. ?P z"
+    using assms eval_Mn[OF assms(1)] by (metis option.distinct(1))
+  ultimately have "?P z"
+    using LeastI[of ?P] by blast
+  then have "eval f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval f (y # xs) \<down>)"
+    by simp
+  then show "eval f (z # xs) \<down>= 0" by simp
+  show "\<And>y. y < z \<Longrightarrow> eval f (y # xs) \<down>\<noteq> 0"
+qed
+
+lemma eval_Mn_diverg:
+  assumes "recfn (length xs) (Mn n f)"
+  shows "\<not> (\<exists>z. eval f (z # xs) \<down>= 0 \<and> (\<forall>y<z. eval f (y # xs) \<down>)) \<longleftrightarrow> eval (Mn n f) xs \<up>"
+  using assms eval_Mn[OF assms(1)] by simp
+
+
+
+definition exteq :: "recf \<Rightarrow> recf \<Rightarrow> bool" (infix "\<simeq>" 55) where
+  "f \<simeq> g \<equiv> arity f = arity g \<and> (\<forall>xs. length xs = arity f \<longrightarrow> eval f xs = eval g xs)"
+
+lemma exteq_refl: "f \<simeq> f"
+  using exteq_def by simp
+
+lemma exteq_sym: "f \<simeq> g \<Longrightarrow> g \<simeq> f"
+  using exteq_def by simp
+
+lemma exteq_trans: "f \<simeq> g \<Longrightarrow> g \<simeq> h \<Longrightarrow> f \<simeq> h"
+  using exteq_def by simp
+
+lemma exteqI:
+  assumes "arity f = arity g" and "\<And>xs. length xs = arity f \<Longrightarrow> eval f xs = eval g xs"
+  shows "f \<simeq> g"
+  using assms exteq_def by simp
+
+lemma exteqI1:
+  assumes "arity f = 1" and "arity g = 1" and "\<And>x. eval f [x] = eval g [x]"
+  shows "f \<simeq> g"
+  using assms exteqI by (metis One_nat_def Suc_length_conv length_0_conv)
+
+
+fun wrap_Id :: "recf \<Rightarrow> nat \<Rightarrow> recf" where
+  "wrap_Id f 0 = f"
+| "wrap_Id f (Suc n) = Cn (arity f) (Id 1 0) [wrap_Id f n]"
+
+lemma recfn_wrap_Id: "recfn a f \<Longrightarrow> recfn a (wrap_Id f n)"
+  using wellf_arity_nonzero by (induction n) auto
+
+lemma exteq_wrap_Id: "recfn a f \<Longrightarrow> f \<simeq> wrap_Id f n"
+proof (induction n)
+  case 0
+  then show ?case by (simp add: exteq_refl)
+next
+  case (Suc n)
+  have "wrap_Id f n \<simeq> wrap_Id f (Suc n) "
+  proof (rule exteqI)
+    show "arity (wrap_Id f n) = arity (wrap_Id f (Suc n))"
+      using Suc by (simp add: recfn_wrap_Id)
+    show "eval (wrap_Id f n) xs = eval (wrap_Id f (Suc n)) xs"
+      if "length xs = arity (wrap_Id f n)" for xs
+    proof -
+      have "recfn (length xs) (Cn (arity f) (Id 1 0) [wrap_Id f n])"
+        using that Suc recfn_wrap_Id by (metis wrap_Id.simps(2))
+      then show "eval (wrap_Id f n) xs = eval (wrap_Id f (Suc n)) xs"
+        by auto
+    qed
+  qed
+  then show ?case using Suc exteq_trans by fast
+qed
+
+fun depth :: "recf \<Rightarrow> nat" where
+  "depth Z = 0"
+| "depth S = 0"
+| "depth (Id m n) = 0"
+| "depth (Cn n f gs) = Suc (max (depth f) (Max (set (map depth gs))))"
+| "depth (Pr n f g) = Suc (max (depth f) (depth g))"
+| "depth (Mn n f) = Suc (depth f)"
+
+lemma depth_wrap_Id: "recfn a f \<Longrightarrow> depth (wrap_Id f n) = depth f + n"
+  by (induction n) simp_all
+
+lemma wrap_Id_injective:
+  assumes "recfn a f" and "wrap_Id f n\<^sub>1 = wrap_Id f n\<^sub>2"
+  shows "n\<^sub>1 = n\<^sub>2"
+  using assms by (metis add_left_cancel depth_wrap_Id)
+
+lemma exteq_infinite:
+  assumes "recfn a f"
+  shows "infinite {g. recfn a g \<and> g \<simeq> f}" (is "infinite ?R")
+proof -
+  have "inj (wrap_Id f)"
+  then have "infinite (range (wrap_Id f))"
+    using finite_imageD by blast
+  moreover have "range (wrap_Id f) \<subseteq> ?R"
+    using assms exteq_sym exteq_wrap_Id recfn_wrap_Id by blast
+  ultimately show ?thesis by (simp add: infinite_super)
+qed
+
+
+
+fun Mn_free :: "recf \<Rightarrow> bool" where
+  "Mn_free Z = True"
+| "Mn_free S = True"
+| "Mn_free (Id m n) = True"
+| "Mn_free (Cn n f gs) = ((\<forall>g \<in> set gs. Mn_free g) \<and> Mn_free f)"
+| "Mn_free (Pr n f g) = (Mn_free f \<and> Mn_free g)"
+| "Mn_free (Mn n f) = False"
+
+
+abbreviation prim_recfn :: "nat \<Rightarrow> recf \<Rightarrow> bool" where
+  "prim_recfn n f \<equiv> recfn n f \<and> Mn_free f"
+
+definition total :: "recf \<Rightarrow> bool" where
+  "total f \<equiv> \<forall>xs. length xs = arity f \<longrightarrow> eval f xs \<down>"
+
+lemma totalI [intro]:
+  assumes "\<And>xs. length xs = arity f \<Longrightarrow> eval f xs \<down>"
+  shows "total f"
+  using assms total_def by simp
+
+lemma totalE [simp]:
+  assumes "total f" and "recfn n f" and "length xs = n"
+  shows "eval f xs \<down>"
+  using assms total_def by simp
+
+lemma totalI1 :
+  assumes "recfn 1 f" and "\<And>x. eval f [x] \<down>"
+  shows "total f"
+  using assms totalI[of f] by (metis One_nat_def length_0_conv length_Suc_conv)
+
+lemma totalI2:
+  assumes "recfn 2 f" and "\<And>x y. eval f [x, y] \<down>"
+  shows "total f"
+  using assms totalI[of f] by (smt length_0_conv length_Suc_conv numeral_2_eq_2)
+
+lemma totalI3:
+  assumes "recfn 3 f" and "\<And>x y z. eval f [x, y, z] \<down>"
+  shows "total f"
+  using assms totalI[of f] by (smt length_0_conv length_Suc_conv numeral_3_eq_3)
+
+lemma totalI4:
+  assumes "recfn 4 f" and "\<And>w x y z. eval f [w, x, y, z] \<down>"
+  shows "total f"
+proof (rule totalI[of f])
+  fix xs :: "nat list"
+  assume "length xs = arity f"
+  then have "length xs = Suc (Suc (Suc (Suc 0)))"
+    using assms(1) by simp
+  then obtain w x y z where "xs = [w, x, y, z]"
+    by (smt Suc_length_conv length_0_conv)
+  then show "eval f xs \<down>" using assms(2) by simp
+qed
+
+lemma Mn_free_imp_total [intro]:
+  assumes "wellf f" and "Mn_free f"
+  shows "total f"
+  using assms
+proof (induction f rule: Mn_free.induct)
+  case (5 n f g)
+  have "eval (Pr n f g) (x # xs) \<down>" if "length (x # xs) = arity (Pr n f g)" for x xs
+    using 5 that by (induction x) auto
+  then show ?case by (metis arity.simps(5) length_Suc_conv totalI)
+qed (auto simp add: total_def eval_def)
+
+lemma prim_recfn_total: "prim_recfn n f \<Longrightarrow> total f"
+  using Mn_free_imp_total by simp
+
+lemma eval_Pr_prim_Suc:
+  assumes "h = Pr n f g" and "prim_recfn (Suc n) h" and "length xs = n"
+  shows "eval h (Suc x # xs) = eval g (x # the (eval h (x # xs)) # xs)"
+  using assms eval_Pr_converg_Suc prim_recfn_total by simp
+
+lemma Cn_total:
+  assumes "\<forall>g\<in>set gs. total g" and "total f" and "recfn n (Cn n f gs)"
+  shows "total (Cn n f gs)"
+  using assms by (simp add: totalI)
+
+lemma Pr_total:
+  assumes "total f" and "total g" and "recfn (Suc n) (Pr n f g)"
+  shows "total (Pr n f g)"
+proof -
+  have "eval (Pr n f g) (x # xs) \<down>" if "length xs = n" for x xs
+    using that assms by (induction x) auto
+  then show ?thesis
+    using assms(3) totalI by (metis Suc_length_conv arity.simps(5))
+qed
+
+lemma eval_Mn_total:
+  assumes "recfn (length xs) (Mn n f)" and "total f"
+  shows "eval (Mn n f) xs =
+    (if (\<exists>z. eval f (z # xs) \<down>= 0)
+     then Some (LEAST z. eval f (z # xs) \<down>= 0)
+     else None)"
+  using assms by auto
+
+
+
+
+
+
+
+definition r_dummy :: "nat \<Rightarrow> recf \<Rightarrow> recf" where
+  "r_dummy n f \<equiv> Cn (arity f + n) f (map (\<lambda>i. Id (arity f + n) i) [0..<arity f])"
+
+lemma r_dummy_prim [simp]:
+  "prim_recfn a f \<Longrightarrow> prim_recfn (a + n) (r_dummy n f)"
+  using wellf_arity_nonzero by (auto simp add: r_dummy_def)
+
+lemma r_dummy_recfn [simp]:
+  "recfn a f \<Longrightarrow> recfn (a + n) (r_dummy n f)"
+  using wellf_arity_nonzero by (auto simp add: r_dummy_def)
+
+lemma r_dummy [simp]:
+  "r_dummy n f = Cn (arity f + n) f (map (\<lambda>i. Id (arity f + n) i) [0..<arity f])"
+  unfolding r_dummy_def by simp
+
+lemma r_dummy_append:
+  assumes "recfn (length xs) f" and "length ys = n"
+  shows "eval (r_dummy n f) (xs @ ys) = eval f xs"
+proof -
+  let ?r = "r_dummy n f"
+  let ?gs = "map (\<lambda>i. Id (arity f + n) i) [0..<arity f]"
+  have "length ?gs = arity f" by simp
+  moreover have "?gs ! i = (Id (arity f + n) i)" if "i < arity f" for i
+    by (simp add: that)
+  moreover have *: "eval_wellf (?gs ! i) (xs @ ys) \<down>= xs ! i" if "i < arity f" for i
+    using that assms by (simp add: nth_append)
+  ultimately have "map (\<lambda>g. the (eval_wellf g (xs @ ys))) ?gs = xs"
+    by (metis (no_types, lifting) assms(1) length_map nth_equalityI nth_map option.sel)
+  moreover have "\<forall>g \<in> set ?gs. eval_wellf g (xs @ ys) \<down>"
+    using * by simp
+  moreover have "recfn (length (xs @ ys)) ?r"
+    using assms r_dummy_recfn by fastforce
+  ultimately show ?thesis
+    by (auto simp add: assms eval_def)
+qed
+
+
+definition r_shrink :: "recf \<Rightarrow> recf" where
+  "r_shrink f \<equiv> Cn 1 f [Id 1 0, Id 1 0]"
+
+lemma r_shrink_prim [simp]: "prim_recfn 2 f \<Longrightarrow> prim_recfn 1 (r_shrink f)"
+  by (simp add: r_shrink_def)
+
+lemma r_shrink_recfn [simp]: "recfn 2 f \<Longrightarrow> recfn 1 (r_shrink f)"
+  by (simp add: r_shrink_def)
+
+lemma r_shrink [simp]: "recfn 2 f \<Longrightarrow> eval (r_shrink f) [x] = eval f [x, x]"
+  by (simp add: r_shrink_def)
+
+definition r_swap :: "recf \<Rightarrow> recf" where
+  "r_swap f \<equiv> Cn 2 f [Id 2 1, Id 2 0]"
+
+lemma r_swap_recfn [simp]: "recfn 2 f \<Longrightarrow> recfn 2 (r_swap f)"
+  by (simp add: r_swap_def)
+
+lemma r_swap_prim [simp]: "prim_recfn 2 f \<Longrightarrow> prim_recfn 2 (r_swap f)"
+  by (simp add: r_swap_def)
+
+lemma r_swap [simp]: "recfn 2 f \<Longrightarrow> eval (r_swap f) [x, y] = eval f [y, x]"
+  by (simp add: r_swap_def)
+
+
+definition r_shift :: "recf \<Rightarrow> recf" where
+  "r_shift f \<equiv> Cn (Suc (arity f)) f (map (\<lambda>i. Id (Suc (arity f)) (Suc i)) [0..<arity f])"
+
+lemma r_shift_prim [simp]: "prim_recfn a f \<Longrightarrow> prim_recfn (Suc a) (r_shift f)"
+  by (simp add: r_shift_def)
+
+lemma r_shift_recfn [simp]: "recfn a f \<Longrightarrow> recfn (Suc a) (r_shift f)"
+  by (simp add: r_shift_def)
+
+lemma r_shift [simp]:
+  assumes "recfn (length xs) f"
+  shows "eval (r_shift f) (x # xs) = eval f xs"
+proof -
+  let ?r = "r_shift f"
+  let ?gs = "map (\<lambda>i. Id (Suc (arity f)) (Suc i)) [0..<arity f]"
+  have "length ?gs = arity f" by simp
+  moreover have "?gs ! i = (Id (Suc (arity f)) (Suc i))" if "i < arity f" for i
+    by (simp add: that)
+  moreover have *: "eval (?gs ! i) (x # xs) \<down>= xs ! i" if "i < arity f" for i
+    using assms nth_append that by simp
+  ultimately have "map (\<lambda>g. the (eval g (x # xs))) ?gs = xs"
+    by (metis (no_types, lifting) assms length_map nth_equalityI nth_map option.sel)
+  moreover have "\<forall>g \<in> set ?gs. eval g (x # xs) \<noteq> None"
+    using * by simp
+  ultimately show ?thesis using r_shift_def assms by simp
+qed
+
+
+
+
+fun r_const :: "nat \<Rightarrow> recf" where
+  "r_const 0 = Z"
+| "r_const (Suc c) = Cn 1 S [r_const c]"
+
+lemma r_const_prim [simp]: "prim_recfn 1 (r_const c)"
+  by (induction c) (simp_all)
+
+lemma r_const [simp]: "eval (r_const c) [x] \<down>= c"
+  by (induction c) simp_all
+
+
+definition "r_constn n c \<equiv> if n = 0 then r_const c else r_dummy n (r_const c)"
+
+lemma r_constn_prim [simp]: "prim_recfn (Suc n) (r_constn n c)"
+  unfolding r_constn_def by simp
+
+lemma r_constn [simp]: "length xs = Suc n \<Longrightarrow> eval (r_constn n c) xs \<down>= c"
+  unfolding r_constn_def
+  by simp (metis length_0_conv length_Suc_conv r_const)
+
+
+definition "r_add \<equiv> Pr 1 (Id 1 0) (Cn 3 S [Id 3 1])"
+
+lemma r_add_prim [simp]: "prim_recfn 2 r_add"
+  by (simp add: r_add_def)
+
+lemma r_add [simp]: "eval r_add [a, b] \<down>= a + b"
+  unfolding r_add_def by (induction a) simp_all
+
+definition "r_mul \<equiv> Pr 1 Z (Cn 3 r_add [Id 3 1, Id 3 2])"
+
+lemma r_mul_prim [simp]: "prim_recfn 2 r_mul"
+  unfolding r_mul_def by simp
+
+lemma r_mul [simp]: "eval r_mul [a, b] \<down>= a * b"
+  unfolding r_mul_def by (induction a) simp_all
+
+definition "r_dec \<equiv> Cn 1 (Pr 1 Z (Id 3 0)) [Id 1 0, Id 1 0]"
+
+lemma r_dec_prim [simp]: "prim_recfn 1 r_dec"
+  by (simp add: r_dec_def)
+
+lemma r_dec [simp]: "eval r_dec [a] \<down>= a - 1"
+proof -
+  have "eval (Pr 1 Z (Id 3 0)) [x, y] \<down>= x - 1" for x y
+    by (induction x) simp_all
+  then show ?thesis by (simp add: r_dec_def)
+qed
+
+definition "r_sub \<equiv> r_swap (Pr 1 (Id 1 0) (Cn 3 r_dec [Id 3 1]))"
+
+lemma r_sub_prim [simp]: "prim_recfn 2 r_sub"
+  unfolding r_sub_def by simp
+
+lemma r_sub [simp]: "eval r_sub [a, b] \<down>= a - b"
+proof -
+  have "eval (Pr 1 (Id 1 0) (Cn 3 r_dec [Id 3 1])) [x, y] \<down>= y - x" for x y
+    by (induction x) simp_all
+  then show ?thesis unfolding r_sub_def by simp
+qed
+
+definition "r_sign \<equiv> r_shrink (Pr 1 Z (r_constn 2 1))"
+
+lemma r_sign_prim [simp]: "prim_recfn 1 r_sign"
+  unfolding r_sign_def by simp
+
+lemma r_sign [simp]: "eval r_sign [x] \<down>= (if x = 0 then 0 else 1)"
+proof -
+  have "eval (Pr 1 Z (r_constn 2 1)) [x, y] \<down>= (if x = 0 then 0 else 1)" for x y
+    by (induction x) simp_all
+  then show ?thesis unfolding r_sign_def by simp
+qed
+
+
+definition "r_not \<equiv> Cn 1 r_sub [r_const 1, r_sign]"
+
+lemma r_not_prim [simp]: "prim_recfn 1 r_not"
+  unfolding r_not_def by simp
+
+lemma r_not [simp]: "eval r_not [x] \<down>= (if x = 0 then 1 else 0)"
+  unfolding r_not_def by simp
+
+definition "r_nand \<equiv> Cn 2 r_not [r_add]"
+
+lemma r_nand_prim [simp]: "prim_recfn 2 r_nand"
+  unfolding r_nand_def by simp
+
+lemma r_nand [simp]: "eval r_nand [x, y] \<down>= (if x = 0 \<and> y = 0 then 1 else 0)"
+  unfolding r_nand_def by simp
+
+definition "r_and \<equiv> Cn 2 r_not [r_nand]"
+
+lemma r_and_prim [simp]: "prim_recfn 2 r_and"
+  unfolding r_and_def by simp
+
+lemma r_and [simp]: "eval r_and [x, y] \<down>= (if x = 0 \<and> y = 0 then 0 else 1)"
+  unfolding r_and_def by simp
+
+definition "r_or \<equiv> Cn 2 r_sign [r_mul]"
+
+lemma r_or_prim [simp]: "prim_recfn 2 r_or"
+  unfolding r_or_def by simp
+
+lemma r_or [simp]: "eval r_or [x, y] \<down>= (if x = 0 \<or> y = 0 then 0 else 1)"
+  unfolding r_or_def by simp
+
+
+
+definition "r_ifz \<equiv>
+  let ifzero = (Cn 3 r_mul [r_dummy 2 r_not, Id 3 1]);
+      ifnzero = (Cn 3 r_mul [r_dummy 2 r_sign, Id 3 2])
+  in Cn 3 r_add [ifzero, ifnzero]"
+
+lemma r_ifz_prim [simp]: "prim_recfn 3 r_ifz"
+  unfolding r_ifz_def by simp
+
+lemma r_ifz [simp]: "eval r_ifz [cond, val0, val1] \<down>= (if cond = 0 then val0 else val1)"
+  unfolding r_ifz_def by (simp add: Let_def)
+
+definition "r_eq \<equiv> Cn 2 r_sign [Cn 2 r_add [r_sub, r_swap r_sub]]"
+
+lemma r_eq_prim [simp]: "prim_recfn 2 r_eq"
+  unfolding r_eq_def by simp
+
+lemma r_eq [simp]: "eval r_eq [x, y] \<down>= (if x = y then 0 else 1)"
+  unfolding r_eq_def by simp
+
+definition "r_ifeq \<equiv> Cn 4 r_ifz [r_dummy 2 r_eq, Id 4 2, Id 4 3]"
+
+lemma r_ifeq_prim [simp]: "prim_recfn 4 r_ifeq"
+  unfolding r_ifeq_def by simp
+
+lemma r_ifeq [simp]: "eval r_ifeq [a, b, v\<^sub>0, v\<^sub>1] \<down>= (if a = b then v\<^sub>0 else v\<^sub>1)"
+  unfolding r_ifeq_def using r_dummy_append[of r_eq "[a, b]" "[v\<^sub>0, v\<^sub>1]" 2]
+  by simp
+
+definition "r_neq \<equiv> Cn 2 r_not [r_eq]"
+
+lemma r_neq_prim [simp]: "prim_recfn 2 r_neq"
+  unfolding r_neq_def by simp
+
+lemma r_neq [simp]: "eval r_neq [x, y] \<down>= (if x = y then 1 else 0)"
+  unfolding r_neq_def by simp
+
+definition "r_ifle \<equiv> Cn 4 r_ifz [r_dummy 2 r_sub, Id 4 2, Id 4 3]"
+
+lemma r_ifle_prim [simp]: "prim_recfn 4 r_ifle"
+  unfolding r_ifle_def by simp
+
+lemma r_ifle [simp]: "eval r_ifle [a, b, v\<^sub>0, v\<^sub>1] \<down>= (if a \<le> b then v\<^sub>0 else v\<^sub>1)"
+  unfolding r_ifle_def using r_dummy_append[of r_sub "[a, b]" "[v\<^sub>0, v\<^sub>1]" 2]
+  by simp
+
+definition "r_ifless \<equiv> Cn 4 r_ifle [Id 4 1, Id 4 0, Id 4 3, Id 4 2]"
+
+lemma r_ifless_prim [simp]: "prim_recfn 4 r_ifless"
+  unfolding r_ifless_def by simp
+
+lemma r_ifless [simp]: "eval r_ifless [a, b, v\<^sub>0, v\<^sub>1] \<down>= (if a < b then v\<^sub>0 else v\<^sub>1)"
+  unfolding r_ifless_def by simp
+
+definition "r_less \<equiv> Cn 2 r_ifle [Id 2 1, Id 2 0, r_constn 1 1, r_constn 1 0]"
+
+lemma r_less_prim [simp]: "prim_recfn 2 r_less"
+  unfolding r_less_def by simp
+
+lemma r_less [simp]: "eval r_less [x, y] \<down>= (if x < y then 0 else 1)"
+  unfolding r_less_def by simp
+
+definition "r_le \<equiv> Cn 2 r_ifle [Id 2 0, Id 2 1, r_constn 1 0, r_constn 1 1]"
+
+lemma r_le_prim [simp]: "prim_recfn 2 r_le"
+  unfolding r_le_def by simp
+
+lemma r_le [simp]: "eval r_le [x, y] \<down>= (if x \<le> y then 0 else 1)"
+  unfolding r_le_def by simp
+
+
+definition "r_ifeq_else_diverg \<equiv>
+  Cn 3 r_add [Id 3 2, Mn 3 (Cn 4 r_add [Id 4 0, Cn 4 r_eq [Id 4 1, Id 4 2]])]"
+
+lemma r_ifeq_else_diverg_recfn [simp]: "recfn 3 r_ifeq_else_diverg"
+  unfolding r_ifeq_else_diverg_def by simp
+
+lemma r_ifeq_else_diverg [simp]:
+  "eval r_ifeq_else_diverg [a, b, v] = (if a = b then Some v else None)"
+  unfolding r_ifeq_else_diverg_def by simp
+
+
+
+
+definition decidable :: "nat set \<Rightarrow> bool" where
+  "decidable X \<equiv> \<exists>f. recfn 1 f \<and> (\<forall>x. eval f [x] \<down>= (if x \<in> X then 1 else 0))"
+
+
+theorem halting_problem_undecidable:
+  fixes code :: "nat \<Rightarrow> recf"
+  assumes "\<And>f. recfn 1 f \<Longrightarrow> \<exists>i. code i = f"
+  shows "\<not> decidable {x. eval (code x) [x] \<down>}" (is "\<not> decidable ?K")
+proof
+  assume "decidable ?K"
+  then obtain f where "recfn 1 f" and f: "\<forall>x. eval f [x] \<down>= (if x \<in> ?K then 1 else 0)"
+    using decidable_def by auto
+  define g where "g \<equiv> Cn 1 r_ifeq_else_diverg [f, Z, Z]"
+  then have "recfn 1 g"
+  with assms obtain i where i: "code i = g" by auto
+  from g_def have "eval g [x] = (if x \<notin> ?K then Some 0 else None)" for x
+  then have "eval g [i] \<down> \<longleftrightarrow> i \<notin> ?K" by simp
+  also have "... \<longleftrightarrow> eval (code i) [i] \<up>" by simp
+  also have "... \<longleftrightarrow> eval g [i] \<up>"
+    using i by simp
+  finally have "eval g [i] \<down> \<longleftrightarrow> eval g [i] \<up>" .
+  then show False by auto
+qed
+
+
+
+
+
+
+
+
+definition "r_triangle \<equiv> r_shrink (Pr 1 Z (r_dummy 1 (Cn 2 S [r_add])))"
+
+lemma r_triangle_prim: "prim_recfn 1 r_triangle"
+  unfolding r_triangle_def by simp
+
+lemma r_triangle: "eval r_triangle [n] \<down>= Sum {0..n}"
+proof -
+  let ?r = "r_dummy 1 (Cn 2 S [r_add])"
+  have "eval ?r [x, y, z] \<down>= Suc (x + y)" for x y z
+    using r_dummy_append[of "Cn 2 S [r_add]" "[x, y]" "[z]" 1] by simp
+  then have "eval (Pr 1 Z ?r) [x, y] \<down>= Sum {0..x}" for x y
+    by (induction x) simp_all
+  then show ?thesis unfolding r_triangle_def by simp
+qed
+
+lemma r_triangle_eq_triangle [simp]: "eval r_triangle [n] \<down>= triangle n"
+  using r_triangle gauss_sum_nat triangle_def by simp
+
+definition "r_prod_encode \<equiv> Cn 2 r_add [Cn 2 r_triangle [r_add], Id 2 0]"
+
+lemma r_prod_encode_prim [simp]: "prim_recfn 2 r_prod_encode"
+  unfolding r_prod_encode_def using r_triangle_prim by simp
+
+lemma r_prod_encode [simp]: "eval r_prod_encode [m, n] \<down>= prod_encode (m, n)"
+  unfolding r_prod_encode_def prod_encode_def using r_triangle_prim by simp
+

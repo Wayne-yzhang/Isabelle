@@ -1,0 +1,90 @@
+theory DistributedExecution
+  imports IntegrateAlgorithm CreateAlgorithms "HOL-Library.Product_Lexorder"
+begin
+
+type_synonym 'p event_id = "'p \<times> nat"
+
+datatype ('p,'\<Sigma>) event =
+  Send "('p event_id, '\<Sigma>) message" |
+  Receive "'p event_id" "('p event_id, '\<Sigma>) message"
+
+
+locale dist_execution_preliminary =
+  fixes events :: "('p :: linorder) \<Rightarrow> ('p,'\<Sigma>) event list"
+
+  assumes fin_peers: "finite (UNIV :: 'p set)"
+
+begin
+
+fun is_valid_event_id
+  where "is_valid_event_id (i,j) = (j < length (events i))"
+
+fun event_pred
+  where "event_pred (i,j) p  = (is_valid_event_id (i,j) \<and> p (events i ! j))"
+
+fun event_at
+  where "event_at i m = event_pred i ((=) m)"
+
+fun is_reception
+  where
+    "is_reception i j = event_pred j (\<lambda>e. case e of Receive s _ \<Rightarrow> s = i | _ \<Rightarrow> False)"
+
+fun happened_immediately_before where
+  "happened_immediately_before i j = (
+     is_valid_event_id i \<and>
+     is_valid_event_id j \<and>
+     ((fst i = fst j \<and> Suc (snd i) = snd j) \<or> is_reception i j))"
+
+
+
+fun is_valid_state_id
+  where "is_valid_state_id (i,j) = (j \<le> length (events i))"
+
+fun received_messages
+  where
+    "received_messages (i,j) = [m. (Receive _ m) \<leftarrow> (take j (events i))]"
+
+fun state where "state i = foldM integrate [] (received_messages i)"
+
+
+end
+
+
+fun extended_to_set :: "'\<I> extended \<Rightarrow> '\<I> set"
+  where
+    "extended_to_set \<lbrakk>i\<rbrakk> = {i}" |
+    "extended_to_set _ = {}"
+
+fun deps :: "('\<I>, '\<Sigma>) message \<Rightarrow> '\<I> set"
+  where
+    "deps (Insert (InsertMessage l _ u _)) = extended_to_set l \<union> extended_to_set u" |
+    "deps (Delete (DeleteMessage i)) = {i}"
+
+locale dist_execution = dist_execution_preliminary +
+  assumes no_data_corruption:
+    "\<And>i s m. event_at i (Receive s m) \<Longrightarrow> event_at s (Send m)"
+
+  assumes at_most_once:
+    "\<And>i j s m.
+    event_at i (Receive s m) \<Longrightarrow>
+    event_at j (Receive s m) \<Longrightarrow>
+    fst i = fst j \<Longrightarrow> i = j"
+
+  assumes acyclic_happened_before:
+    "acyclicP happened_immediately_before"
+
+  assumes semantic_causal_delivery:
+    "\<And>m s i j i'. event_at (i,j) (Receive s m) \<Longrightarrow> i' \<in> deps m \<Longrightarrow>
+      \<exists>s' j' m'. event_at (i,j') (Receive s' (Insert m')) \<and> j' < j \<and> I m' = i'"
+
+  assumes send_correct:
+    "\<And>m i. event_at i (Send m) \<Longrightarrow>
+    (\<exists>n \<sigma>. return m = state i \<bind> (\<lambda>s. create_insert s n \<sigma> i)) \<or>
+    (\<exists>n. return m = state i \<bind> (\<lambda>s. create_delete s n))"
+
+begin
+
+
+end
+
+end

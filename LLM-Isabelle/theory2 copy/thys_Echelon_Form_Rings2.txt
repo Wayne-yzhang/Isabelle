@@ -1,0 +1,631 @@
+theory Rings2
+imports
+   "HOL-Analysis.Analysis"
+   "HOL-Computational_Algebra.Polynomial_Factorial"
+begin
+
+
+lemma chain_le:
+  fixes I::"nat => 'a set"
+  assumes inc: "\<forall>n. I(n) \<subseteq> I(n+1)"
+  shows "\<forall>n\<le>m. I(n) \<subseteq> I(m)"
+  using assms
+proof (induct m)
+  case 0
+  show ?case by auto
+next
+  case (Suc m)
+  show ?case by (metis Suc_eq_plus1 inc lift_Suc_mono_le)
+qed
+
+context Rings.ring
+begin
+
+lemma sum_add:
+  assumes A: "finite A"
+  and B: "finite B"
+  shows "sum f A + sum g B = sum f (A - B) + sum g (B - A) + sum (\<lambda>x. f x + g x) (A \<inter> B)"
+proof -
+  have 1: "sum f A = sum f (A - B) + sum f (A \<inter> B)"
+    by (metis A Int_Diff_disjoint Un_Diff_Int finite_Diff finite_Int inf_sup_aci(1) local.sum.union_disjoint)
+  have 2: "sum g B = sum g (B - A) + sum g (A \<inter> B)"
+    by (metis B Int_Diff_disjoint Int_commute Un_Diff_Int finite_Diff finite_Int local.sum.union_disjoint)
+  have 3: "sum f (A \<inter> B) + sum g (A \<inter> B) = sum (\<lambda>x. f x + g x) (A \<inter> B)"
+    by (simp add: sum.distrib)
+  show ?thesis
+    by (simp add: "1" "2" "3" add.assoc add.left_commute)
+qed
+
+
+lemma sum_negf:
+  "sum (%x. - (f x)::'a) A = - sum f A"
+proof (cases "finite A")
+  case True thus ?thesis by (induct set: finite) auto
+next
+  case False thus ?thesis by simp
+qed
+
+
+
+lemma sum_distrib_left:
+  shows "r * sum f A = sum (%n. r * f n) A"
+proof (cases "finite A")
+  case True
+  thus ?thesis
+  proof induct
+    case empty thus ?case by simp
+  next
+    case (insert x A) thus ?case by (simp add: distrib_left)
+  qed
+next
+  case False thus ?thesis by simp
+qed
+
+lemma sum_distrib_right:
+  "sum f A * r = (\<Sum>n\<in>A. f n * r)"
+proof (cases "finite A")
+  case True
+  then show ?thesis
+  proof induct
+    case empty thus ?case by simp
+  next
+    case (insert x A) thus ?case by (simp add: distrib_right)
+  qed
+next
+  case False thus ?thesis by simp
+qed
+
+end
+
+
+context comm_monoid_add
+begin
+
+lemma sum_two_elements:
+  assumes "a \<noteq> b"
+  shows "sum f {a,b} = f a + f b"
+  by (metis Diff_cancel assms empty_Diff finite.emptyI infinite_remove add_0_right
+    sum.empty sum.insert sum.insert_remove singletonD)
+
+lemma sum_singleton: "sum f {x} = f x"
+  by simp
+
+end
+
+
+context group_add
+begin
+definition "subgroup A \<equiv> (0 \<in> A \<and> (\<forall>a\<in>A. \<forall>b \<in> A. a + b \<in> A) \<and> (\<forall>a\<in>A. -a \<in> A))"
+
+lemma subgroup_0: "subgroup {0}"
+  unfolding subgroup_def by auto
+
+lemma subgroup_UNIV: "subgroup (UNIV)"
+  unfolding subgroup_def by auto
+
+lemma subgroup_inter:
+  assumes "subgroup A" and "subgroup B"
+  shows "subgroup (A \<inter> B)"
+  using assms unfolding subgroup_def by blast
+
+lemma subgroup_Inter:
+  assumes "\<forall>I\<in>S. subgroup I"
+  shows "subgroup (\<Inter>S)"
+  using assms unfolding subgroup_def by auto
+
+lemma subgroup_Union:
+  fixes I::"nat => 'a set"
+  defines S: "S\<equiv>{I n|n. n\<in>UNIV}"
+  assumes all_subgroup: "\<forall>A\<in>S. subgroup A"
+  and inc: "\<forall>n. I(n) \<subseteq> I(n+1)"
+  shows "subgroup (\<Union>S)"
+unfolding subgroup_def
+proof (safe; (unfold Union_iff)?)
+  show "\<exists>X\<in>S. 0 \<in> X"
+  proof (rule bexI[of _ "I 0"])
+    show "I 0 \<in> S" unfolding S by auto
+    thus "0 \<in> I 0" using all_subgroup unfolding subgroup_def by auto
+  qed
+  fix y a ya b assume y: "y \<in> S" and a: "a \<in> y" and ya: "ya \<in> S" and b: "b \<in> ya"
+  obtain n m where In: "y=I n" and Im: "ya = I m" using y ya S by auto
+  have In_I_max:"I n \<subseteq> I (max n m)" using chain_le[OF inc] by auto
+  have Im_I_max:"I m \<subseteq> I (max n m)" using chain_le[OF inc] by auto
+  show "\<exists>x\<in>S. a + b \<in> x"
+  proof (rule bexI[of _ "I (max n m)"])
+    show "a + b \<in> I (max n m)"
+      by (metis Im Im_I_max In In_I_max a all_subgroup b in_mono max_def subgroup_def y ya)
+    show "I (max n m) \<in> S" using S by auto
+  qed
+  show "\<exists>x\<in>S. - a \<in> x"
+  proof (rule bexI[of _ "I (max n m)"])
+    show "- a \<in> I (max n m)" by (metis In In_I_max a all_subgroup in_mono subgroup_def y)
+    show "I (max n m) \<in> S" using S by auto
+  qed
+qed
+
+
+
+end
+
+
+context Rings.ring
+begin
+
+lemma subgroup_left_principal_ideal: "subgroup {r*a|r. r\<in>UNIV}"
+proof (unfold subgroup_def, auto)
+  show "\<exists>r. 0 = r * a" by (rule exI[of _ 0], simp)
+  fix r ra show "\<exists>rb. r * a + ra * a = rb * a"
+    by (metis add_0_right combine_common_factor)
+  show "\<exists>ra. - (r * a) = ra * a" by (metis minus_mult_left)
+qed
+
+
+definition "left_ideal I = (subgroup I \<and> (\<forall>x\<in>I. \<forall>r. r*x \<in> I))"
+definition "right_ideal I = (subgroup I \<and> (\<forall>x\<in>I. \<forall>r. x*r \<in> I))"
+definition "ideal I= (left_ideal I \<and> right_ideal I)"
+
+definition "left_ideal_generated S = \<Inter>{I. left_ideal I \<and> S \<subseteq> I}"
+definition "right_ideal_generated S = \<Inter>{I. right_ideal I \<and> S \<subseteq> I}"
+definition "ideal_generated S = \<Inter>{I. ideal I \<and> S \<subseteq> I}"
+
+definition "left_principal_ideal S =  (\<exists>a. left_ideal_generated {a} = S)"
+definition "right_principal_ideal S = (right_ideal S \<and> (\<exists>a. right_ideal_generated {a} = S))"
+definition "principal_ideal S = (\<exists>a. ideal_generated {a} = S)"
+
+lemma ideal_inter:
+  assumes "ideal I" and "ideal J" shows "ideal (I \<inter> J)"
+  using assms
+  unfolding ideal_def left_ideal_def right_ideal_def subgroup_def
+  by auto
+
+lemma ideal_Inter:
+  assumes "\<forall>I\<in>S. ideal I"
+  shows "ideal (\<Inter>S)"
+proof (unfold ideal_def left_ideal_def right_ideal_def, auto)
+  show "subgroup (\<Inter>S)" and "subgroup (\<Inter>S)"
+    using subgroup_Inter assms
+    unfolding ideal_def left_ideal_def by auto
+  fix x r xa assume X: "\<forall>X\<in>S. x \<in> X" and xa: "xa \<in> S"
+  show "r * x \<in> xa" by (metis X assms ideal_def left_ideal_def xa)
+next
+  fix x r xa assume X: "\<forall>X\<in>S. x \<in> X" and xa: "xa \<in> S"
+  show "x * r \<in> xa" by (metis X assms ideal_def right_ideal_def xa)
+qed
+
+
+lemma ideal_Union:
+  fixes I::"nat => 'a set"
+  defines S: "S\<equiv>{I n|n. n\<in>UNIV}"
+  assumes all_ideal: "\<forall>A\<in>S. ideal A"
+  and inc: "\<forall>n. I(n) \<subseteq> I(n+1)"
+  shows "ideal (\<Union>S)"
+unfolding ideal_def left_ideal_def right_ideal_def
+proof (safe; (unfold Union_iff)?)
+  fix y x r
+  assume y: "y \<in> S" and x: "x \<in> y"
+  obtain n where n: "y=I n" using y S by auto
+  show "\<exists>xa\<in>S. r * x \<in> xa"
+  proof (rule bexI[of _ "I n"])
+    show "r * x \<in> I n" by (metis n assms(2) ideal_def left_ideal_def x y)
+    show "I n \<in> S" by (metis n y)
+  qed
+  show "\<exists>xa\<in>S. x * r \<in> xa"
+  proof (rule bexI[of _ "I n"])
+    show "x * r \<in> I n" by (metis n assms(2) ideal_def right_ideal_def x y)
+    show "I n \<in> S" by (metis n y)
+  qed
+next
+  show "subgroup (\<Union>S)" and "subgroup (\<Union>S)"
+    using subgroup_Union
+    by (metis (mono_tags) S all_ideal ideal_def inc right_ideal_def)+
+qed
+
+
+
+lemma ideal_not_empty:
+  assumes "ideal I"
+  shows "I \<noteq> {}"
+  using assms unfolding ideal_def left_ideal_def subgroup_def by auto
+
+lemma ideal_0: "ideal {0}"
+  unfolding ideal_def left_ideal_def right_ideal_def using subgroup_0 by auto
+
+lemma ideal_UNIV: "ideal UNIV"
+  unfolding ideal_def left_ideal_def right_ideal_def using subgroup_UNIV by auto
+
+lemma ideal_generated_0: "ideal_generated {0} = {0}"
+  unfolding ideal_generated_def using ideal_0 by auto
+
+lemma ideal_generated_subset_generator:
+  assumes "ideal_generated A = I"
+  shows "A \<subseteq> I"
+  using assms unfolding ideal_generated_def by auto
+
+lemma left_ideal_minus:
+  assumes "left_ideal I"
+  and "a\<in>I" and "b\<in>I"
+  shows "a - b \<in> I"
+  by (metis assms(1) assms(2) assms(3) diff_minus_eq_add left_ideal_def minus_minus subgroup_def)
+
+lemma right_ideal_minus:
+  assumes "right_ideal I"
+  and "a\<in>I" and "b\<in>I"
+  shows "a - b \<in> I"
+  by (metis assms(1) assms(2) assms(3) diff_minus_eq_add minus_minus right_ideal_def subgroup_def)
+
+lemma ideal_minus:
+  assumes "ideal I"
+  and "a\<in>I" and "b\<in>I"
+  shows "a - b \<in> I"
+  by (metis assms(1) assms(2) assms(3) ideal_def right_ideal_minus)
+
+
+lemma ideal_ideal_generated: "ideal (ideal_generated S)"
+  unfolding ideal_generated_def
+  unfolding ideal_def left_ideal_def subgroup_def right_ideal_def
+  by blast
+
+lemma sum_left_ideal:
+  assumes li_X: "left_ideal X"
+  and U_X: "U \<subseteq> X" and U: "finite U"
+  shows "(\<Sum>i\<in>U. f i * i) \<in> X"
+  using U U_X
+proof (induct U)
+  case empty show ?case using li_X by (simp add:  left_ideal_def subgroup_def)
+next
+  case (insert x U)
+  have x_in_X: "x \<in> X" using insert.prems by simp
+  have fx_x_X: "f x * x \<in> X" using li_X x_in_X unfolding left_ideal_def by simp
+  have sum_in_X: "(\<Sum>i\<in>U. f i * i) \<in> X" using insert.prems insert.hyps(3) by simp
+  have "(\<Sum>i\<in>(insert x U). f i * i) = f x * x + (\<Sum>i\<in>U. f i * i)"
+    by (simp add: insert.hyps(1) insert.hyps(2))
+  also have "... \<in> X" using li_X fx_x_X sum_in_X unfolding left_ideal_def subgroup_def by auto
+  finally show "(\<Sum>i\<in>(insert x U). f i * i) \<in> X" .
+qed
+
+lemma sum_right_ideal:
+  assumes li_X: "right_ideal X"
+  and U_X: "U \<subseteq> X" and U: "finite U"
+  shows "(\<Sum>i\<in>U. i * f i) \<in> X"
+  using U U_X
+proof (induct U)
+  case empty show ?case using li_X by (simp add: right_ideal_def subgroup_def)
+next
+  case (insert x U)
+  have x_in_X: "x \<in> X" using insert.prems by simp
+  have fx_x_X: "x * f x \<in> X" using li_X x_in_X unfolding right_ideal_def by simp
+  have sum_in_X: "(\<Sum>i\<in>U. i * f i) \<in> X" using insert.prems insert.hyps(3) by simp
+  have "(\<Sum>i\<in>(insert x U). i * f i) =  x * f x + (\<Sum>i\<in>U. i * f i)"
+    by (simp add: insert.hyps(1) insert.hyps(2))
+  also have "... \<in> X" using li_X fx_x_X sum_in_X unfolding right_ideal_def subgroup_def by auto
+  finally show "(\<Sum>i\<in>(insert x U). i * f i) \<in> X" .
+qed
+
+lemma left_ideal_generated_subset:
+  assumes "S \<subseteq> T"
+  shows "left_ideal_generated S \<subseteq> left_ideal_generated T"
+  unfolding left_ideal_generated_def using assms by auto
+
+lemma right_ideal_generated_subset:
+  assumes "S \<subseteq> T"
+  shows "right_ideal_generated S \<subseteq> right_ideal_generated T"
+  unfolding right_ideal_generated_def using assms by auto
+
+lemma ideal_generated_subset:
+  assumes "S \<subseteq> T"
+  shows "ideal_generated S \<subseteq> ideal_generated T"
+  unfolding ideal_generated_def using assms by auto
+
+lemma ideal_generated_in:
+  assumes "a \<in> A"
+  shows "a \<in> ideal_generated A"
+  unfolding ideal_generated_def using assms by auto
+
+lemma ideal_generated_repeated: "ideal_generated {a,a} = ideal_generated {a}"
+  unfolding ideal_generated_def by auto
+
+end
+
+context ring_1
+begin
+
+lemma left_ideal_explicit:
+  "left_ideal_generated S = {y. \<exists>f U. finite U \<and> U \<subseteq> S \<and> sum (\<lambda>i. f i * i) U = y}" (is "?S = ?B")
+proof
+  have S_in_B: "S \<subseteq> ?B"
+  proof (auto)
+    fix x assume x: "x\<in>S"
+    show "\<exists>f U. finite U \<and> U \<subseteq> S \<and> (\<Sum>i\<in>U. f i * i) = x"
+      by (rule exI[of _ "\<lambda>i. 1"], rule exI[of _ "{x}"], simp add: x)
+  qed
+  have left_ideal_B: "left_ideal ?B"
+  proof (unfold left_ideal_def, auto)
+    show "subgroup ?B"
+    proof (unfold subgroup_def, auto)
+      show "\<exists>f U. finite U \<and> U \<subseteq> S \<and> (\<Sum>i\<in>U. f i * i) = 0"
+        by (rule exI[of _ "id"], rule exI[of _ "{}"], auto)
+      fix f A assume A: "finite A" and AS: "A \<subseteq> S"
+      show"\<exists>fa Ua. finite Ua \<and> Ua \<subseteq> S \<and> (\<Sum>i\<in>Ua. fa i * i) = - (\<Sum>i\<in>A. f i * i)"
+        by (rule exI[of _ "\<lambda>i. - f i"], rule exI[of _ A],
+            auto simp add: A AS sum_negf[of "\<lambda>i. f i * i" A])
+      fix fa B assume B: "finite B" and BS: "B \<subseteq> S"
+      let ?g="\<lambda>i. if i \<in> A - B then f i else if i \<in> B - A then fa i else f i + fa i"
+      show "\<exists>fb Ub. finite Ub \<and> Ub \<subseteq> S \<and> (\<Sum>i\<in>Ub. fb i * i)
+        = (\<Sum>i\<in>A. f i * i) + (\<Sum>i\<in>B. fa i * i)"
+      proof (rule exI[of _ ?g], rule exI[of _ "A \<union> B"], simp add: A B AS BS)
+        let ?g2 = "(\<lambda>i. (if i \<in> A \<and> i \<notin> B then f i else
+          if i \<in> B - A then fa i else f i + fa i) * i)"
+        have "(\<Sum>i\<in>A. f i * i) + (\<Sum>i\<in>B. fa i * i)
+          = (\<Sum>i\<in>A - B. f i * i) + (\<Sum>i\<in>B - A. fa i * i) + (\<Sum>i\<in>A\<inter>B. (f i * i) + (fa i * i))"
+          by (rule sum_add[OF A B])
+        also have "... = (\<Sum>i\<in>A - B. f i * i) + (\<Sum>i\<in>B - A. fa i * i)
+          + (\<Sum>i\<in>A \<inter> B. (f i + fa i) * i)"
+          by (simp add: distrib_right)
+        also have "... =  sum ?g2 (A - B) + sum ?g2 (B - A) + sum ?g2 (A \<inter> B)" by auto
+        also have "... = sum ?g2 (A \<union> B)" by (rule sum.union_diff2[OF A B, symmetric])
+        finally show "sum ?g2 (A \<union> B) = (\<Sum>i\<in>A. f i * i) + (\<Sum>i\<in>B. fa i * i)" ..
+      qed
+    qed
+    fix f U r assume U: "finite U" and U_in_S: "U \<subseteq> S"
+    show "\<exists>fa Ua. finite Ua \<and> Ua \<subseteq> S \<and> (\<Sum>i\<in>Ua. fa i * i) = r * (\<Sum>i\<in>U. f i * i)"
+      by (rule exI[of _ "\<lambda>i. r * f i"], rule exI[of _ U])
+    (simp add: U U_in_S sum_distrib_left mult_assoc)
+  qed
+  thus "?S \<subseteq> ?B" using S_in_B unfolding left_ideal_generated_def by auto
+next
+  show "?B \<subseteq> ?S"
+  proof (unfold left_ideal_generated_def, auto)
+    fix X f U
+    assume li_X: "left_ideal X" and S_X: "S \<subseteq> X" and U: "finite U" and U_in_S: "U \<subseteq> S"
+    have U_in_X: "U \<subseteq> X" using U_in_S S_X by simp
+    show "(\<Sum>i\<in>U. f i * i) \<in> X"
+      by (rule sum_left_ideal[OF li_X U_in_X U])
+  qed
+qed
+
+
+lemma right_ideal_explicit:
+  "right_ideal_generated S = {y. \<exists>f U. finite U \<and> U \<subseteq> S \<and> sum (\<lambda>i. i * f i) U = y}" (is "?S = ?B")
+proof
+  have S_in_B: "S \<subseteq> ?B"
+  proof (auto)
+    fix x assume x: "x\<in>S"
+    show "\<exists>f U. finite U \<and> U \<subseteq> S \<and> (\<Sum>i\<in>U. i * f i) = x"
+      by (rule exI[of _ "\<lambda>i. 1"], rule exI[of _ "{x}"], simp add: x)
+  qed
+  have right_ideal_B: "right_ideal ?B"
+  proof (unfold right_ideal_def, auto)
+    show "subgroup ?B"
+    proof (unfold subgroup_def, auto)
+      show "\<exists>f U. finite U \<and> U \<subseteq> S \<and> (\<Sum>i\<in>U. i * f i) = 0"
+        by (rule exI[of _ "id"], rule exI[of _ "{}"], auto)
+      fix f A assume A: "finite A" and AS: "A \<subseteq> S"
+      show"\<exists>fa Ua. finite Ua \<and> Ua \<subseteq> S \<and> (\<Sum>i\<in>Ua.  i * fa i) = - (\<Sum>i\<in>A.  i * f i)"
+        by (rule exI[of _ "\<lambda>i. - f i"], rule exI[of _ A],
+            auto simp add: A AS sum_negf[of "\<lambda>i. i * f i" A])
+      fix fa B assume B: "finite B" and BS: "B \<subseteq> S"
+      let ?g="\<lambda>i. if i \<in> A - B then f i else if i \<in> B - A then fa i else f i + fa i"
+      show "\<exists>fb Ub. finite Ub \<and> Ub \<subseteq> S \<and> (\<Sum>i\<in>Ub. i * fb i)
+        = (\<Sum>i\<in>A. i * f i) + (\<Sum>i\<in>B. i * fa i)"
+      proof (rule exI[of _ ?g], rule exI[of _ "A \<union> B"], simp add: A B AS BS)
+        let ?g2 = "(\<lambda>i. i * (if i \<in> A \<and> i \<notin> B then f i else
+          if i \<in> B - A then fa i else f i + fa i))"
+        have "(\<Sum>i\<in>A.  i * f i) + (\<Sum>i\<in>B.  i * fa i)
+          = (\<Sum>i\<in>A - B.  i * f i) + (\<Sum>i\<in>B - A.  i * fa i) + (\<Sum>i\<in>A\<inter>B. (i * f i) + (i * fa i))"
+          by (rule sum_add[OF A B])
+        also have "... = (\<Sum>i\<in>A - B. i * f i) + (\<Sum>i\<in>B - A.  i * fa i)
+          + (\<Sum>i\<in>A \<inter> B. i * (f i + fa i))"
+          by (simp add: distrib_left)
+        also have "... =  sum ?g2 (A - B) + sum ?g2 (B - A) + sum ?g2 (A \<inter> B)" by auto
+        also have "... = sum ?g2 (A \<union> B)" by (rule sum.union_diff2[OF A B, symmetric])
+        finally show "sum ?g2 (A \<union> B) = (\<Sum>i\<in>A. i * f i) + (\<Sum>i\<in>B. i * fa i)" ..
+      qed
+    qed
+    fix f U r assume U: "finite U" and U_in_S: "U \<subseteq> S"
+    show "\<exists>fa Ua. finite Ua \<and> Ua \<subseteq> S \<and> (\<Sum>i\<in>Ua. i * fa i) = (\<Sum>i\<in>U. i * f i) * r"
+      by (rule exI[of _ "\<lambda>i. f i * r"], rule exI[of _ U])
+    (simp add: U U_in_S sum_distrib_right mult_assoc)
+  qed
+  thus "?S \<subseteq> ?B" using S_in_B unfolding right_ideal_generated_def by auto
+next
+  show "?B \<subseteq> ?S"
+  proof (unfold right_ideal_generated_def, auto)
+    fix X f U
+    assume li_X: "right_ideal X" and S_X: "S \<subseteq> X" and U: "finite U" and U_in_S: "U \<subseteq> S"
+    have U_in_X: "U \<subseteq> X" using U_in_S S_X by simp
+    show "(\<Sum>i\<in>U. i * f i) \<in> X"
+      by (rule sum_right_ideal[OF li_X U_in_X U])
+  qed
+qed
+
+end
+
+context comm_ring
+begin
+
+lemma left_ideal_eq_right_ideal: "left_ideal I = right_ideal I"
+  unfolding left_ideal_def right_ideal_def subgroup_def
+  by auto (metis mult_commute)+
+
+corollary ideal_eq_left_ideal: "ideal I = left_ideal I"
+  by (metis ideal_def left_ideal_eq_right_ideal)
+
+lemma ideal_eq_right_ideal: "ideal I = right_ideal I"
+  by (metis ideal_def left_ideal_eq_right_ideal)
+
+lemma principal_ideal_eq_left:
+  "principal_ideal S = (\<exists>a. left_ideal_generated {a} = S)"
+  unfolding principal_ideal_def ideal_generated_def left_ideal_generated_def
+  unfolding ideal_eq_left_ideal ..
+
+end
+
+context comm_ring_1
+begin
+
+lemma ideal_generated_eq_left_ideal: "ideal_generated A = left_ideal_generated A"
+  unfolding ideal_generated_def ideal_def
+  by (metis (no_types, lifting) Collect_cong left_ideal_eq_right_ideal left_ideal_generated_def)
+
+lemma ideal_generated_eq_right_ideal: "ideal_generated A = right_ideal_generated A"
+  unfolding ideal_generated_def ideal_def
+  by (metis (no_types, lifting) Collect_cong left_ideal_eq_right_ideal right_ideal_generated_def)
+
+
+lemma obtain_sum_ideal_generated:
+  assumes a: "a \<in> ideal_generated A" and A: "finite A"
+  obtains f where "sum (\<lambda>i. f i * i) A = a"
+proof -
+  obtain g U where g: "sum (\<lambda>i. g i * i) U = a" and UA: "U \<subseteq> A" and U: "finite U"
+    using a unfolding ideal_generated_eq_left_ideal
+    unfolding left_ideal_explicit by blast
+  let ?f="\<lambda>i. if i \<in> A - U then 0 else g i"
+  have A_union: "A = (A - U) \<union> U" using UA by auto
+  have "sum (\<lambda>i. ?f i * i) A = sum (\<lambda>i. ?f i * i) ((A - U) \<union> U)" using A_union by simp
+  also have "... = sum (\<lambda>i. ?f i * i) (A - U) + sum (\<lambda>i. ?f i * i) U"
+    by (rule sum.union_disjoint[OF _ U], auto simp add: A U UA)
+  also have "... = sum (\<lambda>i. ?f i * i) U" by auto
+  also have "... = a" using g by auto
+  finally have "sum (\<lambda>i. ?f i * i) A = a" .
+  with that show ?thesis .
+qed
+
+lemma dvd_ideal_generated_singleton:
+  assumes subset: "ideal_generated {a} \<subseteq> ideal_generated {b}"
+  shows "b dvd a"
+proof -
+ have "a \<in> ideal_generated {a}" by (simp add: ideal_generated_in)
+ hence a: "a \<in> ideal_generated {b}" by (metis subset subsetCE)
+ obtain f where "sum (\<lambda>i. f i * i) {b} = a" by (rule obtain_sum_ideal_generated[OF a], simp)
+ hence fb_b_a: "f b * b = a" unfolding sum_singleton .
+ show ?thesis unfolding dvd_def by (rule exI[of _ "f b"], metis fb_b_a mult_commute)
+qed
+
+lemma ideal_generated_singleton: "ideal_generated {a} = {k*a|k. k \<in> UNIV}"
+proof (auto simp add: ideal_generated_eq_left_ideal left_ideal_explicit)
+  fix f U
+  assume U: "finite U" and U_in_a: "U \<subseteq> {a}"
+  show "\<exists>k. (\<Sum>i\<in>U. f i * i) = k * a"
+  proof (cases "U={}")
+    case True show ?thesis by (rule exI[of _ 0], simp add: True)
+  next
+    case False
+    hence Ua: "U = {a}" using U_in_a by auto
+    show ?thesis by (rule exI[of _ "f a"]) (simp add: Ua sum_singleton)
+  qed
+next
+  fix k
+  show " \<exists>f U. finite U \<and> U \<subseteq> {a} \<and> (\<Sum>i\<in>U. f i * i) = k * a"
+    by (rule exI[of _ "\<lambda>i. k"], rule exI[of _ "{a}"], simp)
+qed
+
+
+lemma dvd_ideal_generated_singleton':
+  assumes b_dvd_a: "b dvd a"
+  shows "ideal_generated {a} \<subseteq> ideal_generated {b}"
+  apply (simp only: ideal_generated_singleton)
+  using assms unfolding dvd_def
+  apply auto
+  apply (simp_all only: mult_commute)
+  unfolding mult_assoc[symmetric]
+  apply blast
+  done
+
+
+lemma ideal_generated_subset2:
+  assumes ac: "ideal_generated {a} \<subseteq> ideal_generated {c}"
+  and bc: "ideal_generated {b} \<subseteq> ideal_generated {c}"
+  shows "ideal_generated {a,b} \<subseteq> ideal_generated {c}"
+proof
+  fix x
+  assume x: "x \<in> ideal_generated {a, b}"
+  show " x \<in> ideal_generated {c}"
+  proof (cases "a=b")
+    case True
+    show ?thesis using x bc unfolding True ideal_generated_repeated by fast
+  next
+    case False
+    obtain k where k: "a = c * k"
+      using dvd_ideal_generated_singleton[OF ac] unfolding dvd_def by auto
+    obtain k' where k': "b = c * k'"
+      using dvd_ideal_generated_singleton[OF bc] unfolding dvd_def by auto
+    obtain f where f: "sum (\<lambda>i. f i * i) {a,b} = x"
+      by (rule obtain_sum_ideal_generated[OF x], simp)
+    hence "x = f a * a + f b * b " unfolding sum_two_elements[OF False] by simp
+    also have "... = f a * (c * k) + f b * (c * k')" unfolding k k' by simp
+    also have "... = (f a * k) * c + (f b * k') * c"
+      by (simp only: mult_assoc) (simp only: mult_commute)
+    also have "... = (f a * k +  f b * k') * c"
+      by (simp only: mult_commute) (simp only: distrib_left)
+    finally have "x = (f a * k + f b * k') * c" .
+    thus ?thesis unfolding ideal_generated_singleton by auto
+  qed
+qed
+
+end
+
+lemma ideal_kZ: "ideal {k*x|x. x\<in>(UNIV::int set)}"
+  unfolding ideal_def left_ideal_def right_ideal_def subgroup_def
+  apply auto
+  apply (metis int_distrib(2))
+  apply (metis minus_mult_right)
+  apply (metis int_distrib(2))
+  apply (metis minus_mult_right)
+  done
+
+
+
+class GCD_ring = comm_ring_1
+  + assumes exists_gcd: "\<exists>d. d dvd a \<and> d dvd b \<and> (\<forall>d'. d' dvd a \<and> d' dvd b \<longrightarrow> d' dvd d)"
+begin
+
+
+definition is_gcd :: "('a \<Rightarrow> 'a \<Rightarrow> 'a) \<Rightarrow> bool"
+  where "is_gcd (gcd') = (\<forall>a b. (gcd' a b dvd a)
+                          \<and> (gcd' a b dvd b)
+                          \<and> (\<forall>d'. d' dvd a \<and> d' dvd b \<longrightarrow> d' dvd gcd' a b))"
+
+lemma gcd'_dvd1:
+  assumes "is_gcd gcd'" shows "gcd' a b dvd a" using assms unfolding is_gcd_def by auto
+
+lemma gcd'_dvd2:
+  assumes "is_gcd gcd'" shows "gcd' a b dvd b"
+  using assms unfolding is_gcd_def by auto
+
+lemma gcd'_greatest:
+  assumes "is_gcd gcd'" and "l dvd a" and "l dvd b"
+  shows "l dvd gcd' a b"
+  using assms unfolding is_gcd_def by auto
+
+lemma gcd'_zero [simp]:
+  assumes "is_gcd gcd'"
+  shows "gcd' x y = 0 \<longleftrightarrow> x = 0 \<and> y = 0"
+  by (metis dvd_0_left dvd_refl gcd'_dvd1 gcd'_dvd2 gcd'_greatest assms)+
+
+end
+
+class GCD_domain = GCD_ring + idom
+
+class bezout_ring = comm_ring_1 +
+        assumes exists_bezout: "\<exists>p q d. (p*a + q*b = d)
+                    \<and> (d dvd a)
+                    \<and> (d dvd b)
+                    \<and> (\<forall>d'. (d' dvd a \<and> d' dvd b) \<longrightarrow> d' dvd d)"
+begin
+
+subclass GCD_ring
+proof
+  fix a b
+  show "\<exists>d. d dvd a \<and> d dvd b \<and> (\<forall>d'. d' dvd a \<and> d' dvd b \<longrightarrow> d' dvd d)"
+    using exists_bezout[of a b] by auto
+qed
+
+
+definition is_bezout :: "('a \<Rightarrow>'a \<Rightarrow> ('a \<times> 'a \<times> 'a)) \<Rightarrow> bool"
+  where "is_bezout (bezout) = (\<forall>a b. let (p, q, gcd_a_b) = bezout a b
+                                      in
+                                        p * a + q * b = gcd_a_b
+                                        \<and> (gcd_a_b dvd a)
+                                        \<and> (gcd_a_b dvd b)
+                                        \<and> (\<forall>d'. d' dvd a \<and> d' dvd b \<longrightarrow> d' dvd gcd_a_b))"
+

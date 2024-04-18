@@ -1,0 +1,232 @@
+theory Macaulay_Matrix
+  imports More_MPoly_Type_Class Jordan_Normal_Form.Gauss_Jordan_Elimination
+begin
+
+
+
+lemma vec_of_list_alt: "vec_of_list xs = vec (length xs) (nth xs)"
+  by (transfer, rule refl)
+
+lemma vec_cong:
+  assumes "n = m" and "\<And>i. i < m \<Longrightarrow> f i = g i"
+  shows "vec n f = vec m g"
+  using assms by auto
+
+lemma scalar_prod_comm:
+  assumes "dim_vec v = dim_vec w"
+  shows "v \<bullet> w = w \<bullet> (v::'a::comm_semiring_0 vec)"
+  by (simp add: scalar_prod_def assms, rule sum.cong, rule refl, simp only: ac_simps)
+
+lemma vec_scalar_mult_fun: "vec n (\<lambda>x. c * f x) = c \<cdot>\<^sub>v vec n f"
+  by (simp add: smult_vec_def, rule vec_cong, rule refl, simp)
+
+definition mult_vec_mat :: "'a vec \<Rightarrow> 'a :: semiring_0 mat \<Rightarrow> 'a vec" (infixl "\<^sub>v*" 70)
+  where "v \<^sub>v* A \<equiv> vec (dim_col A) (\<lambda>j. v \<bullet> col A j)"
+
+definition resize_vec :: "nat \<Rightarrow> 'a vec \<Rightarrow> 'a vec"
+  where "resize_vec n v = vec n (vec_index v)"
+
+lemma dim_resize_vec[simp]: "dim_vec (resize_vec n v) = n"
+  by (simp add: resize_vec_def)
+
+lemma resize_vec_carrier: "resize_vec n v \<in> carrier_vec n"
+  by (simp add: carrier_dim_vec)
+
+lemma resize_vec_dim[simp]: "resize_vec (dim_vec v) v = v"
+  by (simp add: resize_vec_def eq_vecI)
+
+lemma resize_vec_index:
+  assumes "i < n"
+  shows "resize_vec n v $ i = v $ i"
+  using assms by (simp add: resize_vec_def)
+
+lemma mult_mat_vec_resize:
+  "v \<^sub>v* A = (resize_vec (dim_row A) v) \<^sub>v* A"
+  by (simp add: mult_vec_mat_def scalar_prod_def, rule arg_cong2[of _ _ _ _ vec], rule, rule,
+      rule sum.cong, rule, simp add: resize_vec_index)
+
+lemma assoc_mult_vec_mat:
+  assumes "v \<in> carrier_vec n1" and "A \<in> carrier_mat n1 n2" and "B \<in> carrier_mat n2 n3"
+  shows "v \<^sub>v* (A * B) = (v \<^sub>v* A) \<^sub>v* B"
+  using assms by (intro eq_vecI, auto simp add: mult_vec_mat_def mult_mat_vec_def assoc_scalar_prod)
+
+lemma mult_vec_mat_transpose:
+  assumes "dim_vec v = dim_row A"
+  shows "v \<^sub>v* A = (transpose_mat A) *\<^sub>v (v::'a::comm_semiring_0 vec)"
+proof (simp add: mult_vec_mat_def mult_mat_vec_def, rule vec_cong, rule refl, simp)
+  fix j
+  show "v \<bullet> col A j = col A j \<bullet> v" by (rule scalar_prod_comm, simp add: assms)
+qed
+
+
+definition nzrows :: "'a::zero mat \<Rightarrow> 'a vec list"
+  where "nzrows A = filter (\<lambda>r. r \<noteq> 0\<^sub>v (dim_col A)) (rows A)"
+
+definition row_space :: "'a mat \<Rightarrow> 'a::semiring_0 vec set"
+  where "row_space A = (\<lambda>v. mult_vec_mat v A) ` (carrier_vec (dim_row A))"
+
+definition row_echelon :: "'a mat \<Rightarrow> 'a::field mat"
+  where "row_echelon A = fst (gauss_jordan A (1\<^sub>m (dim_row A)))"
+
+
+lemma length_nzrows: "length (nzrows A) \<le> dim_row A"
+  by (simp add: nzrows_def length_rows[symmetric] del: length_rows)
+
+lemma set_nzrows: "set (nzrows A) = set (rows A) - {0\<^sub>v (dim_col A)}"
+  by (auto simp add: nzrows_def)
+
+lemma nzrows_nth_not_zero:
+  assumes "i < length (nzrows A)"
+  shows "nzrows A ! i \<noteq> 0\<^sub>v (dim_col A)"
+  using assms unfolding nzrows_def using nth_mem by force
+
+
+lemma row_spaceI:
+  assumes "x = v \<^sub>v* A"
+  shows "x \<in> row_space A"
+  unfolding row_space_def assms by (rule, fact mult_mat_vec_resize, fact resize_vec_carrier)
+
+lemma row_spaceE:
+  assumes "x \<in> row_space A"
+  obtains v where "v \<in> carrier_vec (dim_row A)" and "x = v \<^sub>v* A"
+  using assms unfolding row_space_def by auto
+
+lemma row_space_alt: "row_space A = range (\<lambda>v. mult_vec_mat v A)"
+proof
+  show "row_space A \<subseteq> range (\<lambda>v. v \<^sub>v* A)" unfolding row_space_def by auto
+next
+  show "range (\<lambda>v. v \<^sub>v* A) \<subseteq> row_space A"
+  proof
+    fix x
+    assume "x \<in> range (\<lambda>v. v \<^sub>v* A)"
+    then obtain v where "x = v \<^sub>v* A" ..
+    thus "x \<in> row_space A" by (rule row_spaceI)
+  qed
+qed
+
+lemma row_space_mult:
+  assumes "A \<in> carrier_mat nr nc" and "B \<in> carrier_mat nr nr"
+  shows "row_space (B * A) \<subseteq> row_space A"
+proof
+  from assms(2) assms(1) have "B * A \<in> carrier_mat nr nc" by (rule mult_carrier_mat)
+  hence "nr = dim_row (B * A)" by blast
+  fix x
+  assume "x \<in> row_space (B * A)"
+  then obtain v where "v \<in> carrier_vec nr" and x: "x = v \<^sub>v* (B * A)"
+  from this(1) assms(2) assms(1) have "x = (v \<^sub>v* B) \<^sub>v* A" unfolding x by (rule assoc_mult_vec_mat)
+  thus "x \<in> row_space A" by (rule row_spaceI)
+qed
+
+lemma row_space_mult_unit:
+  assumes "P \<in> Units (ring_mat TYPE('a::semiring_1) (dim_row A) b)"
+  shows "row_space (P * A) = row_space A"
+proof -
+  have A: "A \<in> carrier_mat (dim_row A) (dim_col A)" by simp
+  from assms have P: "P \<in> carrier (ring_mat TYPE('a) (dim_row A) b)" and
+    *: "\<exists>Q\<in>(carrier (ring_mat TYPE('a) (dim_row A) b)).
+            Q \<otimes>\<^bsub>ring_mat TYPE('a) (dim_row A) b\<^esub> P = \<one>\<^bsub>ring_mat TYPE('a) (dim_row A) b\<^esub>"
+    unfolding Units_def by auto
+  from P have P_in: "P \<in> carrier_mat (dim_row A) (dim_row A)" by (simp add: ring_mat_def)
+  from * obtain Q where "Q \<in> carrier (ring_mat TYPE('a) (dim_row A) b)"
+    and "Q \<otimes>\<^bsub>ring_mat TYPE('a) (dim_row A) b\<^esub> P = \<one>\<^bsub>ring_mat TYPE('a) (dim_row A) b\<^esub>" ..
+  hence Q_in: "Q \<in> carrier_mat (dim_row A) (dim_row A)" and QP: "Q * P = 1\<^sub>m (dim_row A)"
+    by (simp_all add: ring_mat_def)
+  show ?thesis
+  proof
+    from A P_in show "row_space (P * A) \<subseteq> row_space A" by (rule row_space_mult)
+  next
+    from A P_in Q_in have "Q * (P * A) = (Q * P) * A" by (simp only: assoc_mult_mat)
+    also from A have "... = A" by (simp add: QP)
+    finally have eq: "row_space A = row_space (Q * (P * A))" by simp
+    show "row_space A \<subseteq> row_space (P * A)" unfolding eq by (rule row_space_mult, rule mult_carrier_mat, fact+)
+  qed
+qed
+
+
+lemma row_eq_zero_iff_pivot_fun:
+  assumes "pivot_fun A f (dim_col A)" and "i < dim_row (A::'a::zero_neq_one mat)"
+  shows "(row A i = 0\<^sub>v (dim_col A)) \<longleftrightarrow> (f i = dim_col A)"
+proof -
+  have *: "dim_row A = dim_row A" ..
+  show ?thesis
+  proof
+    assume a: "row A i = 0\<^sub>v (dim_col A)"
+    show "f i = dim_col A"
+    proof (rule ccontr)
+      assume "f i \<noteq> dim_col A"
+      with pivot_funD(1)[OF * assms] have **: "f i < dim_col A" by simp
+      with * assms have "A $$ (i, f i) = 1" by (rule pivot_funD)
+      with ** assms(2) have "row A i $ (f i) = 1" by simp
+      hence "(1::'a) = (0\<^sub>v (dim_col A)) $ (f i)" by (simp only: a)
+      also have "... = (0::'a)" using ** by simp
+      finally show False by simp
+    qed
+  next
+    assume a: "f i = dim_col A"
+    show "row A i = 0\<^sub>v (dim_col A)"
+    proof (rule, simp_all add: assms(2))
+      fix j
+      assume "j < dim_col A"
+      hence "j < f i" by (simp only: a)
+      with * assms show "A $$ (i, j) = 0" by (rule pivot_funD)
+    qed
+  qed
+qed
+
+lemma row_not_zero_iff_pivot_fun:
+  assumes "pivot_fun A f (dim_col A)" and "i < dim_row (A::'a::zero_neq_one mat)"
+  shows "(row A i \<noteq> 0\<^sub>v (dim_col A)) \<longleftrightarrow> (f i < dim_col A)"
+proof (simp only: row_eq_zero_iff_pivot_fun[OF assms])
+  have "f i \<le> dim_col A" by (rule pivot_funD[where ?f = f], rule refl, fact+)
+  thus "(f i \<noteq> dim_col A) = (f i < dim_col A)" by auto
+qed
+
+lemma pivot_fun_stabilizes:
+  assumes "pivot_fun A f nc" and "i1 \<le> i2" and "i2 < dim_row A" and "nc \<le> f i1"
+  shows "f i2 = nc"
+proof -
+  from assms(2) have "i2 = i1 + (i2 - i1)" by simp
+  then obtain k where "i2 = i1 + k" ..
+  proof (induct k arbitrary: i1)
+    case 0
+    from this(1) have "i1 < dim_row A" by simp
+    from _ assms(1) this have "f i1 \<le> nc" by (rule pivot_funD, intro refl)
+  next
+    case (Suc k)
+    from Suc(2) have "Suc (i1 + k) < dim_row A" by simp
+    hence "Suc i1 + k < dim_row A" by simp
+    hence "Suc i1 < dim_row A" by simp
+    hence "i1 < dim_row A" by simp
+    have "nc \<le> f (Suc i1)"
+    proof -
+      have "f i1 < f (Suc i1) \<or> f (Suc i1) = nc" by (rule pivot_funD, rule refl, fact+)
+      with Suc(3) show ?thesis by auto
+    qed
+    thus ?case by simp
+  qed
+qed
+
+lemma pivot_fun_mono_strict:
+  assumes "pivot_fun A f nc" and "i1 < i2" and "i2 < dim_row A" and "f i1 < nc"
+  shows "f i1 < f i2"
+proof -
+  from assms(2) have "i2 - i1 \<noteq> 0" and "i2 = i1 + (i2 - i1)" by simp_all
+  then obtain k where "k \<noteq> 0" and "i2 = i1 + k" ..
+  proof (induct k arbitrary: i1)
+    case 0
+    thus ?case by simp
+  next
+    case (Suc k)
+    from Suc(3) have "Suc (i1 + k) < dim_row A" by simp
+    hence "Suc i1 + k < dim_row A" by simp
+    hence "Suc i1 < dim_row A" by simp
+    hence "i1 < dim_row A" by simp
+    have *: "f i1 < f (Suc i1)"
+    proof -
+      have "f i1 < f (Suc i1) \<or> f (Suc i1) = nc" by (rule pivot_funD, rule refl, fact+)
+      with Suc(4) show ?thesis by auto
+    qed
+    show ?case
+    proof (simp, cases "k = 0")
+      case True
+      show "f i1 < f (Suc (i1 + k))" by (simp add: True *)

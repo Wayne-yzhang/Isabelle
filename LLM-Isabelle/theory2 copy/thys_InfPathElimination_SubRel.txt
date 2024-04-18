@@ -1,0 +1,332 @@
+theory SubRel
+imports Graph
+begin 
+
+
+
+
+
+
+
+type_synonym 'v sub_t = "(('v \<times> nat) \<times> ('v \<times> nat))"
+
+
+
+
+type_synonym 'v sub_rel_t = "'v sub_t set"
+
+
+
+
+abbreviation subsumee :: 
+  "'v sub_t \<Rightarrow> ('v \<times> nat)" 
+where 
+  "subsumee sub \<equiv> fst sub"
+
+
+abbreviation subsumer :: 
+  "'v sub_t \<Rightarrow> ('v \<times> nat)" 
+where 
+  "subsumer sub \<equiv> snd sub"
+
+
+
+
+abbreviation subsumees :: 
+  "'v sub_rel_t \<Rightarrow> ('v \<times> nat) set" 
+where 
+  "subsumees subs \<equiv> subsumee ` subs"
+
+
+abbreviation subsumers :: 
+  "'v sub_rel_t \<Rightarrow> ('v \<times> nat) set" 
+where 
+  "subsumers subs \<equiv> subsumer ` subs"
+
+
+
+
+lemma subsumees_conv :
+  "subsumees subs = {v. \<exists> v'. (v,v') \<in> subs}"
+by force
+
+
+lemma subsumers_conv :
+  "subsumers subs = {v'. \<exists> v. (v,v') \<in> subs}"
+by force
+
+
+
+
+
+abbreviation vertices ::
+  "'v sub_rel_t \<Rightarrow> ('v \<times> nat) set" 
+where
+  "vertices subs \<equiv> subsumers subs \<union> subsumees subs"
+
+
+
+
+
+
+locale sub_rel =
+  fixes subs :: "'v sub_rel_t" (structure)
+
+
+
+
+locale wf_sub_rel = sub_rel +
+  assumes sub_imp_same_verts : 
+    "sub \<in> subs \<Longrightarrow> fst (subsumee sub) = fst (subsumer sub)"
+  
+  assumes subsumed_by_one : 
+    "\<forall> v \<in> subsumees subs. \<exists>! v'. (v,v') \<in> subs"
+  
+  assumes inter_empty : 
+    "subsumers subs \<inter> subsumees subs = {}"
+
+begin
+  lemmas wf_sub_rel = sub_imp_same_verts subsumed_by_one inter_empty
+
+
+  lemma (in wf_sub_rel) subsumed_by_two_imp : 
+    assumes "(v,v1) \<in> subs"
+    assumes "(v,v2) \<in> subs" 
+    shows   "v1 = v2"
+  using assms wf_sub_rel unfolding subsumees_conv by blast
+  
+
+  lemma in_trancl_imp :
+    assumes "(v,v') \<in> subs\<^sup>+"
+    shows   "(v,v') \<in> subs"
+  using tranclD[OF assms] tranclD[of _ v' subs]
+        rtranclD[of _ v' subs]  
+        inter_empty 
+  by force
+
+  lemma trancl_eq :
+    "subs\<^sup>+ = subs"
+  using in_trancl_imp r_into_trancl[of _ _ subs] by fast
+end
+
+
+
+
+lemma
+  "wf_sub_rel {}"
+by (auto simp add : wf_sub_rel_def)
+
+
+
+
+
+locale rgraph = 
+  fixes g :: "('v,'x) rgraph_scheme" (structure)
+
+
+locale sub_rel_of = rgraph + sub_rel +
+  assumes related_are_verts : "vertices subs \<subseteq> Graph.vertices g"
+begin
+  lemmas sub_rel_of = related_are_verts
+
+
+  lemma trancl_sub_rel_of :
+     "sub_rel_of g (subs\<^sup>+)"
+  using tranclD[of _ _ subs] tranclD2[of _ _ subs] sub_rel_of
+  unfolding sub_rel_of_def subsumers_conv subsumees_conv by blast
+end
+
+
+
+
+lemma
+  "sub_rel_of g {}"
+by (auto simp add : sub_rel_of_def)
+
+
+
+
+
+locale wf_sub_rel_of = rgraph + sub_rel +
+  assumes sub_rel_of : "sub_rel_of g subs"
+  assumes wf_sub_rel : "wf_sub_rel subs"
+begin
+  lemmas wf_sub_rel_of = sub_rel_of wf_sub_rel                                                       
+end
+
+
+
+
+lemma
+  "wf_sub_rel_of g {}"
+by (auto simp add : sub_rel_of_def wf_sub_rel_def wf_sub_rel_of_def)
+
+
+
+
+
+
+
+fun ces :: "('v \<times> nat) \<Rightarrow> ('v \<times> nat) edge list \<Rightarrow> ('v \<times> nat) \<Rightarrow> 'v sub_rel_t \<Rightarrow> bool" where
+  "ces v1 [] v2 subs = (v1 = v2  \<or> (v1,v2) \<in> subs\<^sup>+)"
+| "ces v1 (e#es) v2 subs = ((v1 = src e \<or> (v1,src e) \<in> subs\<^sup>+) \<and> ces (tgt e) es v2 subs)"
+
+
+
+
+lemma
+  assumes "Graph.ces v1 es v2"
+  shows   "ces v1 es v2 subs"
+using assms by (induct es arbitrary : v1, auto)
+
+
+
+
+lemma
+  assumes "ces v1 es v2 {}"
+  shows   "Graph.ces v1 es v2"
+using assms by (induct es arbitrary : v1, auto)
+
+
+
+
+lemma acas_imp_dcas :
+  assumes "(v1,v2) \<in> subs"
+  assumes "ces v2 es v subs"
+  shows   "ces v1 es v subs"
+using assms by (cases es, simp_all) (intro disjI2, force)+
+
+
+
+
+lemma ces_Un :
+  assumes "ces v1 es v2  subs1"
+  shows   "ces v1 es v2 (subs1 \<union> subs2)"
+using assms by (induct es arbitrary : v1, auto simp add : trancl_mono)
+
+
+
+
+lemma cas_subset :
+  assumes "ces v1 es v2  subs1"
+  assumes "subs1 \<subseteq> subs2"
+  shows   "ces v1 es v2 subs2"
+using assms by (induct es arbitrary : v1, auto simp add : trancl_mono)
+
+
+
+
+lemma ces_append_one :
+  "ces v1 (es @ [e]) v2 subs = (ces v1 es (src e) subs \<and> ces (src e) [e] v2 subs)"
+by (induct es arbitrary : v1, auto)
+
+
+lemma ces_append :
+  "ces v1 (es1 @ es2) v2 subs = (\<exists> v. ces v1 es1 v subs \<and> ces v es2 v2 subs)"
+proof (intro iffI, goal_cases)
+  case 1 thus ?case 
+  by (induct es1 arbitrary : v1)  
+     (simp_all del : split_paired_Ex, blast)
+next
+  case 2 thus ?case
+  proof (induct es1 arbitrary : v1)
+    case (Nil v1)
+
+    then obtain v where "ces v1 [] v subs" 
+                  and   "ces v es2 v2 subs" 
+    by blast
+
+    thus ?case
+    unfolding ces.simps
+    proof (elim disjE, goal_cases)
+      case 1 thus ?case by simp
+    next
+      case 2 thus ?case by (cases es2) (simp, intro disjI2, fastforce)+
+    qed
+  next
+    case Cons thus ?case by auto
+  qed
+qed
+
+
+
+
+lemma (in sub_rel_of) ces_imp_ends_vertices :
+  assumes "ces v1 es v2 subs"
+  assumes "set es \<subseteq> edges g"
+  assumes "v1 \<in> Graph.vertices g"
+  shows   "v2 \<in> Graph.vertices g"
+using assms trancl_sub_rel_of 
+unfolding sub_rel_of_def subsumers_conv vertices_def
+by (induct es arbitrary : v1) (force, (simp del : split_paired_Ex, fast))
+
+
+
+
+
+definition subpath :: 
+  "(('v \<times> nat),'x) rgraph_scheme \<Rightarrow> ('v \<times> nat) \<Rightarrow> ('v \<times> nat) edge list \<Rightarrow> ('v \<times> nat) \<Rightarrow> (('v \<times> nat) \<times> ('v \<times> nat)) set \<Rightarrow> bool" 
+where
+  "subpath g v1 es v2 subs \<equiv> sub_rel_of g subs 
+                           \<and> v1 \<in> Graph.vertices g
+                           \<and> ces v1 es v2 subs  
+                           \<and> set es \<subseteq> edges g"
+
+
+
+
+abbreviation subpath_from ::
+  "(('v \<times> nat),'x) rgraph_scheme \<Rightarrow> ('v \<times> nat) \<Rightarrow> ('v \<times> nat) edge list \<Rightarrow> 'v sub_rel_t \<Rightarrow> bool"
+where
+  "subpath_from g v es subs \<equiv> \<exists> v'. subpath g v es v' subs"
+
+
+
+
+lemma Nil_sp :
+  "subpath g v1 [] v2 subs \<longleftrightarrow> sub_rel_of g subs 
+                             \<and> v1 \<in> Graph.vertices g 
+                             \<and> (v1 = v2 \<or> (v1,v2) \<in> subs\<^sup>+)"
+by (auto simp add : subpath_def)
+
+
+there is no need to account for the transitive closure of the relation.\<close>
+text \<open>Simplification lemma for the one-element sequence.\<close>
+text \<open>Once again, when the subsumption relation is well-formed, the previous lemma can be 
+simplified since, in this case, the transitive closure of the relation is the relation itself.\<close>
+text \<open>Simplification lemma for the non-empty sequence (which might contain more than one element).\<close>
+text \<open>The same lemma when the subsumption relation is well-formed.\<close>
+text \<open>Simplification lemma for @{term "subpath"} when the sequence is known to end by a given 
+edge.\<close>
+text \<open>Simpler version in the case of a well-formed subsumption relation.\<close>
+text \<open>Simplification lemma when the sequence is known to be the concatenation of two 
+sub-sequences.\<close>
+text \<open>Let @{term "es"} be a sub-path of a graph @{term "g"} starting at vertex @{term "v1"}. 
+By definition of @{term "subpath"}, @{term "v1"} is a vertex of @{term "g"}. Even if this is a 
+direct consequence of the definition of @{term "subpath"}, this lemma will ease the proofs of some 
+goals in the following.\<close>
+text \<open>The same property (which also follows the definition of @{term "subpath"}, but not as 
+trivially as the previous lemma) can be established for the final vertex @{term "v2"}.\<close>
+text \<open>A sub-path ending in a subsumed vertex can be extended to the subsumer of this vertex, 
+provided that the subsumption relation is a sub-relation of the graph it equips.\<close>
+text \<open>Let @{term "g"} be a graph equipped with a well-formed sub-relation. A sub-path starting at 
+a subsumed vertex @{term "v1"} whose set of out-edges is empty is either:
+\begin{enumerate}
+  \item empty,
+  \item a sub-path starting at the subsumer @{term "v2"} of @{term "v1"}.
+\end{enumerate}
+The third assumption represent the fact that, when building red-black graphs, we do not allow to 
+build the successor of a subsumed vertex.\<close>
+text \<open>Note that it is not possible to split this lemma into two lemmas (one for each member of the 
+disjunctive conclusion). Suppose @{term "v"} is @{term "v1"}, then 
+@{term "es"} could be empty or it could also be a non-empty sub-path leading from @{term "v2"} to 
+@{term "v1"}. If @{term "v"} is not @{term "v1"}, it could be @{term "v2"} and @{term "es"} could 
+be empty or not.\<close>
+text \<open>A sub-path starting at a non-subsumed vertex whose set of out-edges is empty is also empty.\<close>
+text \<open>Let @{term "e"} be an edge whose target is not subsumed and has not out-going edges. A 
+sub-path @{term "es"} containing @{term "e"} ends by @{term "e"} and this occurrence of @{term "e"} 
+is unique along @{term "es"}.\<close>
+text \<open>Consider a sub-path ending at the target of a recently added edge @{term "e"}, whose target 
+did not belong to the graph prior to its addition. If @{term "es"} starts in another vertex than 
+the target of @{term "e"}, then it contains @{term "e"}.\<close>
+  using tranclD2 assms(3) \<open>tgt e \<notin> subsumers subs\<close> \<open>es = es' @ [e']\<close>

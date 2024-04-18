@@ -1,0 +1,486 @@
+theory Multi_Single_TM_Translation
+  imports  
+    Multitape_TM
+    Singletape_TM
+    STM_Renaming
+begin
+
+
+datatype 'a tuple_symbol = NO_HAT "'a" | HAT "'a"
+datatype ('a, 'k) st_tape_symbol = ST_LE ("\<turnstile>") | TUPLE "'k \<Rightarrow> 'a tuple_symbol" | INP "'a"
+datatype 'a sym_or_bullet = SYM "'a" | BULLET ("\<bullet>")
+
+datatype ('a,'q,'k) st_states = 
+  R\<^sub>1 "'a sym_or_bullet" |
+  R\<^sub>2 |
+  S\<^sub>0 'q |
+  S  "'q" "'k \<Rightarrow> 'a sym_or_bullet" |
+  S\<^sub>1  "'q" "'k \<Rightarrow> 'a" |
+  E\<^sub>0  "'q" "'k \<Rightarrow> 'a" "'k \<Rightarrow> dir" |
+  E  "'q" "'k \<Rightarrow> 'a sym_or_bullet" "'k \<Rightarrow> dir" |
+  Er "'q" "'k \<Rightarrow> 'a sym_or_bullet" "'k \<Rightarrow> dir" "'k set" |
+  El "'q" "'k \<Rightarrow> 'a sym_or_bullet" "'k \<Rightarrow> dir" "'k set" |
+  Em "'q" "'k \<Rightarrow> 'a sym_or_bullet" "'k \<Rightarrow> dir" "'k set"
+
+type_synonym ('a,'q,'k)mt_rule = "'q \<times> ('k \<Rightarrow> 'a) \<times> 'q \<times> ('k \<Rightarrow> 'a) \<times> ('k \<Rightarrow> dir)" 
+
+context multitape_tm
+begin
+
+definition R1_Set where "R1_Set = SYM ` \<Sigma> \<union> {\<bullet>}" 
+
+definition gamma_set :: "('k \<Rightarrow> 'a tuple_symbol) set" where
+  "gamma_set = (UNIV :: 'k set) \<rightarrow> NO_HAT ` \<Gamma> \<union> HAT ` \<Gamma>" 
+
+definition \<Gamma>' :: "('a, 'k) st_tape_symbol set" where 
+  "\<Gamma>' = TUPLE ` gamma_set \<union> INP ` \<Sigma> \<union> {\<turnstile>}" 
+
+definition "func_set = (UNIV :: 'k set) \<rightarrow> SYM ` \<Gamma> \<union> {\<bullet>}" 
+
+definition blank' :: "('a, 'k) st_tape_symbol" where "blank' = TUPLE (\<lambda> _. NO_HAT blank)" 
+definition hatLE' :: "('a, 'k) st_tape_symbol" where "hatLE' = TUPLE (\<lambda> _. HAT LE)" 
+definition encSym :: "'a \<Rightarrow> ('a, 'k) st_tape_symbol" where "encSym a = (TUPLE (\<lambda> i. if i = 0 then NO_HAT a else NO_HAT blank))" 
+
+definition add_inp :: "('k \<Rightarrow> 'a tuple_symbol) \<Rightarrow> ('k \<Rightarrow> 'a sym_or_bullet) \<Rightarrow> ('k \<Rightarrow> 'a sym_or_bullet)" where
+  "add_inp inp inp2 = (\<lambda> k. case inp k of HAT s \<Rightarrow> SYM s | _ \<Rightarrow> inp2 k)" 
+
+definition project_inp :: "('k \<Rightarrow> 'a sym_or_bullet) \<Rightarrow> ('k \<Rightarrow> 'a)" where
+  "project_inp inp = (\<lambda> k. case inp k of SYM s \<Rightarrow> s)" 
+
+definition compute_idx_set :: "('k \<Rightarrow> 'a tuple_symbol) \<Rightarrow> ('k \<Rightarrow> 'a sym_or_bullet)  \<Rightarrow> 'k set" where
+  "compute_idx_set tup ys = {i . tup i \<in> HAT ` \<Gamma> \<and> ys i \<in> SYM ` \<Gamma>}"
+
+definition update_ys :: "('k \<Rightarrow> 'a tuple_symbol) \<Rightarrow> ('k \<Rightarrow> 'a sym_or_bullet)  \<Rightarrow> ('k \<Rightarrow> 'a sym_or_bullet)" where
+  "update_ys tup ys = (\<lambda> k. if k \<in> (compute_idx_set tup ys) then \<bullet> else ys k)"
+
+definition replace_sym :: "('k \<Rightarrow> 'a tuple_symbol) \<Rightarrow> ('k \<Rightarrow> 'a sym_or_bullet)  \<Rightarrow> ('k \<Rightarrow> 'a tuple_symbol)" where
+  "replace_sym tup ys = (\<lambda> k. if k \<in> (compute_idx_set tup ys) 
+                              then (case ys k of SYM a \<Rightarrow> NO_HAT a) 
+                              else tup k)"
+
+definition place_hats_to_dir :: "dir \<Rightarrow> ('k \<Rightarrow> 'a tuple_symbol) \<Rightarrow> ('k \<Rightarrow> dir) \<Rightarrow>'k set \<Rightarrow> ('k \<Rightarrow> 'a tuple_symbol)" where
+  "place_hats_to_dir dir tup ds I = (\<lambda> k. (case tup k of 
+                                      NO_HAT a \<Rightarrow> if k \<in> I \<and> ds k = dir 
+                                                  then HAT a
+                                                  else NO_HAT a 
+                                      | HAT a \<Rightarrow> HAT a )) "
+
+definition place_hats_R :: "('k \<Rightarrow> 'a tuple_symbol) \<Rightarrow> ('k \<Rightarrow> dir) \<Rightarrow>'k set \<Rightarrow> ('k \<Rightarrow> 'a tuple_symbol)" where
+  "place_hats_R = place_hats_to_dir dir.R"
+
+definition place_hats_M :: "('k \<Rightarrow> 'a tuple_symbol) \<Rightarrow> ('k \<Rightarrow> dir) \<Rightarrow>'k set \<Rightarrow> ('k \<Rightarrow> 'a tuple_symbol)" where
+  "place_hats_M = place_hats_to_dir dir.N"
+
+definition place_hats_L :: "('k \<Rightarrow> 'a tuple_symbol) \<Rightarrow> ('k \<Rightarrow> dir) \<Rightarrow>'k set \<Rightarrow> ('k \<Rightarrow> 'a tuple_symbol)" where
+  "place_hats_L = place_hats_to_dir dir.L"
+
+definition \<delta>' :: 
+  "(('a, 'q, 'k) st_states \<times> ('a, 'k) st_tape_symbol \<times> ('a, 'q, 'k) st_states \<times> ('a, 'k) st_tape_symbol \<times> dir)set"  
+  where
+    "\<delta>' = ({(R\<^sub>1 \<bullet>, \<turnstile>, R\<^sub>1 \<bullet>, \<turnstile>, dir.R)}) 
+    \<union> (\<lambda> x. (R\<^sub>1 \<bullet>, INP x, R\<^sub>1 (SYM x), hatLE', dir.R)) ` \<Sigma>
+    \<union> (\<lambda> (a,x). (R\<^sub>1 (SYM a), INP x, R\<^sub>1 (SYM x), encSym a, dir.R)) ` (\<Sigma> \<times> \<Sigma>)
+    \<union> {(R\<^sub>1 \<bullet>, blank', R\<^sub>2, hatLE', dir.L)}
+    \<union> (\<lambda> a. (R\<^sub>1 (SYM a), blank', R\<^sub>2, encSym a, dir.L)) ` \<Sigma>
+    \<union> (\<lambda> x. (R\<^sub>2, x, R\<^sub>2, x, dir.L)) ` (\<Gamma>' - { \<turnstile> })
+    \<union> {(R\<^sub>2, \<turnstile>, S\<^sub>0 s, \<turnstile>, dir.N)}
+    \<union> (\<lambda> q. (S\<^sub>0 q, \<turnstile>, S q (\<lambda> _. \<bullet>), \<turnstile>, dir.R)) ` (Q - {t,r})
+    \<union> (\<lambda> (q,inp,t). (S q inp, TUPLE t, S q (add_inp t inp), TUPLE t, dir.R)) ` (Q \<times> (func_set - (UNIV \<rightarrow> SYM ` \<Gamma>)) \<times> gamma_set)
+    \<union> (\<lambda> (q,inp,a). (S q inp, a, S\<^sub>1 q (project_inp inp), a, dir.L)) ` (Q \<times> (UNIV \<rightarrow> SYM ` \<Gamma>) \<times> (\<Gamma>' - { \<turnstile> }))
+    \<union> (\<lambda> ((q,a,q',b,d),t). (S\<^sub>1 q a, t, E\<^sub>0 q' b d, t, dir.N)) ` (\<delta> \<times> \<Gamma>')
+    \<union> (\<lambda> ((q,a,d),t). (E\<^sub>0 q a d, t, E q (SYM o a) d, t, dir.N)) ` ((Q \<times> (UNIV \<rightarrow> \<Gamma>) \<times> UNIV) \<times> \<Gamma>')
+    \<union> (\<lambda> (q,d). (E q (\<lambda> _. \<bullet>) d, \<turnstile>, S\<^sub>0 q, \<turnstile>, dir.N)) ` (Q \<times> UNIV)
+    \<union> (\<lambda> (q,ys,ds,t).   (E  q ys ds,   TUPLE t, Er q (update_ys t ys) ds (compute_idx_set t ys), TUPLE(replace_sym t ys), dir.R)) ` (Q \<times> func_set \<times> UNIV \<times> gamma_set)
+    \<union> (\<lambda> (q,ys,ds,I,t). (Er q ys ds I, TUPLE t, Em q ys ds I, TUPLE (place_hats_R t ds I), dir.L)) ` (Q \<times> func_set \<times> UNIV \<times> UNIV \<times> gamma_set)
+    \<union> (\<lambda> (q,ys,ds,I,t). (Em q ys ds I, TUPLE t, El q ys ds I, TUPLE (place_hats_M t ds I), dir.L)) ` (Q \<times> func_set \<times> UNIV \<times> UNIV \<times> gamma_set)
+    \<union> (\<lambda> (q,ys,ds,I,t). (El q ys ds I, TUPLE t, E  q ys ds,   TUPLE (place_hats_L t ds I), dir.N)) ` (Q \<times> func_set \<times> UNIV \<times> UNIV \<times> gamma_set)
+  "
+
+definition "Q' = 
+  R\<^sub>1 ` R1_Set \<union> {R\<^sub>2} \<union> 
+  S\<^sub>0 ` Q \<union> (\<lambda> (q,inp). S q inp) ` (Q \<times> func_set) \<union> (\<lambda> (q,a). S\<^sub>1 q a) ` (Q \<times> (UNIV \<rightarrow> \<Gamma>)) \<union>
+  (\<lambda> (q,a,d). E\<^sub>0 q a d) ` (Q \<times> (UNIV \<rightarrow> \<Gamma>) \<times> UNIV) \<union> 
+  (\<lambda> (q,a,d). E q a d) ` (Q \<times> func_set \<times> UNIV) \<union>
+  (\<lambda> (q,a,d,I). Er q a d I) ` (Q \<times> func_set \<times> UNIV \<times> UNIV) \<union>
+  (\<lambda> (q,a,d,I). Em q a d I) ` (Q \<times> func_set \<times> UNIV \<times> UNIV) \<union>
+  (\<lambda> (q,a,d,I). El q a d I) ` (Q \<times> func_set \<times> UNIV \<times> UNIV)"
+
+lemma compute_idx_range[simp,intro]:
+  assumes "tup \<in> gamma_set"
+  assumes "ys \<in> func_set"
+  shows "compute_idx_set tup ys \<in> UNIV"
+  by auto
+
+lemma update_ys_range[simp,intro]:
+  assumes "tup \<in> gamma_set"
+  assumes "ys \<in> func_set"
+  shows "update_ys tup ys \<in> func_set"
+  by (insert assms, fastforce simp: update_ys_def func_set_def)
+
+lemma replace_sym_range[simp,intro]:
+  assumes "tup \<in> gamma_set"
+  assumes "ys \<in> func_set"
+  shows "replace_sym tup ys \<in> gamma_set"
+proof -
+  have "\<forall> k. (if k \<in> compute_idx_set tup ys then case ys k of SYM x \<Rightarrow> NO_HAT x else tup k) \<in> NO_HAT ` \<Gamma> \<union> HAT ` \<Gamma>"
+    by(intro allI, insert assms, cases "k \<in> compute_idx_set tup ys", auto simp: func_set_def compute_idx_set_def gamma_set_def replace_sym_def)
+  then show ?thesis
+    using assms unfolding replace_sym_def gamma_set_def by blast
+qed
+
+lemma tup_hat_content:
+  assumes "tup \<in> gamma_set"
+  assumes "tup x = HAT a"
+  shows "a \<in> \<Gamma>"
+proof - 
+  have "range tup \<subseteq> NO_HAT ` \<Gamma> \<union> HAT ` \<Gamma>" 
+    using assms gamma_set_def by auto
+  then show ?thesis 
+    using assms(2)
+    by (metis UNIV_I Un_iff image_iff image_subset_iff tuple_symbol.distinct(1) tuple_symbol.inject(2))
+qed
+
+lemma tup_no_hat_content:
+  assumes "tup \<in> gamma_set"
+  assumes "tup x = NO_HAT a"
+  shows "a \<in> \<Gamma>"
+proof - 
+  have "range tup \<subseteq> NO_HAT ` \<Gamma> \<union> HAT ` \<Gamma>" 
+    using assms gamma_set_def by auto
+  then show ?thesis 
+    using assms(2)
+    by (metis UNIV_I Un_iff image_iff image_subset_iff tuple_symbol.inject(1) tuple_symbol.simps(4))
+qed
+
+lemma place_hats_to_dir_range[simp, intro]:
+  assumes "tup \<in> gamma_set"
+  shows "place_hats_to_dir d tup ds I \<in> gamma_set"
+proof -
+  have "\<forall> k. (case tup k of NO_HAT a \<Rightarrow> if k \<in> I \<and> ds k = d then HAT a else NO_HAT a | HAT x \<Rightarrow> HAT x)
+    \<in>  NO_HAT ` \<Gamma> \<union> HAT ` \<Gamma>"
+  proof 
+    fix k 
+    show "(case tup k of NO_HAT a \<Rightarrow> if k \<in> I \<and> ds k = d then HAT a else NO_HAT a | HAT x \<Rightarrow> HAT x)
+    \<in>  NO_HAT ` \<Gamma> \<union> HAT ` \<Gamma>"
+      by(cases "tup k", insert tup_hat_content[OF assms(1)] tup_no_hat_content[OF assms(1)], auto simp: gamma_set_def)
+  qed
+  then show ?thesis
+    using assms
+    unfolding place_hats_to_dir_def gamma_set_def
+    by auto
+qed
+
+lemma place_hats_range[simp,intro]:
+  assumes "tup \<in> gamma_set"
+  shows "place_hats_R tup ds I \<in> gamma_set" and 
+    "place_hats_L tup ds I \<in> gamma_set" and 
+    "place_hats_M tup ds I \<in> gamma_set"
+  by(insert assms, auto simp: place_hats_R_def place_hats_L_def place_hats_M_def)
+
+lemma fin_R1_Set[intro,simp]: "finite R1_Set" 
+  unfolding R1_Set_def using fin_\<Sigma> by auto
+
+lemma fin_gamma_set[intro,simp]: "finite gamma_set" 
+  unfolding gamma_set_def using fin_\<Gamma> 
+  by (intro fin_funcsetI, auto)
+
+lemma fin_\<Gamma>'[intro,simp]: "finite \<Gamma>'" 
+  unfolding \<Gamma>'_def using fin_\<Sigma> by auto
+
+lemma fin_func_set[simp,intro]: "finite func_set" 
+  unfolding func_set_def using fin_\<Gamma> by auto
+
+lemma memberships[simp,intro]: "\<turnstile> \<in> \<Gamma>'" 
+  "\<bullet> \<in> R1_Set" 
+  "x \<in> \<Sigma> \<Longrightarrow> SYM x \<in> R1_Set" 
+  "x \<in> \<Sigma> \<Longrightarrow> encSym x \<in> \<Gamma>'"
+  "blank' \<in> \<Gamma>'" 
+  "hatLE' \<in> \<Gamma>'" 
+  "x \<in> \<Sigma> \<Longrightarrow> INP x \<in> \<Gamma>'" 
+  "y \<in> gamma_set \<Longrightarrow> TUPLE y \<in> \<Gamma>'" 
+  "(\<lambda>_. \<bullet>) \<in> func_set" 
+  "f \<in> UNIV \<rightarrow> SYM ` \<Gamma> \<Longrightarrow> f \<in> func_set" 
+  "g \<in> UNIV \<rightarrow> \<Gamma> \<Longrightarrow> SYM \<circ> g \<in> func_set" 
+  "f \<in> UNIV \<rightarrow> SYM ` \<Gamma> \<Longrightarrow> project_inp f k \<in> \<Gamma>" 
+  unfolding R1_Set_def \<Gamma>'_def blank'_def hatLE'_def gamma_set_def encSym_def func_set_def project_inp_def
+  using LE blank tm funcset_mem[of f UNIV "SYM ` \<Gamma>" k] by (auto split: sym_or_bullet.splits)
+
+lemma add_inp_func_set[simp,intro]: "b \<in> gamma_set \<Longrightarrow> a \<in> func_set \<Longrightarrow> add_inp b a \<in> func_set"
+  unfolding func_set_def gamma_set_def
+proof
+  fix x
+  assume a: "a \<in> UNIV \<rightarrow> SYM ` \<Gamma> \<union> {\<bullet>}" and b: "b \<in> UNIV \<rightarrow> NO_HAT ` \<Gamma> \<union> HAT ` \<Gamma>" 
+  from a have a: "a x \<in> SYM ` \<Gamma> \<union> {\<bullet>}" by auto
+  from b have b: "b x \<in> NO_HAT ` \<Gamma> \<union> HAT ` \<Gamma>" by auto
+  show "add_inp b a x \<in> SYM ` \<Gamma> \<union> {\<bullet>}" using a b
+    unfolding add_inp_def by (cases "b x", auto simp: gamma_set_def)
+qed
+
+
+lemma automation[simp]: "\<And> a b A B. (S a b \<in> (\<lambda>x. case x of (x1, x2) \<Rightarrow> S x1 x2) ` (A \<times> B)) \<longleftrightarrow> (a \<in> A \<and> b \<in> B)"
+  "\<And> a b A B. (S\<^sub>1 a b \<in> (\<lambda>x. case x of (x1, x2) \<Rightarrow> S\<^sub>1 x1 x2) ` (A \<times> B)) \<longleftrightarrow> (a \<in> A \<and> b \<in> B)"
+  "\<And> a b c A B C. (E\<^sub>0 a b c \<in> (\<lambda>x. case x of (x1, x2, x3) \<Rightarrow> E\<^sub>0 x1 x2 x3) ` (A \<times> B \<times> C)) \<longleftrightarrow> (a \<in> A \<and> b \<in> B \<and> c \<in> C)"
+  "\<And> a b c A B C. (E a b c \<in> (\<lambda>x. case x of (x1, x2, x3) \<Rightarrow> E x1 x2 x3) ` (A \<times> B \<times> C)) \<longleftrightarrow> (a \<in> A \<and> b \<in> B \<and> c \<in> C)"
+  "\<And> a b c d A B C. (Er a b c d \<in> (\<lambda>x. case x of (x1, x2, x3, x4) \<Rightarrow> Er x1 x2 x3 x4) ` (A \<times> B \<times> C)) \<longleftrightarrow> (a \<in> A \<and> b \<in> B \<and> (c,d) \<in> C)"
+  "\<And> a b c d A B C. (Em a b c d \<in> (\<lambda>x. case x of (x1, x2, x3, x4) \<Rightarrow> Em x1 x2 x3 x4) ` (A \<times> B \<times> C)) \<longleftrightarrow> (a \<in> A \<and> b \<in> B \<and> (c,d) \<in> C)"
+  "\<And> a b c d A B C. (El a b c d \<in> (\<lambda>x. case x of (x1, x2, x3, x4) \<Rightarrow> El x1 x2 x3 x4) ` (A \<times> B \<times> C)) \<longleftrightarrow> (a \<in> A \<and> b \<in> B \<and> (c,d) \<in> C)"
+  "blank' \<noteq> \<turnstile>" 
+  "\<turnstile> \<noteq> blank'" 
+  "blank' \<noteq> INP x" 
+  "INP x \<noteq> blank'" 
+  by (force simp: blank'_def)+
+
+interpretation st: singletape_tm Q' "(INP ` \<Sigma>)" \<Gamma>' blank' \<turnstile> \<delta>' "R\<^sub>1 \<bullet>" "S\<^sub>0 t" "S\<^sub>0 r"
+proof 
+  show "finite Q'" 
+    unfolding Q'_def using fin_Q fin_\<Gamma>
+    by (intro finite_UnI finite_imageI finite_cartesian_product, auto)
+  show "finite \<Gamma>'" by (rule fin_\<Gamma>')
+  show "S\<^sub>0 t \<in> Q'" unfolding Q'_def using tQ by auto
+  show "S\<^sub>0 r \<in> Q'" unfolding Q'_def using rQ by auto
+  show "S\<^sub>0 t \<noteq> S\<^sub>0 r" using tr by auto
+  show "blank' \<notin> INP ` \<Sigma>" unfolding blank'_def by auto
+  show "R\<^sub>1 \<bullet> \<in> Q'" unfolding Q'_def by auto
+  show "\<delta>' \<subseteq> (Q' - {S\<^sub>0 t, S\<^sub>0 r}) \<times> \<Gamma>' \<times> Q' \<times> \<Gamma>' \<times> UNIV" 
+    unfolding \<delta>'_def Q'_def using tm
+    by (auto dest: \<delta>)
+  show "(q, \<turnstile>, q', a', d) \<in> \<delta>' \<Longrightarrow> a' = \<turnstile> \<and> d \<in> {dir.N, dir.R}" for q q' a' d
+    unfolding \<delta>'_def by (auto simp: hatLE'_def blank'_def)
+qed auto
+
+lemma valid_st: "singletape_tm Q' (INP ` \<Sigma>) \<Gamma>' blank' \<turnstile> \<delta>' (R\<^sub>1 \<bullet>) (S\<^sub>0 t) (S\<^sub>0 r)" ..
+
+
+lemma det_preservation: "deterministic \<Longrightarrow> st.deterministic" 
+  unfolding deterministic_def st.deterministic_def unfolding \<delta>'_def
+  by auto
+
+
+
+lemma range_mt_pos: 
+  "\<exists> i. Max (range (mt_pos cm)) = mt_pos cm i" 
+  "finite (range (mt_pos (cm :: ('a, 'q, 'k) mt_config)))" 
+  "range (mt_pos cm) \<noteq> {}"
+proof -
+  show "finite (range (mt_pos cm))" by auto
+  moreover show "range (mt_pos cm) \<noteq> {}" by auto
+  ultimately show "\<exists> i. Max (range (mt_pos cm)) = mt_pos cm i"
+    by (meson Max_in imageE)
+qed
+
+lemma max_mt_pos_step: assumes "(cm,cm') \<in> step" 
+  shows "Max (range (mt_pos cm')) \<le> Suc (Max (range (mt_pos cm)))" 
+proof -
+  from range_mt_pos(1)[of cm'] obtain i'
+    where max1: "Max (range (mt_pos cm')) = mt_pos cm' i'" by auto
+  hence "Max (range (mt_pos cm')) \<le> mt_pos cm' i'" by auto
+  also have "\<dots> \<le> Suc (mt_pos cm i')" using assms
+  proof (cases)
+    case (step q ts n q' a dir)
+    then show ?thesis by (cases "dir i'", auto)
+  qed
+  also have "\<dots> \<le> Suc (Max (range (mt_pos cm)))" using range_mt_pos[of cm] by simp
+  finally show ?thesis .
+qed
+
+lemma max_mt_pos_init: "Max (range (mt_pos (init_config w))) = 0" 
+  unfolding init_config_def by auto
+
+lemma INP_D: assumes "set x \<subseteq> INP ` \<Sigma>" 
+  shows "\<exists> w. x = map INP w \<and> set w \<subseteq> \<Sigma>" 
+  using assms 
+proof (induct x)
+  case (Cons x xs)
+  then obtain w where "xs = map INP w \<and> set w \<subseteq> \<Sigma>" by auto
+  moreover from Cons(2) obtain a where "x = INP a" and "a \<in> \<Sigma>" by auto
+  ultimately show ?case by (intro exI[of _ "a # w"], auto)
+qed auto
+
+
+
+fun enc :: "('a, 'q, 'k) mt_config \<Rightarrow> nat \<Rightarrow> ('a, 'k) st_tape_symbol"
+  where "enc (Config\<^sub>M q tc p) n = TUPLE (\<lambda> k. if p k = n then HAT (tc k n) else NO_HAT (tc k n))"
+
+inductive rel_R\<^sub>1 :: "(('a, 'k) st_tape_symbol,('a, 'q, 'k) st_states)st_config \<Rightarrow> 'a list \<Rightarrow> nat \<Rightarrow> bool" where 
+  "n = length w \<Longrightarrow> 
+  tc' 0 = \<turnstile> \<Longrightarrow> 
+  p' \<le> n \<Longrightarrow> 
+  (\<And> i. i < p' \<Longrightarrow> enc (init_config w) i = tc' (Suc i)) \<Longrightarrow>
+  (\<And> i. i \<ge> p' \<Longrightarrow> tc' (Suc i) = (if i < n then INP (w ! i) else blank')) \<Longrightarrow>
+  (p' = 0 \<Longrightarrow> q' = \<bullet>) \<Longrightarrow>
+  (\<And> p. p' = Suc p \<Longrightarrow> q' = SYM (w ! p)) \<Longrightarrow>
+  rel_R\<^sub>1 (Config\<^sub>S (R\<^sub>1 q') tc' (Suc p')) w p'" 
+
+
+lemma rel_R\<^sub>1_init: shows "\<exists> cs1. (st.init_config (map INP w), cs1) \<in> st.dstep \<and> rel_R\<^sub>1 cs1 w 0" 
+proof -
+  let ?INP = "INP :: 'a \<Rightarrow> ('a, 'k) st_tape_symbol" 
+  have mem: "(R\<^sub>1 \<bullet>, \<turnstile>, R\<^sub>1 \<bullet>, \<turnstile>, dir.R) \<in> \<delta>'" unfolding \<delta>'_def by auto
+  let ?cs1 = "Config\<^sub>S (R\<^sub>1 \<bullet>) (\<lambda>n. if n = 0 then \<turnstile> else if n \<le> length (map ?INP w) then map ?INP w ! (n - 1) else blank') (Suc 0)" 
+  have "(st.init_config (map INP w), ?cs1) \<in> st.dstep" 
+    unfolding st.init_config_def by (rule st.dstepI[OF mem], auto simp: \<delta>'_def blank'_def)
+  moreover have "rel_R\<^sub>1 ?cs1 w 0" 
+    by (intro rel_R\<^sub>1.intros[OF refl], auto)
+  ultimately show ?thesis by blast
+qed
+
+lemma rel_R\<^sub>1_R\<^sub>1: assumes "rel_R\<^sub>1 cs0 w j"
+  and "j < length w" 
+  and "set w \<subseteq> \<Sigma>" 
+shows "\<exists> cs1. (cs0, cs1) \<in> st.dstep \<and> rel_R\<^sub>1 cs1 w (Suc j)" 
+  using assms(1)
+proof (cases rule: rel_R\<^sub>1.cases)
+  case (1 n tc' q')
+  note cs0 = 1(1)
+  from assms have wj: "w ! j \<in> \<Sigma>" by auto
+  show ?thesis
+  proof (cases j)
+    case 0
+    with 1 have q': "q' = \<bullet>" by auto
+    from 1(6)[of 0] 0 assms 1 have tc'1: "tc' (Suc 0) = INP (w ! 0)" by auto
+    have mem: "(R\<^sub>1 \<bullet>, INP (w ! 0), R\<^sub>1 (SYM (w ! 0)), hatLE', dir.R) \<in> \<delta>'" unfolding \<delta>'_def
+      using wj 0 by auto
+    let ?cs1 = "Config\<^sub>S (R\<^sub>1 (SYM (w ! 0))) (tc'(Suc 0 := hatLE')) (Suc (Suc 0))" 
+    have enc: "enc (init_config w) 0 = hatLE'" unfolding init_config_def hatLE'_def by auto
+    have "(cs0, ?cs1) \<in> st.dstep" unfolding cs0 0
+      by (intro st.dstepI[OF mem], auto simp: q' tc'1 \<delta>'_def blank'_def)
+    moreover have "rel_R\<^sub>1 ?cs1 w (Suc 0)" 
+      by (intro rel_R\<^sub>1.intros, rule 1(2), insert 1 0 assms(2), auto simp: enc) (cases w, auto)
+    ultimately show ?thesis unfolding 0 by blast
+  next
+    case (Suc p)
+    from 1(8)[OF Suc] have q': "q' = SYM (w ! p)" by auto
+    from Suc assms(2) have "p < length w" by auto
+    with assms(3) have "w ! p \<in> \<Sigma>" by auto
+    with wj have "(w ! p, w ! j) \<in> \<Sigma> \<times> \<Sigma>" by auto
+    hence mem: "(R\<^sub>1 (SYM (w ! p)), INP (w ! j), R\<^sub>1 (SYM (w ! j)), encSym (w ! p), dir.R) \<in> \<delta>'" unfolding \<delta>'_def by auto
+      by (auto simp: init_config_def encSym_def)
+    from 1(6)[of j] assms 1 have tc': "tc' (Suc j) = INP (w ! j)" by auto
+    let ?cs1 = "Config\<^sub>S (R\<^sub>1 (SYM (w ! j))) (tc'(Suc j := encSym (w ! p))) (Suc (Suc j))" 
+    have "(cs0, ?cs1) \<in> st.dstep" unfolding cs0
+      by (rule st.dstepI[OF mem], insert q' tc', auto simp: \<delta>'_def blank'_def)
+    moreover have "rel_R\<^sub>1 ?cs1 w (Suc j)" 
+      by (intro rel_R\<^sub>1.intros, insert 1 assms enc, auto)
+    ultimately show ?thesis by blast
+  qed
+qed
+
+inductive rel_R\<^sub>2 :: "(('a, 'k) st_tape_symbol,('a, 'q, 'k) st_states)st_config \<Rightarrow> 'a list \<Rightarrow> nat \<Rightarrow> bool" where 
+  "tc' 0 = \<turnstile> \<Longrightarrow> 
+  (\<And> i. enc (init_config w) i = tc' (Suc i)) \<Longrightarrow>
+  p \<le> length w \<Longrightarrow>
+  rel_R\<^sub>2 (Config\<^sub>S R\<^sub>2 tc' p) w p" 
+
+
+lemma rel_R\<^sub>1_R\<^sub>2: assumes "rel_R\<^sub>1 cs0 w (length w)"
+  and "set w \<subseteq> \<Sigma>" 
+shows "\<exists> cs1. (cs0, cs1) \<in> st.dstep \<and> rel_R\<^sub>2 cs1 w (length w)" 
+  using assms
+proof (cases rule: rel_R\<^sub>1.cases)
+  case (1 n tc' q')
+  note cs0 = 1(1)
+  have enc: "enc (init_config w) i = tc' (Suc i)" if "i \<noteq> length w" for i
+  proof (cases "i < length w")
+    case True
+    thus ?thesis using 1(5)[of i] by auto
+  next
+    case False
+    with that have i: "i > length w" by auto
+    with 1(6)[of i] 1 have "tc' (Suc i) = blank'" by auto
+    also have "\<dots> = enc (init_config w) i" using i unfolding init_config_def by (auto simp: blank'_def)
+    finally show ?thesis by simp
+  qed
+  show ?thesis
+  proof (cases "length w")
+    case 0
+    with 1 have q': "q' = \<bullet>" by auto
+    from 1(6)[of 0] 0 1 have tc'1: "tc' (Suc 0) = blank'" by auto
+    have mem: "(R\<^sub>1 \<bullet>, blank', R\<^sub>2, hatLE', dir.L) \<in> \<delta>'" unfolding \<delta>'_def
+      by auto
+    let ?tc = "tc'(Suc 0 := hatLE')" 
+    let ?cs1 = "Config\<^sub>S R\<^sub>2 ?tc 0" 
+    have enc0: "enc (init_config w) 0 = hatLE'" unfolding init_config_def hatLE'_def by auto
+    have enc: "enc (init_config w) i = ?tc (Suc i)" for i using enc[of i] enc0 using 0
+      by (cases i, auto)
+    have "(cs0, ?cs1) \<in> st.dstep" unfolding cs0 0
+      by (intro st.dstepI[OF mem], auto simp: q' tc'1 \<delta>'_def blank'_def)
+    moreover have "rel_R\<^sub>2 ?cs1 w (length w)" unfolding 0
+      by (intro rel_R\<^sub>2.intros enc, insert 1 0, auto)
+    ultimately show ?thesis unfolding 0 by blast
+  next
+    case (Suc p)
+    from 1(8)[OF Suc] have q': "q' = SYM (w ! p)" by auto
+    from Suc have "p < length w" by auto
+    with assms(2) have "w ! p \<in> \<Sigma>" by auto
+    hence mem: "(R\<^sub>1 (SYM (w ! p)), blank', R\<^sub>2, encSym (w ! p), dir.L) \<in> \<delta>'" unfolding \<delta>'_def by auto
+    let ?tc = "tc'(Suc (length w) := encSym (w ! p))" 
+      by (auto simp: init_config_def encSym_def)
+    from 1(6)[of "length w"] assms 1 have tc': "tc' (Suc (length w)) = blank'" by auto
+    let ?cs1 = "Config\<^sub>S R\<^sub>2 ?tc (length w)" 
+    have enc: "enc (init_config w) i = ?tc (Suc i)" for i using enc[of i] encW by auto
+    have "(cs0, ?cs1) \<in> st.dstep" unfolding cs0 q'
+      by (intro st.dstepI[OF mem] tc', auto simp: \<delta>'_def blank'_def)
+    moreover have "rel_R\<^sub>2 ?cs1 w (length w)" 
+      by (intro rel_R\<^sub>2.intros, insert 1 assms enc, auto)
+    ultimately show ?thesis by blast
+  qed
+qed
+
+
+lemma rel_R\<^sub>2_R\<^sub>2: assumes "rel_R\<^sub>2 cs0 w (Suc j)"
+  and "set w \<subseteq> \<Sigma>" 
+shows "\<exists> cs1. (cs0, cs1) \<in> st.dstep \<and> rel_R\<^sub>2 cs1 w j" 
+  using assms
+proof (cases rule: rel_R\<^sub>2.cases)
+  case (1 tc')
+  note cs0 = 1(1)
+  from 1 have j: "j < length w" by auto
+  have tc: "tc' (Suc j) \<in> \<Gamma>' - { \<turnstile> }" unfolding 1(3)[symmetric] using j assms(2)[unfolded set_conv_nth] unfolding init_config_def
+    by (force simp: \<Gamma>'_def gamma_set_def intro!: imageI LE blank set_mp[OF \<Sigma>_sub_\<Gamma>, of "w ! (j - Suc 0)"])
+  hence mem: "(R\<^sub>2, tc' (Suc j), R\<^sub>2, tc' (Suc j), dir.L) \<in> \<delta>'" unfolding \<delta>'_def by auto
+  let ?cs1 = "Config\<^sub>S R\<^sub>2 tc' j" 
+  have "(cs0, ?cs1) \<in> st.dstep" unfolding cs0 using tc
+    by (intro st.dstepI[OF mem], auto simp: \<delta>'_def blank'_def)
+  moreover have "rel_R\<^sub>2 ?cs1 w j"
+    by (intro rel_R\<^sub>2.intros, insert 1, auto)
+  ultimately show ?thesis by blast
+qed
+
+inductive rel_S\<^sub>0 :: "(('a, 'k) st_tape_symbol,('a, 'q, 'k) st_states)st_config \<Rightarrow> ('a, 'q, 'k) mt_config \<Rightarrow> bool" where 
+  "tc' 0 = \<turnstile> \<Longrightarrow> 
+  (\<And> i. tc' (Suc i) = enc (Config\<^sub>M q tc p) i) \<Longrightarrow>
+  valid_config (Config\<^sub>M q tc p) \<Longrightarrow>
+  rel_S\<^sub>0 (Config\<^sub>S (S\<^sub>0 q) tc' 0) (Config\<^sub>M q tc p)" 
+
+lemma rel_R\<^sub>2_S\<^sub>0: assumes "rel_R\<^sub>2 cs0 w 0"
+  and "set w \<subseteq> \<Sigma>" 
+shows "\<exists> cs1. (cs0, cs1) \<in> st.dstep \<and> rel_S\<^sub>0 cs1 (init_config w)" 
+  using assms
+proof (cases rule: rel_R\<^sub>2.cases)
+  case (1 tc')
+  note cs0 = 1(1)
+  hence mem: "(R\<^sub>2, \<turnstile>, S\<^sub>0 s, \<turnstile>, dir.N) \<in> \<delta>'" unfolding \<delta>'_def by auto
+  let ?cs1 = "Config\<^sub>S (S\<^sub>0 s) tc' 0" 
+  have "(cs0, ?cs1) \<in> st.dstep" unfolding cs0
+    by (intro st.dstepI[OF mem], insert 1, auto simp: \<delta>'_def blank'_def)
+  moreover have "rel_S\<^sub>0 ?cs1 (init_config w)" using valid_init_config[OF assms(2)] unfolding init_config_def
+    by (intro rel_S\<^sub>0.intros, insert 1(1,2,4-), auto simp: 1(3)[symmetric] init_config_def)
+  ultimately show ?thesis by blast
+qed
+
+  then via the R-phase one can switch to the beginning of 
+  the S-phase (@{const rel_S\<^sub>0}) for the initial configuration.\<close>
+subsubsection \<open>S-Phase\<close>
+text \<open>If we start the S-phase (in @{const rel_S\<^sub>0}), and the multitape-TM is not in a final state, 
+  then we can move to the end of the S-phase (in @{const rel_S\<^sub>1}).\<close>
+subsubsection \<open>E-Phase\<close>
+text \<open>For the transition between S and E phase we do not have deterministic steps.
+  Therefore we add two lemmas: the former one is for showing that multitape can be simulated
+  by singletape, and the latter one is for the inverse direction.\<close>
+subsubsection \<open>Simulation of multitape TM by singletape TM\<close>
+subsubsection \<open>Simulation of singletape TM by multitape TM\<close>
+subsubsection \<open>Main Results\<close>
+subsection \<open>Main Results with Proper Renamings\<close>
+text \<open>By using the renaming capabilities we can get rid of the @{term "map INP"} in the language
+  equivalence theorem. We just assume that there will always be enough symbols for the renaming, 
+  i.e., an infinite supply of fresh names is available.\<close>

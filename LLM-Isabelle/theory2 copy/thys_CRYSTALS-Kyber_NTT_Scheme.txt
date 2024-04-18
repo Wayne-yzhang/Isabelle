@@ -1,0 +1,410 @@
+theory NTT_Scheme
+
+imports Crypto_Scheme
+  Mod_Ring_Numeral
+  "Number_Theoretic_Transform.NTT"
+
+begin
+
+lemma Poly_strip_while:
+"Poly (strip_while ((=) 0) x) = Poly x"
+by (metis Poly_coeffs coeffs_Poly)
+
+
+
+locale kyber_ntt = kyber_spec _ _ _ _"TYPE('a :: qr_spec)" "TYPE('k::finite)" +
+fixes type_a :: "('a :: qr_spec) itself" 
+  and type_k :: "('k ::finite) itself" 
+  and \<omega> :: "('a::qr_spec) mod_ring"
+  and \<mu> :: "'a mod_ring"
+  and \<psi> :: "'a mod_ring"
+  and \<psi>inv :: "'a mod_ring"
+  and ninv :: "'a mod_ring"
+  and mult_factor :: int
+assumes
+      omega_properties: "\<omega>^n = 1" "\<omega> \<noteq> 1" "(\<forall> m. \<omega>^m = 1 \<and> m\<noteq>0 \<longrightarrow> m \<ge> n)"
+  and mu_properties: "\<mu> * \<omega> = 1" "\<mu> \<noteq> 1"
+  and psi_properties: "\<psi>^2 = \<omega>" "\<psi>^n = -1"
+  and psi_psiinv: "\<psi> * \<psi>inv = 1"
+  and n_ninv: "(of_int_mod_ring n) * ninv = 1"
+  and q_split: "q = mult_factor * n + 1"
+begin
+lemma mu_prop:
+  "(\<forall> m. \<mu>^m = 1 \<and> m\<noteq>0 \<longrightarrow> m \<ge> n)"
+by (metis mu_properties(1) mult.commute mult.right_neutral 
+  omega_properties(3) power_mult_distrib power_one)
+
+lemma mu_prop':
+assumes "\<mu>^m' = 1" "m'\<noteq>0" shows "m' \<ge> n"
+using mu_prop  assms by blast
+
+lemma omega_prop':
+assumes "\<omega>^m' = 1" "m'\<noteq>0" shows "m' \<ge> n"
+using omega_properties(3)  assms by blast
+
+lemma psi_props:
+shows "\<psi>^(2*n) = 1"
+      "\<psi>^(n*(2*a+1)) = -1"
+      "\<psi>\<noteq>1"
+proof -
+  show "\<psi>^(2*n) = 1" 
+  by (simp add: omega_properties(1) power_mult psi_properties)
+  show "\<psi>^(n*(2*a+1)) = -1" 
+  by (metis (no_types, lifting) mult.commute mult_1 power_add 
+    power_minus1_even power_mult psi_properties(2))
+  show "\<psi>\<noteq>1"
+  using omega_properties(2) one_power2 psi_properties(1) by blast
+qed
+
+lemma psi_inv_exp:
+"\<psi>^i * \<psi>inv ^i = 1"
+using left_right_inverse_power psi_psiinv by blast
+
+lemma inv_psi_exp:
+"\<psi>inv^i * \<psi> ^i = 1"
+by (simp add: mult.commute psi_inv_exp)
+
+
+lemma negative_psi:
+assumes "i<j"
+shows "\<psi>^j * \<psi>inv ^i = \<psi>^(j-i)"
+proof -
+  have j: "\<psi>^j = \<psi>^(j-i) * \<psi>^i" using assms 
+  by (metis add.commute le_add_diff_inverse nat_less_le power_add)
+  show ?thesis unfolding j
+  by (simp add: left_right_inverse_power psi_psiinv)
+qed
+
+lemma negative_psi':
+assumes "i\<le>j"
+shows "\<psi>inv^i * \<psi> ^j = \<psi>^(j-i)"
+proof -
+  have j: "\<psi>^j = \<psi>^i * \<psi>^(j-i)" using assms 
+  by (metis le_add_diff_inverse power_add)
+  show ?thesis unfolding j mult.assoc[symmetric] using inv_psi_exp[of i] by simp
+qed
+
+lemma psiinv_prop:
+shows "\<psi>inv^2 = \<mu>"
+proof -
+  show "\<psi>inv^2 = \<mu>"
+  by (metis (mono_tags, lifting) mu_properties(1) mult.commute 
+    mult_cancel_right mult_cancel_right2 power_mult_distrib psi_properties(1) psi_psiinv)
+qed
+
+lemma n_ninv':
+"ninv * (of_int_mod_ring n) = 1"
+using n_ninv 
+by (simp add: mult.commute)
+
+
+definition map2_poly :: "('a mod_ring \<Rightarrow> 'a mod_ring \<Rightarrow> 'a mod_ring) \<Rightarrow> 
+    'a mod_ring poly \<Rightarrow> 'a mod_ring poly \<Rightarrow> 'a mod_ring poly" where 
+"map2_poly f p1 p2 = 
+  Poly (map2 f (map (poly.coeff p1) [0..<nat n]) (map (poly.coeff p2) [0..<nat n]))"
+
+lemma Poly_map_coeff:
+assumes "degree f < num"
+shows "Poly (map (poly.coeff (f)) [0..<num]) = f"
+proof (subst poly_eq_iff, safe)
+  fix j
+  show "poly.coeff (Poly (map (poly.coeff f) [0..<num])) j = poly.coeff f j"
+  proof (cases "j<num")
+    case True
+    then show ?thesis
+    unfolding coeff_Poly by (subst nth_default_nth, auto)
+  next
+    case False
+    then have "j>degree f" using assms by auto
+    then show ?thesis unfolding coeff_Poly using False
+    by (simp add: coeff_eq_0 nth_default_beyond)
+  qed
+qed
+
+lemma map_upto_n_mod: 
+"(Poly (map f [0..<n]) mod qr_poly) = (Poly (map f [0..<n]) :: 'a mod_ring poly)"
+proof -
+  have "degree (Poly (map f [0::nat..<n])) < n" 
+  by (metis Suc_pred' deg_Poly' deg_qr_n deg_qr_pos degree_0 diff_zero le_imp_less_Suc 
+    length_map length_upt nat_int)
+  then show ?thesis
+qed
+
+
+lemma coeff_of_qr_zero:
+assumes "i\<ge>n"
+shows "poly.coeff (of_qr (f :: 'a qr)) i = 0"
+proof -
+  have "degree (of_qr f) < i"
+    using deg_of_qr deg_qr_n assms order_less_le_trans by auto
+  then show ?thesis by (subst coeff_eq_0, auto)
+qed
+
+definition ntt_coeff_poly :: "'a qr \<Rightarrow> nat \<Rightarrow> 'a mod_ring" where
+  "ntt_coeff_poly g i = (\<Sum>j\<in>{0..<n}. (poly.coeff (of_qr g) j) * \<psi>^(j * (2*i+1)))"
+
+definition ntt_coeffs :: "'a qr \<Rightarrow> 'a mod_ring list" where
+  "ntt_coeffs g = map (ntt_coeff_poly g) [0..<n]"
+
+definition ntt_poly :: "'a qr \<Rightarrow> 'a qr" where
+"ntt_poly g = to_qr (Poly (ntt_coeffs g))"
+
+definition inv_ntt_coeff_poly :: "'a qr \<Rightarrow> nat \<Rightarrow> 'a mod_ring" where
+  "inv_ntt_coeff_poly g' i = ninv * 
+    (\<Sum>j\<in>{0..<n}. (poly.coeff (of_qr g') j) * \<psi>inv^(i*(2*j+1)))"
+
+definition inv_ntt_coeffs :: "'a qr \<Rightarrow> 'a mod_ring list" where
+  "inv_ntt_coeffs g' = map (inv_ntt_coeff_poly g') [0..<n]"
+
+definition inv_ntt_poly :: "'a qr \<Rightarrow> 'a qr" where
+  "inv_ntt_poly g = to_qr (Poly (inv_ntt_coeffs g))"
+
+
+interpretation kyber_ntt: ntt "nat q" "nat n" "nat mult_factor" \<omega> \<mu>
+proof (unfold_locales, goal_cases)
+  case 2
+  then show ?case  using q_gt_two by linarith
+next
+  case 3
+  then show ?case 
+    by (smt (verit, del_insts) int_nat_eq mult.commute nat_int_add 
+    nat_mult_distrib of_nat_1 q_gt_two q_split zadd_int_left)
+next
+  case 4
+  then show ?case using n_gt_1 by linarith
+
+
+definition qr_mult_coeffs :: "'a qr \<Rightarrow> 'a qr \<Rightarrow> 'a qr" (infixl "\<star>" 70) where
+ 
+
+definition conv_sign :: "int \<Rightarrow> 'a mod_ring" where
+"conv_sign x = (if x mod 2 = 0 then 1 else -1)"
+
+definition negacycl_conv :: "'a qr \<Rightarrow> 'a qr \<Rightarrow> 'a qr" where
+"negacycl_conv f g = 
+  to_qr (Poly (map 
+  (\<lambda>i. \<Sum>j<n. conv_sign ((int i - int j) div n) *  
+    poly.coeff (of_qr f) j * poly.coeff (of_qr g) (nat ((int i - int j) mod n)))
+  [0..<n]))"
+
+lemma negacycl_conv_mod_qr_poly:
+"of_qr (negacycl_conv f g) mod qr_poly = of_qr (negacycl_conv f g)"
+unfolding negacycl_conv_def of_qr_to_qr by auto
+
+
+lemma mod_div_qr_poly:
+"(f :: 'a mod_ring poly) = (f mod qr_poly) + qr_poly * (f div qr_poly)"
+by simp
+
+definition take_deg :: "nat \<Rightarrow> ('b::zero) poly \<Rightarrow> 'b poly"  where
+"take_deg = (\<lambda>n. \<lambda>f. Poly (take n (coeffs f)))"
+
+definition drop_deg :: "nat \<Rightarrow> ('b::zero) poly \<Rightarrow> 'b poly"  where
+"drop_deg = (\<lambda>n. \<lambda>f. Poly (drop n (coeffs f)))"
+
+lemma take_deg_monom_drop_deg:
+assumes "degree f \<ge> n"
+shows "(f :: 'a mod_ring poly) = take_deg n f + (Polynomial.monom 1 n) * drop_deg n f"
+proof -
+  have "min (length (coeffs f)) n = n" using assms 
+  by (metis bot_nat_0.not_eq_extremum degree_0 le_imp_less_Suc 
+    length_coeffs_degree min.absorb1 min.absorb4)
+  then show ?thesis
+    unfolding take_deg_def drop_deg_def 
+    apply (subst Poly_coeffs[of f,symmetric]) 
+    apply (subst append_take_drop_id[of n "coeffs f", symmetric])
+    apply (subst Poly_append)
+    by (auto)
+qed
+
+lemma split_mod_qr_poly:
+assumes "degree f \<ge> n"
+shows "(f :: 'a mod_ring poly) = take_deg n f - drop_deg n f + qr_poly * drop_deg n f"
+proof -
+  have "(Polynomial.monom 1 n + 1) * drop_deg n f = 
+    Polynomial.monom 1 n *  drop_deg n f + drop_deg n f"
+    by (simp add: mult_poly_add_left)
+  then show ?thesis 
+    apply (subst take_deg_monom_drop_deg[OF assms])
+    apply (unfold qr_poly_def qr_poly'_eq of_int_hom.map_poly_hom_add) 
+    by auto
+qed
+
+lemma degree_drop_n:
+"degree (drop_deg n f) = degree f - n"
+unfolding drop_deg_def
+by (simp add: degree_eq_length_coeffs)
+
+lemma degree_drop_2n:
+assumes "degree f < 2*n"
+shows "degree (drop_deg n f) < n"
+using assms unfolding degree_drop_n by auto
+
+lemma degree_take_n:
+"degree (take_deg n f) < n"
+unfolding take_deg_def 
+by (metis coeff_Poly_eq deg_qr_n deg_qr_pos degree_0 leading_coeff_0_iff 
+  nth_default_take of_nat_eq_iff)
+
+lemma deg_mult_of_qr:
+"degree (of_qr (f ::'a qr) * of_qr g) < 2 * n"
+by (metis add_less_mono deg_of_qr deg_qr_n degree_0 degree_mult_eq 
+  mult_2 mult_eq_0_iff nat_int_comparison(1))
+
+lemma mod_qr_poly:
+assumes "degree f \<ge> n" "degree f < 2*n"
+shows "(f :: 'a mod_ring poly) mod qr_poly = take_deg n f - drop_deg n f "
+proof -
+  have "degree (take_deg n f - drop_deg n f) < deg_qr TYPE('a)" 
+    using degree_diff_le_max[of "take_deg n f" "drop_deg n f"]
+     degree_drop_2n[OF assms(2)]  degree_take_n
+     by (metis deg_qr_n degree_diff_less nat_int)
+  then have "(take_deg n f - drop_deg n f) mod qr_poly =
+    take_deg n f - drop_deg n f" by (subst deg_mod_qr_poly, auto)
+  then show ?thesis
+    by (subst split_mod_qr_poly[OF assms(1)], auto)
+qed
+
+lemma coeff_take_deg:
+assumes "i<n"
+shows "poly.coeff (take_deg n f) i = poly.coeff (f::'a mod_ring poly) i"
+using assms unfolding take_deg_def 
+by (simp add: nth_default_coeffs_eq nth_default_take)
+
+lemma coeff_drop_deg:
+assumes "i<n"
+shows "poly.coeff (drop_deg n f) i = poly.coeff (f::'a mod_ring poly) (i+n)"
+using assms unfolding drop_deg_def 
+by (simp add: nth_default_coeffs_eq nth_default_drop)
+
+lemma coeff_mod_qr_poly:
+assumes "degree (f::'a mod_ring poly) \<ge> n" "degree f < 2*n" "i<n"
+shows "poly.coeff (f mod qr_poly) i = poly.coeff f i - poly.coeff f (i+n)"
+apply (subst mod_qr_poly[OF assms(1) assms(2)]) 
+apply (subst coeff_diff)
+apply (unfold coeff_take_deg[OF assms(3)] coeff_drop_deg[OF assms(3)])
+by auto
+
+
+lemma sum_leq_split:
+"(\<Sum>ia\<le>i+n. f ia) = (\<Sum>ia<n. f ia) + (\<Sum>ia\<in>{n..i+n}. f ia)"
+proof -
+  have *: "{..i + n} - {..<n} = {n..i + n}" 
+  by (metis atLeastLessThanSuc_atLeastAtMost lessThan_Suc_atMost lessThan_minus_lessThan) 
+  show ?thesis 
+  by (subst sum.subset_diff[of "{..<n}" "{..i+n}" f]) (auto simp add: * add.commute)
+qed
+
+lemma less_diff:
+assumes "l1<l2"
+shows "{..<l2} - {..l1} = {l1<..<l2::nat}"
+by (metis atLeastSucLessThan_greaterThanLessThan lessThan_Suc_atMost lessThan_minus_lessThan)
+
+lemma sum_less_split:
+assumes "l1<(l2::nat)"
+shows "sum f {..<l2} = sum f {..l1} + sum f {l1<..<l2}"
+by (subst sum.subset_diff[of "{..l1}" "{..<l2}" f]) 
+   (auto simp add: assms add.commute order_le_less_trans less_diff[OF assms]) 
+
+lemma div_minus_1:
+assumes "(x::int) \<in> {-b..<0}"
+shows "x div b = -1" 
+using assms 
+by (smt (verit, ccfv_SIG) atLeastLessThan_iff div_minus_minus div_pos_neg_trivial)
+
+lemma coeff_conv:
+fixes f :: "'a qr"
+assumes "i<n" 
+shows "poly.coeff ((of_qr f) * (of_qr g) mod qr_poly) i = 
+    (\<Sum>j<n. conv_sign ((int i - int j) div n) * 
+      poly.coeff (of_qr f) j * poly.coeff (of_qr g) (nat ((int i - int j) mod n)))"
+proof (cases "degree (of_qr f) + degree (of_qr g)<n")
+  case True
+  then have True':"degree ((of_qr f) * (of_qr g)) <n" using degree_mult_le 
+  using order_le_less_trans by blast
+  have "poly.coeff ((of_qr f) * (of_qr g) mod qr_poly) i = 
+    poly.coeff ((of_qr f) * (of_qr g)) i" using True'
+  by (metis deg_qr_n degree_qr_poly mod_poly_less nat_int)
+  also have "\<dots> = (\<Sum>ia\<le>i. poly.coeff (of_qr f) ia * poly.coeff (of_qr g) (i - ia))" 
+    unfolding coeff_mult by auto
+  also have "\<dots> = (\<Sum>ia\<le>i. conv_sign ((int i - int ia) div int n) *
+    poly.coeff (of_qr f) ia * 
+    poly.coeff (of_qr g) (nat ((int i - int ia) mod n)))" 
+  proof -
+    have "i-ia = nat ((int i - int ia) mod n)" if "ia \<le> i" for ia
+    using assms that by force
+    moreover have "conv_sign ((int i - int ia) div int n) = 1" 
+      if "ia \<le> i" for ia unfolding conv_sign_def 
+      using assms that by force
+    ultimately show ?thesis by auto
+  qed
+  also have "\<dots> = (\<Sum>ia<n. conv_sign ((int i - int ia) div int n) *
+    poly.coeff (of_qr f) ia * 
+    poly.coeff (of_qr g) (nat ((int i - int ia) mod n)))"
+  proof -
+    have "poly.coeff (of_qr f) ia *
+       poly.coeff (of_qr g) (nat ((int i - int ia) mod int n)) = 0" 
+      if "ia \<in> {i<..<n}" for ia 
+    proof (subst mult_eq_0_iff, safe, goal_cases)
+      case 1
+      have deg_g: "nat ((int i - int ia) mod int n) \<le> degree (of_qr g)" 
+        using le_degree[OF 1] by auto
+      have "ia > degree (of_qr f)" 
+      proof (rule ccontr)
+        assume "\<not> degree (of_qr f) < ia"
+        then have as: "ia \<le> degree (of_qr f)" by auto
+        then have ni: "nat ((int i - int ia) mod int n) + ia = n + i" 
+          using that  by (smt (verit, ccfv_threshold) True deg_g 
+          greaterThanLessThan_iff int_nat_eq less_imp_of_nat_less 
+          mod_add_self1 mod_pos_pos_trivial of_nat_0_le_iff of_nat_add 
+          of_nat_mono)
+        have "n + i \<le> degree (of_qr f) + degree (of_qr g)"
+          unfolding ni[symmetric] using as deg_g by auto
+        then show False using True by auto
+      qed
+      then show ?case 
+      using coeff_eq_0 by blast
+    qed
+    then show ?thesis
+  qed
+  finally show ?thesis by blast
+next
+  case False
+  then have *: "degree (of_qr f * of_qr g) \<ge> n"
+  by (metis add.right_neutral add_0 deg_of_qr deg_qr_n degree_0 degree_mult_eq 
+      linorder_not_le nat_int)
+  have "poly.coeff (of_qr f * of_qr g) (i + n) = (\<Sum>ia<n.
+        poly.coeff (of_qr f) ia * poly.coeff (of_qr g) (i + n - ia))" 
+    unfolding coeff_mult using coeff_of_qr_zero 
+    by (subst sum_leq_split[of _ i]) (auto)
+  also have "\<dots> = (\<Sum>ia\<in>{i<..<n}.
+        poly.coeff (of_qr f) ia * poly.coeff (of_qr g) (i + n - ia))" 
+  also have "\<dots> = (\<Sum>ia\<in>{i<..<n}.
+        poly.coeff (of_qr f) ia * poly.coeff (of_qr g) (nat ((int i - ia) mod n)))"
+  proof -
+    have "int i - int ia + int n \<in>{0..<n}" if "ia \<in> {i<..<n}" for ia using assms that by auto
+    then have "int i + n-ia = (int i-ia) mod n" if "ia\<in>{i<..<n}" for ia
+    then have "i+n-ia = nat ((int i - ia) mod n)" if "ia\<in>{i<..<n}" for ia
+    by (metis int_minus nat_int of_nat_add that)
+    then show ?thesis by fastforce
+  qed
+  also have "\<dots> = - (\<Sum>ia\<in>{i<..<n}. conv_sign ((int i - int ia) div n) *
+        poly.coeff (of_qr f) ia * poly.coeff (of_qr g) (nat ((int i - ia) mod n)))"
+  proof -
+    have negative:"(int i - int ia) \<in> {-n..<0}" if "ia \<in>{i<..<n}" for ia 
+      using that by auto
+    have "(int i - int ia) div n = -1" if "ia \<in>{i<..<n}" for ia
+      using div_minus_1[OF negative[OF that]] .
+    then have "conv_sign ((int i - int ia) div n) = -1" if "ia \<in>{i<..<n}" for ia 
+      unfolding conv_sign_def using that by auto
+    then have *: "(\<Sum>ia\<in>{i<..<n}. foo ia) =
+      (\<Sum>x\<in>{i<..<n}. - (conv_sign ((int i - int x) div int n) * foo x))" 
+    for foo by auto
+    show ?thesis 
+    by (subst sum_negf[symmetric], subst *) (simp add: mult.assoc) 
+ nth_default 0 (map2 (*) 
+"Poly (ntt_coeffs (f * g)) = Poly (map2 (*) 
+  also have "\<dots> = Poly (coeffs (map2_poly (*) (Poly (ntt_coeffs f)) (Poly (ntt_coeffs g))))"
+  also have "\<dots> = (map2_poly (*) (of_qr (to_qr (Poly (ntt_coeffs f))))
+       (map2_poly (*) (of_qr (to_qr (Poly (ntt_coeffs f))))
+    to_qr (map2_poly (*) (of_qr (to_qr (Poly (ntt_coeffs f))))

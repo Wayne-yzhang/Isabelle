@@ -1,0 +1,428 @@
+theory Count_Rectangle imports Count_Line
+begin
+
+
+
+lemma proots_count_const:
+  assumes "c\<noteq>0"
+  shows "proots_count [:c:] s = 0"
+  unfolding proots_count_def using assms by auto
+
+lemma proots_count_nzero:
+  assumes "\<And>x. x\<in>s \<Longrightarrow> poly p x\<noteq>0"
+  shows "proots_count p s = 0"
+  unfolding proots_count_def
+  by(rule sum.neutral) (use assms in auto)
+
+lemma complex_box_ne_empty: 
+  fixes a b::complex
+  shows 
+    "cbox a b \<noteq> {} \<longleftrightarrow> (Re a \<le> Re b \<and> Im a \<le> Im b)"
+    "box a b \<noteq> {} \<longleftrightarrow> (Re a < Re b \<and> Im a < Im b)"
+  by (auto simp add:box_ne_empty Basis_complex_def) 
+
+  
+definition proots_rect ::"complex poly \<Rightarrow> complex \<Rightarrow> complex \<Rightarrow> nat" where
+  "proots_rect p lb ub = proots_count p (box lb ub)"
+
+definition proots_crect ::"complex poly \<Rightarrow> complex \<Rightarrow> complex \<Rightarrow> nat" where
+  "proots_crect p lb ub = proots_count p (cbox lb ub)" 
+
+definition proots_rect_ll ::"complex poly \<Rightarrow> complex \<Rightarrow> complex \<Rightarrow> nat" where
+  "proots_rect_ll p lb ub = proots_count p (box lb ub \<union> {lb} 
+                              \<union> open_segment lb (Complex (Re ub) (Im lb))
+                              \<union> open_segment lb (Complex (Re lb) (Im ub)))" 
+
+definition proots_rect_border::"complex poly \<Rightarrow> complex \<Rightarrow> complex \<Rightarrow> nat" where
+  "proots_rect_border p a b = proots_count p (path_image (rectpath a b))"
+
+definition not_rect_vertex::"complex \<Rightarrow> complex \<Rightarrow> complex \<Rightarrow> bool" where 
+  "not_rect_vertex r a b = (r\<noteq>a \<and> r \<noteq> Complex (Re b) (Im a) \<and> r\<noteq>b \<and> r\<noteq>Complex (Re a) (Im b))"
+
+definition not_rect_vanishing :: "complex poly \<Rightarrow> complex \<Rightarrow> complex \<Rightarrow> bool" where
+  "not_rect_vanishing p a b = (poly p a\<noteq>0 \<and> poly p (Complex (Re b) (Im a)) \<noteq> 0 
+                            \<and> poly p b \<noteq>0 \<and> poly p (Complex (Re a) (Im b))\<noteq> 0)"
+
+lemma cindexP_rectpath_edge_base:
+  assumes "Re a < Re b" "Im a < Im b"
+    and "not_rect_vertex r a b"
+    and "r\<in>path_image (rectpath a b)"
+  shows "cindexP_pathE [:-r,1:] (rectpath a b) = -1"
+proof -
+  have r_nzero:"r\<noteq>a" "r\<noteq>Complex (Re b) (Im a)" "r\<noteq>b" "r\<noteq>Complex (Re a) (Im b)" 
+
+  define rr where "rr = [:-r,1:]"
+  have rr_linepath:"cindexP_pathE rr (linepath a b) 
+          = cindex_pathE (linepath (a - r) (b-r)) 0 " for a b
+     unfolding rr_def 
+     unfolding cindexP_lineE_def cindexP_pathE_def poly_linepath_comp
+     by (simp add:poly_pcompose comp_def linepath_def scaleR_conv_of_real algebra_simps)
+
+  have cindexP_pathE_eq:"cindexP_pathE rr (rectpath a b) = 
+                 cindexP_pathE rr (linepath a (Complex (Re b) (Im a)))  
+                 + cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) 
+                 + cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) 
+                 + cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a)"
+    unfolding rectpath_def Let_def 
+    by ((subst cindex_poly_pathE_joinpaths
+            |subst finite_ReZ_segments_joinpaths
+            |intro path_poly_comp conjI);
+        (simp add:poly_linepath_comp finite_ReZ_segments_poly_of_real path_compose_join 
+          pathfinish_compose pathstart_compose poly_pcompose)?)+
+
+  have "(Im r = Im a \<and> Re a < Re r \<and> Re r < Re b)
+        \<or> (Re r = Re b \<and> Im a < Im r \<and> Im r < Im b)
+        \<or> (Im r = Im b \<and> Re a < Re r \<and> Re r < Re b)
+        \<or> (Re r = Re a \<and> Im a < Im r \<and> Im r < Im b)"
+  proof -
+    have "r \<in> closed_segment a (Complex (Re b) (Im a)) 
+          \<or> r \<in> closed_segment (Complex (Re b) (Im a)) b 
+          \<or> r \<in> closed_segment b (Complex (Re a) (Im b)) 
+          \<or> r \<in> closed_segment (Complex (Re a) (Im b)) a"
+      unfolding rectpath_def Let_def
+      by (subst (asm) path_image_join;simp)+
+    then show ?thesis 
+      by (smt (verit, del_insts) assms(1) assms(2) r_nzero 
+          closed_segment_commute closed_segment_imp_Re_Im(1) closed_segment_imp_Re_Im(2) 
+          complex.sel(1) complex.sel(2) complex_eq_iff)
+  qed
+  moreover have "cindexP_pathE rr (rectpath a b) = -1" 
+    if "Im r = Im a" "Re a < Re r" "Re r < Re b" 
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      using closed_segment_degen_complex(2) that(1) that(2) that(3) by auto
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)  
+      subgoal using closed_segment_imp_Re_Im(1) that(3) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = -1"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(2) closed_segment_imp_Re_Im(2) that(1) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using closed_segment_imp_Re_Im(1) that(2) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    ultimately show ?thesis unfolding cindexP_pathE_eq by auto
+  qed
+  moreover have "cindexP_pathE rr (rectpath a b) = -1" 
+    if "Re r = Re b" "Im a < Im r" "Im r < Im b" 
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = -1/2"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath) 
+      subgoal using closed_segment_imp_Re_Im(2) that(2) by fastforce
+      subgoal using that assms unfolding Let_def by auto 
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      using closed_segment_degen_complex(1) that(1) that(2) that(3) by auto
+
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = -1/2"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using closed_segment_imp_Re_Im(2) that(3) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(1) closed_segment_imp_Re_Im(1) that(1) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    ultimately show ?thesis unfolding cindexP_pathE_eq by auto
+  qed
+  moreover have "cindexP_pathE rr (rectpath a b) = -1" 
+    if "Im r = Im b" "Re a < Re r" "Re r < Re b" 
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = -1"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath) 
+      subgoal using assms(2) closed_segment_imp_Re_Im(2) that(1) by fastforce
+      subgoal using that assms unfolding Let_def by auto 
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath) 
+      subgoal using closed_segment_imp_Re_Im(1) that(3) by force
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (smt (verit, del_insts) Im_poly_hom.base.hom_zero Re_poly_hom.base.hom_zero 
+          closed_segment_commute closed_segment_degen_complex(2) complex.sel(1) 
+          complex.sel(2) minus_complex.simps(1) minus_complex.simps(2) that(1) that(2) that(3))
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using closed_segment_imp_Re_Im(1) that(2) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    ultimately show ?thesis unfolding cindexP_pathE_eq by auto
+  qed
+  moreover have "cindexP_pathE rr (rectpath a b) = -1" 
+    if "Re r = Re a" "Im a < Im r" "Im r < Im b" 
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = -1/2"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath) 
+      subgoal using closed_segment_imp_Re_Im(2) that(2) by fastforce
+      subgoal using that assms unfolding Let_def by auto 
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath) 
+      subgoal using assms(1) closed_segment_imp_Re_Im(1) that(1) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = -1/2"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath) 
+      subgoal using closed_segment_imp_Re_Im(2) that(3) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (smt (verit) Im_poly_hom.base.hom_zero Re_poly_hom.base.hom_zero 
+          closed_segment_commute closed_segment_degen_complex(1) complex.sel(1) 
+          complex.sel(2) minus_complex.simps(1) minus_complex.simps(2) that(1) that(2) that(3))
+    ultimately show ?thesis unfolding cindexP_pathE_eq by auto
+  qed
+  ultimately show ?thesis unfolding rr_def by auto
+qed
+
+lemma cindexP_rectpath_vertex_base:
+  assumes "Re a < Re b" "Im a < Im b"
+    and "\<not> not_rect_vertex r a b" 
+  shows "cindexP_pathE [:-r,1:] (rectpath a b) = -1/2"
+proof -
+  have r_cases:"r=a \<or> r=Complex (Re b) (Im a)\<or> r=b \<or> r=Complex (Re a) (Im b)" 
+  define rr where "rr = [:-r,1:]"
+  have rr_linepath:"cindexP_pathE rr (linepath a b) 
+          = cindex_pathE (linepath (a - r) (b-r)) 0 " for a b
+     unfolding rr_def 
+     unfolding cindexP_lineE_def cindexP_pathE_def poly_linepath_comp
+     by (simp add:poly_pcompose comp_def linepath_def scaleR_conv_of_real algebra_simps)
+
+  have cindexP_pathE_eq:"cindexP_pathE rr (rectpath a b) = 
+                 cindexP_pathE rr (linepath a (Complex (Re b) (Im a)))  
+                 + cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) 
+                 + cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) 
+                 + cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a)"
+    unfolding rectpath_def Let_def 
+    by ((subst cindex_poly_pathE_joinpaths
+            |subst finite_ReZ_segments_joinpaths
+            |intro path_poly_comp conjI);
+        (simp add:poly_linepath_comp finite_ReZ_segments_poly_of_real path_compose_join 
+          pathfinish_compose pathstart_compose poly_pcompose)?)+
+
+  have "cindexP_pathE rr (rectpath a b) = -1/2" 
+    if "r=a" 
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (simp add: that)
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)  
+      subgoal using assms(1) closed_segment_imp_Re_Im(1) that by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = -1/2"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(2) closed_segment_imp_Re_Im(2) that(1) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (simp add: that)
+    ultimately show ?thesis unfolding cindexP_pathE_eq by auto
+  qed
+  moreover have "cindexP_pathE rr (rectpath a b) = -1/2" 
+    if "r=Complex (Re b) (Im a)" 
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (simp add: that)
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (simp add: that)
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = -1/2"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(2) closed_segment_imp_Re_Im(2) that(1) by fastforce
+      subgoal using that assms unfolding Let_def by auto
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(1) closed_segment_imp_Re_Im(1) that by fastforce
+      subgoal by (smt (z3) complex.sel(1) minus_complex.simps(1))
+      done
+    ultimately show ?thesis unfolding cindexP_pathE_eq by auto
+  qed
+  moreover have "cindexP_pathE rr (rectpath a b) = -1/2" 
+    if "r=b" 
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = -1/2"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(2) closed_segment_imp_Re_Im(2) that by fastforce
+      subgoal using assms(1) assms(2) that by auto
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (simp add: that)
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (simp add: that)
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(1) closed_segment_imp_Re_Im(1) that by fastforce
+      subgoal by (smt (z3) complex.sel(1) minus_complex.simps(1))
+      done
+    ultimately show ?thesis unfolding cindexP_pathE_eq by auto
+  qed
+  moreover have "cindexP_pathE rr (rectpath a b) = -1/2" 
+    if "r=Complex (Re a) (Im b)" 
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = -1/2"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(2) closed_segment_imp_Re_Im(2) that by fastforce
+      subgoal using assms(1) assms(2) that by auto
+      done
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using assms(1) closed_segment_imp_Re_Im(1) that by fastforce
+      subgoal by (smt (z3) complex.sel(1) minus_complex.simps(1))
+      done
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (simp add: that)
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (rule cindex_pathE_linepath_on)
+      by (simp add: that)
+    ultimately show ?thesis unfolding cindexP_pathE_eq by auto
+  qed
+  ultimately show ?thesis using r_cases unfolding rr_def by auto
+qed
+
+lemma cindexP_rectpath_interior_base:
+  assumes "r\<in>box a b"
+  shows "cindexP_pathE [:-r,1:] (rectpath a b) = -2"
+proof -
+  have inbox:"Re r \<in> {Re a<..<Re b} \<and> Im r \<in> {Im a<..<Im b}"
+  then have r_nzero:"r\<noteq>a" "r\<noteq>Complex (Re b) (Im a)" "r\<noteq>b" "r\<noteq>Complex (Re a) (Im b)" 
+    by auto
+  have "Re a < Re b" "Im a < Im b"
+
+  define rr where "rr = [:-r,1:]"
+  have rr_linepath:"cindexP_pathE rr (linepath a b) 
+          = cindex_pathE (linepath (a - r) (b-r)) 0 " for a b
+     unfolding rr_def 
+     unfolding cindexP_lineE_def cindexP_pathE_def poly_linepath_comp
+     by (simp add:poly_pcompose comp_def linepath_def scaleR_conv_of_real algebra_simps)
+
+  have "cindexP_pathE rr (rectpath a b) = 
+                 cindexP_pathE rr (linepath a (Complex (Re b) (Im a)))  
+                 + cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) 
+                 + cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) 
+                 + cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a)"
+    unfolding rectpath_def Let_def 
+    by ((subst cindex_poly_pathE_joinpaths
+            |subst finite_ReZ_segments_joinpaths
+            |intro path_poly_comp conjI);
+        (simp add:poly_linepath_comp finite_ReZ_segments_poly_of_real path_compose_join 
+          pathfinish_compose pathstart_compose poly_pcompose)?)+
+  also have "... = -2"
+  proof -
+    have "cindexP_pathE rr (linepath a (Complex (Re b) (Im a))) = -1"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using closed_segment_imp_Re_Im(2) inbox by fastforce
+      using inbox by auto
+    moreover have "cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)  
+      subgoal using closed_segment_imp_Re_Im(1) inbox by fastforce
+      using inbox by auto
+    moreover have "cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) = -1"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using closed_segment_imp_Re_Im(2) inbox by fastforce
+      using inbox by auto
+    moreover have "cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a) = 0"
+      unfolding rr_linepath
+      apply (subst cindex_pathE_linepath)
+      subgoal using closed_segment_imp_Re_Im(1) inbox by fastforce
+      using inbox by auto
+    ultimately show ?thesis by auto
+  qed
+  finally show ?thesis unfolding rr_def .
+qed
+
+
+lemma cindexP_rectpath_outside_base:
+  assumes "Re a < Re b" "Im a < Im b" 
+    and "r\<notin>cbox a b"
+  shows "cindexP_pathE [:-r,1:] (rectpath a b) = 0"
+proof -
+  have not_cbox:"\<not> (Re r \<in> {Re a..Re b} \<and> Im r \<in> {Im a..Im b})"
+  then have r_nzero:"r\<noteq>a" "r\<noteq>Complex (Re b) (Im a)" "r\<noteq>b" "r\<noteq>Complex (Re a) (Im b)" 
+    using assms by auto
+
+  define rr where "rr = [:-r,1:]"
+  have rr_linepath:"cindexP_pathE rr (linepath a b) 
+          = cindex_pathE (linepath (a - r) (b-r)) 0 " for a b
+     unfolding rr_def 
+     unfolding cindexP_lineE_def cindexP_pathE_def poly_linepath_comp
+     by (simp add:poly_pcompose comp_def linepath_def scaleR_conv_of_real algebra_simps)
+
+  have "cindexP_pathE rr (rectpath a b) = 
+                 cindexP_pathE rr (linepath a (Complex (Re b) (Im a)))  
+                 + cindexP_pathE rr (linepath (Complex (Re b) (Im a)) b) 
+                 + cindexP_pathE rr (linepath b (Complex (Re a) (Im b))) 
+                 + cindexP_pathE rr (linepath (Complex (Re a) (Im b)) a)"
+    unfolding rectpath_def Let_def 
+    by ((subst cindex_poly_pathE_joinpaths
+            |subst finite_ReZ_segments_joinpaths
+            |intro path_poly_comp conjI);
+        (simp add:poly_linepath_comp finite_ReZ_segments_poly_of_real path_compose_join 
+          pathfinish_compose pathstart_compose poly_pcompose)?)+
+  have "cindexP_pathE rr (rectpath a b) = cindex_pathE (poly rr \<circ> rectpath a b) 0"
+    unfolding cindexP_pathE_def by simp
+  also have "...  = - 2 * winding_number (poly rr \<circ> rectpath a b) 0"
+      Index theorem  (i.e., @{thm "winding_number_cindex_pathE"}) we can make the proof shorter.\<close>
+    using \<open>not_rect_vertex r a b\<close> unfolding rr_def not_rect_vertex_def by auto
+    using \<open>not_rect_vanishing p a b\<close> unfolding not_rect_vanishing_def by auto
+  using \<open>not_rect_vanishing p a b\<close>
+subsection \<open>Code generation\<close>
+      subgoal using \<open>Re x \<noteq> Re y\<close> complex_eq_iff that(2) by auto
+      subgoal using \<open>Im x \<noteq> Im y\<close> complex_eq_iff that(2) by auto
+    using \<open>p\<noteq>0\<close> by auto
+    using ll_disj \<open>p\<noteq>0\<close>
+    by (simp add: CC_def \<open>0 \<le> C1\<close> \<open>0 \<le> C2\<close> \<open>0 \<le> C3\<close> \<open>0 \<le> C4\<close>)
+    unfolding proots_rect_ll_def using ll_disj \<open>p\<noteq>0\<close>

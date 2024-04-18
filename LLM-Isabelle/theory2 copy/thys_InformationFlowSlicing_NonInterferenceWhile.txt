@@ -1,0 +1,446 @@
+theory NonInterferenceWhile imports
+  Slicing.SemanticsWellFormed
+  Slicing.StaticControlDependences
+  LiftingIntra
+begin
+
+locale SecurityTypes =
+  fixes H :: "vname set"
+  fixes L :: "vname set"
+  assumes HighLowDistinct: "H \<inter> L = {}"
+  and HighLowUNIV: "H \<union> L = UNIV"
+begin
+
+
+
+fun labels_LDCFG_nodes :: "cmd \<Rightarrow> w_node LDCFG_node \<Rightarrow> cmd \<Rightarrow> bool"
+  where "labels_LDCFG_nodes prog (Node n) c = labels_nodes prog n c"
+  | "labels_LDCFG_nodes prog n c = False"
+
+
+
+lemmas WCFG_path_induct[consumes 1, case_names empty_path Cons_path]
+  = CFG.path.induct[OF While_CFG_aux]
+
+
+lemma lift_valid_node:
+  assumes "CFG.valid_node sourcenode targetnode (valid_edge prog) n"
+  shows "CFG.valid_node src trg
+  (lift_valid_edge (valid_edge prog) sourcenode targetnode kind (_Entry_) (_Exit_))
+  (Node n)"
+proof -
+  obtain a where "valid_edge prog a" and "n = sourcenode a \<or> n = targetnode a"
+    by(fastforce simp:While_CFG.valid_node_def)
+  show ?thesis
+  proof
+    assume "n = sourcenode a"
+    show ?thesis
+    proof(cases "sourcenode a = Entry")
+      case True
+      have "lift_valid_edge (valid_edge prog) sourcenode targetnode kind Entry Exit 
+        (NewEntry,(\<lambda>s. True)\<^sub>\<surd>,Node Entry)"
+        by(fastforce intro:lve_Entry_edge)
+        by(fastforce simp:CFG.valid_node_def[OF lift_CFG])
+    next
+      case False
+      have "lift_valid_edge (valid_edge prog) sourcenode targetnode kind Entry Exit 
+        (Node (sourcenode a),kind a,Node (targetnode a))"
+        by(fastforce intro:lve_edge)
+        by(fastforce simp:CFG.valid_node_def[OF lift_CFG])
+    qed
+  next
+    assume "n = targetnode a"
+    show ?thesis
+    proof(cases "targetnode a = Exit")
+      case True
+      have "lift_valid_edge (valid_edge prog) sourcenode targetnode kind Entry Exit 
+        (Node Exit,(\<lambda>s. True)\<^sub>\<surd>,NewExit)"
+        by(fastforce intro:lve_Exit_edge)
+        by(fastforce simp:CFG.valid_node_def[OF lift_CFG])
+    next
+      case False
+      have "lift_valid_edge (valid_edge prog) sourcenode targetnode kind Entry Exit 
+        (Node (sourcenode a),kind a,Node (targetnode a))"
+        by(fastforce intro:lve_edge)
+        by(fastforce simp:CFG.valid_node_def[OF lift_CFG])
+    qed
+  qed
+qed
+
+
+
+lemma lifted_CFG_fund_prop:
+  assumes "labels_LDCFG_nodes prog n c" and "\<langle>c,s\<rangle> \<rightarrow>* \<langle>c',s'\<rangle>"
+  shows "\<exists>n' as. CFG.path src trg
+  (lift_valid_edge (valid_edge prog) sourcenode targetnode kind (_Entry_) (_Exit_))
+  n as n' \<and> transfers (CFG.kinds knd as) s = s' \<and>
+  preds (CFG.kinds knd as) s \<and> labels_LDCFG_nodes prog n' c'"
+proof -
+    and "labels_nodes prog nx c" by(cases n) auto
+  obtain n' as where "prog \<turnstile> nx -as\<rightarrow>* n'" and "transfers (CFG.kinds kind as) s = s'"
+    and "preds (CFG.kinds kind as) s" and "labels_nodes prog n' c'"
+    by(auto dest:While_semantics_CFG_wf.fundamental_property)
+    by simp
+  have "\<exists>es. CFG.path src trg
+    (lift_valid_edge (valid_edge prog) sourcenode targetnode kind (_Entry_) (_Exit_))
+    (Node nx) es (Node n') \<and> transfers (CFG.kinds knd es) s = s' \<and>
+    preds (CFG.kinds knd es) s"
+  proof(induct arbitrary:n s c rule:WCFG_path_induct)
+    case (empty_path n nx)
+    have valid_node:"CFG.valid_node src trg
+     (lift_valid_edge (valid_edge prog) sourcenode targetnode kind (_Entry_) (_Exit_))
+      (Node n)"
+      by(rule lift_valid_node)
+    have "CFG.kinds knd 
+      ([]::(w_node LDCFG_node \<times> state edge_kind \<times> w_node LDCFG_node) list) = []"
+      by(simp add:CFG.kinds_def[OF lift_CFG[OF While_CFGExit_wf_aux]])
+      valid_node
+    show ?case
+      by(fastforce intro:CFG.empty_path[OF lift_CFG[OF While_CFGExit_wf_aux]] 
+                   simp:While_CFG.kinds_def)
+  next
+    case (Cons_path n'' as n' a nx)
+    have "transfers (CFG.kinds kind as) (transfer (kind a) s) = s'"
+      by(simp add:While_CFG.kinds_def)
+    have "preds (CFG.kinds kind as) (transfer (kind a) s)"
+      and "pred (kind a) s" by(simp_all add:While_CFG.kinds_def)
+    show ?case
+    proof(cases "sourcenode a = (_Entry_)")
+      case True
+      thus ?thesis by simp
+    next
+      case False
+      have edge:"lift_valid_edge (valid_edge prog) sourcenode targetnode kind 
+        Entry Exit (Node (sourcenode a),kind a,Node (targetnode a))"
+        by(fastforce intro:lve_edge)
+      have "CFG.valid_node sourcenode targetnode (valid_edge prog) n''"
+        by(rule While_CFG.path_valid_node)
+      then obtain c'' where "labels_nodes prog n'' c''"
+      proof(cases rule:While_CFGExit.valid_node_cases)
+        case Entry
+        thus ?thesis by simp
+      next
+        case Exit
+        thus ?thesis by simp
+      next
+        case inner
+        then obtain l'' where [simp]:"n'' = (_ l'' _)" by(cases n'') auto
+          by(fastforce intro:WCFG_targetlabel_less_num_nodes simp:valid_edge_def)
+        then obtain c'' where "labels prog l'' c''"
+          by(fastforce dest:less_num_inner_nodes_label)
+        with that show ?thesis by fastforce
+      qed
+      obtain es where "CFG.path src trg
+        (lift_valid_edge (valid_edge prog) sourcenode targetnode kind 
+        (_Entry_) (_Exit_)) (LDCFG_node.Node n'') es (LDCFG_node.Node n')"
+        and "transfers (CFG.kinds knd es) (transfer (kind a) s) = s'"
+        and "preds (CFG.kinds knd es) (transfer (kind a) s)" by blast
+      have path:"CFG.path src trg
+        (lift_valid_edge (valid_edge prog) sourcenode targetnode 
+        kind (_Entry_) (_Exit_))
+        (LDCFG_node.Node nx) ((Node (sourcenode a),kind a,Node (targetnode a))#es) 
+        (LDCFG_node.Node n')"
+        by(fastforce intro:CFG.Cons_path[OF lift_CFG[OF While_CFGExit_wf_aux]])
+      from edge have "knd (Node (sourcenode a),kind a,Node (targetnode a)) = kind a"
+        by(simp add:knd_def)
+      have "transfers 
+        (CFG.kinds knd ((Node (sourcenode a),kind a,Node (targetnode a))#es)) s = s'"
+        and "preds 
+        (CFG.kinds knd ((Node (sourcenode a),kind a,Node (targetnode a))#es)) s"
+        by(auto simp:CFG.kinds_def[OF lift_CFG[OF While_CFGExit_wf_aux]])
+      with path show ?thesis by blast
+    qed
+  qed
+  show ?thesis by fastforce
+qed
+
+
+
+fun final :: "cmd \<Rightarrow> bool"
+  where "final Skip = True"
+  | "final c = False"
+
+
+lemma final_edge:
+  "labels_nodes prog n Skip \<Longrightarrow> prog \<turnstile> n -\<Up>id\<rightarrow> (_Exit_)"
+proof(induct prog arbitrary:n)
+  case Skip
+    by(cases n)(auto elim:labels.cases)
+  thus ?case by(fastforce intro:WCFG_Skip)
+next
+  case (LAss V e)
+    by(cases n)(auto elim:labels.cases)
+  thus ?case by(fastforce intro:WCFG_LAssSkip)
+next
+  case (Seq c\<^sub>1 c\<^sub>2)
+    and "l \<ge> #:c\<^sub>1" and "labels_nodes c\<^sub>2 (_ l - #:c\<^sub>1 _) Skip"
+    by(cases n)(auto elim:labels.cases)
+  have "c\<^sub>2 \<turnstile> (_ l - #:c\<^sub>1 _) -\<Up>id\<rightarrow> (_Exit_)" .
+    by(fastforce intro:WCFG_SeqSecond)
+next
+  case (Cond b c\<^sub>1 c\<^sub>2)
+  obtain l where "n = (_ l _)" and disj:"(l \<ge> 1 \<and> labels_nodes c\<^sub>1 (_ l - 1 _) Skip) \<or>
+    (l \<ge> #:c\<^sub>1 + 1 \<and> labels_nodes c\<^sub>2 (_ l - #:c\<^sub>1 - 1 _) Skip)"
+    by(cases n) (fastforce elim:labels.cases)+
+  from disj show ?case
+  proof
+    assume "1 \<le> l \<and> labels_nodes c\<^sub>1 (_ l - 1 _) Skip"
+    hence "1 \<le> l" and "labels_nodes c\<^sub>1 (_ l - 1 _) Skip" by simp_all
+    have "c\<^sub>1 \<turnstile> (_ l - 1 _) -\<Up>id\<rightarrow> (_Exit_)" .
+      by(fastforce intro:WCFG_CondThen)
+  next
+    assume "#:c\<^sub>1 + 1 \<le> l \<and> labels_nodes c\<^sub>2 (_ l - #:c\<^sub>1 - 1 _) Skip"
+    hence "#:c\<^sub>1 + 1 \<le> l" and "labels_nodes c\<^sub>2 (_ l - #:c\<^sub>1 - 1 _) Skip" by simp_all
+    have "c\<^sub>2 \<turnstile> (_ l - #:c\<^sub>1 - 1 _) -\<Up>id\<rightarrow> (_Exit_)" .
+      -\<Up>id\<rightarrow> (_Exit_) \<oplus> (#:c\<^sub>1 + 1)"
+      by(fastforce intro:WCFG_CondElse)
+  qed
+next
+  case (While b c)
+    by(cases n)(auto elim:labels.cases)
+  thus ?case by(fastforce intro:WCFG_WhileFalseSkip)
+qed
+
+
+
+
+
+lemmas WODNonInterferenceGraph = 
+  lift_wod_backward_slice[OF While_CFGExit_wf_aux HighLowDistinct HighLowUNIV]
+
+
+lemma WODNonInterference:
+  "NonInterferenceIntra src trg knd
+     (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+       (_Entry_) (_Exit_))
+     NewEntry (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+     (lift_Use (Uses prog) (_Entry_) (_Exit_) H L) id
+     (CFG_wf.wod_backward_slice src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L))
+     reds (labels_LDCFG_nodes prog)
+     NewExit H L (LDCFG_node.Node (_Entry_)) (LDCFG_node.Node (_Exit_)) final"
+proof -
+  interpret NonInterferenceIntraGraph src trg knd
+     "lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+       (_Entry_) (_Exit_)"
+     NewEntry "lift_Def (Defs prog) (_Entry_) (_Exit_) H L"
+     "lift_Use (Uses prog) (_Entry_) (_Exit_) H L" id
+     "CFG_wf.wod_backward_slice src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L)"
+     NewExit H L "LDCFG_node.Node (_Entry_)" "LDCFG_node.Node (_Exit_)"
+    by(rule WODNonInterferenceGraph)
+  interpret BackwardSlice_wf src trg knd
+    "lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+      (_Entry_) (_Exit_)"
+    NewEntry "lift_Def (Defs prog) (_Entry_) (_Exit_) H L"
+    "lift_Use (Uses prog) (_Entry_) (_Exit_) H L" id
+    "CFG_wf.wod_backward_slice src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L)" reds "labels_LDCFG_nodes prog"
+  proof(unfold_locales)
+    fix n c s c' s'
+    assume "labels_LDCFG_nodes prog n c" and "\<langle>c,s\<rangle> \<rightarrow>* \<langle>c',s'\<rangle>"
+    thus "\<exists>n' as. CFG.path src trg
+     (lift_valid_edge (valid_edge prog) sourcenode targetnode kind (_Entry_) (_Exit_))
+      n as n' \<and> transfers (CFG.kinds knd as) s = s' \<and>
+      preds (CFG.kinds knd as) s \<and> labels_LDCFG_nodes prog n' c'"
+      by(rule lifted_CFG_fund_prop)
+  qed
+  show ?thesis 
+  proof(unfold_locales)
+    fix c n
+    assume "final c" and "labels_LDCFG_nodes prog n c"
+      and "labels_nodes prog nx Skip" by(cases n) auto
+      by(rule final_edge)
+    then obtain a where "valid_edge prog a" and "sourcenode a = nx"
+      and "kind a = \<Up>id" and "targetnode a = (_Exit_)"
+      by(auto simp:valid_edge_def)
+    show "\<exists>a. lift_valid_edge (valid_edge prog) sourcenode targetnode
+      kind (_Entry_) (_Exit_) a \<and>
+      src a = n \<and> trg a = LDCFG_node.Node (_Exit_) \<and> knd a = \<Up>id"
+      by(rule_tac x="(Node nx,\<Up>id,Node (_Exit_))" in exI)
+        (auto intro!:lve_edge simp:knd_def valid_edge_def)
+  qed
+qed
+
+
+
+lemma inner_node_exists:"\<exists>n. CFGExit.inner_node sourcenode targetnode 
+  (valid_edge prog) (_Entry_) (_Exit_) n"
+proof -
+  have "prog \<turnstile> (_Entry_) -(\<lambda>s. True)\<^sub>\<surd>\<rightarrow> (_0_)" by(rule WCFG_Entry)
+  hence "CFG.valid_node sourcenode targetnode (valid_edge prog) (_0_)"
+    by(auto simp:While_CFG.valid_node_def valid_edge_def)
+  thus ?thesis by(auto simp:While_CFGExit.inner_node_def)
+qed
+
+
+lemmas SCDNonInterferenceGraph = 
+  lift_PDG_standard_backward_slice[OF WStandardControlDependence.PDG_scd 
+  WhilePostdomination_aux _ HighLowDistinct HighLowUNIV]
+
+
+lemma SCDNonInterference:
+  "NonInterferenceIntra src trg knd
+     (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+       (_Entry_) (_Exit_))
+     NewEntry (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+     (lift_Use (Uses prog) (_Entry_) (_Exit_) H L) id
+     (PDG.PDG_BS src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L)
+       (Postdomination.standard_control_dependence src trg
+         (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+           (_Entry_) (_Exit_)) NewExit))
+     reds (labels_LDCFG_nodes prog)
+     NewExit H L (LDCFG_node.Node (_Entry_)) (LDCFG_node.Node (_Exit_)) final"
+proof -
+  from inner_node_exists obtain n where "CFGExit.inner_node sourcenode targetnode 
+    (valid_edge prog) (_Entry_) (_Exit_) n" by blast
+  then interpret NonInterferenceIntraGraph src trg knd
+     "lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+       (_Entry_) (_Exit_)"
+     NewEntry "lift_Def (Defs prog) (_Entry_) (_Exit_) H L"
+     "lift_Use (Uses prog) (_Entry_) (_Exit_) H L" id
+     "PDG.PDG_BS src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L)
+       (Postdomination.standard_control_dependence src trg
+         (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+           (_Entry_) (_Exit_)) NewExit)"
+     NewExit H L "LDCFG_node.Node (_Entry_)" "LDCFG_node.Node (_Exit_)"
+    by(fastforce intro:SCDNonInterferenceGraph)
+  interpret BackwardSlice_wf src trg knd
+    "lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+      (_Entry_) (_Exit_)"
+    NewEntry "lift_Def (Defs prog) (_Entry_) (_Exit_) H L"
+    "lift_Use (Uses prog) (_Entry_) (_Exit_) H L" id
+    "PDG.PDG_BS src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L)
+       (Postdomination.standard_control_dependence src trg
+         (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+           (_Entry_) (_Exit_)) NewExit)" reds "labels_LDCFG_nodes prog"
+  proof(unfold_locales)
+    fix n c s c' s'
+    assume "labels_LDCFG_nodes prog n c" and "\<langle>c,s\<rangle> \<rightarrow>* \<langle>c',s'\<rangle>"
+    thus "\<exists>n' as. CFG.path src trg
+     (lift_valid_edge (valid_edge prog) sourcenode targetnode kind (_Entry_) (_Exit_))
+      n as n' \<and> transfers (CFG.kinds knd as) s = s' \<and>
+      preds (CFG.kinds knd as) s \<and> labels_LDCFG_nodes prog n' c'"
+      by(rule lifted_CFG_fund_prop)
+  qed
+  show ?thesis 
+  proof(unfold_locales)
+    fix c n
+    assume "final c" and "labels_LDCFG_nodes prog n c"
+      and "labels_nodes prog nx Skip" by(cases n) auto
+      by(rule final_edge)
+    then obtain a where "valid_edge prog a" and "sourcenode a = nx"
+      and "kind a = \<Up>id" and "targetnode a = (_Exit_)"
+      by(auto simp:valid_edge_def)
+    show "\<exists>a. lift_valid_edge (valid_edge prog) sourcenode targetnode
+      kind (_Entry_) (_Exit_) a \<and>
+      src a = n \<and> trg a = LDCFG_node.Node (_Exit_) \<and> knd a = \<Up>id"
+      by(rule_tac x="(Node nx,\<Up>id,Node (_Exit_))" in exI)
+        (auto intro!:lve_edge simp:knd_def valid_edge_def)
+  qed
+qed
+
+
+
+lemmas WCDNonInterferenceGraph = 
+  lift_PDG_weak_backward_slice[OF WWeakControlDependence.PDG_wcd 
+  WhileStrongPostdomination_aux _ HighLowDistinct HighLowUNIV]
+
+
+lemma WCDNonInterference:
+  "NonInterferenceIntra src trg knd
+     (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+       (_Entry_) (_Exit_))
+     NewEntry (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+     (lift_Use (Uses prog) (_Entry_) (_Exit_) H L) id
+     (PDG.PDG_BS src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L)
+       (StrongPostdomination.weak_control_dependence src trg
+         (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+           (_Entry_) (_Exit_)) NewExit))
+     reds (labels_LDCFG_nodes prog)
+     NewExit H L (LDCFG_node.Node (_Entry_)) (LDCFG_node.Node (_Exit_)) final"
+proof -
+  from inner_node_exists obtain n where "CFGExit.inner_node sourcenode targetnode 
+    (valid_edge prog) (_Entry_) (_Exit_) n" by blast
+  then interpret NonInterferenceIntraGraph src trg knd
+     "lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+       (_Entry_) (_Exit_)"
+     NewEntry "lift_Def (Defs prog) (_Entry_) (_Exit_) H L"
+     "lift_Use (Uses prog) (_Entry_) (_Exit_) H L" id
+     "PDG.PDG_BS src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L)
+       (StrongPostdomination.weak_control_dependence src trg
+         (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+           (_Entry_) (_Exit_)) NewExit)"
+     NewExit H L "LDCFG_node.Node (_Entry_)" "LDCFG_node.Node (_Exit_)"
+    by(fastforce intro:WCDNonInterferenceGraph)
+  interpret BackwardSlice_wf src trg knd
+    "lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+      (_Entry_) (_Exit_)"
+    NewEntry "lift_Def (Defs prog) (_Entry_) (_Exit_) H L"
+    "lift_Use (Uses prog) (_Entry_) (_Exit_) H L" id
+    "PDG.PDG_BS src trg
+       (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+         (_Entry_) (_Exit_))
+       (lift_Def (Defs prog) (_Entry_) (_Exit_) H L)
+       (lift_Use (Uses prog) (_Entry_) (_Exit_) H L)
+       (StrongPostdomination.weak_control_dependence src trg
+         (lift_valid_edge (valid_edge prog) sourcenode targetnode kind
+           (_Entry_) (_Exit_)) NewExit)" reds "labels_LDCFG_nodes prog"
+  proof(unfold_locales)
+    fix n c s c' s'
+    assume "labels_LDCFG_nodes prog n c" and "\<langle>c,s\<rangle> \<rightarrow>* \<langle>c',s'\<rangle>"
+    thus "\<exists>n' as. CFG.path src trg
+     (lift_valid_edge (valid_edge prog) sourcenode targetnode kind (_Entry_) (_Exit_))
+      n as n' \<and> transfers (CFG.kinds knd as) s = s' \<and>
+      preds (CFG.kinds knd as) s \<and> labels_LDCFG_nodes prog n' c'"
+      by(rule lifted_CFG_fund_prop)
+  qed
+  show ?thesis 
+  proof(unfold_locales)
+    fix c n
+    assume "final c" and "labels_LDCFG_nodes prog n c"
+      and "labels_nodes prog nx Skip" by(cases n) auto
+      by(rule final_edge)
+    then obtain a where "valid_edge prog a" and "sourcenode a = nx"
+      and "kind a = \<Up>id" and "targetnode a = (_Exit_)"
+      by(auto simp:valid_edge_def)
+    show "\<exists>a. lift_valid_edge (valid_edge prog) sourcenode targetnode
+      kind (_Entry_) (_Exit_) a \<and>
+      src a = n \<and> trg a = LDCFG_node.Node (_Exit_) \<and> knd a = \<Up>id"
+      by(rule_tac x="(Node nx,\<Up>id,Node (_Exit_))" in exI)
+        (auto intro!:lve_edge simp:knd_def valid_edge_def)
+  qed
+qed
+
+end
+
+end

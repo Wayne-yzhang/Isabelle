@@ -1,0 +1,320 @@
+theory Eclose_Absolute imports "ZF-Constructible.Formula" "ZF-Constructible.WF_absolute" begin
+
+
+
+definition
+  directed :: "i=>o" where
+   "directed(A) == A\<noteq>0 & (\<forall>x\<in>A. \<forall>y\<in>A. x \<union> y \<in> A)"
+
+definition
+  contin :: "(i=>i) => o" where
+   "contin(h) == (\<forall>A. directed(A) \<longrightarrow> h(\<Union>A) = (\<Union>X\<in>A. h(X)))"
+
+lemma bnd_mono_iterates_subset: "[|bnd_mono(D, h); n \<in> nat|] ==> h^n (0) \<subseteq> D"
+apply (induct_tac n) 
+ apply (simp_all add: bnd_mono_def, blast) 
+done
+
+lemma bnd_mono_increasing [rule_format]:
+     "[|i \<in> nat; j \<in> nat; bnd_mono(D,h)|] ==> i \<le> j \<longrightarrow> h^i(0) \<subseteq> h^j(0)"
+apply (rule_tac m=i and n=j in diff_induct, simp_all)
+apply (blast del: subsetI
+             intro: bnd_mono_iterates_subset bnd_monoD2 [of concl: h]) 
+done
+
+lemma directed_iterates: "bnd_mono(D,h) ==> directed({h^n (0). n\<in>nat})"
+apply (simp add: directed_def, clarify) 
+apply (rename_tac i j)
+apply (rule_tac x="i \<union> j" in bexI) 
+apply (rule_tac i = i and j = j in Ord_linear_le)
+apply (simp_all add: subset_Un_iff [THEN iffD1] le_imp_subset
+                     subset_Un_iff2 [THEN iffD1])
+apply (simp_all add: subset_Un_iff [THEN iff_sym] bnd_mono_increasing
+                     subset_Un_iff2 [THEN iff_sym])
+done
+
+
+lemma contin_iterates_eq: 
+    "[|bnd_mono(D, h); contin(h)|] 
+     ==> h(\<Union>n\<in>nat. h^n (0)) = (\<Union>n\<in>nat. h^n (0))"
+apply (simp add: contin_def directed_iterates) 
+apply (rule trans) 
+apply (rule equalityI) 
+ apply (simp_all add: UN_subset_iff)
+ apply safe
+ apply (erule_tac [2] natE) 
+  apply (rule_tac a="succ(x)" in UN_I) 
+   apply simp_all 
+apply blast 
+done
+
+lemma lfp_subset_Union:
+     "[|bnd_mono(D, h); contin(h)|] ==> lfp(D,h) \<subseteq> (\<Union>n\<in>nat. h^n(0))"
+apply (rule lfp_lowerbound) 
+ apply (simp add: contin_iterates_eq) 
+apply (simp add: contin_def bnd_mono_iterates_subset UN_subset_iff) 
+done
+
+lemma Union_subset_lfp:
+     "bnd_mono(D,h) ==> (\<Union>n\<in>nat. h^n(0)) \<subseteq> lfp(D,h)"
+apply (simp add: UN_subset_iff)
+apply (rule ballI)  
+apply (induct_tac n, simp_all) 
+apply (rule subset_trans [of _ "h(lfp(D,h))"])
+ apply (blast dest: bnd_monoD2 [OF _ _ lfp_subset])  
+apply (erule lfp_lemma2) 
+done
+
+lemma lfp_eq_Union:
+     "[|bnd_mono(D, h); contin(h)|] ==> lfp(D,h) = (\<Union>n\<in>nat. h^n(0))"
+by (blast del: subsetI 
+          intro: lfp_subset_Union Union_subset_lfp)
+
+
+
+lemma contin_imp_mono: "[|X\<subseteq>Y; contin(F)|] ==> F(X) \<subseteq> F(Y)"
+apply (simp add: contin_def) 
+apply (drule_tac x="{X,Y}" in spec) 
+apply (simp add: directed_def subset_Un_iff2 Un_commute) 
+done
+
+lemma sum_contin: "[|contin(F); contin(G)|] ==> contin(\<lambda>X. F(X) + G(X))"
+by (simp add: contin_def, blast)
+
+lemma prod_contin: "[|contin(F); contin(G)|] ==> contin(\<lambda>X. F(X) * G(X))" 
+apply (subgoal_tac "\<forall>B C. F(B) \<subseteq> F(B \<union> C)")
+ prefer 2 apply (simp add: Un_upper1 contin_imp_mono) 
+apply (subgoal_tac "\<forall>B C. G(C) \<subseteq> G(B \<union> C)")
+ prefer 2 apply (simp add: Un_upper2 contin_imp_mono) 
+apply (simp add: contin_def, clarify) 
+apply (rule equalityI) 
+ prefer 2 apply blast 
+apply clarify 
+apply (rename_tac B C) 
+apply (rule_tac a="B \<union> C" in UN_I) 
+ apply (simp add: directed_def, blast)  
+done
+
+lemma const_contin: "contin(\<lambda>X. A)"
+by (simp add: contin_def directed_def)
+
+lemma id_contin: "contin(\<lambda>X. X)"
+by (simp add: contin_def)
+
+
+
+
+definition
+  iterates_MH :: "[i=>o, [i,i]=>o, i, i, i, i] => o" where
+   "iterates_MH(M,isF,v,n,g,z) ==
+        is_nat_case(M, v, \<lambda>m u. \<exists>gm[M]. fun_apply(M,g,m,gm) & isF(gm,u),
+                    n, z)"
+
+definition
+  is_iterates :: "[i=>o, [i,i]=>o, i, i, i] => o" where
+    "is_iterates(M,isF,v,n,Z) == 
+      \<exists>sn[M]. \<exists>msn[M]. successor(M,n,sn) & membership(M,sn,msn) &
+                       is_wfrec(M, iterates_MH(M,isF,v), msn, n, Z)"
+
+definition
+  iterates_replacement :: "[i=>o, [i,i]=>o, i] => o" where
+   "iterates_replacement(M,isF,v) ==
+      \<forall>n[M]. n\<in>nat \<longrightarrow> 
+         wfrec_replacement(M, iterates_MH(M,isF,v), Memrel(succ(n)))"
+
+lemma (in M_basic) iterates_MH_abs:
+  "[| relation1(M,isF,F); M(n); M(g); M(z) |] 
+   ==> iterates_MH(M,isF,v,n,g,z) \<longleftrightarrow> z = nat_case(v, \<lambda>m. F(g`m), n)"
+by (simp add: nat_case_abs [of _ "\<lambda>m. F(g ` m)"]
+              relation1_def iterates_MH_def)  
+
+lemma (in M_trancl) iterates_imp_wfrec_replacement:
+  "[|relation1(M,isF,F); n \<in> nat; iterates_replacement(M,isF,v)|] 
+   ==> wfrec_replacement(M, \<lambda>n f z. z = nat_case(v, \<lambda>m. F(f`m), n), 
+                       Memrel(succ(n)))" 
+by (simp add: iterates_replacement_def iterates_MH_abs)
+
+theorem (in M_trancl) iterates_abs:
+  "[| iterates_replacement(M,isF,v); relation1(M,isF,F);
+      n \<in> nat; M(v); M(z); \<forall>x[M]. M(F(x)) |] 
+   ==> is_iterates(M,isF,v,n,z) \<longleftrightarrow> z = iterates(F,n,v)" 
+apply (frule iterates_imp_wfrec_replacement, assumption+)
+apply (simp add: wf_Memrel trans_Memrel relation_Memrel 
+                 is_iterates_def relation2_def iterates_MH_abs 
+                 iterates_nat_def recursor_def transrec_def 
+                 eclose_sing_Ord_eq nat_into_M
+         trans_wfrec_abs [of _ _ _ _ "\<lambda>n g. nat_case(v, \<lambda>m. F(g`m), n)"])
+done
+
+
+lemma (in M_trancl) iterates_closed [intro,simp]:
+  "[| iterates_replacement(M,isF,v); relation1(M,isF,F);
+      n \<in> nat; M(v); \<forall>x[M]. M(F(x)) |] 
+   ==> M(iterates(F,n,v))"
+apply (frule iterates_imp_wfrec_replacement, assumption+)
+apply (simp add: wf_Memrel trans_Memrel relation_Memrel 
+                 relation2_def iterates_MH_abs 
+                 iterates_nat_def recursor_def transrec_def 
+                 eclose_sing_Ord_eq nat_into_M
+         trans_wfrec_closed [of _ _ _ "\<lambda>n g. nat_case(v, \<lambda>m. F(g`m), n)"])
+done
+
+
+
+lemmas datatype_univs = Inl_in_univ Inr_in_univ 
+                        Pair_in_univ nat_into_univ A_into_univ 
+
+lemma list_fun_bnd_mono: "bnd_mono(univ(A), \<lambda>X. {0} + A*X)"
+apply (rule bnd_monoI)
+ apply (intro subset_refl zero_subset_univ A_subset_univ 
+              sum_subset_univ Sigma_subset_univ) 
+apply (rule subset_refl sum_mono Sigma_mono | assumption)+
+done
+
+lemma list_fun_contin: "contin(\<lambda>X. {0} + A*X)"
+by (intro sum_contin prod_contin id_contin const_contin) 
+
+lemma list_eq_lfp2: "list(A) = lfp(univ(A), \<lambda>X. {0} + A*X)"
+apply (simp add: list_def) 
+apply (rule equalityI) 
+ apply (rule lfp_lowerbound) 
+  prefer 2 apply (rule lfp_subset)
+ apply (clarify, subst lfp_unfold [OF list_fun_bnd_mono])
+ apply (simp add: Nil_def Cons_def)
+ apply blast 
+apply (rule lfp_lowerbound) 
+ prefer 2 apply (rule lfp_subset) 
+apply (clarify, subst lfp_unfold [OF list.bnd_mono]) 
+apply (simp add: Nil_def Cons_def)
+apply (blast intro: datatype_univs
+             dest: lfp_subset [THEN subsetD])
+done
+
+lemma list_eq_Union:
+     "list(A) = (\<Union>n\<in>nat. (\<lambda>X. {0} + A*X) ^ n (0))"
+by (simp add: list_eq_lfp2 lfp_eq_Union list_fun_bnd_mono list_fun_contin)
+
+
+definition
+  is_list_functor :: "[i=>o,i,i,i] => o" where
+    "is_list_functor(M,A,X,Z) == 
+        \<exists>n1[M]. \<exists>AX[M]. 
+         number1(M,n1) & cartprod(M,A,X,AX) & is_sum(M,n1,AX,Z)"
+
+lemma (in M_basic) list_functor_abs [simp]: 
+     "[| M(A); M(X); M(Z) |] ==> is_list_functor(M,A,X,Z) \<longleftrightarrow> (Z = {0} + A*X)"
+by (simp add: is_list_functor_def singleton_0 nat_into_M)
+
+
+
+lemma formula_fun_bnd_mono:
+     "bnd_mono(univ(0), \<lambda>X. ((nat*nat) + (nat*nat)) + (X*X + X))"
+apply (rule bnd_monoI)
+ apply (intro subset_refl zero_subset_univ A_subset_univ 
+              sum_subset_univ Sigma_subset_univ nat_subset_univ) 
+apply (rule subset_refl sum_mono Sigma_mono | assumption)+
+done
+
+lemma formula_fun_contin:
+     "contin(\<lambda>X. ((nat*nat) + (nat*nat)) + (X*X + X))"
+by (intro sum_contin prod_contin id_contin const_contin) 
+
+
+lemma formula_eq_lfp2:
+    "formula = lfp(univ(0), \<lambda>X. ((nat*nat) + (nat*nat)) + (X*X + X))"
+apply (simp add: formula_def) 
+apply (rule equalityI) 
+ apply (rule lfp_lowerbound) 
+  prefer 2 apply (rule lfp_subset)
+ apply (clarify, subst lfp_unfold [OF formula_fun_bnd_mono])
+ apply (simp add: Member_def Equal_def Nand_def Forall_def)
+ apply blast 
+apply (rule lfp_lowerbound) 
+ prefer 2 apply (rule lfp_subset, clarify) 
+apply (subst lfp_unfold [OF formula.bnd_mono, simplified]) 
+apply (simp add: Member_def Equal_def Nand_def Forall_def)  
+apply (elim sumE SigmaE, simp_all) 
+apply (blast intro: datatype_univs dest: lfp_subset [THEN subsetD])+  
+done
+
+lemma formula_eq_Union:
+     "formula = 
+      (\<Union>n\<in>nat. (\<lambda>X. ((nat*nat) + (nat*nat)) + (X*X + X)) ^ n (0))"
+by (simp add: formula_eq_lfp2 lfp_eq_Union formula_fun_bnd_mono 
+              formula_fun_contin)
+
+
+definition
+  is_formula_functor :: "[i=>o,i,i] => o" where
+    "is_formula_functor(M,X,Z) == 
+        \<exists>nat'[M]. \<exists>natnat[M]. \<exists>natnatsum[M]. \<exists>XX[M]. \<exists>X3[M]. 
+          omega(M,nat') & cartprod(M,nat',nat',natnat) & 
+          is_sum(M,natnat,natnat,natnatsum) &
+          cartprod(M,X,X,XX) & is_sum(M,XX,X,X3) & 
+          is_sum(M,natnatsum,X3,Z)"
+
+lemma (in M_trancl) formula_functor_abs [simp]: 
+     "[| M(X); M(Z) |] 
+      ==> is_formula_functor(M,X,Z) \<longleftrightarrow> 
+          Z = ((nat*nat) + (nat*nat)) + (X*X + X)"
+by (simp add: is_formula_functor_def) 
+
+
+
+definition
+  list_N :: "[i,i] => i" where
+    "list_N(A,n) == (\<lambda>X. {0} + A * X)^n (0)"
+
+lemma Nil_in_list_N [simp]: "[] \<in> list_N(A,succ(n))"
+by (simp add: list_N_def Nil_def)
+
+lemma Cons_in_list_N [simp]:
+     "Cons(a,l) \<in> list_N(A,succ(n)) \<longleftrightarrow> a\<in>A & l \<in> list_N(A,n)"
+by (simp add: list_N_def Cons_def) 
+
+lemma list_N_0: "list_N(A,0) = 0"
+by (simp add: list_N_def)
+
+lemma list_N_succ: "list_N(A,succ(n)) = {0} + A * (list_N(A,n))"
+by (simp add: list_N_def)
+
+lemma list_N_imp_list:
+  "[| l \<in> list_N(A,n); n \<in> nat |] ==> l \<in> list(A)"
+by (force simp add: list_eq_Union list_N_def)
+
+lemma list_N_imp_length_lt [rule_format]:
+     "n \<in> nat ==> \<forall>l \<in> list_N(A,n). length(l) < n"
+apply (induct_tac n)  
+apply (auto simp add: list_N_0 list_N_succ 
+                      Nil_def [symmetric] Cons_def [symmetric]) 
+done
+
+lemma list_imp_list_N [rule_format]:
+     "l \<in> list(A) ==> \<forall>n\<in>nat. length(l) < n \<longrightarrow> l \<in> list_N(A, n)"
+apply (induct_tac l)
+apply (force elim: natE)+
+done
+
+lemma list_N_imp_eq_length:
+      "[|n \<in> nat; l \<notin> list_N(A, n); l \<in> list_N(A, succ(n))|] 
+       ==> n = length(l)"
+apply (rule le_anti_sym) 
+ prefer 2 apply (simp add: list_N_imp_length_lt) 
+apply (frule list_N_imp_list, simp)
+apply (simp add: not_lt_iff_le [symmetric]) 
+apply (blast intro: list_imp_list_N) 
+done
+  
+neither of which is absolute.\<close>
+subsubsection\<open>Towards Absoluteness of \<^term>\<open>formula_rec\<close>\<close>
+text\<open>These two aren't simprules because they reveal the underlying
+formula representation.\<close>
+text\<open>This result and the next are unused.\<close>
+subsubsection\<open>Absoluteness of the List Construction\<close>
+subsubsection\<open>Absoluteness of Formulas\<close>
+subsection\<open>Absoluteness for \<open>\<epsilon>\<close>-Closure: the \<^term>\<open>eclose\<close> Operator\<close>
+text\<open>Re-expresses eclose using "iterates"\<close>
+subsection \<open>Absoluteness for \<^term>\<open>transrec\<close>\<close>
+text\<open>\<^prop>\<open>transrec(a,H) \<equiv> wfrec(Memrel(eclose({a})), a, H)\<close>\<close>
+text\<open>The condition \<^term>\<open>Ord(i)\<close> lets us use the simpler
+  \<open>trans_wfrec_abs\<close> rather than \<open>trans_wfrec_abs\<close>,

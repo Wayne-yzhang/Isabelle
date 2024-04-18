@@ -1,0 +1,129 @@
+theory Commitment_Schemes imports
+  CryptHOL.CryptHOL
+begin
+
+
+
+type_synonym ('vk', 'plain', 'commit', 'state) hid_adv = 
+  "('vk' \<Rightarrow> (('plain' \<times> 'plain') \<times> 'state) spmf)
+   \<times> ('commit' \<Rightarrow> 'state \<Rightarrow> bool spmf)"
+
+type_synonym 'commit' hid = "'commit' \<Rightarrow> bool spmf"
+
+type_synonym ('ck', 'plain', 'commit', 'opening')  bind_adversary = 
+  "'ck' \<Rightarrow> ('commit' \<times> 'plain' \<times> 'opening' \<times> 'plain' \<times> 'opening') spmf"
+
+
+locale abstract_commitment =
+    and verify :: "'vk \<Rightarrow> 'plain \<Rightarrow> 'commit \<Rightarrow> 'opening \<Rightarrow> bool" 
+begin
+
+definition "valid_msg_set = {m. valid_msg m}"
+
+definition lossless :: "('pub_key, 'plain, 'commit, 'state) hid_adv \<Rightarrow> bool"
+  where "lossless \<A> \<longleftrightarrow>
+   ((\<forall>pk. lossless_spmf (fst \<A> pk)) \<and>
+        (\<forall>commit \<sigma>. lossless_spmf (snd \<A> commit \<sigma>)))"
+
+
+definition correct_game :: "'plain \<Rightarrow> bool spmf"
+  where "correct_game m = do {
+  (ck, vk) \<leftarrow> key_gen;
+  (c,d) \<leftarrow> commit ck m;
+  return_spmf (verify vk m c d)}"
+
+lemma   "\<lbrakk> lossless_spmf key_gen; lossless_spmf TI;
+          \<And>pk m. valid_msg m \<Longrightarrow> lossless_spmf (commit pk m) \<rbrakk>
+              \<Longrightarrow> valid_msg m \<Longrightarrow> lossless_spmf (correct_game m)"
+  by(simp add: lossless_def correct_game_def split_def Let_def)
+
+definition correct where "correct \<equiv> (\<forall>m. valid_msg m \<longrightarrow> spmf (correct_game m) True = 1)"
+
+
+primrec hiding_game_ind_cpa :: "('vk, 'plain, 'commit, 'state) hid_adv \<Rightarrow> bool spmf"
+  where "hiding_game_ind_cpa (\<A>1, \<A>2) = TRY do {
+  (ck, vk) \<leftarrow> key_gen;
+  ((m0, m1), \<sigma>) \<leftarrow> \<A>1 vk;
+  _ :: unit \<leftarrow> assert_spmf (valid_msg m0 \<and> valid_msg m1);
+  b \<leftarrow> coin_spmf; 
+  (c,d) \<leftarrow> commit ck (if b then m0 else m1);
+  b' :: bool \<leftarrow> \<A>2 c \<sigma>;
+  return_spmf (b' = b)} ELSE coin_spmf"
+
+
+lemma lossless_hiding_game:
+  "\<lbrakk> lossless \<A>; lossless_spmf key_gen;
+     \<And>pk plain. valid_msg plain \<Longrightarrow> lossless_spmf (commit pk plain) \<rbrakk>
+  \<Longrightarrow> lossless_spmf (hiding_game_ind_cpa \<A>)"
+  by(auto simp add: lossless_def hiding_game_ind_cpa_def split_def Let_def)
+
+
+definition hiding_advantage_ind_cpa :: "('vk, 'plain, 'commit, 'state) hid_adv \<Rightarrow> real"
+  where "hiding_advantage_ind_cpa \<A> \<equiv> \<bar>spmf (hiding_game_ind_cpa \<A>) True - 1/2\<bar>"
+
+definition perfect_hiding_ind_cpa :: "('vk, 'plain, 'commit, 'state) hid_adv \<Rightarrow> bool"
+  where "perfect_hiding_ind_cpa \<A> \<equiv> (hiding_advantage_ind_cpa \<A> = 0)"
+
+
+definition bind_game :: "('ck, 'plain, 'commit, 'opening) bind_adversary \<Rightarrow> bool spmf"
+  where "bind_game \<A> = TRY do {
+  (ck, vk) \<leftarrow> key_gen;
+  (c, m, d, m', d') \<leftarrow> \<A> ck;
+  _ :: unit \<leftarrow> assert_spmf (m \<noteq> m' \<and> valid_msg m \<and> valid_msg m');
+  let b = verify vk m c d;
+  let b' = verify vk m' c d';
+  return_spmf (b \<and> b')} ELSE return_spmf False"
+
+
+lemma bind_game_alt_def:
+  "bind_game \<A> = TRY do {
+  (ck, vk) \<leftarrow> key_gen;
+  (c, m, d, m', d') \<leftarrow> \<A> ck;
+  _ :: unit \<leftarrow> assert_spmf (m \<noteq> m' \<and> valid_msg m \<and> valid_msg m');
+  let b = verify vk m c d;
+  let b' = verify vk m' c d';
+  _ :: unit \<leftarrow> assert_spmf (b \<and> b'); 
+  return_spmf True} ELSE return_spmf False"
+  (is "?lhs = ?rhs")
+proof -
+  have "?lhs = TRY do {
+      (ck, vk) \<leftarrow> key_gen;
+      TRY do {
+        (c, m, d, m', d') \<leftarrow> \<A> ck;
+        TRY do {
+          _ :: unit \<leftarrow> assert_spmf (m \<noteq> m' \<and> valid_msg m \<and> valid_msg m');
+          TRY return_spmf (verify vk m c d \<and> verify vk m' c d') ELSE return_spmf False
+        } ELSE return_spmf False
+      } ELSE return_spmf False
+    } ELSE return_spmf False"
+    unfolding split_def bind_game_def
+    by(fold try_bind_spmf_lossless2[OF lossless_return_spmf]) simp
+  also have "\<dots> = TRY do {
+      (ck, vk) \<leftarrow> key_gen;
+      TRY do {
+        (c, m, d, m', d') \<leftarrow> \<A> ck;
+        TRY do {
+          _ :: unit \<leftarrow> assert_spmf (m \<noteq> m' \<and> valid_msg m \<and> valid_msg m');
+          TRY do {
+            _ :: unit \<leftarrow> assert_spmf (verify vk m c d \<and> verify vk m' c d');
+            return_spmf True
+          } ELSE return_spmf False
+        } ELSE return_spmf False
+      } ELSE return_spmf False
+    } ELSE return_spmf False"
+    by(auto simp add: try_bind_assert_spmf try_spmf_return_spmf1 intro!: try_spmf_cong bind_spmf_cong)
+  also have "\<dots> = ?rhs"
+    unfolding split_def Let_def
+    by(fold try_bind_spmf_lossless2[OF lossless_return_spmf]) simp
+  finally show ?thesis .
+qed
+
+lemma lossless_binding_game: "lossless_spmf (bind_game \<A>)" 
+  by (simp add: bind_game_def)
+
+definition bind_advantage :: "('ck, 'plain, 'commit, 'opening) bind_adversary \<Rightarrow> real"
+  where "bind_advantage \<A> \<equiv> spmf (bind_game \<A>) True"
+
+end
+
+end

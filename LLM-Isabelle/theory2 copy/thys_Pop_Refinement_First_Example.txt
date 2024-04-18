@@ -1,0 +1,185 @@
+theory %invisible First_Example
+imports Main
+begin
+
+
+
+
+
+
+
+
+
+
+type_synonym name = string
+
+
+datatype expr = Const nat | Var name | Double expr | Add expr expr
+
+
+record prog =
+ para :: "name list"
+ body :: expr
+
+
+
+
+type_synonym ctxt = "name set"
+
+
+fun wfe :: "ctxt \<Rightarrow> expr \<Rightarrow> bool"
+where
+  "wfe \<Gamma> (Const c) \<longleftrightarrow> True" |
+  "wfe \<Gamma> (Var v) \<longleftrightarrow> v \<in> \<Gamma>" |
+  "wfe \<Gamma> (Double e) \<longleftrightarrow> wfe \<Gamma> e" |
+  "wfe \<Gamma> (Add e\<^sub>1 e\<^sub>2) \<longleftrightarrow> wfe \<Gamma> e\<^sub>1 \<and> wfe \<Gamma> e\<^sub>2"
+
+
+definition ctxt :: "prog \<Rightarrow> ctxt"
+where "ctxt p \<equiv> set (para p)"
+
+
+definition wfp :: "prog \<Rightarrow> bool"
+where "wfp p \<equiv> distinct (para p) \<and> wfe (ctxt p) (body p)"
+
+
+
+
+type_synonym env = "name \<rightharpoonup> nat"
+
+
+definition match :: "env \<Rightarrow> ctxt \<Rightarrow> bool"
+where "match \<E> \<Gamma> \<equiv> dom \<E> = \<Gamma>"
+
+
+definition mul_opt :: "nat option \<Rightarrow> nat option \<Rightarrow> nat option" (infixl "\<otimes>" 70)
+where "U\<^sub>1 \<otimes> U\<^sub>2 \<equiv>
+  case (U\<^sub>1, U\<^sub>2) of (Some u\<^sub>1, Some u\<^sub>2) \<Rightarrow> Some (u\<^sub>1 * u\<^sub>2) | _ \<Rightarrow> None"
+
+definition add_opt :: "nat option \<Rightarrow> nat option \<Rightarrow> nat option" (infixl "\<oplus>" 65)
+where "U\<^sub>1 \<oplus> U\<^sub>2 \<equiv>
+  case (U\<^sub>1, U\<^sub>2) of (Some u\<^sub>1, Some u\<^sub>2) \<Rightarrow> Some (u\<^sub>1 + u\<^sub>2) | _ \<Rightarrow> None"
+
+fun eval :: "env \<Rightarrow> expr \<Rightarrow> nat option"
+where
+  "eval \<E> (Const c) = Some c" |
+  "eval \<E> (Var v) = \<E> v" |
+  "eval \<E> (Double e) = Some 2 \<otimes> eval \<E> e" |
+  "eval \<E> (Add e\<^sub>1 e\<^sub>2) = eval \<E> e\<^sub>1 \<oplus> eval \<E> e\<^sub>2"
+
+
+lemma eval_wfe:
+  "wfe \<Gamma> e \<Longrightarrow> match \<E> \<Gamma> \<Longrightarrow> eval \<E> e \<noteq> None"
+by (induct e, auto simp: match_def mul_opt_def add_opt_def)
+
+
+definition envs :: "prog \<Rightarrow> env set"
+where "envs p \<equiv> {\<E>. match \<E> (ctxt p)}"
+
+
+lemma eval_wfp:
+  "wfp p \<Longrightarrow> \<E> \<in> envs p \<Longrightarrow> eval \<E> (body p) \<noteq> None"
+by (metis envs_def eval_wfe mem_Collect_eq wfp_def)
+
+
+definition "supply" :: "prog \<Rightarrow> nat list \<Rightarrow> env option"
+where "supply p us \<equiv>
+  let vs = para p in
+  if distinct vs \<and> length us = length vs
+  then Some (map_of (zip vs us))
+  else None"
+
+definition exec :: "prog \<Rightarrow> nat list \<Rightarrow> nat option"
+where "exec p us \<equiv>
+  case supply p us of Some \<E> \<Rightarrow> eval \<E> (body p) | None \<Rightarrow> None"
+
+
+lemma supply_wfp: "
+  wfp p \<Longrightarrow>
+  length us = length (para p) \<Longrightarrow>
+  \<exists>\<E> \<in> envs p. supply p us = Some \<E>"
+by (auto
+ simp: wfp_def supply_def envs_def ctxt_def match_def split: option.split)
+
+lemma exec_wfp:
+  "wfp p \<Longrightarrow> length us = length (para p) \<Longrightarrow> exec p us \<noteq> None"
+by (metis eval_wfp exec_def option.simps(5) supply_wfp)
+
+
+
+
+fun coste :: "expr \<Rightarrow> nat"
+where
+  "coste (Const c) = 0" |
+  "coste (Var v) = 0" |
+  "coste (Double e) = 1 + coste e" |
+  "coste (Add e\<^sub>1 e\<^sub>2) = 1 + coste e\<^sub>1 + coste e\<^sub>2"
+
+definition costp :: "prog \<Rightarrow> nat"
+where "costp p \<equiv> coste (body p)"
+
+
+
+
+definition f :: "nat \<Rightarrow> nat \<Rightarrow> nat"
+where "f x y \<equiv> 3 * x + 2 * y"
+
+definition spec\<^sub>0 :: "prog \<Rightarrow> bool"
+where "spec\<^sub>0 p \<equiv>
+  wfp p \<and>
+  para p = [''x'', ''y''] \<and>
+  (\<forall>x y. exec p [x, y] = Some (f x y)) \<and>
+  costp p \<le> 3"
+
+
+
+
+
+
+
+
+abbreviation \<Gamma>\<^sub>x\<^sub>y :: ctxt
+where "\<Gamma>\<^sub>x\<^sub>y \<equiv> {''x'', ''y''}"
+
+abbreviation \<E>\<^sub>x\<^sub>y :: "nat \<Rightarrow> nat \<Rightarrow> env"
+where "\<E>\<^sub>x\<^sub>y x y \<equiv> [''x'' \<mapsto> x, ''y'' \<mapsto> y]"
+
+lemma reduce_prog_to_body: "
+  para p = [''x'', ''y''] \<Longrightarrow>
+  wfp p = wfe \<Gamma>\<^sub>x\<^sub>y (body p) \<and>
+  exec p [x, y] = eval (\<E>\<^sub>x\<^sub>y x y) (body p)"
+by (auto simp: wfp_def ctxt_def exec_def supply_def fun_upd_twist)
+
+and using the definition of @{const costp}
+to reduce the cost of the program to the cost of the body,
+@{const spec\<^sub>0} is refined as follows.\<close>
+text \<open>@{const spec\<^sub>1} and @{const spec\<^sub>0} are actually equivalent,
+but the definition of @{const spec\<^sub>1} is ``closer'' to the implementation
+than the definition of @{const spec\<^sub>0}:
+the latter states constraints on the whole program,
+while the former states simpler constraints on the body,
+given that the parameters are already determined.
+can also be used to prove the equivalence of @{const spec\<^sub>1} and @{const spec\<^sub>0},
+but in general proving inclusion is easier than proving equivalence.
+Some of the following refinement steps yield non-equivalent predicates.\<close>
+subsection \<open>Step 2\<close>
+text \<open>\label{sec:refI:stepII}\<close>
+text \<open>The third conjunct in @{const spec\<^sub>1} says that
+the body computes @{term "f x y"},
+which depends on both @{term x} and @{term y},
+and which yields an odd result for some values of @{term x} and @{term y}.
+Thus the body cannot be a constant, a variable, or a double,
+leaving a sum as the only option.
+Adding @{term "\<exists>e\<^sub>1 e\<^sub>2. body p = Add e\<^sub>1 e\<^sub>2"} as a conjunct to @{const spec\<^sub>1}
+and re-arranging the other conjuncts,
+moving some of them under the existential quantification
+so that they can be simplified in the next refinement step,
+@{const spec\<^sub>1} is refined as follows.\<close>
+text \<open>This refinement step is guided by an analysis
+of the constraints in @{const spec\<^sub>1}.\<close>
+subsection \<open>Step 3\<close>
+text \<open>\label{sec:refI:stepIII}\<close>
+text \<open>The fact that the body is a sum
+reduces the well-formedness, evaluation, and cost of the body
+to the well-formedness, evaluation, and cost of the addends.\<close>
+text \<open>Using \<open>reduce_body_to_addends\<close>

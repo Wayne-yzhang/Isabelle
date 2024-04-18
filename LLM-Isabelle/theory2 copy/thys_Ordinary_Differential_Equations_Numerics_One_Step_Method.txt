@@ -1,0 +1,131 @@
+theory One_Step_Method
+imports
+  Ordinary_Differential_Equations.Initial_Value_Problem
+begin
+
+
+locale grid =
+  fixes t::"nat \<Rightarrow> real"
+  assumes steps: "\<And>i. t i \<le> t (Suc i)"
+begin
+
+lemmas grid = steps
+
+lemma grid_ge_min:
+  shows "t 0 \<le> t j"
+proof (induct j)
+  fix j
+  assume "t 0 \<le> t j"
+  also from grid have "t j \<le> t (Suc j)" .
+  finally show "t 0 \<le> t (Suc j)" .
+qed simp
+
+lemma grid_mono:
+  assumes "j \<le> n"
+  shows "t j \<le> t n"
+using assms
+proof (induct rule: inc_induct)
+  fix j
+  assume "j < n" "t (Suc j) \<le> t n"
+  moreover
+  with grid have "t j \<le> t (Suc j)" by auto
+  ultimately
+  show "t j \<le> t n" by simp
+qed simp
+
+
+definition stepsize
+where "stepsize j = t (Suc j) - t j"
+
+lemma grid_stepsize_nonneg:
+  shows "stepsize j \<ge> 0"
+  using grid unfolding stepsize_def
+  by (simp add: field_simps order_less_imp_le)
+
+lemma grid_stepsize_sum:
+  shows "(\<Sum>i\<in>{0..<n}. stepsize i) = t n - t 0"
+  by (induct n) (simp_all add: stepsize_def)
+
+definition max_stepsize
+where "max_stepsize n = Max (stepsize ` {0..n})"
+
+lemma max_stepsize_ge_stepsize:
+  assumes "j \<le> n"
+  shows "max_stepsize n \<ge> stepsize j"
+  using assms by (auto simp: max_stepsize_def)
+
+lemma max_stepsize_nonneg:
+  shows "max_stepsize n \<ge> 0"
+  using grid_stepsize_nonneg[of 0]
+    max_stepsize_ge_stepsize[of 0 n]
+  by simp
+
+lemma max_stepsize_mono:
+  assumes "j \<le> n"
+  shows "max_stepsize j \<le> max_stepsize n"
+  using assms by (auto intro!: Max_mono simp: max_stepsize_def)
+
+definition min_stepsize
+where "min_stepsize n = Min (stepsize ` {0..n})"
+
+lemma min_stepsize_le_stepsize:
+  assumes "j \<le> n"
+  shows "min_stepsize n \<le> stepsize j"
+  using grid assms
+  by (auto simp add: min_stepsize_def)
+
+end
+
+lemma (in grid) grid_interval_notempty: "t 0 \<le> t n" using grid_ge_min[of n] .
+
+
+
+definition discrete_evolution
+where "discrete_evolution incr t1 t0 x = x + (t1 - t0) *\<^sub>R incr (t1 - t0) t0 x"
+
+  grid, define a function over the whole grid\<close>
+subsection \<open>Consistency \label{sec:osm-consistent}\<close>
+  finally show ?thesis using zero_less_power[OF \<open>T - t > 0\<close>, of "p+1"]
+  { assume "L = 0" hence ?thesis using \<open>r \<ge> 0\<close> by simp
+    from \<open>0 \<le> T2\<close> \<open>T1 \<ge> T2\<close> have "T1 \<ge> 0" by simp
+    hence eg: "(exp (L * T1 + 1) - 1) > 0" using \<open>L > 0\<close>
+      using assms B_pos \<open>T1 \<ge> 0\<close> \<open>L > 0\<close> \<open>B > 0\<close>
+      by (subst real_root_pow_pos2[OF \<open>p > 0\<close>])
+      using B_pos \<open>L > 0\<close> eg \<open>r \<ge> 0\<close>
+    also have "... \<le> r" using \<open>T1 \<ge> T2\<close> \<open>0 \<le> T2\<close>
+      assume "T1 \<noteq> 0" with \<open>T1 \<ge> T2\<close> \<open>0 \<le> T2\<close> have "T1 > 0" by simp
+      show ?thesis using \<open>L > 0\<close> \<open>0 \<le> T2\<close> \<open>T1 \<ge> 0\<close> add_0_left \<open>T1 > 0\<close> \<open>T1 \<ge> T2\<close>
+        by (intro mult_right_le_one_le \<open>r \<ge> 0\<close>)
+    assume "\<not>0<B" hence "B = 0" using \<open>B \<ge> 0\<close> by simp
+    hence ?thesis using \<open>r \<ge> 0\<close> by simp
+subsection \<open>Accumulation of errors\<close>
+text \<open>The concept of accumulating errors applies to convergence and stability.\<close>
+using \<open>t j \<le> T\<close> max_step
+    using grid_stepsize_nonneg \<open>B\<ge>0\<close> \<open>L\<ge>0\<close>
+      using \<open>L\<ge>0\<close> \<open>B\<ge>0\<close> \<open>t j \<le> T\<close> max_stepsize_nonneg
+      using \<open>B \<ge> 0\<close> max_step max_stepsize_nonneg \<open>L \<ge> 0\<close> \<open>p > 0\<close>
+        grid_ge_min using grid_mono[of 0 j] \<open>t 0 \<le> T\<close> IH1
+    using consistence_error[OF \<open>t (Suc j) \<le> T\<close>] by (simp add: dist_norm)
+    using \<open>B \<ge> 0\<close> IH1 IH2 \<open>t (Suc j) \<le> T\<close> \<open>0\<le>L\<close> grid_stepsize_nonneg
+    using grid_stepsize_nonneg \<open>B \<ge> 0\<close> grid
+    using \<open>B \<ge> 0\<close> grid_stepsize_nonneg \<open>p > 0\<close> \<open>L\<ge>0\<close>
+    using \<open>L \<ge> 0\<close> \<open>B \<ge> 0\<close> max_stepsize_nonneg
+    using \<open>B\<ge>0\<close>\<open>L\<ge>0\<close> max_stepsize_nonneg
+subsection \<open>Consistency of order p implies convergence of order p \label{sec:osm-cons-imp-conv}\<close>
+  from max_step \<open>t j \<le> t1\<close> have "max_stepsize j \<le>
+    using \<open>t (Suc j) \<le> t1\<close> grid_mono[of j "Suc j"] grid_from grid_interval_notempty
+      using grid_stepsize_nonneg grid_mono \<open>t (Suc j) \<le> t1\<close>
+    have t: "t j \<in> {t 0..t1}" using grid[of j] \<open>t (Suc j) \<le> t1\<close>
+    using \<open>p > 0\<close> \<open>L \<ge> 0\<close> \<open>B \<ge> 0\<close> \<open>t j \<le> t1\<close>
+    using \<open>t j \<le> t1\<close> \<open>0\<le>L\<close> \<open>0\<le>B\<close> max_stepsize_nonneg
+subsection \<open>Stability \label{sec:osm-stability}\<close>
+      using \<open>t j \<le> t1\<close> by (rule c1.convergence)
+      grid_mono \<open>t j \<le> t1\<close> t0_le
+      using \<open>t j \<le> t1\<close> by (rule c1.convergence)
+        grid_mono \<open>t j \<le> t1\<close> \<open>t 0 \<le> t1\<close>
+      using  \<open>t j \<le> t1\<close> \<open>t (Suc j) \<le> t1\<close> incr_in_r
+  qed (simp_all add: consistent_nonneg order_pos lipschitz_nonneg \<open>t j \<le> t1\<close>)
+      grid_ge_min grid_mono \<open>t j \<le> t1\<close>
+subsection\<open>Stability via implicit error\<close>
+      by (simp only: dist_commute fg'[OF \<open>t j \<le> t1\<close>])
+    using \<open>t j \<le> t1\<close>

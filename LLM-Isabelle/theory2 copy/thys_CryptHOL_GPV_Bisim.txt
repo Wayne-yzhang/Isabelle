@@ -1,0 +1,299 @@
+theory GPV_Bisim imports
+  GPV_Expectation
+begin
+
+
+
+lemma exec_gpv_oracle_bisim':
+  assumes *: "X s1 s2"
+  and bisim: "\<And>s1 s2 x. X s1 s2 \<Longrightarrow> rel_spmf (\<lambda>(a, s1') (b, s2'). a = b \<and> X s1' s2') (oracle1 s1 x) (oracle2 s2 x)"
+  shows "rel_spmf (\<lambda>(a, s1') (b, s2'). a = b \<and> X s1' s2') (exec_gpv oracle1 gpv s1) (exec_gpv oracle2 gpv s2)"
+by(rule exec_gpv_parametric[of X "(=)" "(=)", unfolded gpv.rel_eq rel_prod_conv, THEN rel_funD, THEN rel_funD, THEN rel_funD, OF rel_funI refl, OF rel_funI *])(simp add: bisim)
+
+lemma exec_gpv_oracle_bisim:
+  assumes *: "X s1 s2"
+  and bisim: "\<And>s1 s2 x. X s1 s2 \<Longrightarrow> rel_spmf (\<lambda>(a, s1') (b, s2'). a = b \<and> X s1' s2') (oracle1 s1 x) (oracle2 s2 x)"
+  and R: "\<And>x s1' s2'. \<lbrakk> X s1' s2'; (x, s1') \<in> set_spmf (exec_gpv oracle1 gpv s1); (x, s2') \<in> set_spmf (exec_gpv oracle2 gpv s2) \<rbrakk> \<Longrightarrow> R (x, s1') (x, s2')"
+  shows "rel_spmf R (exec_gpv oracle1 gpv s1) (exec_gpv oracle2 gpv s2)"
+apply(rule spmf_rel_mono_strong)
+apply(rule exec_gpv_oracle_bisim'[OF * bisim])
+apply(auto dest: R)
+done
+
+lemma run_gpv_oracle_bisim:
+  assumes  "X s1 s2"
+  and "\<And>s1 s2 x. X s1 s2 \<Longrightarrow> rel_spmf (\<lambda>(a, s1') (b, s2'). a = b \<and> X s1' s2') (oracle1 s1 x) (oracle2 s2 x)"
+  shows "run_gpv oracle1 gpv s1 = run_gpv oracle2 gpv s2"
+using exec_gpv_oracle_bisim'[OF assms]
+by(fold spmf_rel_eq)(fastforce simp add: spmf_rel_map intro: rel_spmf_mono)
+
+context
+  fixes joint_oracle :: "('s1 \<times> 's2) \<Rightarrow> 'a \<Rightarrow> (('b \<times> 's1) \<times> ('b \<times> 's2)) spmf"
+  and oracle1 :: "'s1 \<Rightarrow> 'a \<Rightarrow> ('b \<times> 's1) spmf"
+  and bad1 :: "'s1 \<Rightarrow> bool"
+  and oracle2 :: "'s2 \<Rightarrow> 'a \<Rightarrow> ('b \<times> 's2) spmf"
+  and bad2 :: "'s2 \<Rightarrow> bool"
+begin
+
+partial_function (spmf) exec_until_bad :: "('x, 'a, 'b) gpv \<Rightarrow> 's1 \<Rightarrow> 's2 \<Rightarrow> (('x \<times> 's1) \<times> ('x \<times> 's2)) spmf"
+where
+  "exec_until_bad gpv s1 s2 = 
+  (if bad1 s1 \<or> bad2 s2 then pair_spmf (exec_gpv oracle1 gpv s1) (exec_gpv oracle2 gpv s2)
+  else bind_spmf (the_gpv gpv) (\<lambda>generat.
+     case generat of Pure x \<Rightarrow> return_spmf ((x, s1), (x, s2))
+     | IO out f \<Rightarrow> bind_spmf (joint_oracle (s1, s2) out) (\<lambda>((x, s1'), (y, s2')). 
+       if bad1 s1' \<or> bad2 s2' then pair_spmf (exec_gpv oracle1 (f x) s1') (exec_gpv oracle2 (f y) s2')
+       else exec_until_bad (f x) s1' s2')))"
+
+lemma exec_until_bad_fixp_induct [case_names adm bottom step]:
+  assumes "ccpo.admissible (fun_lub lub_spmf) (fun_ord (ord_spmf (=))) (\<lambda>f. P (\<lambda>gpv s1 s2. f ((gpv, s1), s2)))"
+  and "P (\<lambda>_ _ _. return_pmf None)"
+  and "\<And>exec_until_bad'. P exec_until_bad' \<Longrightarrow> 
+     P (\<lambda>gpv s1 s2. if bad1 s1 \<or> bad2 s2 then pair_spmf (exec_gpv oracle1 gpv s1) (exec_gpv oracle2 gpv s2)
+     else bind_spmf (the_gpv gpv) (\<lambda>generat.
+     case generat of Pure x \<Rightarrow> return_spmf ((x, s1), (x, s2))
+     | IO out f \<Rightarrow> bind_spmf (joint_oracle (s1, s2) out) (\<lambda>((x, s1'), (y, s2')). 
+       if bad1 s1' \<or> bad2 s2' then pair_spmf (exec_gpv oracle1 (f x) s1') (exec_gpv oracle2 (f y) s2') 
+       else exec_until_bad' (f x) s1' s2')))"
+  shows "P exec_until_bad"
+using assms by(rule exec_until_bad.fixp_induct[unfolded curry_conv[abs_def]])
+
+end
+
+lemma exec_gpv_oracle_bisim_bad_plossless:
+  fixes s1 :: 's1 and s2 :: 's2 and X :: "'s1 \<Rightarrow> 's2 \<Rightarrow> bool"
+  and oracle1 :: "'s1 \<Rightarrow> 'a \<Rightarrow> ('b \<times> 's1) spmf"
+  and oracle2 :: "'s2 \<Rightarrow> 'a \<Rightarrow> ('b \<times> 's2) spmf"
+  assumes *: "if bad2 s2 then X_bad s1 s2 else X s1 s2"
+  and bad: "bad1 s1 = bad2 s2"
+  and bisim: "\<And>s1 s2 x. \<lbrakk> X s1 s2; x \<in> outs_\<I> \<I> \<rbrakk> \<Longrightarrow> rel_spmf (\<lambda>(a, s1') (b, s2'). bad1 s1' = bad2 s2' \<and> (if bad2 s2' then X_bad s1' s2' else a = b \<and> X s1' s2')) (oracle1 s1 x) (oracle2 s2 x)"
+  and bad_sticky1: "\<And>s2. bad2 s2 \<Longrightarrow> callee_invariant_on oracle1 (\<lambda>s1. bad1 s1 \<and> X_bad s1 s2) \<I>"
+  and bad_sticky2: "\<And>s1. bad1 s1 \<Longrightarrow> callee_invariant_on oracle2 (\<lambda>s2. bad2 s2 \<and> X_bad s1 s2) \<I>"
+  and lossless1: "\<And>s1 x. \<lbrakk> bad1 s1; x \<in> outs_\<I> \<I> \<rbrakk> \<Longrightarrow> lossless_spmf (oracle1 s1 x)"
+  and lossless2: "\<And>s2 x. \<lbrakk> bad2 s2; x \<in> outs_\<I> \<I> \<rbrakk> \<Longrightarrow> lossless_spmf (oracle2 s2 x)"
+  and lossless: "plossless_gpv \<I> gpv"
+  and WT_oracle2: "\<And>s2. \<I> \<turnstile>c oracle2 s2 \<surd>"
+  and WT_gpv: "\<I> \<turnstile>g gpv \<surd>"
+  shows "rel_spmf (\<lambda>(a, s1') (b, s2'). bad1 s1' = bad2 s2' \<and> (if bad2 s2' then X_bad s1' s2' else a = b \<and> X s1' s2')) (exec_gpv oracle1 gpv s1) (exec_gpv oracle2 gpv s2)"
+  (is "rel_spmf ?R ?p ?q")
+proof -
+  let ?R' = "\<lambda>(a, s1') (b, s2'). bad1 s1' = bad2 s2' \<and> (if bad2 s2' then X_bad s1' s2' else a = b \<and> X s1' s2')"
+  from bisim have "\<forall>s1 s2. \<forall>x \<in> outs_\<I> \<I>. X s1 s2 \<longrightarrow> rel_spmf ?R' (oracle1 s1 x) (oracle2 s2 x)" by blast
+  then obtain joint_oracle
+    where oracle1 [symmetric]: "\<And>s1 s2 x. \<lbrakk> X s1 s2; x \<in> outs_\<I> \<I> \<rbrakk> \<Longrightarrow> map_spmf fst (joint_oracle s1 s2 x) = oracle1 s1 x"
+    and oracle2 [symmetric]: "\<And>s1 s2 x. \<lbrakk> X s1 s2; x \<in> outs_\<I> \<I> \<rbrakk> \<Longrightarrow> map_spmf snd (joint_oracle s1 s2 x) = oracle2 s2 x"
+    and 3 [rotated 2]: "\<And>s1 s2 x y y' s1' s2'. \<lbrakk> X s1 s2; x \<in> outs_\<I> \<I>; ((y, s1'), (y', s2')) \<in> set_spmf (joint_oracle s1 s2 x) \<rbrakk>
+      \<Longrightarrow> bad1 s1' = bad2 s2' \<and> (if bad2 s2' then X_bad s1' s2' else y = y' \<and> X s1' s2')"
+    apply atomize_elim
+    apply(unfold rel_spmf_simps all_conj_distrib[symmetric] all_simps(6) imp_conjR[symmetric])
+    apply(subst choice_iff[symmetric] ex_simps(6))+
+    apply fastforce
+    done
+  let ?joint_oracle = "\<lambda>(s1, s2). joint_oracle s1 s2"
+  let ?pq = "exec_until_bad ?joint_oracle oracle1 bad1 oracle2 bad2 gpv s1 s2"
+
+  have setD: "\<And>s1 s2 x y y' s1' s2'. \<lbrakk> X s1 s2; x \<in> outs_\<I> \<I>; ((y, s1'), (y', s2')) \<in> set_spmf (joint_oracle s1 s2 x) \<rbrakk>
+    \<Longrightarrow> (y, s1') \<in> set_spmf (oracle1 s1 x) \<and> (y', s2') \<in> set_spmf (oracle2 s2 x)"
+    unfolding oracle1 oracle2 by(auto intro: rev_image_eqI)
+  show ?thesis
+  proof
+    show "map_spmf fst ?pq = exec_gpv oracle1 gpv s1"
+    proof(rule spmf.leq_antisym)
+      show "ord_spmf (=) (map_spmf fst ?pq) (exec_gpv oracle1 gpv s1)" using * bad WT_gpv lossless
+      proof(induction arbitrary: s1 s2 gpv rule: exec_until_bad_fixp_induct)
+        case adm show ?case by simp
+        case bottom show ?case by simp
+        case (step exec_until_bad')
+        show ?case
+        proof(cases "bad2 s2")
+          case True
+          then have "weight_spmf (exec_gpv oracle2 gpv s2) = 1"
+            using callee_invariant_on.weight_exec_gpv[OF bad_sticky2 lossless2, of s1 gpv s2]
+              step.prems weight_spmf_le_1[of "exec_gpv oracle2 gpv s2"]
+            by(simp add: pgen_lossless_gpv_def weight_gpv_def)
+          then show ?thesis using True by simp
+        next
+          case False
+          hence "\<not> bad1 s1" using step.prems(2) by simp
+          moreover {
+            fix out c r1 s1' r2 s2'
+            assume IO: "IO out c \<in> set_spmf (the_gpv gpv)"
+              and joint: "((r1, s1'), (r2, s2')) \<in> set_spmf (joint_oracle s1 s2 out)"
+            from step.prems(3) IO have out: "out \<in> outs_\<I> \<I>" by(rule WT_gpvD)
+            from setD[OF _ out joint] step.prems(1) False
+            have 1: "(r1, s1') \<in> set_spmf (oracle1 s1 out)"
+              and 2: "(r2, s2') \<in> set_spmf (oracle2 s2 out)" by simp_all
+            hence r1: "r1 \<in> responses_\<I> \<I> out" and r2: "r2 \<in> responses_\<I> \<I> out"
+              using WT_oracle1 WT_oracle2 out by(blast dest: WT_calleeD)+
+            have *: "plossless_gpv \<I> (c r2)" using step.prems(4) IO r2 step.prems(3)
+              by(rule plossless_gpv_ContD)
+            then have "bad2 s2' \<Longrightarrow> weight_spmf (exec_gpv oracle2 (c r2) s2') = 1"
+              and "\<not> bad2 s2' \<Longrightarrow> ord_spmf (=) (map_spmf fst (exec_until_bad' (c r2) s1' s2')) (exec_gpv oracle1 (c r2) s1')"
+              using callee_invariant_on.weight_exec_gpv[OF bad_sticky2 lossless2, of s1' "c r2" s2'] 
+                weight_spmf_le_1[of "exec_gpv oracle2 (c r2) s2'"] WT_gpv_ContD[OF step.prems(3) IO r2]
+                3[OF joint _ out] step.prems(1) False
+              by(simp_all add: pgen_lossless_gpv_def weight_gpv_def step.IH) }
+          ultimately show ?thesis using False step.prems(1)
+            by(rewrite in "ord_spmf _ _ \<hole>" exec_gpv.simps)
+              (fastforce simp add: split_def bind_map_spmf map_spmf_bind_spmf oracle1 WT_gpv_OutD[OF step.prems(3)] intro!: ord_spmf_bind_reflI split!: generat.split dest: 3)
+        qed
+      qed
+      show "ord_spmf (=) (exec_gpv oracle1 gpv s1) (map_spmf fst ?pq)" using * bad WT_gpv lossless
+      proof(induction arbitrary: gpv s1 s2 rule: exec_gpv_fixp_induct_strong)
+        case adm show ?case by simp
+        case bottom show ?case by simp
+        case (step exec_gpv')
+        then show ?case
+        proof(cases "bad2 s2")
+          case True
+          then have "weight_spmf (exec_gpv oracle2 gpv s2) = 1"
+            using callee_invariant_on.weight_exec_gpv[OF bad_sticky2 lossless2, of s1 gpv s2]
+              step.prems weight_spmf_le_1[of "exec_gpv oracle2 gpv s2"]
+            by(simp add: pgen_lossless_gpv_def weight_gpv_def)
+          then show ?thesis using True
+            by(rewrite exec_until_bad.simps; rewrite exec_gpv.simps)
+              (clarsimp intro!: ord_spmf_bind_reflI split!: generat.split simp add: step.hyps)
+        next
+          case False
+          hence "\<not> bad1 s1" using step.prems(2) by simp
+          moreover {
+            fix out c r1 s1' r2 s2'
+            assume IO: "IO out c \<in> set_spmf (the_gpv gpv)"
+              and joint: "((r1, s1'), (r2, s2')) \<in> set_spmf (joint_oracle s1 s2 out)"
+            from step.prems(3) IO have out: "out \<in> outs_\<I> \<I>" by(rule WT_gpvD)
+            from setD[OF _ out joint] step.prems(1) False
+            have 1: "(r1, s1') \<in> set_spmf (oracle1 s1 out)"
+              and 2: "(r2, s2') \<in> set_spmf (oracle2 s2 out)" by simp_all
+            hence r1: "r1 \<in> responses_\<I> \<I> out" and r2: "r2 \<in> responses_\<I> \<I> out"
+              using WT_oracle1 WT_oracle2 out by(blast dest: WT_calleeD)+
+            have *: "plossless_gpv \<I> (c r2)" using step.prems(4) IO r2 step.prems(3)
+              by(rule plossless_gpv_ContD)
+            then have "bad2 s2' \<Longrightarrow> weight_spmf (exec_gpv oracle2 (c r2) s2') = 1" 
+              and "\<not> bad2 s2' \<Longrightarrow> ord_spmf (=) (exec_gpv' (c r2) s1') (map_spmf fst (exec_until_bad (\<lambda>(x, y). joint_oracle x y) oracle1 bad1 oracle2 bad2 (c r2) s1' s2'))"
+              using callee_invariant_on.weight_exec_gpv[OF bad_sticky2 lossless2, of s1' "c r2" s2'] 
+                weight_spmf_le_1[of "exec_gpv oracle2 (c r2) s2'"] WT_gpv_ContD[OF step.prems(3) IO r2]
+                3[OF joint _ out] step.prems(1) False
+              by(simp_all add: pgen_lossless_gpv_def weight_gpv_def step.IH) }
+          ultimately show ?thesis using False step.prems(1)
+            by(rewrite exec_until_bad.simps)
+              (fastforce simp add: map_spmf_bind_spmf WT_gpv_OutD[OF step.prems(3)] oracle1 bind_map_spmf step.hyps intro!: ord_spmf_bind_reflI split!: generat.split dest: 3)
+        qed
+      qed
+    qed
+
+    show "map_spmf snd ?pq = exec_gpv oracle2 gpv s2"
+    proof(rule spmf.leq_antisym)
+      show "ord_spmf (=) (map_spmf snd ?pq) (exec_gpv oracle2 gpv s2)" using * bad WT_gpv lossless
+      proof(induction arbitrary: s1 s2 gpv rule: exec_until_bad_fixp_induct)
+        case adm show ?case by simp
+        case bottom show ?case by simp
+        case (step exec_until_bad')
+        show ?case
+        proof(cases "bad2 s2")
+          case True
+          then have "weight_spmf (exec_gpv oracle1 gpv s1) = 1"
+            using callee_invariant_on.weight_exec_gpv[OF bad_sticky1 lossless1, of s2 gpv s1]
+              step.prems weight_spmf_le_1[of "exec_gpv oracle1 gpv s1"]
+            by(simp add: pgen_lossless_gpv_def weight_gpv_def)
+          then show ?thesis using True by simp
+        next
+          case False
+          hence "\<not> bad1 s1" using step.prems(2) by simp
+          moreover {
+            fix out c r1 s1' r2 s2'
+            assume IO: "IO out c \<in> set_spmf (the_gpv gpv)"
+              and joint: "((r1, s1'), (r2, s2')) \<in> set_spmf (joint_oracle s1 s2 out)"
+            from step.prems(3) IO have out: "out \<in> outs_\<I> \<I>" by(rule WT_gpvD)
+            from setD[OF _ out joint] step.prems(1) False
+            have 1: "(r1, s1') \<in> set_spmf (oracle1 s1 out)"
+              and 2: "(r2, s2') \<in> set_spmf (oracle2 s2 out)" by simp_all
+            hence r1: "r1 \<in> responses_\<I> \<I> out" and r2: "r2 \<in> responses_\<I> \<I> out"
+              using WT_oracle1 WT_oracle2 out by(blast dest: WT_calleeD)+
+            have *: "plossless_gpv \<I> (c r1)" using step.prems(4) IO r1 step.prems(3)
+              by(rule plossless_gpv_ContD)
+            then have "bad2 s2' \<Longrightarrow> weight_spmf (exec_gpv oracle1 (c r1) s1') = 1"
+              and "\<not> bad2 s2' \<Longrightarrow> ord_spmf (=) (map_spmf snd (exec_until_bad' (c r2) s1' s2')) (exec_gpv oracle2 (c r2) s2')"
+              using callee_invariant_on.weight_exec_gpv[OF bad_sticky1 lossless1, of s2' "c r1" s1'] 
+                weight_spmf_le_1[of "exec_gpv oracle1 (c r1) s1'"] WT_gpv_ContD[OF step.prems(3) IO r1]
+                3[OF joint _ out] step.prems(1) False
+              by(simp_all add: pgen_lossless_gpv_def weight_gpv_def step.IH) }
+          ultimately show ?thesis using False step.prems(1)
+            by(rewrite in "ord_spmf _ _ \<hole>" exec_gpv.simps)
+              (fastforce simp add: split_def bind_map_spmf map_spmf_bind_spmf oracle2 WT_gpv_OutD[OF step.prems(3)] intro!: ord_spmf_bind_reflI split!: generat.split dest: 3)
+        qed
+      qed
+      show "ord_spmf (=) (exec_gpv oracle2 gpv s2) (map_spmf snd ?pq)" using * bad WT_gpv lossless
+      proof(induction arbitrary: gpv s1 s2 rule: exec_gpv_fixp_induct_strong)
+        case adm show ?case by simp
+        case bottom show ?case by simp
+        case (step exec_gpv')
+        then show ?case
+        proof(cases "bad2 s2")
+          case True
+          then have "weight_spmf (exec_gpv oracle1 gpv s1) = 1"
+            using callee_invariant_on.weight_exec_gpv[OF bad_sticky1 lossless1, of s2 gpv s1]
+              step.prems weight_spmf_le_1[of "exec_gpv oracle1 gpv s1"]
+            by(simp add: pgen_lossless_gpv_def weight_gpv_def)
+          then show ?thesis using True
+            by(rewrite exec_until_bad.simps; subst (2) exec_gpv.simps)
+              (clarsimp intro!: ord_spmf_bind_reflI split!: generat.split simp add: step.hyps)
+        next
+          case False
+          hence "\<not> bad1 s1" using step.prems(2) by simp
+          moreover {
+            fix out c r1 s1' r2 s2'
+            assume IO: "IO out c \<in> set_spmf (the_gpv gpv)"
+              and joint: "((r1, s1'), (r2, s2')) \<in> set_spmf (joint_oracle s1 s2 out)"
+            from step.prems(3) IO have out: "out \<in> outs_\<I> \<I>" by(rule WT_gpvD)
+            from setD[OF _ out joint] step.prems(1) False
+            have 1: "(r1, s1') \<in> set_spmf (oracle1 s1 out)"
+              and 2: "(r2, s2') \<in> set_spmf (oracle2 s2 out)" by simp_all
+            hence r1: "r1 \<in> responses_\<I> \<I> out" and r2: "r2 \<in> responses_\<I> \<I> out"
+              using WT_oracle1 WT_oracle2 out by(blast dest: WT_calleeD)+
+            have *: "plossless_gpv \<I> (c r1)" using step.prems(4) IO r1 step.prems(3)
+              by(rule plossless_gpv_ContD)
+            then have "bad2 s2' \<Longrightarrow> weight_spmf (exec_gpv oracle1 (c r1) s1') = 1" 
+              and "\<not> bad2 s2' \<Longrightarrow> ord_spmf (=) (exec_gpv' (c r2) s2') (map_spmf snd (exec_until_bad (\<lambda>(x, y). joint_oracle x y) oracle1 bad1 oracle2 bad2 (c r2) s1' s2'))"
+              using callee_invariant_on.weight_exec_gpv[OF bad_sticky1 lossless1, of s2' "c r1" s1'] 
+                weight_spmf_le_1[of "exec_gpv oracle1 (c r1) s1'"] WT_gpv_ContD[OF step.prems(3) IO r1]
+                3[OF joint _ out] step.prems(1) False
+              by(simp_all add: pgen_lossless_gpv_def step.IH weight_gpv_def) }
+          ultimately show ?thesis using False step.prems(1)
+            by(rewrite exec_until_bad.simps)
+              (fastforce simp add: map_spmf_bind_spmf WT_gpv_OutD[OF step.prems(3)] oracle2 bind_map_spmf step.hyps intro!: ord_spmf_bind_reflI split!: generat.split dest: 3)
+        qed
+      qed
+    qed
+
+    have "set_spmf ?pq \<subseteq> {(as1, bs2). ?R' as1 bs2}" using * bad WT_gpv
+    proof(induction arbitrary: gpv s1 s2 rule: exec_until_bad_fixp_induct)
+      case adm show ?case by(intro cont_intro ccpo_class.admissible_leI)
+      case bottom show ?case by simp
+      case step
+      have switch: "set_spmf (exec_gpv oracle1 (c r1) s1') \<times> set_spmf (exec_gpv oracle2 (c r2) s2')
+            \<subseteq> {((a, s1'), b, s2'). bad1 s1' = bad2 s2' \<and> (if bad2 s2' then X_bad s1' s2' else a = b \<and> X s1' s2')}"
+        if "\<not> bad1 s1" "\<I> \<turnstile>g gpv \<surd>" "\<not> bad2 s2" and X: "X s1 s2" and out: "IO out c \<in> set_spmf (the_gpv gpv)"
+        and joint: "((r1, s1'), (r2, s2')) \<in> set_spmf (joint_oracle s1 s2 out)" 
+        and bad2: "bad2 s2'"
+        for out c r1 s1' r2 s2'
+      proof(clarify; rule conjI)
+        from step.prems(3) out have outs: "out \<in> outs_\<I> \<I>" by(rule WT_gpv_OutD)
+        from bad2 3[OF joint X this] have bad1: "bad1 s1' \<and> X_bad s1' s2'" by simp_all
+
+        have s1': "(r1, s1') \<in> set_spmf (oracle1 s1 out)" and s2': "(r2, s2') \<in> set_spmf (oracle2 s2 out)"
+          using setD[OF X outs joint] by simp_all
+        have resp: "r1 \<in> responses_\<I> \<I> out" using WT_oracle1 s1' outs by(rule WT_calleeD)
+        with step.prems(3) out have WT1: "\<I> \<turnstile>g c r1 \<surd>" by(rule WT_gpv_ContD)
+        have resp: "r2 \<in> responses_\<I> \<I> out" using WT_oracle2 s2' outs by(rule WT_calleeD)
+        with step.prems(3) out have WT2: "\<I> \<turnstile>g c r2 \<surd>" by(rule WT_gpv_ContD)
+
+        fix r1' s1'' r2' s2''
+        assume s1'': "(r1', s1'') \<in> set_spmf (exec_gpv oracle1 (c r1) s1')"
+          and s2'': "(r2', s2'') \<in> set_spmf (exec_gpv oracle2 (c r2) s2')"
+        have *: "bad1 s1'' \<and> X_bad s1'' s2'" using bad2 s1'' bad1 WT1
+          by(rule callee_invariant_on.exec_gpv_invariant[OF bad_sticky1])
+        have "bad2 s2'' \<and> X_bad s1'' s2''" using _ s2'' _ WT2
+          by(rule callee_invariant_on.exec_gpv_invariant[OF bad_sticky2])(simp_all add: bad2 *)
+  and WT_oracle1: "\<And>s1. \<I> \<turnstile>c oracle1 s1 \<surd>" (* stronger than the invariants above because unconditional *)
+  and \<I>: "\<I> = \<I>_full" (* TODO: generalize *)
+lemma ord_spmf_exec_gpv_stop: (* TODO: generalize ord_spmf to support different type variables *)

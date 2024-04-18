@@ -1,0 +1,219 @@
+theory Functional_Spaces
+  imports
+    "HOL-Analysis.Analysis"
+    "HOL-Library.Function_Algebras"
+    Ergodic_Theory.SG_Library_Complement
+begin
+
+
+
+
+
+
+lemmas uminus_fun_def = fun_Compl_def
+lemmas minus_fun_def = fun_diff_def
+
+lemma fun_sum_apply:
+  fixes u::"'i \<Rightarrow> 'a \<Rightarrow> ('b::comm_monoid_add)"
+  shows "(sum u I) x = sum (\<lambda>i. u i x) I"
+by (induction I rule: infinite_finite_induct, auto)
+
+instantiation "fun" :: (type, real_vector) real_vector
+begin
+
+definition scaleR_fun::"real \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> 'a \<Rightarrow> 'b"
+  where "scaleR_fun = (\<lambda>c f. (\<lambda>x. c *\<^sub>R f x))"
+
+lemma scaleR_apply [simp, code]: "(c *\<^sub>R f) x = c *\<^sub>R (f x)"
+  by (simp add: scaleR_fun_def)
+
+instance by (standard, auto simp add: scaleR_add_right scaleR_add_left)
+end
+
+lemmas divideR_apply = scaleR_apply
+
+lemma [measurable]:
+  "0 \<in> borel_measurable M"
+unfolding zero_fun_def by auto
+
+lemma borel_measurable_const_scaleR' [measurable (raw)]:
+  "(f::('a \<Rightarrow> 'b::real_normed_vector)) \<in> borel_measurable M \<Longrightarrow> c *\<^sub>R f \<in> borel_measurable M"
+unfolding scaleR_fun_def using borel_measurable_add by auto
+
+lemma borel_measurable_add'[measurable (raw)]:
+  fixes f g :: "'a \<Rightarrow> 'b::{second_countable_topology, real_normed_vector}"
+  assumes f: "f \<in> borel_measurable M"
+  assumes g: "g \<in> borel_measurable M"
+  shows "f + g \<in> borel_measurable M"
+unfolding plus_fun_def using assms by auto
+
+lemma borel_measurable_uminus'[measurable (raw)]:
+  fixes f g :: "'a \<Rightarrow> 'b::{second_countable_topology, real_normed_vector}"
+  assumes f: "f \<in> borel_measurable M"
+  shows "-f \<in> borel_measurable M"
+unfolding fun_Compl_def using assms by auto
+
+lemma borel_measurable_diff'[measurable (raw)]:
+  fixes f g :: "'a \<Rightarrow> 'b::{second_countable_topology, real_normed_vector}"
+  assumes f: "f \<in> borel_measurable M"
+  assumes g: "g \<in> borel_measurable M"
+  shows "f - g \<in> borel_measurable M"
+unfolding fun_diff_def using assms by auto
+
+lemma borel_measurable_sum'[measurable (raw)]:
+  fixes f::"'i \<Rightarrow> 'a \<Rightarrow> 'b::{second_countable_topology, real_normed_vector}"
+  assumes "\<And>i. i \<in> I \<Longrightarrow> f i \<in> borel_measurable M"
+  shows "(\<Sum>i\<in>I. f i) \<in> borel_measurable M"
+using borel_measurable_sum[of I f, OF assms] unfolding fun_sum_apply[symmetric] by simp
+
+lemma zero_applied_to [simp]:
+  "(0::('a \<Rightarrow> ('b::real_vector))) x = 0"
+unfolding zero_fun_def by simp
+
+
+
+
+
+
+typedef (overloaded) ('a::real_vector) quasinorm = "{(C::real, N::('a \<Rightarrow> ennreal)). (C \<ge> 1)
+      \<and> (\<forall> x c. N (c *\<^sub>R x) = ennreal \<bar>c\<bar> * N(x)) \<and> (\<forall> x y. N(x+y) \<le> C * N x + C * N y)}"
+morphisms Rep_quasinorm quasinorm_of
+proof
+  show "(1,(\<lambda>x. 0)) \<in> {(C::real, N::('a \<Rightarrow> ennreal)). (C \<ge> 1)
+      \<and> (\<forall> x c. N (c *\<^sub>R x) = ennreal \<bar>c\<bar> * N x) \<and> (\<forall> x y. N (x+y) \<le> C * N x + C * N y)}"
+    by auto
+qed
+
+definition eNorm::"'a quasinorm \<Rightarrow> ('a::real_vector) \<Rightarrow> ennreal"
+  where "eNorm N x = (snd (Rep_quasinorm N)) x"
+
+definition defect::"('a::real_vector) quasinorm \<Rightarrow> real"
+  where "defect N = fst (Rep_quasinorm N)"
+
+lemma eNorm_triangular_ineq:
+  "eNorm N (x + y) \<le> defect N * eNorm N x + defect N * eNorm N y"
+unfolding eNorm_def defect_def using Rep_quasinorm[of N] by auto
+
+lemma defect_ge_1:
+  "defect N \<ge> 1"
+unfolding defect_def using Rep_quasinorm[of N] by auto
+
+lemma eNorm_cmult:
+  "eNorm N (c *\<^sub>R x) = ennreal \<bar>c\<bar> * eNorm N x"
+unfolding eNorm_def using Rep_quasinorm[of N] by auto
+
+lemma eNorm_zero [simp]:
+  "eNorm N 0 = 0"
+by (metis eNorm_cmult abs_zero ennreal_0 mult_zero_left real_vector.scale_zero_left)
+
+lemma eNorm_uminus [simp]:
+  "eNorm N (-x) = eNorm N x"
+using eNorm_cmult[of N "-1" x] by auto
+
+lemma eNorm_sum:
+  "eNorm N (\<Sum>i\<in>{..<n}. u i) \<le> (\<Sum>i\<in>{..<n}. (defect N)^(Suc i) * eNorm N (u i))"
+proof (cases "n=0")
+  case True
+  then show ?thesis by simp
+next
+  case False
+  then obtain m where "n = Suc m" using not0_implies_Suc by blast
+  have "\<And>v. eNorm N (\<Sum>i\<in>{..n}. v i) \<le> (\<Sum>i\<in>{..<n}. (defect N)^(Suc i) * eNorm N (v i)) + (defect N)^n * eNorm N (v n)" for n
+  proof (induction n)
+    case 0
+    then show ?case by simp
+  next
+    case (Suc n)
+    have *: "(defect N)^(Suc n) = (defect N)^n * ennreal(defect N)"
+      by (metis defect_ge_1 ennreal_le_iff ennreal_neg ennreal_power less_le not_less not_one_le_zero semiring_normalization_rules(28))
+    fix v::"nat \<Rightarrow> 'a"
+    define w where "w = (\<lambda>i. if i = n then v n + v (Suc n) else v i)"
+    have "(\<Sum>i\<in>{..Suc n}. v i) = (\<Sum>i\<in>{..<n}. v i) + v n + v (Suc n)"
+      using lessThan_Suc_atMost sum.lessThan_Suc by auto
+    also have "... = (\<Sum>i\<in>{..<n}. w i) + w n" unfolding w_def by auto
+    finally have "(\<Sum>i\<in>{..Suc n}. v i) = (\<Sum>i\<in>{..n}. w i)"
+      by (metis lessThan_Suc_atMost sum.lessThan_Suc)
+    then have "eNorm N (\<Sum>i\<in>{..Suc n}. v i) = eNorm N (\<Sum>i\<in>{..n}. w i)" by simp
+    also have "... \<le> (\<Sum>i\<in>{..<n}. (defect N)^(Suc i) * eNorm N (w i)) + (defect N)^n * eNorm N (w n)"
+      using Suc.IH by auto
+    also have "... = (\<Sum>i\<in>{..<n}. (defect N)^(Suc i) * eNorm N (v i)) + (defect N)^n * eNorm N (v n + v (Suc n))"
+      unfolding w_def by auto
+    also have "... \<le> (\<Sum>i\<in>{..<n}. (defect N)^(Suc i) * eNorm N (v i)) +
+          (defect N)^n * (defect N * eNorm N (v n) + defect N * eNorm N (v (Suc n)))"
+      by (rule add_mono, simp, rule mult_left_mono, auto simp add: eNorm_triangular_ineq)
+    also have "... = (\<Sum>i\<in>{..<n}. (defect N)^(Suc i) * eNorm N (v i))
+        + (defect N)^(Suc n) * eNorm N (v n) + (defect N)^(Suc n) * eNorm N (v (Suc n))"
+      unfolding * by (simp add: distrib_left semiring_normalization_rules(18))
+    also have "... = (\<Sum>i\<in>{..<Suc n}. (defect N)^(Suc i) * eNorm N (v i)) + (defect N)^(Suc n) * eNorm N (v (Suc n))"
+      by auto
+    finally show "eNorm N (\<Sum>i\<in>{..Suc n}. v i)
+            \<le> (\<Sum>i<Suc n. ennreal (defect N ^ Suc i) * eNorm N (v i)) + ennreal (defect N ^ Suc n) * eNorm N (v (Suc n)) "
+      by simp
+  qed
+  then have "eNorm N (\<Sum>i\<in>{..<Suc m}. u i)
+      \<le> (\<Sum>i\<in>{..<m}. (defect N)^(Suc i) * eNorm N (u i)) + (defect N)^m * eNorm N (u m)"
+    using lessThan_Suc_atMost by auto
+  also have "... \<le> (\<Sum>i\<in>{..<m}. (defect N)^(Suc i) * eNorm N (u i)) + (defect N)^(Suc m) * eNorm N (u m)"
+    apply (rule add_mono, auto intro!: mult_right_mono ennreal_leI)
+    using defect_ge_1 by (metis atMost_iff le_less lessThan_Suc_atMost lessThan_iff power_Suc power_increasing)
+  also have "... = (\<Sum>i\<in>{..<Suc m}. (defect N)^(Suc i) * eNorm N (u i))"
+    by auto
+  finally show "eNorm N (\<Sum>i\<in>{..<n}. u i) \<le> (\<Sum>i<n. ennreal (defect N ^ Suc i) * eNorm N (u i))"
+qed
+
+
+
+definition quasinorm_on::"('a set) \<Rightarrow> real \<Rightarrow> (('a::real_vector) \<Rightarrow> ennreal) \<Rightarrow> bool"
+  where "quasinorm_on F C N = (
+    (\<forall>x y. (x \<in> F \<and> y \<in> F) \<longrightarrow> (x + y \<in> F) \<and> N (x+y) \<le> C * N x + C * N y)
+    \<and> (\<forall>c x. x \<in> F \<longrightarrow> c *\<^sub>R x \<in> F \<and> N(c *\<^sub>R x) = \<bar>c\<bar> * N x)
+    \<and> C \<ge> 1 \<and> 0 \<in> F)"
+
+lemma quasinorm_of:
+  fixes N::"('a::real_vector) \<Rightarrow> ennreal" and C::real
+  assumes "quasinorm_on UNIV C N"
+  shows "eNorm (quasinorm_of (C,N)) x = N x"
+        "defect (quasinorm_of (C,N)) = C"
+using assms unfolding eNorm_def defect_def quasinorm_on_def by (auto simp add: quasinorm_of_inverse)
+
+lemma quasinorm_onI:
+  fixes N::"('a::real_vector) \<Rightarrow> ennreal" and C::real and F::"'a set"
+  assumes "\<And>x y. x \<in> F \<Longrightarrow> y \<in> F \<Longrightarrow> x + y \<in> F"
+          "\<And>x y. x \<in> F \<Longrightarrow> y \<in> F \<Longrightarrow> N (x + y) \<le> C * N x + C * N y"
+          "\<And>c x. c \<noteq> 0 \<Longrightarrow> x \<in> F \<Longrightarrow> c *\<^sub>R x \<in> F"
+          "\<And>c x. c \<noteq> 0 \<Longrightarrow> x \<in> F \<Longrightarrow> N (c *\<^sub>R x) \<le> ennreal \<bar>c\<bar> * N x"
+          "0 \<in> F" "N(0) = 0" "C \<ge> 1"
+  shows "quasinorm_on F C N"
+proof -
+  have "N(c *\<^sub>R x) = ennreal \<bar>c\<bar> * N x" if "x \<in> F" for c x
+  proof (cases "c = 0")
+    case True
+  next
+    case False
+    have "N((1/c) *\<^sub>R (c *\<^sub>R x)) \<le> ennreal (abs (1/c)) * N (c *\<^sub>R x)"
+    then have "N x \<le> ennreal (abs (1/c)) * N (c *\<^sub>R x)" using False by auto
+    then have "ennreal \<bar>c\<bar> * N x \<le> ennreal \<bar>c\<bar> * ennreal (abs (1/c)) * N (c *\<^sub>R x)"
+      by (simp add: mult.assoc mult_left_mono)
+    also have "... = N (c *\<^sub>R x)" using ennreal_mult' abs_mult False
+      by (metis abs_ge_zero abs_one comm_monoid_mult_class.mult_1 ennreal_1 eq_divide_eq_1 field_class.field_divide_inverse)
+    finally show ?thesis
+  qed
+  then show ?thesis
+    unfolding quasinorm_on_def using assms by (auto, metis real_vector.scale_zero_left)
+qed
+
+lemma extend_quasinorm:
+  assumes "quasinorm_on F C N"
+  shows "quasinorm_on UNIV C (\<lambda>x. if x \<in> F then N x else \<infinity>)"
+proof -
+  have *: "(if x + y \<in> F then N (x + y) else \<infinity>)
+    \<le> ennreal C * (if x \<in> F then N x else \<infinity>) + ennreal C * (if y \<in> F then N y else \<infinity>)" for x y
+  proof (cases "x \<in> F \<and> y \<in> F")
+    case True
+    then show ?thesis using assms unfolding quasinorm_on_def by auto
+  next
+    case False
+    moreover have "C \<ge> 1" using assms unfolding quasinorm_on_def by auto
+    ultimately have *: "ennreal C * (if x \<in> F then N x else \<infinity>) + ennreal C * (if y \<in> F then N y else \<infinity>) = \<infinity>"
+      using ennreal_mult_eq_top_iff by auto
+    show ?thesis by (simp add: *)

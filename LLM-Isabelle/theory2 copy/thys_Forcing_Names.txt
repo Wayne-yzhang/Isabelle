@@ -1,0 +1,389 @@
+theory Names
+  imports
+    Forcing_Data
+    Interface
+    Recursion_Thms
+    Synthetic_Definition
+begin
+
+definition
+  SepReplace :: "[i, i\<Rightarrow>i, i\<Rightarrow> o] \<Rightarrow> i" where
+  "SepReplace(A,b,Q) \<equiv> {y . x\<in>A, y=b(x) \<and> Q(x)}"
+
+syntax
+  "_SepReplace"  :: "[i, pttrn, i, o] \<Rightarrow> i"  ("(1{_ ../ _ \<in> _, _})")
+translations
+  "{b .. x\<in>A, Q}" => "CONST SepReplace(A, \<lambda>x. b, \<lambda>x. Q)"
+
+lemma Sep_and_Replace: "{b(x) .. x\<in>A, P(x) } = {b(x) . x\<in>{y\<in>A. P(y)}}"
+  by (auto simp add:SepReplace_def)
+
+lemma SepReplace_subset : "A\<subseteq>A'\<Longrightarrow> {b .. x\<in>A, Q}\<subseteq>{b .. x\<in>A', Q}"
+  by (auto simp add:SepReplace_def)
+
+lemma SepReplace_iff [simp]: "y\<in>{b(x) .. x\<in>A, P(x)} \<longleftrightarrow> (\<exists>x\<in>A. y=b(x) & P(x))"
+  by (auto simp add:SepReplace_def)
+
+lemma SepReplace_dom_implies :
+  "(\<And> x . x \<in>A \<Longrightarrow> b(x) = b'(x))\<Longrightarrow> {b(x) .. x\<in>A, Q(x)}={b'(x) .. x\<in>A, Q(x)}"
+  by  (simp add:SepReplace_def)
+
+lemma SepReplace_pred_implies :
+  "\<forall>x. Q(x)\<longrightarrow> b(x) = b'(x)\<Longrightarrow> {b(x) .. x\<in>A, Q(x)}={b'(x) .. x\<in>A, Q(x)}"
+  by  (force simp add:SepReplace_def)
+
+
+lemma eclose_sing : "x \<in> eclose(a) \<Longrightarrow> x \<in> eclose({a})"
+  by(rule subsetD[OF mem_eclose_subset],simp+)
+
+lemma ecloseE :
+  assumes  "x \<in> eclose(A)"
+  shows  "x \<in> A \<or> (\<exists> B \<in> A . x \<in> eclose(B))"
+  using assms
+proof (induct rule:eclose_induct_down)
+  case (1 y)
+  then
+  show ?case
+    using arg_into_eclose by auto
+next
+  case (2 y z)
+  consider (inA) "y \<in> A" | (exB) "(\<exists>B\<in>A. y \<in> eclose(B))"
+    by auto
+  then show ?case
+  proof (cases)
+    case inA
+    then
+    show ?thesis using 2 arg_into_eclose by auto
+  next
+    case exB
+    then obtain B where "y \<in> eclose(B)" "B\<in>A"
+      by auto
+    then
+    show ?thesis using 2 ecloseD[of y B z] by auto
+  qed
+qed
+
+lemma eclose_singE : "x \<in> eclose({a}) \<Longrightarrow> x = a \<or> x \<in> eclose(a)"
+  by(blast dest: ecloseE)
+
+lemma in_eclose_sing :
+  assumes "x \<in> eclose({a})" "a \<in> eclose(z)"
+  shows "x \<in> eclose({z})"
+proof -
+  consider (eq) "x=a" | (lt) "x\<in>eclose(a)"
+    using eclose_singE by auto
+  then
+  show ?thesis
+    using eclose_sing mem_eclose_trans assms
+    by (cases, auto)
+qed
+
+lemma in_dom_in_eclose :
+  assumes "x \<in> domain(z)"
+  shows "x \<in> eclose(z)"
+proof -
+  from assms
+  obtain y where "\<langle>x,y\<rangle> \<in> z"
+    unfolding domain_def by auto
+  then
+  show ?thesis
+    unfolding Pair_def
+    using ecloseD[of "{x,x}"] ecloseD[of "{{x,x},{x,y}}"] arg_into_eclose
+    by auto
+qed
+
+definition
+  ed :: "[i,i] \<Rightarrow> o" where
+  "ed(x,y) \<equiv> x \<in> domain(y)"
+
+definition
+  edrel :: "i \<Rightarrow> i" where
+  "edrel(A) \<equiv> Rrel(ed,A)"
+
+
+lemma edI[intro!]: "t\<in>domain(x) \<Longrightarrow> ed(t,x)"
+  unfolding ed_def .
+
+lemma edD[dest!]: "ed(t,x) \<Longrightarrow> t\<in>domain(x)"
+  unfolding ed_def .
+
+
+lemma rank_ed:
+  assumes "ed(y,x)"
+  shows "succ(rank(y)) \<le> rank(x)"
+proof
+  from assms
+  obtain p where "\<langle>y,p\<rangle>\<in>x" by auto
+  moreover
+  obtain s where "y\<in>s" "s\<in>\<langle>y,p\<rangle>" unfolding Pair_def by auto
+  ultimately
+  have "rank(y) < rank(s)" "rank(s) < rank(\<langle>y,p\<rangle>)" "rank(\<langle>y,p\<rangle>) < rank(x)"
+    using rank_lt by blast+
+  then
+  show "rank(y) < rank(x)"
+    using lt_trans by blast
+qed
+
+lemma edrel_dest [dest]: "x \<in> edrel(A) \<Longrightarrow> \<exists> a\<in> A. \<exists> b \<in> A. x =\<langle>a,b\<rangle>"
+  by(auto simp add:ed_def edrel_def Rrel_def)
+
+lemma edrelD : "x \<in> edrel(A) \<Longrightarrow> \<exists> a\<in> A. \<exists> b \<in> A. x =\<langle>a,b\<rangle> \<and> a \<in> domain(b)"
+  by(auto simp add:ed_def edrel_def Rrel_def)
+
+lemma edrelI [intro!]: "x\<in>A \<Longrightarrow> y\<in>A \<Longrightarrow> x \<in> domain(y) \<Longrightarrow> \<langle>x,y\<rangle>\<in>edrel(A)"
+  by (simp add:ed_def edrel_def Rrel_def)
+
+lemma edrel_trans: "Transset(A) \<Longrightarrow> y\<in>A \<Longrightarrow> x \<in> domain(y) \<Longrightarrow> \<langle>x,y\<rangle>\<in>edrel(A)"
+  by (rule edrelI, auto simp add:Transset_def domain_def Pair_def)
+
+lemma domain_trans: "Transset(A) \<Longrightarrow> y\<in>A \<Longrightarrow> x \<in> domain(y) \<Longrightarrow> x\<in>A"
+  by (auto simp add: Transset_def domain_def Pair_def)
+
+lemma relation_edrel : "relation(edrel(A))"
+  by(auto simp add: relation_def)
+
+lemma field_edrel : "field(edrel(A))\<subseteq>A"
+  by blast
+
+lemma edrel_sub_memrel: "edrel(A) \<subseteq> trancl(Memrel(eclose(A)))"
+proof
+  fix z
+  assume
+    "z\<in>edrel(A)"
+  then obtain x y where
+    Eq1:   "x\<in>A" "y\<in>A" "z=\<langle>x,y\<rangle>" "x\<in>domain(y)"
+    using edrelD
+    by blast
+  then obtain u v where
+    Eq2:   "x\<in>u" "u\<in>v" "v\<in>y"
+    unfolding domain_def Pair_def by auto
+  with Eq1 have
+    Eq3:   "x\<in>eclose(A)" "y\<in>eclose(A)" "u\<in>eclose(A)" "v\<in>eclose(A)"
+    by (auto, rule_tac [3-4] ecloseD, rule_tac [3] ecloseD, simp_all add:arg_into_eclose)
+  let
+    ?r="trancl(Memrel(eclose(A)))"
+  from Eq2 and Eq3 have
+    "\<langle>x,u\<rangle>\<in>?r" "\<langle>u,v\<rangle>\<in>?r" "\<langle>v,y\<rangle>\<in>?r"
+    by (auto simp add: r_into_trancl)
+  then  have
+    "\<langle>x,y\<rangle>\<in>?r"
+    by (rule_tac trancl_trans, rule_tac [2] trancl_trans, simp)
+  with Eq1 show "z\<in>?r" by simp
+qed
+
+lemma wf_edrel : "wf(edrel(A))"
+  using wf_subset [of "trancl(Memrel(eclose(A)))"] edrel_sub_memrel
+    wf_trancl wf_Memrel
+  by auto
+
+lemma ed_induction:
+  assumes "\<And>x. \<lbrakk>\<And>y.  ed(y,x) \<Longrightarrow> Q(y) \<rbrakk> \<Longrightarrow> Q(x)"
+  shows "Q(a)"
+proof(induct rule: wf_induct2[OF wf_edrel[of "eclose({a})"] ,of a "eclose({a})"])
+  case 1
+  then show ?case using arg_into_eclose by simp
+next
+  case 2
+  then show ?case using field_edrel .
+next
+  case (3 x)
+  then
+  show ?case
+    using assms[of x] edrelI domain_trans[OF Transset_eclose 3(1)] by blast
+qed
+
+lemma dom_under_edrel_eclose: "edrel(eclose({x})) -`` {x} = domain(x)"
+proof
+  show "edrel(eclose({x})) -`` {x} \<subseteq> domain(x)"
+    unfolding edrel_def Rrel_def ed_def
+    by auto
+next
+  show "domain(x) \<subseteq> edrel(eclose({x})) -`` {x}"
+    unfolding edrel_def Rrel_def
+    using in_dom_in_eclose eclose_sing arg_into_eclose
+    by blast
+qed
+
+lemma ed_eclose : "\<langle>y,z\<rangle> \<in> edrel(A) \<Longrightarrow> y \<in> eclose(z)"
+  by(drule edrelD,auto simp add:domain_def in_dom_in_eclose)
+
+lemma tr_edrel_eclose : "\<langle>y,z\<rangle> \<in> edrel(eclose({x}))^+ \<Longrightarrow> y \<in> eclose(z)"
+  by(rule trancl_induct,(simp add: ed_eclose mem_eclose_trans)+)
+
+
+lemma restrict_edrel_eq :
+  assumes "z \<in> domain(x)"
+  shows "edrel(eclose({x})) \<inter> eclose({z})\<times>eclose({z}) = edrel(eclose({z}))"
+proof(intro equalityI subsetI)
+  let ?ec="\<lambda> y . edrel(eclose({y}))"
+  let ?ez="eclose({z})"
+  let ?rr="?ec(x) \<inter> ?ez \<times> ?ez"
+  fix y
+  assume yr:"y \<in> ?rr"
+  with yr obtain a b where 1:"\<langle>a,b\<rangle> \<in> ?rr" "a \<in> ?ez" "b \<in> ?ez" "\<langle>a,b\<rangle> \<in> ?ec(x)" "y=\<langle>a,b\<rangle>"
+    by blast
+  moreover
+  from this
+  have "a \<in> domain(b)" using edrelD by blast
+  ultimately
+  show "y \<in> edrel(eclose({z}))" by blast
+next
+  let ?ec="\<lambda> y . edrel(eclose({y}))"
+  let ?ez="eclose({z})"
+  let ?rr="?ec(x) \<inter> ?ez \<times> ?ez"
+  fix y
+  assume yr:"y \<in> edrel(?ez)"
+  then obtain a b where "a \<in> ?ez" "b \<in> ?ez" "y=\<langle>a,b\<rangle>" "a \<in> domain(b)"
+    using edrelD by blast
+  moreover
+  from this assms
+  have "z \<in> eclose(x)" using in_dom_in_eclose by simp
+  moreover
+  from assms calculation
+  have "a \<in> eclose({x})" "b \<in> eclose({x})" using in_eclose_sing by simp_all
+  moreover
+  have "\<langle>a,b\<rangle> \<in> edrel(eclose({x}))" by blast
+  ultimately
+  show "y \<in> ?rr" by simp
+qed
+
+lemma tr_edrel_subset :
+  assumes "z \<in> domain(x)"
+  shows   "tr_down(edrel(eclose({x})),z) \<subseteq> eclose({z})"
+proof(intro subsetI)
+  let ?r="\<lambda> x . edrel(eclose({x}))"
+  fix y
+  assume  "y \<in> tr_down(?r(x),z)"
+  then
+  have "\<langle>y,z\<rangle> \<in> ?r(x)^+" using tr_downD by simp
+  with assms
+  show "y \<in> eclose({z})" using tr_edrel_eclose eclose_sing by simp
+qed
+
+
+context M_ctm
+begin
+
+lemma upairM : "x \<in> M \<Longrightarrow> y \<in> M \<Longrightarrow> {x,y} \<in> M"
+  by (simp flip: setclass_iff)
+
+lemma singletonM : "a \<in> M \<Longrightarrow> {a} \<in> M"
+  by (simp flip: setclass_iff)
+
+lemma Rep_simp : "Replace(u,\<lambda> y z . z = f(y)) = { f(y) . y \<in> u}"
+  by(auto)
+
+
+context forcing_data
+begin
+
+definition
+  Hcheck :: "[i,i] \<Rightarrow> i" where
+  "Hcheck(z,f)  \<equiv> { \<langle>f`y,one\<rangle> . y \<in> z}"
+
+definition
+  check :: "i \<Rightarrow> i" where
+  "check(x) \<equiv> transrec(x , Hcheck)"
+
+lemma checkD:
+  "check(x) =  wfrec(Memrel(eclose({x})), x, Hcheck)"
+  unfolding check_def transrec_def ..
+
+definition
+  rcheck :: "i \<Rightarrow> i" where
+  "rcheck(x) \<equiv> Memrel(eclose({x}))^+"
+
+
+lemma Hcheck_trancl:"Hcheck(y, restrict(f,Memrel(eclose({x}))-``{y}))
+                   = Hcheck(y, restrict(f,(Memrel(eclose({x}))^+)-``{y}))"
+  unfolding Hcheck_def
+  using restrict_trans_eq by simp
+
+lemma check_trancl: "check(x) = wfrec(rcheck(x), x, Hcheck)"
+  using checkD wf_eq_trancl Hcheck_trancl unfolding rcheck_def by simp
+
+lemma rcheck_in_M :
+  "x \<in> M \<Longrightarrow> rcheck(x) \<in> M"
+  unfolding rcheck_def by (simp flip: setclass_iff)
+
+
+lemma  aux_def_check: "x \<in> y \<Longrightarrow>
+  wfrec(Memrel(eclose({y})), x, Hcheck) =
+  wfrec(Memrel(eclose({x})), x, Hcheck)"
+  by (rule wfrec_eclose_eq,auto simp add: arg_into_eclose eclose_sing)
+
+lemma def_check : "check(y) = { \<langle>check(w),one\<rangle> . w \<in> y}"
+proof -
+  let
+    ?r="\<lambda>y. Memrel(eclose({y}))"
+  have wfr:   "\<forall>w . wf(?r(w))" 
+    using wf_Memrel ..
+  then 
+  have "check(y)= Hcheck( y, \<lambda>x\<in>?r(y) -`` {y}. wfrec(?r(y), x, Hcheck))"
+    using wfrec[of "?r(y)" y "Hcheck"] checkD by simp
+  also 
+  have " ... = Hcheck( y, \<lambda>x\<in>y. wfrec(?r(y), x, Hcheck))"
+    using under_Memrel_eclose arg_into_eclose by simp
+  also 
+  have " ... = Hcheck( y, \<lambda>x\<in>y. check(x))"
+    using aux_def_check checkD by simp
+  finally show ?thesis using Hcheck_def by simp
+qed
+
+
+lemma def_checkS :
+  fixes n
+  assumes "n \<in> nat"
+  shows "check(succ(n)) = check(n) \<union> {\<langle>check(n),one\<rangle>}"
+proof -
+  have "check(succ(n)) = {\<langle>check(i),one\<rangle> . i \<in> succ(n)} "
+    using def_check by blast
+  also have "... = {\<langle>check(i),one\<rangle> . i \<in> n} \<union> {\<langle>check(n),one\<rangle>}"
+    by blast
+  also have "... = check(n) \<union> {\<langle>check(n),one\<rangle>}"
+    using def_check[of n,symmetric] by simp
+  finally show ?thesis .
+qed
+
+lemma field_Memrel2 :
+  assumes "x \<in> M"
+  shows "field(Memrel(eclose({x}))) \<subseteq> M"
+proof -
+  have "field(Memrel(eclose({x}))) \<subseteq> eclose({x})" "eclose({x}) \<subseteq> M"
+    using Ordinal.Memrel_type field_rel_subset assms eclose_least[OF trans_M] by auto
+  then
+  show ?thesis using subset_trans by simp
+qed
+
+definition
+  Hv :: "i\<Rightarrow>i\<Rightarrow>i\<Rightarrow>i" where
+  "Hv(G,x,f) \<equiv> { f`y .. y\<in> domain(x), \<exists>p\<in>P. \<langle>y,p\<rangle> \<in> x \<and> p \<in> G }"
+
+in terms of the well-founded recursor.\<close>
+  also from \<open>z\<in>domain(x)\<close>
+text\<open>The next lemma provides the usual recursive expresion for the definition of term\<open>val\<close>.\<close>
+text\<open>Check-names are the canonical names for elements of the
+ground model. Here we show that this is the case.\<close>
+  with \<open>\<theta>\<in>domain(\<pi>)\<close> \<open>\<langle>\<theta>,p\<rangle> \<in> \<pi>\<close>
+  moreover from this \<open>\<pi>\<in>M\<close>
+    from \<open>y \<in> val(G,c)\<close>
+    with trans_M \<open>c\<in>M\<close>
+  using \<open>n\<in>nat\<close>
+  with \<open>check(x)\<in>M\<close>
+  with \<open>check(x)\<in>M\<close>
+  then show ?case using \<open>x\<in>nat\<close> def_checkS by simp
+    using \<open>z\<in>M\<close> \<open>f\<in>M\<close> transitivity
+    using that one_in_M \<open>X\<in>M\<close> rcheck_in_M by simp
+    using  that sats_is_wfrec_fm \<open>X\<in>M\<close> rcheck_in_M one_in_M by simp
+    using that 1 \<open>X\<in>M\<close> rcheck_in_M one_in_M by (simp del:pair_abs)
+    using replacement_ax 1 artyf \<open>X\<in>M\<close> rcheck_in_M one_in_M by simp
+  with \<open>f\<in>M\<close>
+  with \<open>f\<in>M\<close>
+text\<open>The name for the generic filter\<close>
+  with \<open>one\<in>G\<close> \<open>G\<subseteq>P\<close> show
+  with \<open>p\<in>G\<close> \<open>G\<subseteq>P\<close>
+  with \<open>p\<in>G\<close> \<open>G\<subseteq>P\<close> \<open>one\<in>G\<close>
+    unfolding \<open>p = _\<close> Pair_def by (force intro:Transset_M[OF trans_M])
+  moreover from  \<open>p\<in>M\<close>
+    unfolding \<open>p = _\<close> Pair_def by (simp)
+  with P_in_M P_dense \<open>P\<subseteq>P\<close>

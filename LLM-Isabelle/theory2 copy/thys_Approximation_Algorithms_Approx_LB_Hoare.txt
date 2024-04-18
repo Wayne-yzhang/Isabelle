@@ -1,0 +1,419 @@
+theory Approx_LB_Hoare
+  imports Complex_Main "HOL-Hoare.Hoare_Logic"
+begin
+
+lemma lb_impl_job_sum:
+  assumes "lb T A j"
+  shows "(\<Sum>x \<in> {1..m}. T x) = (\<Sum>x \<in> {1..j}. t x)"
+proof -
+  note lbrules = lbE[OF assms]
+  from assms have FINITE: "\<forall>x \<in> {1..m}. finite (A x)" by simp
+  have "(\<Sum>x \<in> {1..m}. T x) = (\<Sum>x \<in> {1..m}. (\<Sum>y \<in> A x. t y))"
+    using lbrules(3) by simp
+  also have "... = (\<Sum>x \<in> {1..j}. t x)"
+    using sum_sum_eq_sum_Un[OF lbrules(1) FINITE]
+    unfolding lbrules(2) .
+  finally show ?thesis .
+qed
+
+
+lemma job_lower_bound_machine:
+  assumes "lb T A j" "x \<in> {1..j}"
+  shows "\<exists>y \<in> {1..m}. t x \<le> T y"
+proof -
+  note lbrules = lbE[OF assms(1)]
+  have "\<exists>y \<in> {1..m}. x \<in> A y" using lbrules(2) assms(2) by blast
+  then obtain y where y_def: "y \<in> {1..m}" "x \<in> A y" ..
+  moreover have "finite (A y)" using assms(1) y_def(1) by simp
+  ultimately have "t x \<le> (\<Sum>x \<in> A y. t x)" using lbrules(1) member_le_sum by fast
+  also have "... = T y" using lbrules(3) y_def(1) by blast
+  finally show ?thesis using y_def(1) by blast
+qed
+
+lemma job_lower_bound_makespan:
+  assumes "lb T A j" "x \<in> {1..j}"
+  shows "t x \<le> makespan T"
+  by (meson job_lower_bound_machine[OF assms] makespan_correct(1) le_trans)
+
+lemma max_job_lower_bound_makespan:
+  assumes "lb T A j"
+  shows "Max\<^sub>0 (t ` {1..j}) \<le> makespan T"
+  using job_lower_bound_makespan[OF assms] by fastforce
+
+lemma job_dist_lower_bound_makespan:
+  assumes "lb T A j"
+  shows "(\<Sum>x \<in> {1..j}. t x) / m \<le> makespan T"
+proof -
+  have "(\<Sum>x \<in> {1..j}. t x) \<le> m * makespan T"
+    using assms lb_impl_job_sum[symmetric]
+      and sum_le_card_Max[of "{1..m}"] m_gt_0 by (simp add: makespan_def')
+  then have "real (\<Sum>x \<in> {1..j}. t x) \<le> real m * real (makespan T)"
+    using of_nat_mono by fastforce
+  then show ?thesis by (simp add: field_simps m_gt_0)
+qed
+
+
+fun min_arg :: "(nat \<Rightarrow> nat) \<Rightarrow> nat \<Rightarrow> nat" where
+  "min_arg T 0 = 1"
+| "min_arg T (Suc x) =
+   (let k = min_arg T x
+    in if T (Suc x) < T k then (Suc x) else k)"
+
+lemma min_correct:
+  "\<forall>x \<in> {1..m}. T (min_arg T m) \<le> T x"
+  by (induction m) (auto simp: Let_def le_Suc_eq, force)
+
+lemma min_in_range:
+  "k > 0 \<Longrightarrow> (min_arg T k) \<in> {1..k}"
+  by (induction k) (auto simp: Let_def, force+)
+
+lemma add_job:
+  assumes "lb T A j" "x \<in> {1..m}"
+  shows "lb (T (x := T x + t (Suc j))) (A (x := A x \<union> {Suc j})) (Suc j)"
+proof -
+  note lbrules = lbE[OF assms(1)]
+
+  have NOTIN: "\<forall>i \<in> {1..m}. Suc j \<notin> A i" using lbrules(2) assms(2) by force
+  with lbrules(1) have "\<forall>i \<in> {1..m}. i \<noteq> x \<longrightarrow> A i \<inter> (A x \<union> {Suc j}) = {}"
+    using assms(2) by blast
+  then have 1: "\<forall>x \<in> {1..m}. \<forall>y \<in> {1..m}. x \<noteq> y \<longrightarrow> ?A x \<inter> ?A y = {}"
+    using lbrules(1) by simp
+
+  have "(\<Union>y \<in> {1..m}. ?A y) = (\<Union>y \<in> {1..m}. A y) \<union> {Suc j}"
+    using UNION_fun_upd assms(2) by auto
+  also have "... = {1..Suc j}" unfolding lbrules(2) by auto
+  finally have 2: "(\<Union>y \<in> {1..m}. ?A y) = {1..Suc j}" .
+
+  have "(\<Sum>i \<in> ?A x. t i) = (\<Sum>i \<in> A x \<union> {Suc j}. t i)" by simp
+  moreover have "A x \<inter> {Suc j} = {}" using NOTIN assms(2) by blast
+  moreover have "finite (A x)" "finite {Suc j}" using assms by simp+
+  ultimately have "(\<Sum>i \<in> ?A x. t i) = (\<Sum>i \<in> A x. t i) + (\<Sum>i \<in> {Suc j}. t i)"
+    using sum.union_disjoint by simp
+  also have "... = T x + t (Suc j)" using lbrules(3) assms(2) by simp
+  finally have "(\<Sum>i \<in> ?A x. t i) = ?T x" by simp
+  then have 3: "\<forall>i \<in> {1..m}. (\<Sum>j \<in> ?A i. t j) = ?T i"
+    using lbrules(3) assms(2) by simp
+
+  from lbI[OF 1 2 3] show ?thesis .
+qed
+
+lemma makespan_mono:
+  "y \<le> T x \<Longrightarrow> makespan (T (x := y)) \<le> makespan T"
+  "T x \<le> y \<Longrightarrow> makespan T \<le> makespan (T (x := y))"
+  using f_Max\<^sub>0_mono by auto
+
+lemma smaller_optimum:
+  assumes "lb T A (Suc j)"
+  shows "\<exists>T' A'. lb T' A' j \<and> makespan T' \<le> makespan T"
+proof -
+  note lbrules = lbE[OF assms]
+  have "\<exists>x \<in> {1..m}. Suc j \<in> A x" using lbrules(2) by auto
+  then obtain x where x_def: "x \<in> {1..m}" "Suc j \<in> A x" ..
+  let ?T = "T (x := T x - t (Suc j))"
+  let ?A = "A (x := A x - {Suc j})"
+
+  from lbrules(1) have "\<forall>i \<in> {1..m}. i \<noteq> x \<longrightarrow> A i \<inter> (A x - {Suc j}) = {}"
+    using x_def(1) by blast
+  then have 1: "\<forall>x \<in> {1..m}. \<forall>y \<in> {1..m}. x \<noteq> y \<longrightarrow> ?A x \<inter> ?A y = {}"
+    using lbrules(1) by auto
+
+  have NOTIN: "\<forall>i \<in> {1..m}. i \<noteq> x \<longrightarrow> Suc j \<notin> A i" using lbrules(1) x_def by blast
+  then have "(\<Union>y \<in> {1..m}. ?A y) = (\<Union>y \<in> {1..m}. A y) - {Suc j}"
+    using UNION_fun_upd x_def by auto
+  also have "... = {1..j}" unfolding lbrules(2) by auto
+  finally have 2: "(\<Union>y \<in> {1..m}. ?A y) = {1..j}" .
+
+  have "(\<Sum>i \<in> A x - {Suc j}. t i) = (\<Sum>i \<in> A x. t i) - t (Suc j)"
+    by (simp add: sum_diff1_nat x_def(2))
+  also have "... = T x - t (Suc j)" using lbrules(3) x_def(1) by simp
+  finally have "(\<Sum>i \<in> ?A x. t i) = ?T x" by simp
+  then have 3: "\<forall>i \<in> {1..m}. (\<Sum>j \<in> ?A i. t j) = ?T i"
+    using lbrules(3) x_def(1) by simp
+
+  have "lb ?T ?A j \<and> makespan ?T \<le> makespan T"
+    using lbI[OF 1 2 3] makespan_mono(1) by force
+  then show ?thesis by blast
+qed
+
+lemma remove_small_job:
+  assumes "makespan (T (x := T x + y)) \<noteq> T x + y"
+  shows   "makespan (T (x := T x + y)) = makespan T"
+proof -
+  let ?T = "T (x := T x + y)"
+  have NOT_X: "makespan ?T \<noteq> ?T x" using assms(1) by simp
+  then have "\<exists>i \<in> {1..m}. makespan ?T = ?T i \<and> i \<noteq> x"
+    using makespan_correct(2) by metis
+  then obtain i where i_def: "i \<in> {1..m}" "makespan ?T = ?T i" "i \<noteq> x" by blast
+  then have "?T i = T i" using NOT_X by simp
+  moreover from this have "makespan T = T i"
+    by (metis i_def(1,2) antisym_conv le_add1 makespan_mono(2) makespan_correct(1))
+  ultimately show ?thesis using i_def(2) by simp
+qed
+
+lemma greedy_makespan_no_jobs [simp]:
+  "makespan (\<lambda>_. 0) = 0"
+  using m_gt_0 by (simp add: makespan_def')
+
+lemma min_avg: "m * T (min_arg T m) \<le> (\<Sum>i \<in> {1..m}. T i)"
+proof -
+  have "(\<Sum>_ \<in> {1..m}. ?T) \<le> ?S"
+      and min_correct by blast
+  then show ?thesis by simp
+qed
+
+definition inv\<^sub>1 :: "(nat \<Rightarrow> nat) \<Rightarrow> (nat \<Rightarrow> nat set) \<Rightarrow> nat \<Rightarrow> bool" where
+  "inv\<^sub>1 T A j = (lb T A j \<and> j \<le> n \<and> (\<forall>T' A'. lb T' A' j \<longrightarrow> makespan T \<le> 2 * makespan T'))"
+
+lemma inv\<^sub>1E:
+  assumes "inv\<^sub>1 T A j"
+  shows "lb T A j" "j \<le> n"
+        "lb T' A' j \<Longrightarrow> makespan T \<le> 2 * makespan T'"
+  using assms unfolding inv\<^sub>1_def by blast+
+
+lemma inv\<^sub>1I:
+  assumes "lb T A j" "j \<le> n" "\<forall>T' A'. lb T' A' j \<longrightarrow> makespan T \<le> 2 * makespan T'"
+  shows "inv\<^sub>1 T A j" using assms unfolding inv\<^sub>1_def by blast
+
+lemma inv\<^sub>1_step:
+  assumes "inv\<^sub>1 T A j" "j < n"
+  shows "inv\<^sub>1 (T ((min_arg T m) := T (min_arg T m) + t (Suc j)))
+              (A ((min_arg T m) := A (min_arg T m) \<union> {Suc j})) (Suc j)"
+proof -
+  note invrules = inv\<^sub>1E[OF assms(1)]
+  have LB: "lb ?T ?A (Suc j)"
+    using add_job[OF invrules(1) min_in_range[OF m_gt_0]] by blast
+  have MK: "\<forall>T' A'. lb T' A' (Suc j) \<longrightarrow> makespan ?T \<le> 2 * makespan T'"
+  proof rule+
+    fix T\<^sub>1 A\<^sub>1 assume "lb T\<^sub>1 A\<^sub>1 (Suc j)"
+    from smaller_optimum[OF this]
+    obtain T\<^sub>0 A\<^sub>0 where "lb T\<^sub>0 A\<^sub>0 j" "makespan T\<^sub>0 \<le> makespan T\<^sub>1" by blast
+    then have IH: "makespan T \<le> 2 * makespan T\<^sub>1"
+      using invrules(3) by force
+    show "makespan ?T \<le> 2 * makespan T\<^sub>1"
+      case True
+      have "m * T (min_arg T m) \<le> (\<Sum>i \<in> {1..m}. T i)" by (rule min_avg)
+      also have "... = (\<Sum>i \<in> {1..j}. t i)" by (rule lb_impl_job_sum[OF invrules(1)])
+      finally have "real m * T (min_arg T m) \<le> (\<Sum>i \<in> {1..j}. t i)"
+        by (auto dest: of_nat_mono)
+      with m_gt_0 have "T (min_arg T m) \<le> (\<Sum>i \<in> {1..j}. t i) / m"
+        by (simp add: field_simps)
+      then have "T (min_arg T m) \<le> makespan T\<^sub>1"
+      moreover have "t (Suc j) \<le> makespan T\<^sub>1"
+      ultimately show ?thesis unfolding True by simp
+    next
+      case False show ?thesis using remove_small_job[OF False] IH by simp
+    qed
+  qed
+  from inv\<^sub>1I[OF LB _ MK] show ?thesis using assms(2) by simp
+qed
+
+lemma simple_greedy_approximation:
+"VARS T A i j
+{True}
+T := (\<lambda>_. 0);
+A := (\<lambda>_. {});
+j := 0;
+WHILE j < n INV {inv\<^sub>1 T A j} DO
+  i := min_arg T m;
+  j := (Suc j);
+  A := A (i := A(i) \<union> {j});
+  T := T (i := T(i) + t j)
+OD
+{lb T A n \<and> (\<forall>T' A'. lb T' A' n \<longrightarrow> makespan T \<le> 2 * makespan T')}"
+proof (vcg, goal_cases)
+  case (1 T A i j)
+  then show ?case by (simp add: lb_def inv\<^sub>1_def)
+next
+  case (2 T A i j)
+  then show ?case using inv\<^sub>1_step by simp
+next
+  case (3 T A i j)
+  then show ?case unfolding inv\<^sub>1_def by force
+qed
+
+definition sorted :: "nat \<Rightarrow> bool" where
+  "sorted j = (\<forall>x \<in> {1..j}. \<forall>y \<in> {1..x}. t x \<le> t y)"
+
+lemma sorted_smaller [simp]: "\<lbrakk> sorted j; j \<ge> j' \<rbrakk> \<Longrightarrow> sorted j'"
+  unfolding sorted_def by simp
+
+lemma j_gt_m_pigeonhole:
+  assumes "lb T A j" "j > m"
+  shows "\<exists>x \<in> {1..j}. \<exists>y \<in> {1..j}. \<exists>z \<in> {1..m}. x \<noteq> y \<and> x \<in> A z \<and> y \<in> A z"
+proof -
+  have "\<forall>x \<in> {1..j}. \<exists>y \<in> {1..m}. x \<in> A y"
+    using lbE(2)[OF assms(1)] by blast
+  then have "\<exists>f. \<forall>x \<in> {1..j}. x \<in> A (f x) \<and> f x \<in> {1..m}" by metis
+  then obtain f where f_def: "\<forall>x \<in> {1..j}. x \<in> A (f x) \<and> f x \<in> {1..m}" ..
+  then have "card (f ` {1..j}) \<le> card {1..m}"
+    by (meson card_mono finite_atLeastAtMost image_subset_iff)
+  also have "... < card {1..j}" using assms(2) by simp
+  finally have "card (f ` {1..j}) < card {1..j}" .
+  then have "\<not> inj_on f {1..j}" using pigeonhole by blast
+  then have "\<exists>x \<in> {1..j}. \<exists>y \<in> {1..j}. x \<noteq> y \<and> f x = f y"
+    unfolding inj_on_def by blast
+  then show ?thesis using f_def by metis
+qed
+
+lemma sorted_job_lower_bound_machine:
+  assumes "lb T A j" "j > m" "sorted j"
+  shows "\<exists>x \<in> {1..m}. 2 * t j \<le> T x"
+proof -
+  note lbrules = lbE[OF assms(1)]
+  obtain j\<^sub>1 j\<^sub>2 x where *:
+    "j\<^sub>1 \<in> {1..j}" "j\<^sub>2 \<in> {1..j}" "x \<in> {1..m}" "j\<^sub>1 \<noteq> j\<^sub>2" "j\<^sub>1 \<in> A x" "j\<^sub>2 \<in> A x"
+    using j_gt_m_pigeonhole[OF assms(1,2)] by blast
+
+  have "finite (A x)" using assms(1) *(3) by simp
+  then have SUM: "(\<Sum>i \<in> A x. t i) = t j\<^sub>1 + t j\<^sub>2 + (\<Sum>i \<in> A x - {j\<^sub>1} - {j\<^sub>2}. t i)"
+    using *(4-6) by (simp add: sum.remove)
+
+  have "t j \<le> t j\<^sub>1" "t j \<le> t j\<^sub>2"
+    using assms(3) *(1-2) unfolding sorted_def by auto
+  then have "2 * t j \<le> t j\<^sub>1 + t j\<^sub>2" by simp
+  also have "... \<le> (\<Sum>i \<in> A x. t i)" unfolding SUM by simp
+  finally have "2 * t j \<le> T x" using lbrules(3) *(3) by simp
+  then show ?thesis using *(3) by blast
+qed
+
+lemma sorted_job_lower_bound_makespan:
+  assumes "lb T A j" "j > m" "sorted j"
+  shows "2 * t j \<le> makespan T"
+proof -
+  obtain x where x_def: "x \<in> {1..m}" "2 * t j \<le> T x"
+    using sorted_job_lower_bound_machine[OF assms] ..
+  with makespan_correct(1) have "T x \<le> makespan T" by blast
+  with x_def(2) show ?thesis by simp
+qed
+
+lemma min_zero:
+  assumes "x \<in> {1..k}" "T x = 0"
+  shows "T (min_arg T k) = 0"
+  using assms(1)
+proof (induction k)
+  case (Suc k)
+    case True
+    then show ?thesis using assms(2) by (simp add: Let_def)
+  next
+    case False
+    with Suc have "T (min_arg T k) = 0" by simp
+    then show ?thesis by simp
+  qed
+qed simp
+
+lemma min_zero_index:
+  assumes "x \<in> {1..k}" "T x = 0"
+  shows "min_arg T k \<le> x"
+  using assms(1)
+proof (induction k)
+  case (Suc k)
+    case True
+    then show ?thesis using min_in_range[of "Suc k"] by simp
+  next
+    case False
+    with Suc.prems have "x \<in> {1..k}" by simp
+    from min_zero[OF this, of T] assms(2) Suc.IH[OF this]
+    show ?thesis by simp
+  qed
+qed simp
+
+definition inv\<^sub>2 :: "(nat \<Rightarrow> nat) \<Rightarrow> (nat \<Rightarrow> nat set) \<Rightarrow> nat \<Rightarrow> bool" where
+  "inv\<^sub>2 T A j = (lb T A j \<and> j \<le> n
+                \<and> (\<forall>T' A'. lb T' A' j \<longrightarrow> makespan T \<le> 3 / 2 * makespan T') 
+                \<and> (\<forall>x > j. T x = 0)
+                \<and> (j \<le> m \<longrightarrow> makespan T = Max\<^sub>0 (t ` {1..j})))"
+
+lemma inv\<^sub>2E:
+  assumes "inv\<^sub>2 T A j"
+  shows "lb T A j" "j \<le> n"
+        "lb T' A' j \<Longrightarrow> makespan T \<le> 3 / 2 * makespan T'"
+        "\<forall>x > j. T x = 0" "j \<le> m \<Longrightarrow> makespan T = Max\<^sub>0 (t ` {1..j})"
+  using assms unfolding inv\<^sub>2_def by blast+
+
+lemma inv\<^sub>2I:
+  assumes "lb T A j" "j \<le> n"
+          "\<forall>T' A'. lb T' A' j \<longrightarrow> makespan T \<le> 3 / 2 * makespan T'"
+          "\<forall>x > j. T x = 0"
+          "j \<le> m \<Longrightarrow> makespan T = Max\<^sub>0 (t ` {1..j})"
+  shows "inv\<^sub>2 T A j"
+  unfolding inv\<^sub>2_def using assms by blast
+
+lemma inv\<^sub>2_step:
+  assumes "sorted n" "inv\<^sub>2 T A j" "j < n"
+  shows "inv\<^sub>2 (T (min_arg T m := T(min_arg T m) + t(Suc j)))
+              (A (min_arg T m := A(min_arg T m) \<union> {Suc j})) (Suc j)"
+  case True note invrules = inv\<^sub>2E[OF assms(2)]
+  have LB: "lb ?T ?A (Suc j)"
+    using add_job[OF invrules(1) min_in_range[OF m_gt_0]] by blast
+  have MK: "\<forall>T' A'. lb T' A' (Suc j) \<longrightarrow> makespan ?T \<le> 3 / 2 * makespan T'"
+  proof rule+
+    fix T\<^sub>1 A\<^sub>1 assume "lb T\<^sub>1 A\<^sub>1 (Suc j)"
+    from smaller_optimum[OF this]
+    obtain T\<^sub>0 A\<^sub>0 where "lb T\<^sub>0 A\<^sub>0 j" "makespan T\<^sub>0 \<le> makespan T\<^sub>1" by blast
+    then have IH: "makespan T \<le> 3 / 2 * makespan T\<^sub>1"
+      using invrules(3) by force
+    show "makespan ?T \<le> 3 / 2 * makespan T\<^sub>1"
+      case True
+      have "m * T (min_arg T m) \<le> (\<Sum>i \<in> {1..m}. T i)" by (rule min_avg)
+      also have "... = (\<Sum>i \<in> {1..j}. t i)" by (rule lb_impl_job_sum[OF invrules(1)])
+      finally have "real m * T (min_arg T m) \<le> (\<Sum>i \<in> {1..j}. t i)"
+        by (auto dest: of_nat_mono)
+      with m_gt_0 have "T (min_arg T m) \<le> (\<Sum>i \<in> {1..j}. t i) / m"
+        by (simp add: field_simps)
+      then have "T (min_arg T m) \<le> makespan T\<^sub>1"
+      moreover have "2 * t (Suc j) \<le> makespan T\<^sub>1"
+          and assms(1,3) by simp
+      ultimately show ?thesis unfolding True by simp
+    next
+      case False show ?thesis using remove_small_job[OF False] IH by simp
+    qed
+  qed
+  have "\<forall>x > Suc j. ?T x = 0"
+    using invrules(4) min_in_range[OF m_gt_0, of T] True by simp
+  with inv\<^sub>2I[OF LB _ MK] show ?thesis using assms(3) True by simp
+next
+  case False
+  then have IN_RANGE: "Suc j \<in> {1..m}" by simp
+  note invrules = inv\<^sub>2E[OF assms(2)]
+  then have "T (Suc j) = 0" by blast
+
+  have LB: "lb ?T ?A (Suc j)"
+    using add_job[OF invrules(1) min_in_range[OF m_gt_0]] by blast
+
+    using min_zero_index by blast
+  with invrules(4) have EMPTY: "\<forall>x > Suc j. ?T x = 0" by simp
+    using min_zero by blast
+  with fun_upd_f_Max\<^sub>0[OF min_in_range[OF m_gt_0]] invrules(5) False
+  have TRIV: "makespan ?T = Max\<^sub>0 (t ` {1..Suc j})" unfolding f_Max\<^sub>0_equiv[symmetric] by simp
+  have MK: "\<forall>T' A'. lb T' A' (Suc j) \<longrightarrow> makespan ?T \<le> 3 / 2 * makespan T'"
+    by (auto simp: TRIV[folded f_Max\<^sub>0_equiv]
+            dest!: max_job_lower_bound_makespan[folded f_Max\<^sub>0_equiv])
+
+  from inv\<^sub>2I[OF LB _ MK EMPTY TRIV] show ?thesis using assms(3) by simp
+qed
+
+lemma sorted_greedy_approximation:
+"sorted n \<Longrightarrow> VARS T A i j
+{True}
+T := (\<lambda>_. 0);
+A := (\<lambda>_. {});
+j := 0;
+WHILE j < n INV {inv\<^sub>2 T A j} DO
+  i := min_arg T m;
+  j := (Suc j);
+  A := A (i := A(i) \<union> {j});
+  T := T (i := T(i) + t j)
+OD
+{lb T A n \<and> (\<forall>T' A'. lb T' A' n \<longrightarrow> makespan T \<le> 3 / 2 * makespan T')}"
+proof (vcg, goal_cases)
+  case (1 T A i j)
+  then show ?case by (simp add: lb_def inv\<^sub>2_def)
+next
+  case (2 T A i j)
+  then show ?case using inv\<^sub>2_step by simp
+next
+  case (3 T A i j)
+  then show ?case unfolding inv\<^sub>2_def by force
+qed
+
+

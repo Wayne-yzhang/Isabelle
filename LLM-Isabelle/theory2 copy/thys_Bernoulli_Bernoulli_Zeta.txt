@@ -1,0 +1,159 @@
+theory Bernoulli_Zeta
+imports 
+  "HOL-Complex_Analysis.Complex_Analysis"
+  Bernoulli_FPS
+begin
+
+lemma joinpaths_cong: "f = f' \<Longrightarrow> g = g' \<Longrightarrow> f +++ g = f' +++ g'"
+  by simp
+
+lemma linepath_cong: "a = a' \<Longrightarrow> b = b' \<Longrightarrow> linepath a b = linepath a' b'"
+  by simp
+
+lemma residue_bernoulli:
+  assumes "n \<noteq> 0"
+  shows   "residue (\<lambda>z. 1 / (z ^ m * (exp z - 1))) (2 * pi * real_of_int n * \<i>) = 
+             1 / (2 * pi * real_of_int n * \<i>) ^ m"
+proof -
+  have "residue (\<lambda>z. (1 / z ^ m) / (exp z - 1)) (2 * pi * real_of_int n * \<i>) =
+          1 / (2 * pi * real_of_int n * \<i>) ^ m / 1"
+    using exp_integer_2pi[of "real_of_int n"] and assms
+    by (rule_tac residue_simple_pole_deriv[where s="-{0}"])
+       (auto intro!: holomorphic_intros derivative_eq_intros connected_open_delete_finite 
+             simp add: mult_ac connected_punctured_universe)
+  thus ?thesis by (simp add: divide_simps)
+qed
+
+theorem nat_even_power_sums_complex:
+  assumes n': "n' > 0"
+  shows   "(\<lambda>k. 1 / of_nat (Suc k) ^ (2*n') :: complex) sums
+             of_real ((-1) ^ Suc n' * bernoulli (2*n') * (2 * pi) ^ (2 * n') / (2 * fact (2*n')))"
+proof -
+  define n where "n = 2 * n'"
+  from n' have n: "n \<ge> 2" "even n" by (auto simp: n_def)
+  define zeta :: complex where "zeta = (\<Sum>k. 1 / of_nat (Suc k) ^ n)"
+
+  have "summable (\<lambda>k. 1 / of_nat (Suc k) ^ n :: complex)"
+    using inverse_power_summable[of n] n
+    by (subst summable_Suc_iff) (simp add: divide_simps)
+  hence "(\<lambda>k. \<Sum>i<k. 1 / of_nat (Suc i) ^ n) \<longlonglongrightarrow> zeta"
+    by (subst (asm) summable_sums_iff) (simp add: sums_def zeta_def)
+  also have "(\<lambda>k. \<Sum>i<k. 1 / of_nat (Suc i) ^ n) = (\<lambda>k. \<Sum>i\<in>{0<..k}. 1 / of_nat i ^ n)"
+    by (intro ext sum.reindex_bij_witness[of _ "\<lambda>n. n - 1" Suc]) auto
+  finally have zeta_limit: "(\<lambda>k. \<Sum>i\<in>{0<..k}. 1 / of_nat i ^ n) \<longlonglongrightarrow> zeta" .
+
+  define f where "f = (\<lambda>z::complex. if z = 0 then 1 else z / (exp z - 1))"
+
+  define g where "g = (\<lambda>z::complex. 1 / (z ^ n * (exp z - 1)))"
+
+  define \<gamma> :: "nat \<Rightarrow> real \<Rightarrow> complex" 
+    where "\<gamma> = (\<lambda>m. rectpath (-real m - real (2*m+1)*pi*\<i>) (real m + real (2*m+1)*pi*\<i>))"
+
+  define A where "A = (\<lambda>m::nat. box (-(real m+1) - (2*m+2)*pi*\<i>) (real m+1 + (2*m+2)*pi*\<i>))"
+
+  define S where "S = (\<lambda>m::nat. (\<lambda>n. 2 * pi * of_int n * \<i>) ` {-m..m})"
+
+  have int_bound: "k \<in> {-int m..int m}" if "2 * pi * k * \<i> \<in> A m" for k m
+  proof -
+    from that have "(-real (Suc m)) * (2 * pi) < real_of_int k * (2 * pi) \<and> 
+                        real (Suc m) * (2 * pi) > real_of_int k * (2 * pi)"
+      by (auto simp: A_def in_box_complex_iff algebra_simps)
+    hence "-real (Suc m) < real_of_int k \<and> real_of_int k < real (Suc m)"
+      by simp
+    also have "-real (Suc m) = real_of_int (-int (Suc m))" by simp
+    also have "real (Suc m) = real_of_int (int (Suc m))" by simp
+    also have "real_of_int (- int (Suc m)) < real_of_int k \<and> 
+                 real_of_int k < real_of_int (int (Suc m)) \<longleftrightarrow> k \<in> {-int m..int m}" 
+      by (subst of_int_less_iff) auto
+    finally show "k \<in> {-int m..int m}" .
+  qed
+
+  have zeros: "\<exists>k\<in>{-int m..int m}. z = 2 * pi * of_int k * \<i>" if "z \<in> A m" "exp z = 1" for z m
+  proof -
+    from that(2) obtain k where z_eq: "z = 2 * pi * of_int k * \<i>"
+      unfolding exp_eq_1 by (auto simp: complex_eq_iff)
+    with int_bound[of k] and that(1) show ?thesis by auto
+  qed
+  have zeros': "z ^ n * (exp z - 1) \<noteq> 0" if "z \<in> A m - S m" for z m
+    using zeros[of z] that by (auto simp: S_def)
+
+  have subset: "S m \<subseteq> box (-real m - real(2*m+1)*pi*\<i>) (real m + real(2*m+1)*pi*\<i>)" if "m > 0" for m
+  proof (rule, goal_cases)
+    case (1 z)
+    then obtain k :: int where k: "k \<in> {-int m..int m}" "z = 2 * pi * k * \<i>"
+      unfolding S_def by blast
+    have "2 * pi * -m + -pi < 2 * pi * k + 0"
+      using k by (intro add_le_less_mono mult_left_mono) auto
+    moreover have "2 * pi * k + 0 < 2 * pi * m + pi"
+      using k by (intro add_le_less_mono mult_left_mono) auto
+      by (auto simp: A_def in_box_complex_iff algebra_simps)
+  qed
+  from n and zeros' have holo: "g holomorphic_on A m - S m" for m
+    unfolding g_def by (intro holomorphic_intros) auto
+
+  have path_subset: "path_image (\<gamma> m) \<subseteq> A m - S m" if "m > 0" for m
+  proof -
+    have "path_image (\<gamma> m) \<subseteq> cbox (-real m - (2 * m + 1) * pi * \<i>) (real m + (2 * m + 1) * pi * \<i>)"
+      unfolding \<gamma>_def by (rule path_image_rectpath_subset_cbox) auto
+    also have "\<dots> \<subseteq> A m" unfolding A_def
+      by (subst subset_box_complex) auto
+    finally have "path_image (\<gamma> m) \<subseteq> A m" .
+    moreover have "path_image (\<gamma> m) \<inter> S m = {}"
+    proof safe
+      fix z assume z: "z \<in> path_image (\<gamma> m)" "z \<in> S m"
+      from this(2) obtain k :: int where k: "z = 2 * pi * k * \<i>"
+        by (auto simp: S_def)
+      hence [simp]: "Re z = 0" by simp
+      from z(1) have "\<bar>Im z\<bar> = of_int (2*m+1) * pi"
+      also have "\<bar>Im z\<bar> = of_int (2 * \<bar>k\<bar>) * pi"
+        by (simp add: k abs_mult)
+      finally have "2 * \<bar>k\<bar> = 2 * m + 1"
+        by (subst (asm) mult_cancel_right, subst (asm) of_int_eq_iff) simp
+      hence False by presburger
+      thus "z \<in> {}" ..
+    qed
+    ultimately show "path_image (\<gamma> m) \<subseteq> A m - S m" by blast
+  qed
+
+  have eq: "(\<Sum>x\<in>{0<..m}. 1 / of_nat x ^ n) =
+              contour_integral (\<gamma> m) g * (2 * pi * \<i>) ^ n / (4 * pi * \<i>) -
+              complex_of_real (bernoulli n / fact n) * (2 * pi * \<i>) ^ n / 2" 
+    if m: "m > 0" for m
+  proof -
+    have "subdegree (fps_exp 1 - 1 :: complex fps) = 1"
+      by (intro subdegreeI) auto
+    hence expansion: "f has_fps_expansion bernoulli_fps" 
+      unfolding f_def bernoulli_fps_def by (auto intro!: fps_expansion_intros)
+
+    have "contour_integral (\<gamma> m) g =
+             2 * pi * \<i> * (\<Sum>z\<in>S m. winding_number (\<gamma> m) z * residue g z)"
+    proof (rule Residue_theorem)
+      have "cbox (-real m - (2 * m + 1) * pi * \<i>) (real m + (2 * m + 1) * pi * \<i>) \<subseteq> A m"
+        unfolding A_def by (subst subset_box_complex) simp_all
+      thus "\<forall>z. z \<notin> A m \<longrightarrow> winding_number (\<gamma> m) z = 0" unfolding \<gamma>_def
+        by (intro winding_number_rectpath_outside allI impI) auto
+    qed (insert holo path_subset m, auto simp: \<gamma>_def A_def S_def intro: convex_connected)
+    also have "winding_number (\<gamma> m) z = 1" if "z \<in> S m" for z
+      unfolding \<gamma>_def using subset[of m] that m by (subst winding_number_rectpath) blast+
+    hence "(\<Sum>z\<in>S m. winding_number (\<gamma> m) z * residue g z) = (\<Sum>z\<in>S m. residue g z)"
+      by (intro sum.cong) simp_all
+    also have "\<dots> = (\<Sum>k=-int m..int m. residue g (2 * pi * of_int k * \<i>))"
+      unfolding S_def by (subst sum.reindex) (auto simp: inj_on_def o_def)
+    also have "{-int m..int m} = insert 0 ({-int m..int m}-{0})"
+      by auto
+    also have "(\<Sum>k\<in>\<dots>. residue g (2 * pi * of_int k * \<i>)) = 
+                 residue g 0 + (\<Sum>k\<in>{-int m..m}-{0}. residue g (2 * pi * of_int k * \<i>))"
+      by (subst sum.insert) auto
+    also have "residue g 0 = residue (\<lambda>z. f z / z ^ Suc n) 0" unfolding f_def g_def
+      by (intro residue_cong eventually_mono[OF eventually_at_ball[of 1]]) auto
+    also have "\<dots> = fps_nth bernoulli_fps n"
+      by (rule residue_fps_expansion_over_power_at_0 [OF expansion])
+    also have "\<dots> = of_real (bernoulli n / fact n)" 
+      by simp
+    also have "(\<Sum>k\<in>{-int m..m}-{0}. residue g (2 * pi * of_int k * \<i>)) = 
+                 (\<Sum>k\<in>{-int m..m}-{0}. 1 / of_int k ^ n) / (2 * pi * \<i>) ^ n"
+    proof (subst sum_divide_distrib, intro refl sum.cong, goal_cases)
+      case (1 k)
+      hence *: "residue g (2 * pi * of_int k * \<i>) = 1 / (2 * complex_of_real pi * of_int k * \<i>) ^ n"
+        unfolding g_def by (subst residue_bernoulli) auto
+      thus ?case using 1 by (subst *) (simp add: divide_simps power_mult_distrib)

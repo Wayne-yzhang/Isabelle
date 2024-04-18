@@ -1,0 +1,1108 @@
+theory Rep_Fin_Groups
+
+imports
+  "HOL-Library.Function_Algebras"
+  "HOL-Library.Set_Algebras"
+  "HOL-Computational_Algebra.Polynomial"
+
+begin
+
+
+
+
+
+
+
+
+lemma conjcases [case_names BothTrue OneTrue OtherTrue BothFalse] :
+  assumes BothTrue: "P \<and> Q    \<Longrightarrow> R"
+  and     OneTrue:   "P \<and> \<not>Q  \<Longrightarrow> R"
+  and     OtherTrue: "\<not>P \<and> Q  \<Longrightarrow> R"
+  and     BothFalse: "\<not>P \<and> \<not>Q \<Longrightarrow> R"
+  shows   "R"
+  using   assms
+  by      fast
+
+
+
+lemma empty_set_diff_single : "A - {x} = {} \<Longrightarrow> A = {} \<or> A = {x}"
+  by auto
+
+lemma seteqI : "(\<And>a. a \<in> A \<Longrightarrow> a \<in> B) \<Longrightarrow> (\<And>b. b \<in> B \<Longrightarrow> b \<in> A) \<Longrightarrow> A = B"
+  using subset_antisym subsetI by fast
+
+lemma prod_ballI : "(\<And>a b. (a,b) \<in> AxB \<Longrightarrow> P a b) \<Longrightarrow> \<forall>(a,b)\<in>AxB. P a b"
+  by fast
+
+lemma good_card_imp_finite : "of_nat (card A) \<noteq> (0::'a::semiring_1) \<Longrightarrow> finite A"
+  using card_ge_0_finite[of A] by fastforce
+
+
+
+lemma zip_truncate_left : "zip xs ys = zip (take (length ys) xs) ys"
+  by (induct xs ys rule:list_induct2') auto
+
+lemma zip_truncate_right : "zip xs ys = zip xs (take (length xs) ys)"
+  by (induct xs ys rule:list_induct2') auto
+
+
+lemma zip_append_left :
+  "zip (xs@ys) zs = zip xs zs @ zip ys (drop (length xs) zs)"
+  using zip_append1 zip_truncate_right[of xs zs] by simp
+
+lemma zip_append_right :
+  "zip xs (ys@zs) = zip xs ys @ zip (drop (length ys) xs) zs"
+  using zip_append2 zip_truncate_left[of xs ys] by simp
+
+lemma length_concat_map_split_zip :
+  "length [f x y. (x,y)\<leftarrow>zip xs ys] = min (length xs) (length ys)"
+  by (induct xs ys rule: list_induct2') auto
+
+lemma concat_map_split_eq_map_split_zip :
+  "[f x y. (x,y)\<leftarrow>zip xs ys] = map (case_prod f) (zip xs ys)"
+  by (induct xs ys rule: list_induct2') auto
+
+lemma set_zip_map2 :
+  "(a,z) \<in> set (zip xs (map f ys)) \<Longrightarrow> \<exists>b. (a,b) \<in> set (zip xs ys) \<and> z = f b"
+  by (induct xs ys rule: list_induct2') auto
+
+
+lemma concat_eq :
+  "list_all2 (\<lambda>xs ys. length xs = length ys) xss yss \<Longrightarrow> concat xss = concat yss
+        \<Longrightarrow> xss = yss"
+  by  (induct xss yss rule: list_all2_induct) auto
+
+lemma match_concat :
+  fixes   bss :: "'b list list"
+  defines eq_len: "eq_len \<equiv> \<lambda>xs ys. length xs = length ys"
+  shows   "\<forall>as::'a list. length as = length (concat bss)
+                \<longrightarrow> (\<exists>css::'a list list. as = concat css \<and> list_all2 eq_len css bss)"
+proof (induct bss)
+  from eq_len
+    show "\<forall>as. length as = length (concat [])
+                \<longrightarrow> (\<exists>css. as = concat css \<and> list_all2 eq_len css [])"
+    by   simp
+next
+  fix fs :: "'b list" and fss :: "'b list list"
+  assume prevcase: "\<forall>as. length as = length (concat fss)
+                         \<longrightarrow> (\<exists>css. as = concat css \<and> list_all2 eq_len css fss)"
+  have "\<And>as. length as = length (concat (fs # fss))
+             \<Longrightarrow> (\<exists>css. as = concat css \<and> list_all2 eq_len css (fs # fss))"
+  proof
+    fix as :: "'a list"
+    assume as: "length as = length (concat (fs#fss))"
+    define xs ys where "xs = take (length fs) as" and "ys = drop (length fs) as"
+    define gss where "gss = (SOME css. ys = concat css \<and> list_all2 eq_len css fss)"
+    define hss where "hss = xs # gss"
+    with xs_def ys_def as gss_def eq_len prevcase
+      show "as = concat hss \<and> list_all2 eq_len hss (fs#fss)"
+      using someI_ex[of "\<lambda>css. ys = concat css \<and> list_all2 eq_len css fss"] by auto
+  qed
+  thus "\<forall>as. length as = length (concat (fs # fss))
+             \<longrightarrow> (\<exists>css. as = concat css \<and> list_all2 eq_len css (fs # fss))"
+    by fast
+qed 
+
+
+lemma strip_while_0_nnil :
+  "as \<noteq> [] \<Longrightarrow> set as \<noteq> 0 \<Longrightarrow> strip_while ((=) 0) as \<noteq> []"
+  by (induct as rule: rev_nonempty_induct) auto
+
+
+lemma const_sum_list :
+  "\<forall>x \<in> set xs. f x = a \<Longrightarrow> sum_list (map f xs) = a * (length xs)"
+  by (induct xs) auto
+
+lemma sum_list_prod_cong :
+  "\<forall>(x,y) \<in> set xys. f x y = g x y
+        \<Longrightarrow> (\<Sum>(x,y)\<leftarrow>xys. f x y) = (\<Sum>(x,y)\<leftarrow>xys. g x y)"
+  using arg_cong[of "map (case_prod f) xys" "map (case_prod g) xys" sum_list] by fastforce
+
+lemma sum_list_prod_map2 :
+  "(\<Sum>(a,y)\<leftarrow>zip as (map f bs). g a y) = (\<Sum>(a,b)\<leftarrow>zip as bs. g a (f b))"
+  by (induct as bs rule: list_induct2') auto
+
+lemma sum_list_fun_apply : "(\<Sum>x\<leftarrow>xs. f x) y = (\<Sum>x\<leftarrow>xs. f x y)"
+  by (induct xs) auto
+
+lemma sum_list_prod_fun_apply : "(\<Sum>(x,y)\<leftarrow>xys. f x y) z = (\<Sum>(x,y)\<leftarrow>xys. f x y z)"
+  by (induct xys) auto
+
+lemma (in comm_monoid_add) sum_list_plus :
+  "length xs = length ys
+        \<Longrightarrow> sum_list xs + sum_list ys = sum_list [a+b. (a,b)\<leftarrow>zip xs ys]"
+proof (induct xs ys rule: list_induct2)
+  case Cons thus ?case by (simp add: algebra_simps)
+qed simp
+
+lemma sum_list_const_mult_prod :
+  fixes f :: "'a \<Rightarrow> 'b \<Rightarrow> 'r::semiring_0"
+  shows "r * (\<Sum>(x,y)\<leftarrow>xys. f x y) = (\<Sum>(x,y)\<leftarrow>xys. r * (f x y))"
+  using sum_list_const_mult[of r "case_prod f"] prod.case_distrib[of "\<lambda>x. r*x" f]
+  by    simp
+
+lemma sum_list_mult_const_prod :
+  fixes f :: "'a \<Rightarrow> 'b \<Rightarrow> 'r::semiring_0"
+  shows "(\<Sum>(x,y)\<leftarrow>xys. f x y) * r = (\<Sum>(x,y)\<leftarrow>xys. (f x y) * r)"
+  using sum_list_mult_const[of "case_prod f" r] prod.case_distrib[of "\<lambda>x. x*r" f]
+  by    simp
+
+lemma sum_list_update :
+  fixes xs :: "'a::ab_group_add list"
+  shows "n < length xs \<Longrightarrow> sum_list (xs[n := y]) = sum_list xs - xs!n + y"
+proof (induct xs arbitrary: n)
+  case Cons thus ?case by (cases n) auto
+qed simp
+
+lemma sum_list_replicate0 : "sum_list (replicate n 0) = 0"
+  by (induct n) auto
+
+
+lemma listset_ConsI : "x \<in> X \<Longrightarrow> xs \<in> listset Xs \<Longrightarrow> x#xs \<in> listset (X#Xs)"
+  unfolding listset_def set_Cons_def by simp
+
+lemma listset_ConsD : "x#xs \<in> listset (A # As) \<Longrightarrow> x \<in> A \<and> xs \<in> listset As"
+  unfolding listset_def set_Cons_def by auto
+
+lemma listset_Cons_conv :
+  "xs \<in> listset (A # As) \<Longrightarrow> (\<exists>y ys. y \<in> A \<and> ys \<in> listset As \<and> xs = y#ys)"
+  unfolding listset_def set_Cons_def by auto
+
+lemma listset_length : "xs \<in> listset Xs \<Longrightarrow> length xs = length Xs"
+  using     listset_ConsD
+  unfolding listset_def set_Cons_def
+  by        (induct xs Xs rule: list_induct2') auto
+
+lemma set_sum_list_element :
+  "x \<in> (\<Sum>A\<leftarrow>As. A) \<Longrightarrow> \<exists>as \<in> listset As. x = (\<Sum>a\<leftarrow>as. a)"
+proof (induct As arbitrary: x)
+  case Nil hence "x = (\<Sum>a\<leftarrow>[]. a)" by simp
+  moreover have "[] \<in> listset []" by simp
+  ultimately show ?case by fast
+next
+  case (Cons A As)
+  from this obtain a as
+    where a_as: "a \<in> A" "as \<in> listset As" "x = (\<Sum>b\<leftarrow>(a#as). b)"
+    using set_plus_def[of A]
+    by    fastforce
+  have "listset (A#As) = set_Cons A (listset As)" by simp
+  with a_as(1,2) have "a#as \<in> listset (A#As)" unfolding set_Cons_def by fast
+  with a_as(3) show "\<exists>bs\<in>listset (A#As). x = (\<Sum>b\<leftarrow>bs. b)" by fast
+qed
+
+lemma set_sum_list_element_Cons :
+  assumes "x \<in> (\<Sum>X\<leftarrow>(A#As). X)"
+  shows   "\<exists>a as. a\<in>A \<and> as \<in> listset As \<and> x = a + (\<Sum>b\<leftarrow>as. b)"
+proof-
+  from assms obtain xs where xs: "xs \<in> listset (A#As)" "x = (\<Sum>b\<leftarrow>xs. b)"
+    using set_sum_list_element by fast
+  from xs(1) obtain a as where "a \<in> A" "as \<in> listset As" "xs = a # as"
+    using listset_Cons_conv by fast
+  with xs(2) show ?thesis by auto
+qed
+
+lemma sum_list_listset : "as \<in> listset As \<Longrightarrow> sum_list as \<in> (\<Sum>A\<leftarrow>As. A)"
+proof-
+  have "length as = length As \<Longrightarrow> as \<in> listset As \<Longrightarrow> sum_list as \<in> (\<Sum>A\<leftarrow>As. A)"
+  proof (induct as As rule: list_induct2)
+    case Nil show ?case by simp
+  next
+    case (Cons a as A As) thus ?case
+      using listset_ConsD[of a] set_plus_def by auto
+  qed
+  thus "as \<in> listset As \<Longrightarrow> sum_list as \<in> (\<Sum>A\<leftarrow>As. A)" using listset_length by fast
+qed
+
+lemma listsetI_nth :
+  "length xs = length Xs \<Longrightarrow> \<forall>n<length xs. xs!n \<in> Xs!n \<Longrightarrow> xs \<in> listset Xs"
+proof (induct xs Xs rule: list_induct2)
+  case Nil show ?case by simp
+next
+  case (Cons x xs X Xs) thus "x#xs \<in> listset (X#Xs)"
+    using listset_ConsI[of x X xs Xs] by fastforce
+qed
+
+lemma listsetD_nth : "xs \<in> listset Xs \<Longrightarrow> \<forall>n<length xs. xs!n \<in> Xs!n"
+proof-
+  have "length xs = length Xs \<Longrightarrow> xs \<in> listset Xs \<Longrightarrow> \<forall>n<length xs. xs!n \<in> Xs!n"
+  proof (induct xs Xs rule: list_induct2)
+     case Nil show ?case by simp
+  next
+    case (Cons x xs X Xs)
+    from Cons(3) have x_xs: "x \<in> X" "xs \<in> listset Xs"
+      using listset_ConsD[of x] by auto
+    with Cons(2) have 1: "(x#xs)!0 \<in> (X#Xs)!0" "\<forall>n<length xs. xs!n \<in> Xs!n"
+      by auto
+    have "\<And>n. n < length (x#xs) \<Longrightarrow> (x#xs)!n \<in> (X#Xs)!n"
+    proof-
+      fix n assume "n < length (x#xs)"
+      with 1 show "(x#xs)!n \<in> (X#Xs)!n" by (cases n) auto
+    qed
+    thus "\<forall>n < length (x#xs). (x#xs)!n \<in> (X#Xs)!n" by fast
+  qed
+  thus "xs \<in> listset Xs \<Longrightarrow> \<forall>n<length xs. xs!n \<in> Xs!n" using listset_length by fast
+qed
+
+lemma set_listset_el_subset :
+  "xs \<in> listset Xs \<Longrightarrow> \<forall>X\<in>set Xs. X \<subseteq> A \<Longrightarrow> set xs \<subseteq> A"
+proof-
+  have "\<lbrakk> length xs = length Xs; xs \<in> listset Xs; \<forall>X\<in>set Xs. X \<subseteq> A \<rbrakk> 
+              \<Longrightarrow> set xs \<subseteq> A"
+  proof (induct xs Xs rule: list_induct2)
+    case Cons thus ?case using listset_ConsD by force
+  qed simp
+  thus "xs \<in> listset Xs \<Longrightarrow> \<forall>X\<in>set Xs. X \<subseteq> A \<Longrightarrow> set xs \<subseteq> A"
+    using listset_length by fast
+qed
+
+
+
+
+lemma sum_fun_apply : "finite A \<Longrightarrow> (\<Sum>a\<in>A. f a) x = (\<Sum>a\<in>A. f a x)"
+  by (induct set: finite) auto
+
+lemma sum_single_nonzero :
+  "finite A \<Longrightarrow> (\<forall>x\<in>A. \<forall>y\<in>A. f x y = (if y = x then g x else 0)) 
+        \<Longrightarrow> (\<forall>x\<in>A. sum (f x) A = g x)"
+proof (induct A rule: finite_induct)
+  case (insert a A)
+  show "\<forall>x\<in>insert a A. sum (f x) (insert a A) = g x"
+  proof
+    fix x assume x: "x \<in> insert a A"
+    show "sum (f x) (insert a A) = g x"
+    proof (cases "x = a")
+      case True
+      moreover with insert(2,4) have "\<forall>y\<in>A. f x y = 0" by simp
+      ultimately show ?thesis using insert(1,2,4) by simp
+    next
+      case False with x insert show ?thesis by simp
+    qed
+  qed
+qed simp
+
+lemma distrib_comp_sum_right : "(T + T') \<circ> S = (T \<circ> S) + (T' \<circ> S)"
+  by auto
+
+
+definition supp :: "('a \<Rightarrow> 'b::zero) \<Rightarrow> 'a set" where "supp f = {x. f x \<noteq> 0}"
+
+lemma suppI: "f x \<noteq> 0 \<Longrightarrow> x \<in> supp f"
+  using supp_def by fast
+
+lemma suppI_contra: "x \<notin> supp f \<Longrightarrow> f x = 0"
+  using suppI by fast
+
+lemma suppD: "x \<in> supp f \<Longrightarrow> f x \<noteq> 0"
+  using supp_def by fast
+
+lemma suppD_contra: "f x = 0 \<Longrightarrow> x \<notin> supp f"
+  using suppD by fast
+
+lemma zerofun_imp_empty_supp : "supp 0 = {}"
+  unfolding supp_def by simp
+
+lemma supp_zerofun_subset_any : "supp 0 \<subseteq> A"
+  using zerofun_imp_empty_supp by fast
+
+lemma supp_sum_subset_union_supp :
+  fixes     f g :: "'a \<Rightarrow> 'b::monoid_add"
+  shows     "supp (f + g) \<subseteq> supp f \<union> supp g"
+  unfolding supp_def
+  by        auto
+
+lemma supp_neg_eq_supp :
+  fixes     f :: "'a \<Rightarrow> 'b::group_add"
+  shows     "supp (- f) = supp f"
+  unfolding supp_def
+  by        auto
+
+lemma supp_diff_subset_union_supp :
+  fixes     f g :: "'a \<Rightarrow> 'b::group_add"
+  shows     "supp (f - g) \<subseteq> supp f \<union> supp g"
+  unfolding supp_def
+  by        auto
+
+abbreviation restrict0 :: "('a\<Rightarrow>'b::zero) \<Rightarrow> 'a set \<Rightarrow> ('a\<Rightarrow>'b)" (infix "\<down>" 70)
+  where "restrict0 f A \<equiv> (\<lambda>a. if a \<in> A then f a else 0)"
+
+lemma supp_restrict0 : "supp (f\<down>A) \<subseteq> A"
+proof-
+  have "\<And>a. a \<notin> A \<Longrightarrow> a \<notin> supp (f\<down>A)" using suppD_contra[of "f\<down>A"] by simp
+  thus ?thesis by fast
+qed
+
+lemma bij_betw_restrict0 : "bij_betw f A B \<Longrightarrow> bij_betw (f \<down> A) A B"
+  using     bij_betw_imp_inj_on bij_betw_imp_surj_on
+  unfolding bij_betw_def inj_on_def
+  by        auto
+
+
+
+definition convolution ::
+  "('a::group_add \<Rightarrow> 'b::{comm_monoid_add,times}) \<Rightarrow> ('a\<Rightarrow>'b) \<Rightarrow> ('a\<Rightarrow>'b)"
+  where "convolution f g
+              = (\<lambda>x. \<Sum>y|x - y \<in> supp f \<and> y \<in> supp g. (f (x - y)) * g y)"
+
+lemma convolution_zero :
+  fixes     f g :: "'a::group_add \<Rightarrow> 'b::{comm_monoid_add,mult_zero}"
+  shows     "f = 0 \<or> g = 0 \<Longrightarrow> convolution f g = 0"
+  unfolding convolution_def
+  by        auto
+
+lemma convolution_symm :
+  fixes f g :: "'a::group_add \<Rightarrow> 'b::{comm_monoid_add,times}"
+  shows "convolution f g
+              = (\<lambda>x. \<Sum>y|y \<in> supp f \<and> -y + x \<in> supp g. (f y) * g (-y + x))"
+proof
+  fix x::'a
+  define c1 c2 i S1 S2
+    where "c1 y = (f (x - y)) * g y"
+      and "c2 y = (f y) * g (-y + x)"
+      and "i y = -y + x"
+      and "S1 = {y. x - y \<in> supp f \<and> y \<in> supp g}"
+      and "S2 = {y. y \<in> supp f \<and> -y + x \<in> supp g}"
+    for y
+  have "inj_on i S2" unfolding inj_on_def using i_def by simp
+  hence "(\<Sum>y\<in>(i ` S2). c1 y) = (\<Sum>y\<in>S2. (c1 \<circ> i) y)"
+    using sum.reindex by fast
+  moreover have S1_iS2: "S1 = i ` S2"
+  proof (rule seteqI)
+    fix y assume y_S1: "y \<in> S1"
+    define z where "z = x - y"
+    hence y_eq: "-z + x = y" by (auto simp add: algebra_simps)
+    hence "-z + x \<in> supp g" using y_S1 S1_def by fast
+    moreover have "z \<in> supp f" using z_def y_S1 S1_def by fast
+    ultimately have "z \<in> S2" using S2_def by fast
+    moreover have "y = i z" using i_def [abs_def] y_eq by fast
+    ultimately show "y \<in> i ` S2" by fast
+  next
+    fix y assume "y \<in> i ` S2"
+    from this obtain z where z_S2: "z \<in> S2" and y_eq: "y = -z + x"
+      using i_def by fast
+    from y_eq have "x - y = z" by (auto simp add: algebra_simps)
+    hence "x - y \<in> supp f \<and> y \<in> supp g" using y_eq z_S2 S2_def by fastforce
+    thus "y \<in> S1" using S1_def by fast
+  qed
+  ultimately have "(\<Sum>y\<in>S1. c1 y) = (\<Sum>y\<in>S2. (c1 \<circ> i) y)" by fast
+  with i_def c1_def c2_def have "(\<Sum>y\<in>S1. c1 y) = (\<Sum>y\<in>S2. c2 y)"
+    using diff_add_eq_diff_diff_swap[of x _ x] by simp
+  thus "convolution f g x
+              = (\<Sum>y|y \<in> supp f \<and> -y + x \<in> supp g. (f y) * g (-y + x))"
+    unfolding S1_def c1_def S2_def c2_def convolution_def by fast
+qed  
+
+lemma supp_convolution_subset_sum_supp :
+  fixes f g :: "'a::group_add \<Rightarrow> 'b::{comm_monoid_add,times}"
+  shows "supp (convolution f g) \<subseteq> supp f + supp g"
+proof-
+  define SS where "SS x = {y. x-y \<in> supp f \<and> y \<in> supp g}" for x
+  have "convolution f g = (\<lambda>x. sum (\<lambda>y. (f (x - y)) * g y) (SS x))"
+    unfolding SS_def convolution_def by fast
+  moreover have "\<And>x. x \<notin> supp f + supp g \<Longrightarrow> SS x = {}"
+  proof-
+    have "\<And>x. SS x \<noteq> {} \<Longrightarrow> x \<in> supp f + supp g"
+    proof-
+      fix x::'a assume "SS x \<noteq> {}"
+      from this obtain y where "x - y \<in> supp f" and y_G: "y \<in> supp g"
+        using SS_def by fast
+      from this obtain z where z_F: "z \<in> supp f" and z_eq: "x - y = z" by fast
+      from z_eq have "x = z + y" using diff_eq_eq by fast
+      with z_F y_G show "x \<in> supp f + supp g" by fast
+    qed
+    thus "\<And>x. x \<notin> supp f + supp g \<Longrightarrow> SS x = {}" by fast
+  qed
+  ultimately have "\<And>x. x \<notin> supp f + supp g
+                        \<Longrightarrow> convolution f g x = sum (\<lambda>y. (f (x - y)) * g y) {}"
+    by simp
+  hence "\<And>x. x \<notin> supp f + supp g \<Longrightarrow> convolution f g x = 0"
+    using sum.empty by simp
+  thus ?thesis unfolding supp_def by fast
+qed
+
+
+
+
+definition "aezfun_set = {f::'a\<Rightarrow>'b::zero. finite (supp f)}"
+
+lemma aezfun_setD: "f \<in> aezfun_set \<Longrightarrow> finite (supp f)"
+  unfolding aezfun_set_def by fast
+
+lemma aezfun_setI: "finite (supp f) \<Longrightarrow> f \<in> aezfun_set"
+  unfolding aezfun_set_def by fast
+
+lemma zerofun_is_aezfun : "0 \<in> aezfun_set"
+  unfolding supp_def aezfun_set_def by auto
+
+lemma sum_of_aezfun_is_aezfun :
+  fixes     f g :: "'a\<Rightarrow>'b::monoid_add"
+  shows     "f \<in> aezfun_set \<Longrightarrow> g \<in> aezfun_set \<Longrightarrow> f + g \<in> aezfun_set"
+  using     supp_sum_subset_union_supp[of f g] finite_subset[of _ "supp f \<union> supp g"]
+  unfolding aezfun_set_def
+  by        fastforce
+
+lemma neg_of_aezfun_is_aezfun :
+  fixes     f :: "'a\<Rightarrow>'b::group_add"
+  shows     "f \<in> aezfun_set \<Longrightarrow> - f \<in> aezfun_set"
+  using     supp_neg_eq_supp[of f]
+  unfolding aezfun_set_def
+  by        simp
+
+lemma diff_of_aezfun_is_aezfun :
+  fixes     f g :: "'a\<Rightarrow>'b::group_add"
+  shows     "f \<in> aezfun_set \<Longrightarrow> g \<in> aezfun_set \<Longrightarrow> f - g \<in> aezfun_set"
+  using     supp_diff_subset_union_supp[of f g] finite_subset[of _ "supp f \<union> supp g"]
+  unfolding aezfun_set_def
+  by        fastforce
+
+lemma restrict_and_extend0_aezfun_is_aezfun :
+  assumes "f \<in> aezfun_set"
+  shows   "f\<down>A \<in> aezfun_set"
+proof (rule aezfun_setI)
+  have "\<And>a. a \<notin> supp f \<inter> A \<Longrightarrow> a \<notin> supp (f\<down>A)"
+  proof-
+    fix a assume "a \<notin> supp f \<inter> A"
+    thus "a \<notin> supp (f\<down>A)" using suppI_contra[of a] suppD_contra[of "f\<down>A" a]
+      by (cases "a \<in> A") auto
+  qed
+  with assms show "finite (supp (f\<down>A))"
+    using aezfun_setD finite_subset[of "supp (f\<down>A)"] by auto
+qed
+
+
+
+definition deltafun :: "'b::zero \<Rightarrow> 'a \<Rightarrow> ('a \<Rightarrow> 'b)" (infix "\<delta>" 70)
+  where "b \<delta> a = (\<lambda>x. if x = a then b else 0)"
+
+lemma deltafun_apply_eq : "(b \<delta> a) a = b"
+  unfolding deltafun_def by simp
+
+lemma deltafun_apply_neq : "x \<noteq> a \<Longrightarrow> (b \<delta> a) x = 0"
+  unfolding deltafun_def by simp
+
+lemma deltafun0 : "0 \<delta> a = 0"
+  unfolding deltafun_def by auto
+
+lemma deltafun_plus :
+  fixes     b c :: "'b::monoid_add"
+  shows     "(b+c) \<delta> a = (b \<delta> a) + (c \<delta> a)"
+  unfolding deltafun_def
+  by        auto
+
+lemma supp_delta0fun :  "supp (0 \<delta> a) = {}"
+  unfolding supp_def deltafun_def by simp
+
+lemma supp_deltafun :  "b \<noteq> 0 \<Longrightarrow> supp (b \<delta> a) = {a}"
+  unfolding supp_def deltafun_def by simp
+
+lemma deltafun_is_aezfun : "b \<delta> a \<in> aezfun_set"
+proof (cases "b = 0")
+  case True
+  hence "supp (b \<delta> a) = {}" using supp_delta0fun[of a] by fast
+  thus ?thesis unfolding aezfun_set_def by simp
+next
+  case False thus ?thesis using supp_deltafun[of b a] unfolding aezfun_set_def by simp
+qed
+
+lemma aezfun_common_supp_spanning_set' :
+  "finite A \<Longrightarrow> \<exists>as. distinct as \<and> set as = A
+      \<and> ( \<forall>f::'a \<Rightarrow> 'b::semiring_1. supp f \<subseteq> A
+                   \<longrightarrow> (\<exists>bs. length bs = length as \<and> f = (\<Sum>(b,a)\<leftarrow>zip bs as. b \<delta> a)) )"
+proof (induct rule: finite_induct)
+  case empty show ?case unfolding supp_def by auto
+next
+  case (insert a A)
+  from insert(3) obtain as
+    where as: "distinct as" "set as = A"
+              "\<And>f::'a \<Rightarrow> 'b. supp f \<subseteq> A
+                    \<Longrightarrow> \<exists>bs. length bs = length as \<and> f = (\<Sum>(b,a)\<leftarrow>zip bs as. b \<delta> a)"
+    by fast
+  from as(1,2) insert(2) have "distinct (a#as)" "set (a#as) = insert a A" by auto
+  moreover
+    have "\<And>f::'a \<Rightarrow> 'b::semiring_1. supp f \<subseteq> insert a A
+                \<Longrightarrow> (\<exists>bs. length bs = length (a#as)
+                  \<and> f = (\<Sum>(b,a)\<leftarrow>zip bs (a#as). b \<delta> a))"
+  proof-
+    fix f :: "'a \<Rightarrow> 'b" assume supp_f : "supp f \<subseteq> insert a A"
+    define g where "g x = (if x = a then 0 else f x)" for x
+    have "supp g \<subseteq> A"
+    proof
+      fix x assume x: "x \<in> supp g"
+      with x supp_f g_def have "x \<in> insert a A" unfolding supp_def by auto
+      moreover from x g_def have "x \<noteq> a" unfolding supp_def by auto
+      ultimately show "x \<in> A" by fast
+    qed
+    with as(3) obtain bs
+      where bs: "length bs = length as" "g = (\<Sum>(b,a)\<leftarrow>zip bs as. b \<delta> a)"
+      by    fast
+    from bs(1) have "length ((f a) # bs) = length (a#as)" by auto
+    moreover from g_def bs(2) have "f = (\<Sum>(b,a)\<leftarrow>zip ((f a) # bs) (a#as). b \<delta> a)"
+      using deltafun_apply_eq[of "f a" a] deltafun_apply_neq[of _ a "f a"] by (cases) auto
+    ultimately
+      show "\<exists>bs. length bs = length (a#as) \<and> f = (\<Sum>(b,a)\<leftarrow>zip bs (a#as). b \<delta> a)"
+      by   fast
+  qed
+  ultimately show ?case by fast
+qed
+
+
+lemma convolution_eq_sum_over_supp_right :
+  fixes   g f :: "'a::group_add \<Rightarrow> 'b::{comm_monoid_add,mult_zero}"
+  assumes "g \<in> aezfun_set"
+  shows   "convolution f g = (\<lambda>x. \<Sum>y\<in>supp g. (f (x - y)) * g y )"
+proof
+  fix x::'a
+  define SS where "SS = {y. x - y \<in> supp f \<and> y \<in> supp g}"
+  have "finite (supp g)" using assms unfolding aezfun_set_def by fast
+  moreover have "SS \<subseteq> supp g" unfolding SS_def by fast
+  moreover have "\<And>y. y \<in> supp g - SS \<Longrightarrow> (f (x - y)) * g y = 0" using SS_def unfolding supp_def by auto
+  ultimately show "convolution f g x = (\<Sum>y\<in>supp g. (f (x - y)) * g y )"
+    unfolding convolution_def
+    using     SS_def sum.mono_neutral_left[of "supp g" SS "\<lambda>y. (f (x - y)) * g y"]
+    by        fast
+qed
+
+lemma convolution_symm_eq_sum_over_supp_left :
+  fixes   f g :: "'a::group_add \<Rightarrow> 'b::{comm_monoid_add,mult_zero}"
+  assumes "f \<in> aezfun_set"
+  shows   "convolution f g = (\<lambda>x. \<Sum>y\<in>supp f. (f y) * g (-y + x))"
+proof
+  fix x::'a
+  define SS where "SS = {y. y \<in> supp f \<and> -y + x \<in> supp g}"
+  have "finite (supp f)" using assms unfolding aezfun_set_def by fast
+  moreover have "SS \<subseteq> supp f" using SS_def by fast
+  moreover have "\<And>y. y \<in> supp f - SS \<Longrightarrow> (f y) * g (-y + x) = 0"
+    using SS_def unfolding supp_def by auto
+  ultimately
+    have "(\<Sum>y\<in>SS. (f y) * g (-y + x)) = (\<Sum>y\<in>supp f. (f y) * g (-y + x) )"
+    unfolding convolution_def
+    using     SS_def sum.mono_neutral_left[of "supp f" SS "\<lambda>y. (f y) * g (-y + x)"]
+    by        fast
+  thus "convolution f g x = (\<Sum>y\<in>supp f. (f y) * g (-y + x) )"
+    using SS_def convolution_symm[of f g] by simp
+qed
+
+lemma convolution_delta_left :
+  fixes b :: "'b::{comm_monoid_add,mult_zero}"
+  and   a :: "'a::group_add"
+  and   f :: "'a \<Rightarrow> 'b"
+  shows "convolution (b \<delta> a) f = (\<lambda>x. b * f (-a + x))"
+proof (cases "b = 0")
+  case True
+  moreover have "convolution (b \<delta> a) f = 0"
+  proof-
+    from True have "convolution (b \<delta> a) f = convolution 0 f"
+      using deltafun0[of a] arg_cong[of "0 \<delta> a" "0::'a\<Rightarrow>'b"]
+    thus ?thesis using convolution_zero by auto
+  qed
+  ultimately show ?thesis by auto
+next
+  case False thus ?thesis
+    using deltafun_is_aezfun[of b a] convolution_symm_eq_sum_over_supp_left
+          supp_deltafun[of b a] deltafun_apply_eq[of b a]
+    by    fastforce
+qed
+
+lemma convolution_delta_right :
+  fixes b :: "'b::{comm_monoid_add,mult_zero}"
+  and   f :: "'a::group_add \<Rightarrow> 'b" and a::'a
+  shows "convolution f (b \<delta> a) = (\<lambda>x. f (x - a) * b)"
+proof (cases "b = 0")
+  case True
+  moreover have "convolution f (b \<delta> a) = 0"
+  proof-
+    from True have "convolution f (b \<delta> a) = convolution f 0"
+      using deltafun0[of a] arg_cong[of "0 \<delta> a" "0::'a\<Rightarrow>'b"] 
+    thus ?thesis using convolution_zero by auto
+  qed
+  ultimately show ?thesis by auto
+next
+  case False thus ?thesis
+    using deltafun_is_aezfun[of b a] convolution_eq_sum_over_supp_right
+          supp_deltafun[of b a] deltafun_apply_eq[of b a]
+    by    fastforce
+qed
+
+lemma   convolution_delta_delta :
+  fixes b1 b2 :: "'b::{comm_monoid_add,mult_zero}"
+  and   a1 a2 :: "'a::group_add"
+  shows "convolution (b1 \<delta> a1) (b2 \<delta> a2) = (b1 * b2) \<delta> (a1 + a2)"
+proof
+  fix x::'a
+  have 1: "convolution (b1 \<delta> a1) (b2 \<delta> a2) x = (b1 \<delta> a1) (x - a2) * b2"
+    using convolution_delta_right[of "b1 \<delta> a1"] by simp
+  show "convolution (b1 \<delta> a1) (b2 \<delta> a2) x = ((b1 * b2) \<delta> (a1 + a2)) x"
+  proof (cases "x = a1 + a2")
+    case True
+    hence "x - a2 = a1" by (simp add: algebra_simps)
+    with 1 have "convolution (b1 \<delta> a1) (b2 \<delta> a2) x = b1 * b2"
+      using deltafun_apply_eq[of b1 a1] by simp
+    with True show ?thesis
+      using deltafun_apply_eq[of "b1 * b2" "a1 + a2"] by simp
+  next
+    case False
+    hence "x - a2 \<noteq> a1" by (simp add: algebra_simps)
+    with 1 have "convolution (b1 \<delta> a1) (b2 \<delta> a2) x = 0"
+      using deltafun_apply_neq[of "x - a2" a1 b1] by simp
+    with False show ?thesis using deltafun_apply_neq by simp
+  qed
+qed
+
+lemma convolution_of_aezfun_is_aezfun :
+  fixes     f g :: "'a::group_add \<Rightarrow> 'b::{comm_monoid_add,times}"
+  shows     "f \<in> aezfun_set \<Longrightarrow> g \<in> aezfun_set \<Longrightarrow> convolution f g \<in> aezfun_set"
+  using     supp_convolution_subset_sum_supp[of f g]
+            finite_set_plus[of "supp f" "supp g"] finite_subset
+  unfolding aezfun_set_def
+  by        fastforce
+
+lemma convolution_assoc :
+  fixes   f h g :: "'a::group_add \<Rightarrow> 'b::semiring_0"
+  assumes f_aez: "f \<in> aezfun_set" and h_aez: "h \<in> aezfun_set"
+  shows   "convolution (convolution f g) h = convolution f (convolution g h)"
+proof
+  define fg gh where "fg = convolution f g" and "gh = convolution g h"
+  fix x::'a
+  have "convolution fg h x
+              = (\<Sum>y\<in>supp f. (\<Sum>z\<in>supp h. f y * g (-y + x - z) * h z) )"
+  proof-
+    have "convolution fg h x = (\<Sum>z\<in>supp h. fg (x - z) * h z )"
+      using h_aez convolution_eq_sum_over_supp_right[of h fg] by simp
+    moreover have "\<And>z. fg (x - z) * h z
+                        = (\<Sum>y\<in>supp f. f y * g (-y + x - z) * h z)"
+    proof-
+      fix z::'a
+      have "fg (x - z) = (\<Sum>y\<in>supp f. f y * g (-y + (x - z)) )"
+        using fg_def f_aez convolution_symm_eq_sum_over_supp_left by fastforce
+      hence "fg (x - z) * h z = (\<Sum>y\<in>supp f. f y * g (-y + (x - z)) * h z )"
+        using sum_distrib_right by simp
+      thus "fg (x - z) * h z = (\<Sum>y\<in>supp f. f y * g (-y + x - z) * h z )"
+        by (simp add: algebra_simps)
+    qed
+    ultimately 
+      have  "convolution fg h x
+                  = (\<Sum>z\<in>supp h. (\<Sum>y\<in>supp f. f y * g (-y + x - z) * h z) )"
+      using sum.cong
+      by    simp
+    thus ?thesis using sum.swap by simp
+  qed
+  moreover have "convolution f gh x
+                      = (\<Sum>y\<in>supp f. (\<Sum>z\<in>supp h. f y * g (-y + x - z) * h z) )"
+  proof-
+    have "convolution f gh x = (\<Sum>y\<in>supp f. f y * gh (-y + x) )"
+      using f_aez convolution_symm_eq_sum_over_supp_left[of f gh] by simp
+    moreover have "\<And>y. f y * gh (-y + x)
+                        = (\<Sum>z\<in>supp h. f y * g (-y + x - z) * h z)"
+    proof-
+      fix y::'a
+      have triple_cong: "\<And>z. f y * (g (-y + x - z) * h z)
+                              = f y * g (-y + x - z) * h z"
+        using mult.assoc[of "f y"] by simp
+      have "gh (-y + x) = (\<Sum>z\<in>supp h. g (-y + x - z) * h z)"
+        using gh_def h_aez convolution_eq_sum_over_supp_right by fastforce
+      hence "f y * gh (-y + x) = (\<Sum>z\<in>supp h. f y * (g (-y + x - z) * h z))"
+        using sum_distrib_left by simp
+      also have "\<dots> = (\<Sum>z\<in>supp h. f y * g (-y + x - z) * h z)"
+        using triple_cong sum.cong by simp
+      finally
+        show "f y * gh (-y + x) = (\<Sum>z\<in>supp h. f y * g (-y + x - z) * h z)"
+        by   fast
+    qed
+    ultimately show ?thesis using sum.cong by simp
+  qed
+  ultimately show "convolution fg h x = convolution f gh x" by simp
+qed
+
+lemma convolution_distrib_left :
+  fixes   g h f :: "'a::group_add \<Rightarrow> 'b::semiring_0"
+  assumes "g \<in> aezfun_set" "h \<in> aezfun_set"
+  shows   "convolution f (g + h) = convolution f g + convolution f h"
+proof
+  define gh GH where "gh = g + h" and "GH = supp g \<union> supp h"
+  have fin_GH: "finite GH" using GH_def assms unfolding aezfun_set_def by fast
+  have gh_aezfun: "gh \<in> aezfun_set" using gh_def assms sum_of_aezfun_is_aezfun by fast
+  fix x::'a
+  have zero_ext_g : "\<And>y. y \<in> GH - supp g \<Longrightarrow> (f (x - y)) * g y = 0"
+  and  zero_ext_h : "\<And>y. y \<in> GH - supp h \<Longrightarrow> (f (x - y)) * h y = 0"
+  and  zero_ext_gh: "\<And>y. y \<in> GH - supp gh \<Longrightarrow> (f (x - y)) * gh y = 0"
+    unfolding supp_def by auto
+  have "convolution f gh x = (\<Sum>y\<in>supp gh. (f (x - y)) * gh y)"
+    using assms gh_aezfun convolution_eq_sum_over_supp_right[of gh f] by simp
+  also from gh_def GH_def have "\<dots> = (\<Sum>y\<in>GH. (f (x - y)) * gh y)"
+    using fin_GH supp_sum_subset_union_supp zero_ext_gh
+          sum.mono_neutral_left[of GH "supp gh" "(\<lambda>y. (f (x - y)) * gh y)"]
+    by    fast
+  also from gh_def
+    have  "\<dots> = (\<Sum>y\<in>GH. (f (x - y)) * g y) + (\<Sum>y\<in>GH. (f (x - y)) * h y)"
+    using sum.distrib by (simp add: algebra_simps)
+  finally show "convolution f gh x = (convolution f g + convolution f h) x"
+    using assms GH_def fin_GH zero_ext_g zero_ext_h
+          sum.mono_neutral_right[of GH "supp g" "(\<lambda>y. (f (x - y)) * g y)"]
+          sum.mono_neutral_right[of GH "supp h" "(\<lambda>y. (f (x - y)) * h y)"]
+          convolution_eq_sum_over_supp_right[of g f]
+          convolution_eq_sum_over_supp_right[of h f]
+    by    fastforce
+qed
+
+lemma convolution_distrib_right :
+  fixes   f g h :: "'a::group_add \<Rightarrow> 'b::semiring_0"
+  assumes "f \<in> aezfun_set" "g \<in> aezfun_set"
+  shows   "convolution (f + g) h = convolution f h + convolution g h"
+proof
+  define fg FG where "fg = f + g" and "FG = supp f \<union> supp g"
+  have fin_FG: "finite FG" using FG_def assms unfolding aezfun_set_def by fast
+  have fg_aezfun: "fg \<in> aezfun_set" using fg_def assms sum_of_aezfun_is_aezfun by fast
+  fix x::'a
+  have zero_ext_f : "\<And>y. y \<in> FG - supp f \<Longrightarrow> (f y) * h (-y + x) = 0"
+  and  zero_ext_g : "\<And>y. y \<in> FG - supp g \<Longrightarrow> (g y) * h (-y + x) = 0"
+  and  zero_ext_fg: "\<And>y. y \<in> FG - supp fg \<Longrightarrow> (fg y) * h (-y + x) = 0"
+    unfolding supp_def by auto
+  from assms have "convolution fg h x = (\<Sum>y\<in>supp fg. (fg y) * h (-y + x))"
+    using fg_aezfun convolution_symm_eq_sum_over_supp_left[of fg h] by simp
+  also from fg_def FG_def have "\<dots> = (\<Sum>y\<in>FG. (fg y) * h (-y + x))"
+    using fin_FG supp_sum_subset_union_supp zero_ext_fg
+          sum.mono_neutral_left[of FG "supp fg" "(\<lambda>y. (fg y) * h (-y + x))"]
+    by    fast
+  also from fg_def
+    have  "\<dots> = (\<Sum>y\<in>FG. (f y) * h (-y + x)) + (\<Sum>y\<in>FG. (g y) * h (-y + x))"
+    using sum.distrib by (simp add: algebra_simps)
+  finally show "convolution fg h x = (convolution f h + convolution g h) x"
+    using assms FG_def fin_FG zero_ext_f zero_ext_g
+          sum.mono_neutral_right[of FG "supp f" "(\<lambda>y. (f y) * h (-y + x))"]
+          sum.mono_neutral_right[of FG "supp g" "(\<lambda>y. (g y) * h (-y + x))"]
+          convolution_symm_eq_sum_over_supp_left[of f h]
+          convolution_symm_eq_sum_over_supp_left[of g h]
+    by    fastforce
+qed
+
+
+typedef (overloaded) ('a::zero,'b) aezfun = "aezfun_set :: ('b\<Rightarrow>'a) set"
+  morphisms aezfun Abs_aezfun
+  using     zerofun_is_aezfun
+  by        fast
+
+setup_lifting type_definition_aezfun
+
+lemma aezfun_finite_supp : "finite (supp (aezfun a))"
+  using aezfun.aezfun unfolding aezfun_set_def by fast
+
+lemma aezfun_transfer : "aezfun a = aezfun b \<Longrightarrow> a = b" by transfer fast
+
+instantiation aezfun :: (zero, type) zero
+begin
+  lift_definition zero_aezfun :: "('a,'b) aezfun" is "0::'b\<Rightarrow>'a"
+    using zerofun_is_aezfun by fast
+  instance ..
+end
+
+lemma zero_aezfun_transfer : "Abs_aezfun ((0::'b::zero) \<delta> (0::'a::zero)) = 0"
+proof-
+  define zb za where "zb = (0::'b)" and "za = (0::'a)"
+  hence "zb \<delta> za = 0" using deltafun0[of za] by fast
+  moreover have "aezfun 0 = 0" using zero_aezfun.rep_eq by fast
+  ultimately have "zb \<delta> za = aezfun 0" by simp
+  with zb_def za_def show ?thesis using aezfun_inverse by simp
+qed
+
+lemma zero_aezfun_apply [simp]: "aezfun 0 x = 0"
+  by transfer simp
+
+instantiation aezfun :: (monoid_add, type) plus
+begin
+  lift_definition plus_aezfun :: "('a, 'b) aezfun \<Rightarrow> ('a, 'b) aezfun \<Rightarrow> ('a, 'b) aezfun"
+    is    "\<lambda>f g. f + g"
+    using sum_of_aezfun_is_aezfun
+    by    auto
+  instance ..
+end
+
+lemma plus_aezfun_apply [simp]: "aezfun (a+b) x = aezfun a x + aezfun b x"
+  by transfer simp
+
+instance aezfun :: (monoid_add, type) semigroup_add
+proof
+  fix a b c :: "('a, 'b) aezfun"
+  have "aezfun (a + b + c) = aezfun (a + (b + c))"
+  proof
+    fix x::'b show "aezfun (a + b + c) x = aezfun (a + (b + c)) x" 
+      using add.assoc[of "aezfun a x"] by simp
+  qed
+  thus "a + b + c = a + (b + c)" by transfer fast
+qed
+
+instance aezfun :: (monoid_add, type) monoid_add
+proof
+  fix a b c :: "('a, 'b) aezfun"
+  show "0 + a = a" by transfer simp
+  show "a + 0 = a" by transfer simp
+qed
+
+lemma sum_list_aezfun_apply [simp] :
+  "aezfun (sum_list as) x = (\<Sum>a\<leftarrow>as. aezfun a x)"
+  by (induct as) auto
+
+lemma sum_list_map_aezfun_apply [simp] :
+  "aezfun (\<Sum>a\<leftarrow>as. f a) x = (\<Sum>a\<leftarrow>as. aezfun (f a) x)"
+  by (induct as) auto
+
+lemma sum_list_map_aezfun [simp] :
+  "aezfun (\<Sum>a\<leftarrow>as. f a) = (\<Sum>a\<leftarrow>as. aezfun (f a))"
+  using sum_list_map_aezfun_apply[of f] sum_list_fun_apply[of "aezfun \<circ> f"] by auto
+
+lemma sum_list_prod_map_aezfun_apply :  
+  "aezfun (\<Sum>(x,y)\<leftarrow>xys. f x y) a = (\<Sum>(x,y)\<leftarrow>xys. aezfun (f x y) a)"
+  by (induct xys) auto
+
+lemma sum_list_prod_map_aezfun :
+  "aezfun (\<Sum>(x,y)\<leftarrow>xys. f x y) = (\<Sum>(x,y)\<leftarrow>xys. aezfun (f x y))"
+  using sum_list_prod_map_aezfun_apply[of f]
+        sum_list_prod_fun_apply[of "\<lambda>y z. aezfun (f y z)"]
+  by    auto
+
+instance aezfun :: (comm_monoid_add, type) comm_monoid_add
+proof
+  fix a b :: "('a, 'b) aezfun"
+  have "aezfun (a + b) = aezfun (b + a)"
+  proof
+    fix x::'b show "aezfun (a + b) x = aezfun (b + a) x" 
+      using add.commute[of "aezfun a x"] by simp
+  qed
+  thus "a + b = b + a" by transfer fast
+  show "0 + a = a" by simp
+qed
+
+lemma sum_aezfun_apply [simp] :
+  "finite A \<Longrightarrow> aezfun (\<Sum>A) x = (\<Sum>a\<in>A. aezfun a x)"
+  by (induct set: finite) auto
+
+instantiation aezfun :: (group_add, type) minus
+begin
+  lift_definition minus_aezfun :: "('a, 'b) aezfun \<Rightarrow> ('a, 'b) aezfun \<Rightarrow> ('a, 'b) aezfun"
+    is    "\<lambda>f g. f - g"
+    using diff_of_aezfun_is_aezfun
+    by    fast
+  instance ..
+end
+
+lemma minus_aezfun_apply [simp]: "aezfun (a-b) x = aezfun a x - aezfun b x"
+  by transfer simp
+
+instantiation aezfun :: (group_add, type) uminus
+begin
+  lift_definition uminus_aezfun :: "('a, 'b) aezfun \<Rightarrow> ('a, 'b) aezfun" is "\<lambda>f. - f"
+    using neg_of_aezfun_is_aezfun by fast
+  instance ..
+end
+
+lemma uminus_aezfun_apply [simp]: "aezfun (-a) x = - aezfun a x"
+  by transfer simp
+
+lemma aezfun_left_minus [simp] :
+  fixes a :: "('a::group_add, 'b) aezfun"
+  shows "- a + a = 0"
+  by    transfer simp
+
+lemma aezfun_diff_minus [simp] :
+  fixes a b :: "('a::group_add, 'b) aezfun"
+  shows "a - b = a + - b"
+  by    transfer auto
+
+instance aezfun :: (group_add, type) group_add
+proof
+  fix a b :: "('a::group_add, 'b) aezfun"
+  show "- a + a = 0" "a + - b = a - b" by auto
+qed
+
+instance aezfun :: (ab_group_add, type) ab_group_add
+proof
+  fix a b :: "('a::ab_group_add, 'b) aezfun"
+  show "- a + a = 0" by simp
+  show "a - b = a + - b" using aezfun_diff_minus by fast
+qed
+
+instantiation aezfun :: ("{one,zero}", zero) one
+begin
+  lift_definition one_aezfun :: "('a,'b) aezfun" is "1 \<delta> 0"
+    using deltafun_is_aezfun by fast
+  instance ..
+end
+
+lemma one_aezfun_transfer : "Abs_aezfun (1 \<delta> 0) = 1"
+proof-
+  define z n where "z = (0::'b::zero)" and "n = (1::'a::{one,zero})"
+  hence "aezfun 1 = n \<delta> z" using one_aezfun.rep_eq by fast
+  hence "Abs_aezfun (n \<delta> z) = Abs_aezfun (aezfun 1)" by simp
+  with z_def n_def show ?thesis using aezfun_inverse by simp
+qed
+
+lemma one_aezfun_apply [simp]: "aezfun 1 x = (1 \<delta> 0) x"
+  by transfer rule
+
+lemma one_aezfun_apply_eq [simp]: "aezfun 1 0 = 1"
+  using deltafun_apply_eq by simp
+
+lemma one_aezfun_apply_neq [simp]: "x \<noteq> 0 \<Longrightarrow> aezfun 1 x = 0"
+  using deltafun_apply_neq by simp
+
+instance aezfun :: (zero_neq_one, zero) zero_neq_one
+proof
+  have "(0::'a) \<noteq> 1" "aezfun 0 0 = 0" "aezfun (1::('a,'b) aezfun) 0 = 1"
+    using zero_neq_one one_aezfun_apply_eq by auto
+  thus "(0::('a,'b) aezfun) \<noteq> 1"
+    using zero_neq_one one_aezfun_apply_eq
+          fun_eq_iff[of "aezfun (0::('a,'b) aezfun)" "aezfun 1"]
+    by    auto
+qed
+
+instantiation aezfun :: ("{comm_monoid_add,times}", group_add) times
+begin
+  lift_definition times_aezfun :: "('a, 'b) aezfun \<Rightarrow> ('a, 'b) aezfun \<Rightarrow> ('a, 'b) aezfun"
+    is    "\<lambda> f g. convolution f g"
+    using convolution_of_aezfun_is_aezfun
+    by    fast
+  instance ..
+end
+
+lemma convolution_transfer :
+  assumes "f \<in> aezfun_set" "g \<in> aezfun_set"
+  shows   "Abs_aezfun (convolution f g) = Abs_aezfun f * Abs_aezfun g"
+proof (rule aezfun_transfer)
+  from assms have "aezfun (Abs_aezfun (convolution f g)) = convolution f g"
+    using convolution_of_aezfun_is_aezfun Abs_aezfun_inverse by fast
+  moreover from assms
+    have  "aezfun (Abs_aezfun f * Abs_aezfun g) = convolution f g"
+    using times_aezfun.rep_eq[of "Abs_aezfun f"] Abs_aezfun_inverse[of f]
+          Abs_aezfun_inverse[of g]
+    by    simp
+  ultimately show "aezfun (Abs_aezfun (convolution f g))
+                        = aezfun (Abs_aezfun f * Abs_aezfun g)"
+    by simp
+qed
+
+instance aezfun :: ("{comm_monoid_add,mult_zero}", group_add) mult_zero
+proof
+  fix a :: "('a, 'b) aezfun"
+  show "0 * a = 0" using convolution_zero[of _ "aezfun a"] by transfer fast
+  show "a * 0 = 0" using convolution_zero[of   "aezfun a"] by transfer fast
+qed
+
+instance aezfun :: (semiring_0, group_add) semiring_0
+proof
+  fix a b c :: "('a, 'b) aezfun"
+  show "a * b * c = a * (b * c)"
+    using convolution_assoc[of "aezfun a" "aezfun c" "aezfun b"] by transfer
+  show "(a + b) * c = a * c + b * c"
+    using convolution_distrib_right[of "aezfun a" "aezfun b" "aezfun c"] by transfer
+  show "a * (b + c) = a * b + a * c"
+    using convolution_distrib_left[of "aezfun b" "aezfun c" "aezfun a"] by transfer
+qed
+
+instance aezfun :: (ring, group_add) ring ..
+
+instance aezfun :: ("{semiring_0,monoid_mult,zero_neq_one}", group_add) monoid_mult
+proof
+  fix a :: "('a, 'b) aezfun"
+  show "1 * a = a"
+  proof-
+    have "aezfun (1 * a) = convolution (1 \<delta> 0) (aezfun a)" by transfer fast
+    hence "aezfun (1 * a) = (aezfun a)"
+      using one_neq_zero convolution_delta_left[of 1 0 "aezfun a"] minus_zero by simp
+    thus "1 * a = a" by transfer
+  qed
+  show "a * 1 = a"
+  proof-
+    have "aezfun (a * 1) = convolution (aezfun a) (1 \<delta> 0)" by transfer fast
+    hence "aezfun (a * 1) = (aezfun a)" 
+      using one_neq_zero convolution_delta_right[of "aezfun a"] by simp
+    thus ?thesis by transfer
+  qed
+qed
+
+instance aezfun :: (ring_1, group_add) ring_1 ..
+
+
+abbreviation aezdeltafun :: "'b::zero \<Rightarrow> 'a \<Rightarrow> ('b,'a) aezfun" (infix "\<delta>\<delta>" 70)
+  where "b \<delta>\<delta> a \<equiv> Abs_aezfun (b \<delta> a)"
+
+lemma aezdeltafun : "aezfun (b \<delta>\<delta> a) = b \<delta> a"
+  using deltafun_is_aezfun[of b a] Abs_aezfun_inverse by fast
+
+lemma aezdeltafun_plus : "(b+c) \<delta>\<delta> a = (b \<delta>\<delta> a) + (c \<delta>\<delta> a)"
+  using aezdeltafun[of "b+c" a] deltafun_plus aezdeltafun[of b a] aezdeltafun[of c a]
+        plus_aezfun.rep_eq[of "b \<delta>\<delta> a"]
+        aezfun_transfer[of "(b+c) \<delta>\<delta> a" "(b \<delta>\<delta> a) + (c \<delta>\<delta> a)"]
+  by    fastforce
+
+lemma   times_aezdeltafun_aezdeltafun :
+  fixes b1 b2 :: "'b::{comm_monoid_add,mult_zero}"
+  shows "(b1 \<delta>\<delta> a1) * (b2 \<delta>\<delta> a2) = (b1 * b2) \<delta>\<delta> (a1 + a2)"
+  using deltafun_is_aezfun convolution_transfer[of "b1 \<delta> a1", THEN sym]
+        convolution_delta_delta[of b1 a1 b2 a2]
+  by    fastforce
+
+lemma aezfun_restrict_and_extend0 : "(aezfun x)\<down>A \<in> aezfun_set"
+  using aezfun.aezfun restrict_and_extend0_aezfun_is_aezfun[of "aezfun x"] by fast
+
+lemma aezdeltafun_decomp :
+  fixes b :: "'b::semiring_1"
+  shows "b \<delta>\<delta> a = (b \<delta>\<delta> 0) * (1 \<delta>\<delta> a)"
+  using convolution_delta_delta[of b 0 1 a] deltafun_is_aezfun[of b 0]
+        deltafun_is_aezfun[of 1 a] convolution_transfer
+  by    fastforce
+
+lemma aezdeltafun_decomp' :
+  fixes b :: "'b::semiring_1"
+  shows "b \<delta>\<delta> a = (1 \<delta>\<delta> a) * (b \<delta>\<delta> 0)"
+  using convolution_delta_delta[of 1 a b 0] deltafun_is_aezfun[of b 0]
+        deltafun_is_aezfun[of 1 a] convolution_transfer
+  by    fastforce
+
+lemma supp_aezfun1 :
+  "supp ( aezfun ( 1 :: ('a::zero_neq_one,'b::zero) aezfun ) ) = 0"
+  using supp_deltafun[of "1::'a" "0::'b"] by transfer simp
+
+lemma supp_aezfun_diff :
+  "supp (aezfun (x - y)) \<subseteq> supp (aezfun x) \<union> supp (aezfun y)"
+proof-
+  have "supp (aezfun (x - y)) = supp ( (aezfun x) - (aezfun y) )" by transfer fast
+  thus ?thesis using supp_diff_subset_union_supp by fast
+qed
+
+lemma supp_aezfun_times :
+  "supp (aezfun (x * y)) \<subseteq> supp (aezfun x) + supp (aezfun y)"
+proof-
+  have "supp (aezfun (x * y)) = supp (convolution (aezfun x) (aezfun y))"
+    by transfer fast
+  thus ?thesis using supp_convolution_subset_sum_supp by fast
+qed
+
+
+        below.\<close>
+text \<open>
+  The following definition constrains the support of arbitrary almost-everywhere-zero functions, as
+\<close>
+subsection \<open>Polynomials\<close>
+subsection \<open>Algebra of sets\<close>
+subsubsection \<open>General facts\<close>
+subsubsection \<open>Additive independence of sets\<close>
+subsubsection \<open>Inner direct sums\<close>
+text\<open>Some syntactic sugar for \<open>inner_dirsum\<close>, borrowed from theory @{theory HOL.List}.\<close>
+translations \<comment> \<open>Beware of argument permutation!\<close>
+section \<open>Groups\<close>
+subsection \<open>Locales and basic facts\<close>
+subsubsection \<open>Locale \<open>Group\<close> and finite variant \<open>FinGroup\<close>\<close>
+text \<open>
+\<close>
+subsubsection \<open>Abelian variant locale \<open>AbGroup\<close>\<close>
+subsection \<open>Right cosets\<close>
+subsection \<open>Group homomorphisms\<close>
+subsubsection \<open>Preliminaries\<close>
+subsubsection \<open>Locales\<close>
+text \<open>The \<open>supp\<close> condition is not strictly necessary, but helps with equality
+  \<open>Ring1\<close> subset since we will not be interested in having the ability to change the ring of
+  Similar to definition of \<open>card\<close> for finite sets, we default \<open>dim\<close> to 0 if no finite
+  instead, the \<open>good_char\<close> assumption implies that the cardinality of G is not zero, which
+  implies G is finite. (See lemma \<open>good_card_imp_finite\<close>.)
+  @{term U} in @{term "set Us"} are subsets of @{term V}. (See lemma \<open>AbGroup_subset_inner_dirsum\<close>.)
+  We have already demonstrated that the relation \<open>FGModule.isomorphic\<close> is reflexive
+  (lemma \<open>FGModule.isomorphic_refl\<close>), symmetric (lemma \<open>FGModule.isomorphic_sym\<close>),
+  and transitive (lemma \<open>FGModule.isomorphic_trans\<close>). In this section, we provide a finite

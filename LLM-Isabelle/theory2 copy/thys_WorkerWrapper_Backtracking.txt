@@ -1,0 +1,257 @@
+theory Backtracking
+imports
+  HOLCF
+  Nats
+  WorkerWrapperNew
+begin
+
+
+
+datatype expr = const nat | add expr expr | disj expr expr | fail
+
+lemma case_expr_cont[cont2cont]:
+  assumes f1: "\<And>y. cont (\<lambda>x. f1 x y)"
+  assumes f2: "\<And>y z. cont (\<lambda>x. f2 x y z)"
+  assumes f3: "\<And>y z. cont (\<lambda>x. f3 x y z)"
+  assumes f4: "cont (\<lambda>x. f4 x)"
+  shows "cont (\<lambda>x. case_expr (f1 x) (f2 x) (f3 x) (f4 x) expr)"
+  using assms by (cases expr) simp_all
+
+
+fun
+  expr_encode :: "expr \<Rightarrow> nat"
+where
+  "expr_encode (const n) = prod_encode (0, n)"
+| "expr_encode (add e1 e2) = prod_encode (1, (prod_encode (expr_encode e1, expr_encode e2)))"
+| "expr_encode (disj e1 e2) = prod_encode (2, (prod_encode (expr_encode e1, expr_encode e2)))"
+| "expr_encode fail = prod_encode (3, 0)"
+
+lemma expr_encode_inj:
+  "expr_encode x = expr_encode y \<Longrightarrow> x = y"
+  by (induct x arbitrary: y) ((case_tac y, auto dest!: inj_onD[OF inj_prod_encode, where A=UNIV])[1])+
+
+instance expr :: countable
+  by (rule countable_classI[OF expr_encode_inj])
+
+
+default_sort predomain
+
+domain 'a llist =
+    lnil
+  | lcons (lazy "'a") (lazy "'a llist")
+
+
+fixrec lappend :: "'a llist \<rightarrow> 'a llist \<rightarrow> 'a llist" where
+  "lappend\<cdot>lnil\<cdot>ys = ys"
+| "lappend\<cdot>(lcons\<cdot>x\<cdot>xs)\<cdot>ys = lcons\<cdot>x\<cdot>(lappend\<cdot>xs\<cdot>ys)"
+
+fixrec lconcat :: "'a llist llist \<rightarrow> 'a llist" where
+  "lconcat\<cdot>lnil = lnil"
+| "lconcat\<cdot>(lcons\<cdot>x\<cdot>xs) = lappend\<cdot>x\<cdot>(lconcat\<cdot>xs)"
+
+fixrec lmap :: "('a \<rightarrow> 'b) \<rightarrow> 'a llist \<rightarrow> 'b llist" where
+  "lmap\<cdot>f\<cdot>lnil = lnil"
+| "lmap\<cdot>f\<cdot>(lcons\<cdot>x\<cdot>xs) = lcons\<cdot>(f\<cdot>x)\<cdot>(lmap\<cdot>f\<cdot>xs)"
+
+lemma lappend_strict'[simp]: "lappend\<cdot>\<bottom> = (\<Lambda> a. \<bottom>)"
+  by fixrec_simp
+
+lemma lconcat_strict[simp]: "lconcat\<cdot>\<bottom> = \<bottom>"
+  by fixrec_simp
+
+lemma lmap_strict[simp]: "lmap\<cdot>f\<cdot>\<bottom> = \<bottom>"
+  by fixrec_simp
+
+
+type_synonym S = "nat discr llist"
+
+definition returnS :: "nat discr \<rightarrow> S" where
+  "returnS = (\<Lambda> x. lcons\<cdot>x\<cdot>lnil)"
+
+definition bindS :: "S \<rightarrow> (nat discr \<rightarrow> S) \<rightarrow> S" where
+  "bindS = (\<Lambda> x g. lconcat\<cdot>(lmap\<cdot>g\<cdot>x))"
+
+
+definition addS :: "S \<rightarrow> S \<rightarrow> S" where
+  "addS \<equiv> (\<Lambda> x y. bindS\<cdot>x\<cdot>(\<Lambda> xv. bindS\<cdot>y\<cdot>(\<Lambda> yv. returnS\<cdot>(xv + yv))))"
+
+definition disjS :: "S \<rightarrow> S \<rightarrow> S" where
+  "disjS \<equiv> lappend"
+
+definition failS :: "S" where
+  "failS \<equiv> lnil"
+
+
+definition
+  evalS_body :: "(expr discr \<rightarrow> nat discr llist)
+              \<rightarrow> (expr discr \<rightarrow> nat discr llist)"
+where
+  "evalS_body \<equiv> \<Lambda> r e. case undiscr e of
+     const n \<Rightarrow> returnS\<cdot>(Discr n)
+   | add e1 e2 \<Rightarrow> addS\<cdot>(r\<cdot>(Discr e1))\<cdot>(r\<cdot>(Discr e2))
+   | disj e1 e2 \<Rightarrow> disjS\<cdot>(r\<cdot>(Discr e1))\<cdot>(r\<cdot>(Discr e2))
+   | fail \<Rightarrow> failS"
+
+abbreviation evalS :: "expr discr \<rightarrow> nat discr llist" where
+  "evalS \<equiv> fix\<cdot>evalS_body"
+
+
+type_synonym Obs = "nat discr llist"
+type_synonym Failure = "Obs"
+type_synonym Success = "nat discr \<rightarrow> Failure \<rightarrow> Obs"
+type_synonym K = "Success \<rightarrow> Failure \<rightarrow> Obs"
+
+
+definition returnK :: "nat discr \<rightarrow> K" where
+  "returnK \<equiv> (\<Lambda> x. \<Lambda> s f. s\<cdot>x\<cdot>f)"
+
+definition bindK :: "K \<rightarrow> (nat discr \<rightarrow> K) \<rightarrow> K" where
+  "bindK \<equiv> \<Lambda> x g. \<Lambda> s f. x\<cdot>(\<Lambda> xv f'. g\<cdot>xv\<cdot>s\<cdot>f')\<cdot>f"
+
+
+definition addK :: "K \<rightarrow> K \<rightarrow> K" where
+  "addK \<equiv> (\<Lambda> x y. bindK\<cdot>x\<cdot>(\<Lambda> xv. bindK\<cdot>y\<cdot>(\<Lambda> yv. returnK\<cdot>(xv + yv))))"
+
+definition disjK :: "K \<rightarrow> K \<rightarrow> K" where
+  "disjK \<equiv> (\<Lambda> g h. \<Lambda> s f. g\<cdot>s\<cdot>(h\<cdot>s\<cdot>f))"
+
+definition failK :: "K" where
+  "failK \<equiv> \<Lambda> s f. f"
+
+
+definition
+  evalK_body :: "(expr discr \<rightarrow> K) \<rightarrow> (expr discr \<rightarrow> K)"
+where
+  "evalK_body \<equiv> \<Lambda> r e. case undiscr e of
+     const n \<Rightarrow> returnK\<cdot>(Discr n)
+   | add e1 e2 \<Rightarrow> addK\<cdot>(r\<cdot>(Discr e1))\<cdot>(r\<cdot>(Discr e2))
+   | disj e1 e2 \<Rightarrow> disjK\<cdot>(r\<cdot>(Discr e1))\<cdot>(r\<cdot>(Discr e2))
+   | fail \<Rightarrow> failK"
+
+abbreviation evalK :: "expr discr \<rightarrow> K" where
+  "evalK \<equiv> fix\<cdot>evalK_body"
+
+
+fixrec SK :: "S \<rightarrow> K" where
+  "SK\<cdot>lnil = failK"
+| "SK\<cdot>(lcons\<cdot>x\<cdot>xs) = (\<Lambda> s f. s\<cdot>x\<cdot>(SK\<cdot>xs\<cdot>s\<cdot>f))"
+
+definition
+  unwrap :: "(expr discr \<rightarrow> nat discr llist) \<rightarrow> (expr discr \<rightarrow> K)"
+where
+  "unwrap \<equiv> \<Lambda> r e. SK\<cdot>(r\<cdot>e)"
+
+lemma SK_strict[simp]: "SK\<cdot>\<bottom> = \<bottom>"
+  by fixrec_simp
+
+lemma unwrap_strict[simp]: "unwrap\<cdot>\<bottom> = \<bottom>"
+  unfolding unwrap_def by simp
+
+
+definition KS :: "K \<rightarrow> S" where
+  "KS \<equiv> (\<Lambda> k. k\<cdot>lcons\<cdot>lnil)"
+
+definition wrap :: "(expr discr \<rightarrow> K) \<rightarrow> (expr discr \<rightarrow> nat discr llist)" where
+  "wrap \<equiv> \<Lambda> r e. KS\<cdot>(r\<cdot>e)"
+
+lemma KS_strict[simp]: "KS\<cdot>\<bottom> = \<bottom>"
+  unfolding KS_def by simp
+
+lemma wrap_strict[simp]: "wrap\<cdot>\<bottom> = \<bottom>"
+  unfolding wrap_def by simp
+
+
+lemma KS_SK_id:
+  "KS\<cdot>(SK\<cdot>xs) = xs"
+  by (induct xs) (simp_all add: KS_def failK_def)
+
+lemma wrap_unwrap_id:
+  "wrap oo unwrap = ID"
+  unfolding wrap_def unwrap_def
+  by (simp add: KS_SK_id cfun_eq_iff)
+
+
+lemma cfun_not_below:
+  "f\<cdot>x \<notsqsubseteq> g\<cdot>x \<Longrightarrow> f \<notsqsubseteq> g"
+  by (auto simp: cfun_below_iff)
+
+lemma unwrap_wrap_not_under_id:
+  "unwrap oo wrap \<notsqsubseteq> ID"
+proof -
+  let ?witness = "\<Lambda> e. (\<Lambda> s f. lnil :: K)"
+  have "(unwrap oo wrap)\<cdot>?witness\<cdot>(Discr fail)\<cdot>\<bottom>\<cdot>(lcons\<cdot>0\<cdot>lnil)
+       \<notsqsubseteq> ?witness\<cdot>(Discr fail)\<cdot>\<bottom>\<cdot>(lcons\<cdot>0\<cdot>lnil)"
+    by (simp add: failK_def wrap_def unwrap_def KS_def)
+  hence "(unwrap oo wrap)\<cdot>?witness \<notsqsubseteq> ?witness"
+    by (fastforce intro!: cfun_not_below)
+  thus ?thesis by (simp add: cfun_not_below)
+qed
+
+
+definition eval_work :: "expr discr \<rightarrow> K" where
+  "eval_work \<equiv> fix\<cdot>(unwrap oo evalS_body oo wrap)"
+
+definition eval_ww :: "expr discr \<rightarrow> nat discr llist" where
+  "eval_ww \<equiv> wrap\<cdot>eval_work"
+
+lemma "evalS = eval_ww"
+  unfolding eval_ww_def eval_work_def
+  using worker_wrapper_id[OF wrap_unwrap_id]
+  by simp
+
+
+lemma SK_returnS_returnK:
+  "SK\<cdot>(returnS\<cdot>x) = returnK\<cdot>x"
+  by (simp add: returnS_def returnK_def failK_def)
+
+lemma SK_lappend_distrib:
+ "SK\<cdot>(lappend\<cdot>xs\<cdot>ys)\<cdot>s\<cdot>f = SK\<cdot>xs\<cdot>s\<cdot>(SK\<cdot>ys\<cdot>s\<cdot>f)"
+  by (induct xs) (simp_all add: failK_def)
+
+lemma SK_bindS_bindK:
+  "SK\<cdot>(bindS\<cdot>x\<cdot>g) = bindK\<cdot>(SK\<cdot>x)\<cdot>(SK oo g)"
+  by (induct x)
+     (simp_all add: cfun_eq_iff
+                    bindS_def bindK_def failK_def
+                    SK_lappend_distrib)
+
+lemma SK_addS_distrib:
+  "SK\<cdot>(addS\<cdot>x\<cdot>y) = addK\<cdot>(SK\<cdot>x)\<cdot>(SK\<cdot>y)"
+  by (clarsimp simp: cfcomp1
+                     addS_def addK_def failK_def
+                     SK_bindS_bindK SK_returnS_returnK)
+
+lemma SK_disjS_disjK:
+ "SK\<cdot>(disjS\<cdot>xs\<cdot>ys) = disjK\<cdot>(SK\<cdot>xs)\<cdot>(SK\<cdot>ys)"
+  by (simp add: cfun_eq_iff disjS_def disjK_def SK_lappend_distrib)
+
+lemma SK_failS_failK:
+  "SK\<cdot>failS = failK"
+  unfolding failS_def by simp
+
+
+lemma evalS_body_evalK_body:
+  "unwrap oo evalS_body oo wrap = evalK_body oo unwrap oo wrap"
+proof(intro cfun_eqI)
+  fix r e' s f
+  obtain e :: "expr"
+    where ee': "e' = Discr e" by (cases e')
+  have "(unwrap oo evalS_body oo wrap)\<cdot>r\<cdot>(Discr e)\<cdot>s\<cdot>f
+      = (evalK_body oo unwrap oo wrap)\<cdot>r\<cdot>(Discr e)\<cdot>s\<cdot>f"
+    by (cases e)
+       (simp_all add: evalS_body_def evalK_body_def unwrap_def
+                      SK_returnS_returnK SK_addS_distrib
+                      SK_disjS_disjK SK_failS_failK)
+  with ee' show "(unwrap oo evalS_body oo wrap)\<cdot>r\<cdot>e'\<cdot>s\<cdot>f
+                = (evalK_body oo unwrap oo wrap)\<cdot>r\<cdot>e'\<cdot>s\<cdot>f"
+    by simp
+qed
+
+theorem evalS_evalK:
+  "evalS = wrap\<cdot>evalK"
+  using worker_wrapper_fusion_new[OF wrap_unwrap_id unwrap_strict]
+        evalS_body_evalK_body
+  by simp
+
+
+end

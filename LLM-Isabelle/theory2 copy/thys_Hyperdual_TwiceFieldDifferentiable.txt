@@ -1,0 +1,180 @@
+theory TwiceFieldDifferentiable
+  imports "HOL-Analysis.Analysis"
+begin
+
+
+definition field_differentiable_on :: "('a \<Rightarrow> 'a::real_normed_field) \<Rightarrow> 'a set \<Rightarrow> bool"
+  (infix "field'_differentiable'_on" 50)
+  where "f field_differentiable_on s \<equiv> \<forall>x\<in>s. f field_differentiable (at x within s)"
+
+lemma field_differentiable_on_subset:
+  assumes "f field_differentiable_on S"
+      and "T \<subseteq> S"
+    shows "f field_differentiable_on T"
+  by (meson assms field_differentiable_on_def field_differentiable_within_subset in_mono)
+
+definition twice_field_differentiable_at :: "['a \<Rightarrow> 'a::real_normed_field, 'a ] \<Rightarrow> bool"
+  (infixr "(twice'_field'_differentiable'_at)" 50)
+  where "f twice_field_differentiable_at x \<equiv>
+           \<exists>S. f field_differentiable_on S \<and> x \<in> interior S \<and> (deriv f) field_differentiable (at x)"
+
+lemma once_field_differentiable_at:
+  "f twice_field_differentiable_at x \<Longrightarrow> f field_differentiable (at x)"
+  by (metis at_within_interior field_differentiable_on_def interior_subset subsetD twice_field_differentiable_at_def)
+
+lemma deriv_field_differentiable_at:
+  "f twice_field_differentiable_at x \<Longrightarrow> deriv f field_differentiable (at x)"
+  using twice_field_differentiable_at_def by blast
+
+lemma eventually_deriv_compose:
+  assumes "\<exists>S. f field_differentiable_on S \<and> x \<in> interior S"
+      and "g twice_field_differentiable_at (f x)"
+    shows "\<forall>\<^sub>F x in nhds x. deriv (\<lambda>x. g (f x)) x = deriv g (f x) * deriv f x"
+proof -
+  obtain S S'
+   where Df_on_S:  "f field_differentiable_on S" and x_int_S: "x \<in> interior S"
+     and Dg_on_S': "g field_differentiable_on S'" and fx_int_S': "f x \<in> interior S'"
+    using assms twice_field_differentiable_at_def by blast
+
+  let ?T = "{x \<in> interior S. f x \<in> interior S'}"
+
+  have "continuous_on (interior S) f"
+    by (meson Df_on_S continuous_on_eq_continuous_within continuous_on_subset field_differentiable_imp_continuous_at
+         field_differentiable_on_def interior_subset)
+  then have "open (interior S \<inter> {x. f x \<in> interior S'})"
+    by (metis continuous_open_preimage open_interior vimage_def)
+  then have x_int_T: "x \<in> interior ?T"
+    by (metis (no_types) Collect_conj_eq Collect_mem_eq Int_Collect fx_int_S' interior_eq x_int_S)
+  moreover have  Dg_on_fT: "g field_differentiable_on f`?T"
+   by (metis (no_types, lifting) Dg_on_S' field_differentiable_on_subset image_Collect_subsetI interior_subset)
+  moreover have Df_on_T: "f field_differentiable_on ?T"
+    using  field_differentiable_on_subset Df_on_S
+    by (metis Collect_subset interior_subset)
+  moreover have "\<forall>x \<in> interior ?T. deriv (\<lambda>x. g (f x)) x = deriv g (f x) * deriv f x"
+  proof
+    fix x
+    assume x_int_T: "x \<in> interior ?T"
+    have "f field_differentiable at x"
+      by (metis (no_types, lifting) Df_on_T at_within_interior field_differentiable_on_def
+          interior_subset subsetD x_int_T)
+    moreover have "g field_differentiable at (f x)"
+      by (metis (no_types, lifting) Dg_on_S' at_within_interior field_differentiable_on_def
+          interior_subset mem_Collect_eq subsetD x_int_T)
+    ultimately have "deriv (g \<circ> f) x = deriv g (f x) * deriv f x"
+      using deriv_chain[of f x g] by simp
+    then show "deriv (\<lambda>x. g (f x)) x = deriv g (f x) * deriv f x"
+      by (simp add: comp_def)
+  qed
+  ultimately show ?thesis
+    using eventually_nhds by blast
+qed
+
+lemma eventually_deriv_compose':
+  assumes "f twice_field_differentiable_at x"
+      and "g twice_field_differentiable_at (f x)"
+    shows "\<forall>\<^sub>F x in nhds x. deriv (\<lambda>x. g (f x)) x = deriv g (f x) * deriv f x"
+  using assms eventually_deriv_compose twice_field_differentiable_at_def by blast
+
+lemma twice_field_differentiable_at_compose:
+  assumes "f twice_field_differentiable_at x"
+      and "g twice_field_differentiable_at (f x)"
+    shows "(\<lambda>x. g (f x)) twice_field_differentiable_at x"
+proof -
+  obtain S S'
+   where Df_on_S:  "f field_differentiable_on S" and x_int_S: "x \<in> interior S"
+     and Dg_on_S': "g field_differentiable_on S'" and fx_int_S': "f x \<in> interior S'"
+    using assms twice_field_differentiable_at_def by blast
+
+  let ?T = "{x \<in> interior S. f x \<in> interior S'}"
+
+  have "continuous_on (interior S) f"
+    by (meson Df_on_S continuous_on_eq_continuous_within continuous_on_subset field_differentiable_imp_continuous_at
+         field_differentiable_on_def interior_subset)
+  then have "open (interior S \<inter> {x. f x \<in> interior S'})"
+    by (metis continuous_open_preimage open_interior vimage_def)
+  then have x_int_T: "x \<in> interior ?T"
+    by (metis (no_types) Collect_conj_eq Collect_mem_eq Int_Collect fx_int_S' interior_eq x_int_S)
+
+  have  Dg_on_fT: "g field_differentiable_on f`?T"
+    by (metis (no_types, lifting) Dg_on_S' field_differentiable_on_subset image_Collect_subsetI interior_subset)
+
+  have Df_on_T: "f field_differentiable_on ?T"
+    using  field_differentiable_on_subset Df_on_S
+    by (metis Collect_subset interior_subset)
+
+  have "(\<lambda>x. g (f x)) field_differentiable_on ?T"
+    unfolding field_differentiable_on_def
+  proof
+    fix x assume x_int: "x \<in> {x \<in> interior S. f x \<in> interior S'}"
+    have "f field_differentiable at x"
+      by (metis Df_on_S at_within_interior field_differentiable_on_def interior_subset mem_Collect_eq subsetD x_int)
+    moreover have "g field_differentiable at (f x)"
+      by (metis Dg_on_S' at_within_interior field_differentiable_on_def interior_subset mem_Collect_eq subsetD x_int)
+    ultimately have "(g \<circ> f) field_differentiable at x"
+      by (simp add: field_differentiable_compose)
+    then have "(\<lambda>x. g (f x)) field_differentiable at x"
+      by (simp add: comp_def)
+    then show "(\<lambda>x. g (f x)) field_differentiable at x within {x \<in> interior S. f x \<in> interior S'}"
+      using field_differentiable_at_within by blast
+  qed
+  moreover have "deriv (\<lambda>x. g (f x)) field_differentiable at x"
+  proof -
+    have "(\<lambda>x. deriv g (f x)) field_differentiable at x"
+      by (metis DERIV_chain2 assms deriv_field_differentiable_at field_differentiable_def once_field_differentiable_at)
+    then have "(\<lambda>x. deriv g (f x) * deriv f x) field_differentiable at x"
+      using assms field_differentiable_mult[of "\<lambda>x. deriv g (f x)"]
+      by (simp add: deriv_field_differentiable_at)
+    moreover have "deriv (deriv (\<lambda>x. g (f x))) x = deriv (\<lambda>x. deriv g (f x) * deriv f x) x"
+      using assms Df_on_S x_int_S deriv_cong_ev eventually_deriv_compose by fastforce
+    ultimately show ?thesis
+      using assms eventually_deriv_compose DERIV_deriv_iff_field_differentiable Df_on_S x_int_S
+            DERIV_cong_ev[of x x "deriv (\<lambda>x. g (f x))" "\<lambda>x. deriv g (f x) * deriv f x"]
+      by blast
+  qed
+  ultimately show ?thesis
+    using twice_field_differentiable_at_def x_int_T by blast
+qed
+
+lemma twice_field_differentiable_at_const [simp, intro]:
+  "(\<lambda>x. a) twice_field_differentiable_at x"
+  by (auto intro: exI [of _ UNIV] simp add: twice_field_differentiable_at_def field_differentiable_on_def)
+
+lemma twice_field_differentiable_at_ident [simp, intro]:
+  "(\<lambda>x. x) twice_field_differentiable_at x"
+proof -
+  have "\<forall>x\<in>UNIV. (\<lambda>x. x) field_differentiable at x"
+   and "deriv ((\<lambda>x. x)) field_differentiable at x"
+    by simp_all
+  then show ?thesis
+    unfolding twice_field_differentiable_at_def field_differentiable_on_def
+    by fastforce
+qed
+
+lemma twice_field_differentiable_at_cmult [simp, intro]:
+proof -
+    by simp
+    by simp
+  ultimately show ?thesis
+    unfolding twice_field_differentiable_at_def field_differentiable_on_def
+    by fastforce
+qed
+
+lemma twice_field_differentiable_at_uminus [simp, intro]:
+  "uminus twice_field_differentiable_at x"
+proof -
+  have "\<forall>x\<in>UNIV. uminus field_differentiable at x"
+    by (simp add: field_differentiable_minus)
+  moreover have "deriv uminus field_differentiable at x"
+    by simp
+  ultimately show ?thesis
+    unfolding twice_field_differentiable_at_def field_differentiable_on_def
+    by auto
+qed
+
+lemma twice_field_differentiable_at_uminus_fun [intro]:
+  assumes "f twice_field_differentiable_at x"
+    shows "(\<lambda>x. - f x) twice_field_differentiable_at x"
+  by (simp add: assms twice_field_differentiable_at_compose)
+
+
+lemma deriv_scaleR_right_id [simp]:

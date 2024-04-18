@@ -1,0 +1,934 @@
+theory COP
+imports
+  Contracts
+begin
+
+
+
+
+
+
+context Contracts
+begin
+
+definition bilateral_substitutes_on :: "'x set \<Rightarrow> 'x cfun \<Rightarrow> bool" where
+  "bilateral_substitutes_on A f
+     \<longleftrightarrow> \<not>(\<exists>B\<subseteq>A. \<exists>a b. {a, b} \<subseteq> A \<and> Xd a \<notin> Xd ` B \<and> Xd b \<notin> Xd ` B
+                     \<and> b \<notin> f (B \<union> {b}) \<and> b \<in> f (B \<union> {a, b}))"
+
+abbreviation bilateral_substitutes :: "'x cfun \<Rightarrow> bool" where
+  "bilateral_substitutes \<equiv> bilateral_substitutes_on UNIV"
+
+lemma bilateral_substitutes_on_def2:
+  "bilateral_substitutes_on A f
+     \<longleftrightarrow> (\<forall>B\<subseteq>A. \<forall>a\<in>A. \<forall>b\<in>A. Xd a \<notin> Xd ` B \<and> Xd b \<notin> Xd ` B \<and> b \<notin> f (B \<union> {b}) \<longrightarrow> b \<notin> f (B \<union> {a, b}))"
+(is "?lhs \<longleftrightarrow> ?rhs")
+proof %invisible (rule iffI, clarsimp)
+  fix B a b
+  assume lhs: ?lhs and XXX: "B \<subseteq> A" "a \<in> A" "b \<in> A" "Xd a \<notin> Xd ` B" "Xd b \<notin> Xd ` B" "b \<notin> f (insert b B)" "b \<in> f (insert a (insert b B))"
+  show False
+  proof(cases "a \<in> B")
+    case True with XXX show ?thesis by (simp add: insert_absorb)
+  next
+    case False with lhs XXX show ?thesis
+      unfolding bilateral_substitutes_on_def
+      by (cases "b \<in> B") (auto simp: insert_commute insert_absorb)
+  qed
+qed (fastforce simp: bilateral_substitutes_on_def)
+
+lemmas bilateral_substitutes_onI = iffD2[OF bilateral_substitutes_on_def2, rule_format]
+lemmas bilateral_substitutes_onD = iffD1[OF bilateral_substitutes_on_def2, rule_format, simplified, unfolded conj_imp_eq_imp_imp]
+
+lemmas bilateral_substitutes_def = bilateral_substitutes_on_def2[where A=UNIV, simplified]
+lemmas bilateral_substitutesI = iffD2[OF bilateral_substitutes_def, rule_format]
+lemmas bilateral_substitutesD = iffD1[OF bilateral_substitutes_def, rule_format, simplified, unfolded conj_imp_eq_imp_imp]
+
+
+lemma substitutes_on_bilateral_substitutes_on:
+  assumes "substitutes_on A f"
+  shows "bilateral_substitutes_on A f"
+using %invisible assms by (auto intro!: bilateral_substitutes_onI dest: substitutes_onD[rotated -1])
+
+
+lemma bilateral_substitutes_on_def3:
+  "bilateral_substitutes_on A f
+     \<longleftrightarrow> (\<forall>B\<subseteq>A. \<forall>a\<in>A. \<forall>b\<in>A. b \<notin> f (B \<union> {b}) \<and> b \<in> f (B \<union> {a, b}) \<longrightarrow> Xd a \<in> Xd ` B \<or> Xd b \<in> Xd ` B)"
+unfolding %invisible bilateral_substitutes_on_def2 by blast
+
+end
+
+
+locale ContractsWithBilateralSubstitutes = Contracts +
+  assumes Ch_bilateral_substitutes: "\<forall>h. bilateral_substitutes (Ch h)"
+
+sublocale ContractsWithSubstitutes < ContractsWithBilateralSubstitutes
+using %invisible Ch_substitutes by unfold_locales (blast intro: substitutes_on_bilateral_substitutes_on)
+
+locale ContractsWithBilateralSubstitutesAndIRC =
+  ContractsWithBilateralSubstitutes + ContractsWithIRC
+
+sublocale ContractsWithSubstitutesAndIRC < ContractsWithBilateralSubstitutesAndIRC
+by %invisible unfold_locales
+
+context ContractsWithBilateralSubstitutesAndIRC
+begin
+
+
+lemma bilateral_substitutes_lemma:
+  assumes "Xd x \<notin> Xd ` Ch h X"
+  assumes "d \<notin> Xd ` Ch h X"
+  assumes "d \<noteq> Xd x"
+  shows "d \<notin> Xd ` Ch h (insert x X)"
+proof(rule notI)
+  assume "d \<in> Xd ` Ch h (insert x X)"
+  then obtain x' where x': "x' \<in> Ch h (insert x X)" "Xd x' = d" by blast
+  have "x \<in> Ch h (insert x X)" unfolding irc_def by blast
+  let ?X' = "{y \<in> X. Xd y \<notin> {Xd x, d}}"
+  have "Ch h (insert x' ?X') = Ch h X"
+    using consistencyD[OF Ch_consistency[where h=h], where B="X" and C="insert x' ?X'"]
+  have "Ch h (insert x (insert x' ?X')) = Ch h (insert x X)"
+    using consistencyD[OF Ch_consistency[where h=h], where B="insert x X" and C="insert x (insert x' ?X')"]
+    by (clarsimp simp: insert_commute) (blast dest: inj_onD)
+  ultimately show False
+    using bilateral_substitutesD[OF spec[OF Ch_bilateral_substitutes, of h], where a=x and b=x' and B="?X'"] by fastforce
+qed
+
+
+lemma bilateral_substitutes_lemma_union:
+  assumes "Xd ` Ch h X \<inter> Xd ` Y = {}"
+  assumes "d \<notin> Xd ` Ch h X"
+  assumes "d \<notin> Xd ` Y"
+  assumes "allocation Y"
+  shows "d \<notin> Xd ` Ch h (X \<union> Y)"
+using %invisible finite[of Y] assms by (induct arbitrary: d) (simp_all add: bilateral_substitutes_lemma)
+
+lemma cop_F_CH_CD_on_disjoint:
+  assumes "cop_F_closed_inv ds fp"
+  assumes "cop_F_range_inv ds fp"
+  shows "Xd ` CH fp \<inter> Xd ` (CD_on ds (- RH fp) - fp) = {}"
+using %invisible assms CH_range unfolding cop_F_range_inv_def cop_F_closed_inv_def above_def
+by (fastforce simp: set_eq_iff mem_CD_on_Cd Cd_greatest greatest_def)
+
+
+lemma cop_F_RH_mono:
+  assumes "cop_F_closed_inv ds fp"
+  assumes "cop_F_range_inv ds fp"
+  assumes "Xd x \<notin> Xd ` Ch (Xh x) fp"
+  assumes "x \<in> RH fp"
+  shows "x \<in> RH (cop_F ds fp)"
+proof(safe)
+next
+  assume "x \<in> CH (cop_F ds fp)"
+  have "Ch (Xh x) (cop_F ds fp) = Ch (Xh x) (fp \<union> (CD_on ds (-RH fp) - fp - {z. Xd z = Xd x}))"
+    unfolding cop_F_def
+    by - (rule consistencyD[OF Ch_consistency], auto simp: mem_CH_Ch dest: Ch_range' inj_onD)
+  have "Xd x \<notin> Xd ` Ch (Xh x) (cop_F ds fp)"
+             auto simp: CH_def CD_on_inj_on_Xd inj_on_diff)
+qed
+
+lemma cop_F_allocation_inv:
+  "valid ds (\<lambda>ds fp. cop_F_range_inv ds fp \<and> cop_F_closed_inv ds fp) (\<lambda>ds fp. allocation (CH fp))"
+proof(induct rule: validI)
+  case base show ?case by (simp add: CH_simps)
+next
+  case (step fp)
+  then have "allocation (CH fp)"
+        and "cop_F_closed_inv ds fp"
+        and "cop_F_range_inv ds fp" by blast+
+  show ?case
+  proof(rule inj_onI)
+    fix x y
+    assume "x \<in> CH (cop_F ds fp)" and "y \<in> CH (cop_F ds fp)" and "Xd x = Xd y"
+    show "x = y"
+    proof(cases "Xh y = Xh x")
+      show ?thesis by (fastforce simp: mem_CH_Ch dest: inj_onD)
+    next
+      proof(cases x rule: CH_cop_F_cases)
+        proof(cases y rule: CH_cop_F_cases)
+          show ?thesis by (blast dest: inj_onD)
+        next
+            by clarsimp (metis Ch_CH_irc_idem Ch_range' inj_on_contraD)
+        next
+        qed
+      next
+        proof(cases y rule: CH_cop_F_cases)
+            by clarsimp (metis Ch_CH_irc_idem Ch_range' inj_on_contraD)
+        next
+          show ?thesis
+          proof(cases "Xd x \<in> Xd ` Ch (Xh x) fp")
+            case True
+              by clarsimp (metis Ch_range' inj_onD mem_CH_Ch)
+          next
+          qed
+        next
+          have "Xd x \<notin> Xd ` Ch (Xh x) fp" by (auto simp: CH_def dest: Ch_range')
+        qed
+      next
+        proof(cases y rule: CH_cop_F_cases)
+        next
+          have "Xd y \<notin> Xd ` Ch (Xh y) fp" unfolding CH_def by clarsimp (blast dest: Ch_range')
+        next
+            by (meson CD_on_inj_on_Xd DiffD1 inj_on_eq_iff)
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma fp_cop_F_allocation:
+  shows "allocation (cop ds)"
+proof %invisible -
+  have "invariant ds (\<lambda>ds fp. cop_F_range_inv ds fp \<and> cop_F_closed_inv ds fp \<and> allocation (CH fp))"
+    using cop_F_range_inv cop_F_closed_inv cop_F_allocation_inv
+    by - (rule valid_conj | blast | rule valid_pre)+
+  then show ?thesis by (blast dest: invariantD)
+qed
+
+theorem Theorem_1:
+  shows "stable_on ds (cop ds)"
+proof %invisible (rule stable_onI)
+  show "individually_rational_on ds (cop ds)"
+  proof(rule individually_rational_onI)
+    from fp_cop_F_allocation show "CD_on ds (cop ds) = cop ds"
+      by (rule CD_on_closed) (blast dest: fp_cop_F_range_inv' CH_range')
+    show "CH (cop ds) = cop ds" by (simp add: CH_irc_idem)
+  qed
+  show "stable_no_blocking_on ds (cop ds)" by (rule cop_stable_no_blocking_on)
+qed
+
+end
+
+
+datatype X5 = Xd1 | Xd1' | Xd2 | Xd2' | Xd2''
+
+primrec X5d :: "X5 \<Rightarrow> D2" where
+  "X5d Xd1 = D1"
+| "X5d Xd1' = D1"
+| "X5d Xd2 = D2"
+| "X5d Xd2' = D2"
+| "X5d Xd2'' = D2"
+
+primrec X5h :: "X5 \<Rightarrow> H2" where
+  "X5h Xd1 = H1"
+| "X5h Xd1' = H1"
+| "X5h Xd2 = H1"
+| "X5h Xd2' = H2"
+| "X5h Xd2'' = H1"
+
+primrec PX5d :: "D2 \<Rightarrow> X5 rel" where
+  "PX5d D1 = linord_of_list [Xd1, Xd1']"
+| "PX5d D2 = linord_of_list [Xd2, Xd2', Xd2'']"
+
+primrec CX5h :: "H2 \<Rightarrow> X5 cfun" where
+  "CX5h H1 A =
+     (if {Xd1', Xd2} \<subseteq> A then {Xd1', Xd2} else
+      if {Xd2''} \<subseteq> A then {Xd2''} else
+      if {Xd1} \<subseteq> A then {Xd1} else
+      if {Xd1'} \<subseteq> A then {Xd1'} else
+      if {Xd2} \<subseteq> A then {Xd2} else {})"
+| "CX5h H2 A = { x . x \<in> A \<and> x = Xd2' }"
+
+
+lemma X5_UNIV:
+  shows "UNIV = set [Xd1, Xd1', Xd2, Xd2', Xd2'']"
+using X5.exhaust by auto
+
+lemmas X5_pow = subset_subseqs[OF subset_trans[OF subset_UNIV Set.equalityD1[OF X5_UNIV]]]
+
+instance X5 :: finite
+by standard (simp add: X5_UNIV)
+
+lemma X5_ALL:
+  shows "(\<forall>X''. P X'') \<longleftrightarrow> (\<forall>X''\<in>set ` set (subseqs [Xd1, Xd1', Xd2, Xd2', Xd2'']). P X'')"
+using X5_pow by blast
+
+lemma PX5d_linear:
+  shows "Linear_order (PX5d d)"
+by (cases d) (simp_all add: linord_of_list_Linear_order)
+
+lemma PX5d_range:
+  shows "Field (PX5d d) \<subseteq> {x. X5d x = d}"
+by (cases d) simp_all
+
+lemma CX5h_range:
+  shows "CX5h h X \<subseteq> {x \<in> X. X5h x = h}"
+by (cases h) auto
+
+lemma CX5h_singular:
+  shows "inj_on X5d (CX5h h X)"
+by (cases h) (auto intro: inj_onI)
+
+
+interpretation BSI: Contracts X5d X5h PX5d CX5h
+using %invisible PX5d_linear PX5d_range CX5h_range CX5h_singular by unfold_locales blast+
+
+lemma CX5h_bilateral_substitutes:
+  shows "BSI.bilateral_substitutes (CX5h h)"
+unfolding BSI.bilateral_substitutes_def by (cases h) (auto simp: X5_ALL)
+
+lemma CX5h_irc:
+  shows "irc (CX5h h)"
+unfolding irc_def by (cases h) (auto simp: X5_ALL)
+
+interpretation BSI: ContractsWithBilateralSubstitutesAndIRC X5d X5h PX5d CX5h
+using %invisible CX5h_bilateral_substitutes CX5h_irc by unfold_locales blast+
+
+
+lemma Xd1_Xd2'_stable:
+  shows "BSI.stable {Xd1, Xd2'}"
+proof(rule BSI.stable_onI)
+  note image_cong_simp [cong del] note INF_cong_simp [cong] note SUP_cong_simp [cong]
+  show "BSI.individually_rational {Xd1, Xd2'}"
+    unfolding BSI.individually_rational_on_def BSI.CD_on_def BSI.CH_def
+    by (auto simp: insert_commute D2_UNION H2_UNION)
+  show "BSI.stable_no_blocking {Xd1, Xd2'}"
+    unfolding BSI.stable_no_blocking_on_def
+    by (auto simp: X5_ALL BSI.blocking_on_def BSI.mem_CD_on_Cd BSI.maxR_def linord_of_list_linord_of_listP)
+qed
+
+lemma Xd1'_Xd2_stable:
+  shows "BSI.stable {Xd1', Xd2}"
+proof(rule BSI.stable_onI)
+  note image_cong_simp [cong del] note INF_cong_simp [cong] note SUP_cong_simp [cong]
+  show "BSI.individually_rational {Xd1', Xd2}"
+    unfolding BSI.individually_rational_on_def BSI.CD_on_def BSI.CH_def
+    by (auto simp: insert_commute D2_UNION H2_UNION)
+  show "BSI.stable_no_blocking {Xd1', Xd2}"
+    unfolding BSI.stable_no_blocking_on_def
+    by (auto simp: X5_ALL BSI.blocking_on_def BSI.mem_CD_on_Cd BSI.maxR_def linord_of_list_linord_of_listP)
+qed
+
+
+lemma BSI_stable:
+  shows "BSI.stable X \<longleftrightarrow> X = {Xd1, Xd2'} \<or> X = {Xd1', Xd2}"
+(is "?lhs = ?rhs")
+proof(rule iffI)
+  assume ?lhs then show ?rhs
+    apply clarsimp
+    apply (elim disjE; simp add: insert_eq_iff)
+    apply (simp_all only: BSI.stable_on_def BSI.individually_rational_on_def BSI.stable_no_blocking_on_def BSI.blocking_on_def BSI.CH_def)
+    apply (auto 0 1 simp: D2_UNION H2_UNION X5_ALL BSI.mem_CD_on_Cd BSI.maxR_def linord_of_list_linord_of_listP)
+    done
+next
+  assume ?rhs then show ?lhs
+    using Xd1'_Xd2_stable Xd1_Xd2'_stable by blast
+qed
+
+
+lemma
+  "\<not>(\<exists> (Y::X5 set). BSI.doctor_optimal_match UNIV Y)"
+unfolding BSI.doctor_optimal_match_def BSI_stable
+apply clarsimp
+apply (cut_tac X=Y in X5_pow)
+apply clarsimp
+apply (elim disjE; simp add: insert_eq_iff; simp add: X5_ALL linord_of_list_linord_of_listP)
+done
+
+
+
+\begin{quote}
+
+hospital rejects the contract @{term "z"} when that is the only
+contract with @{term "Xd z"} available, it still rejects the contract
+@{term "z"} when the choice set expands.
+
+\end{quote}
+
+\<close>
+text\<open>
+
+
+\<close>
+text\<open>\<close>
+text\<open>
+
+The following defines locales for the @{const
+"unilateral_substitutes"} hypothesis, and inserts these between those
+for @{const "substitutes"} and @{const "bilateral_substitutes"}.
+
+\<close>
+text (in Contracts) \<open>
+
+"unilateral_substitutes"} to @{const "substitutes"} using @{emph
+\begin{quote}
+
+[distinct] contracts with the same doctor, does not depend on what
+other contracts the hospital has access to.
+
+\end{quote}
+This result also depends on @{const "irc"}.
+
+\<close>
+  note Ch_iiaD = iia_onD[OF iffD1[OF substitutes_iia spec[OF \<open>\<forall>h. substitutes_on A (Ch h)\<close>]], rotated -1, simplified]
+      moreover note \<open>pareto_separable_on A\<close> XXX
+      with \<open>\<forall>h. irc_on A (Ch h)\<close> XXX False have "b \<notin> Ch h (insert b ?B')"
+      with \<open>\<forall>h. unilateral_substitutes_on A (Ch h)\<close> XXX False have "b \<notin> Ch h (insert a (insert b ?B'))"
+      with \<open>\<forall>h. irc_on A (Ch h)\<close> XXX False show ?thesis
+    with \<open>\<forall>h. unilateral_substitutes_on A (Ch h)\<close> XXX show ?thesis by (blast dest: unilateral_substitutes_onD)
+subsubsection\<open> \<^citet>\<open>"AfacanTurhan:2015"\<close>: @{emph \<open>doctor separability\<close>} relates bi- and unilateral substitutes \<close>
+text \<open>
+
+"bilateral_substitutes"} and @{const "unilateral_substitutes"} using
+\begin{quote}
+
+from a set of contracts in the sense that no contract of him is
+selected, then that doctor should still not be chosen unless a
+contract of a new doctor (that is, doctor having no contract in the
+given set of contracts) becomes available. For practical purposes, we
+can consider DS as capturing contracts where certain groups of doctors
+
+definition doctor_separable_on :: "'x set \<Rightarrow> 'x cfun \<Rightarrow> bool" where
+  "doctor_separable_on A f
+     \<longleftrightarrow> (\<forall>B\<subseteq>A. \<forall>a b c. {a, b, c} \<subseteq> A \<and> Xd a \<noteq> Xd b \<and> Xd b = Xd c \<and> Xd a \<notin> Xd ` f (B \<union> {a, b})
+         \<longrightarrow> Xd a \<notin> Xd ` f (B \<union> {a, b, c}))"
+
+abbreviation doctor_separable :: "'x cfun \<Rightarrow> bool" where
+  "doctor_separable \<equiv> doctor_separable_on UNIV"
+
+
+lemmas doctor_separable_def = doctor_separable_on_def[where A=UNIV, simplified]
+
+lemmas doctor_separable_onI = iffD2[OF doctor_separable_on_def, rule_format, simplified, unfolded conj_imp_eq_imp_imp]
+lemmas doctor_separable_onD = iffD1[OF doctor_separable_on_def, rule_format, simplified, unfolded conj_imp_eq_imp_imp, rotated -1]
+
+
+lemma unilateral_substitutes_on_doctor_separable_on:
+  assumes "unilateral_substitutes_on A f"
+  assumes "irc_on A f"
+  assumes "\<forall>B\<subseteq>A. allocation (f B)"
+  assumes "f_range_on A f"
+  shows "doctor_separable_on A f"
+proof(rule doctor_separable_onI)
+  fix B a b c
+  assume XXX: "B \<subseteq> A" "a \<in> A" "b \<in> A" "c \<in> A" "Xd a \<noteq> Xd b" "Xd b = Xd c" "Xd a \<notin> Xd ` f (insert a (insert b B))"
+  have "a \<notin> f (insert a (insert b (insert c B)))"
+  proof(rule notI)
+    assume a: "a \<in> f (insert a (insert b (insert c B)))"
+    let ?C = "{x \<in> B . Xd x \<noteq> Xd a \<or> x = a}"
+    have "f (insert a (insert b B)) = f (insert a (insert b ?C))"
+      by - (rule consistency_onD[OF irc_on_consistency_on[where A=A and f=f]];
+            fastforce dest: f_range_onD[where A=A and f=f and B="insert a (insert b B)"] simp: rev_image_eqI)
+    have abcC: "a \<notin> f (insert a (insert b (insert c ?C)))"
+      using unilateral_substitutes_onD[where A=A and f=f and a=c and b=a and B="insert b ?C - {a}"]
+      by (force simp: insert_commute)
+    have "f (insert a (insert b (insert c B))) = f (insert a (insert b (insert c ?C)))"
+      by - (rule consistency_onD[OF irc_on_consistency_on[where A=A and f=f]], (auto)[4],
+            clarsimp, rule conjI, blast dest!: f_range_onD'[where A=A], metis inj_on_contraD insert_subset)
+    with a abcC show False by simp
+  qed
+  moreover
+  have "a' \<notin> f (insert a (insert b (insert c B)))" if a': "a' \<in> B" "Xd a' = Xd a" for a'
+  proof(rule notI)
+    assume a'X: "a' \<in> f (insert a (insert b (insert c B)))"
+    let ?B = "insert a B - {a'}"
+    from XXX a'
+    have XXX_7': "Xd a \<notin> Xd ` f (insert a' (insert b ?B))"
+      by clarsimp (metis imageI insert_Diff_single insert_absorb insert_commute)
+    let ?C = "{x \<in> ?B . Xd x \<noteq> Xd a \<or> x = a'}"
+    have "f (insert a' (insert b ?B)) = f (insert a' (insert b ?C))"
+      by - (rule consistency_onD[OF irc_on_consistency_on[where A=A and f=f]];
+            fastforce dest: f_range_onD[where A=A and f=f and B="insert a' (insert b ?B)"] simp: rev_image_eqI)
+    have abcC: "a' \<notin> f (insert a' (insert b (insert c ?C)))"
+      using unilateral_substitutes_onD[where A=A and f=f and a=c and b=a' and B="insert b ?C - {a'}"]
+      by (force simp: insert_commute rev_image_eqI)
+    have "f (insert a' (insert b (insert c ?B))) = f (insert a' (insert b (insert c ?C)))"
+    proof(rule consistency_onD[OF irc_on_consistency_on[where A=A and f=f]])
+      from a' have "insert a' (insert b (insert c ?B)) = insert a (insert b (insert c B))" by blast
+      show "f (insert a' (insert b (insert c ?B))) \<subseteq> insert a' (insert b (insert c {x \<in> ?B. Xd x \<noteq> Xd a \<or> x = a'}))"
+        by clarsimp (rule conjI, blast dest!: f_range_onD'[where A=A], metis inj_on_contraD insert_subset)
+    with a' a'X abcC show False by simp (metis insert_Diff insert_Diff_single insert_commute)
+  qed
+  ultimately show "Xd a \<notin> Xd ` f (insert a (insert b (insert c B)))"
+    by (fastforce dest: f_range_onD[where B="insert a (insert b (insert c B))"])
+qed
+
+lemma bilateral_substitutes_on_doctor_separable_on_unilateral_substitutes_on:
+  assumes "bilateral_substitutes_on A f"
+  assumes "doctor_separable_on A f"
+  assumes "f_range_on A f"
+  shows "unilateral_substitutes_on A f"
+proof(rule unilateral_substitutes_onI)
+  fix B a b
+  assume XXX: "B \<subseteq> A" "a \<in> A" "b \<in> A" "Xd b \<notin> Xd ` B" "b \<notin> f (insert b B)"
+  show "b \<notin> f (insert a (insert b B))"
+  proof(cases "Xd a \<in> Xd ` B")
+    case True
+    then obtain C c where Cc: "B = insert c C" "c \<notin> C" "Xd c = Xd a" by (metis Set.set_insert image_iff)
+      by clarsimp (metis f_range_onD' image_eqI insertE insert_subset)
+      by (auto simp: insert_commute dest: doctor_separable_onD)
+qed
+
+theorem unilateral_substitutes_on_doctor_separable_on_bilateral_substitutes_on:
+  assumes "irc_on A f"
+  assumes "f_range_on A f"
+  shows "unilateral_substitutes_on A f \<longleftrightarrow> bilateral_substitutes_on A f \<and> doctor_separable_on A f"
+using %invisible assms
+      unilateral_substitutes_on_bilateral_substitutes_on
+      unilateral_substitutes_on_doctor_separable_on
+      bilateral_substitutes_on_doctor_separable_on_unilateral_substitutes_on
+by metis
+
+
+end
+
+
+
+context ContractsWithUnilateralSubstitutesAndIRC
+begin
+
+
+lemma
+  assumes "Xd x \<notin> Xd ` Ch h X"
+  assumes "x \<in> X"
+  shows no_renegotiation_union: "x \<notin> Ch h (X \<union> Y)"
+    and "x \<notin> Ch h (insert x ((X \<union> Y) - {z. Xd z = Xd x}))"
+using %invisible finite[of Y]
+proof induct
+  case empty
+  { case 2 from assms show ?case
+      by - (clarsimp, drule subsetD[OF equalityD2[OF consistencyD[OF Ch_consistency[of h], where B=X]], rotated -1], auto simp: image_iff dest: Ch_range') }
+next
+  case (insert y Y)
+  { case 1 show ?case
+    proof(cases "y \<in> Ch h (insert y (X \<union> Y))")
+      show ?thesis
+      proof(cases "Xd y = Xd x")
+          by clarsimp (metis Ch_singular Un_iff inj_onD insert_absorb)
+      next
+        show ?thesis
+        proof(rule notI)
+          assume "x \<in> Ch h (X \<union> insert y Y)"
+            by - (rule subsetD[OF equalityD1[OF consistencyD[OF Ch_consistency[of h]]], rotated -1],
+                  assumption, clarsimp+, metis Ch_range' Ch_singular Un_iff inj_onD insertE)
+            by (force dest: unilateral_substitutesD3[OF spec[OF Ch_unilateral_substitutes, of h], rotated])
+        qed
+      qed
+    next
+        using Ch_irc unfolding irc_def by simp
+    qed }
+  { case 2 from insert(4) show ?case
+      by (auto simp: insert_commute insert_Diff_if split: if_splits
+               dest: unilateral_substitutesD3[OF spec[OF Ch_unilateral_substitutes, of h], where a=y]) }
+qed
+
+
+definition
+  cop_F_rejected_inv :: "'b set \<Rightarrow> 'a set \<Rightarrow> bool"
+where
+  "cop_F_rejected_inv ds fp \<longleftrightarrow> (\<forall>x\<in>RH fp. \<exists>fp'\<subseteq>fp. x \<in> fp' \<and> above (Pd (Xd x)) x \<subseteq> fp' \<and> Xd x \<notin> Xd ` CH fp')"
+
+
+lemmas cop_F_rejected_invI = iffD2[OF cop_F_rejected_inv_def, rule_format, simplified, unfolded conj_imp_eq_imp_imp]
+
+
+lemma cop_F_rejected_inv:
+  shows "valid ds (\<lambda>ds fp. cop_F_range_inv ds fp \<and> cop_F_closed_inv ds fp \<and> allocation (CH fp)) cop_F_rejected_inv"
+proof %invisible (induct rule: validI)
+  case base show ?case unfolding cop_F_rejected_inv_def by simp
+next
+  case (step fp)
+  then have "cop_F_closed_inv ds fp"
+        and "cop_F_range_inv ds fp"
+        and "allocation (CH fp)"
+        and "cop_F_rejected_inv ds fp" by blast+
+  show ?case
+  proof(rule cop_F_rejected_invI)
+    fix x assume x: "x \<in> cop_F ds fp" "x \<notin> CH (cop_F ds fp)"
+    show "\<exists>fp'\<subseteq>cop_F ds fp. x \<in> fp' \<and> above (Pd (Xd x)) x \<subseteq> fp' \<and> Xd x \<notin> Xd ` CH fp'"
+    proof(cases "Xd x \<in> Xd ` CH (cop_F ds fp)")
+      case True
+        where y: "Xd y = Xd x" "y \<in> CH (cop_F ds fp)" "x \<noteq> y" by (metis imageE)
+      proof(cases x rule: cop_F_cases)
+        show ?thesis
+        proof(cases y rule: CH_cop_F_cases)
+            unfolding cop_F_rejected_inv_def by (metis Diff_iff Un_upper1 cop_F_def subset_refl subset_trans)
+        next
+          obtain fp' where "fp' \<subseteq> fp \<and> y \<in> fp' \<and> above (Pd (Xd y)) y \<subseteq> fp' \<and> Xd y \<notin> Xd ` CH fp'"
+            unfolding cop_F_rejected_inv_def by (fastforce simp: mem_CH_Ch)
+            using no_renegotiation_union[where x=y and X="fp'" and Y="cop_F ds fp"] cop_F_increasing
+            by (clarsimp simp: mem_Ch_CH image_iff) (metis Un_absorb1 mem_CH_Ch subset_trans)
+        next
+            unfolding cop_F_closed_inv_def by - (rule exI[where x=fp]; clarsimp; blast)
+        qed
+      next
+        case CD_on
+        { fix z assume z: "z \<in> CH (cop_F ds fp)" "Xd z = Xd x"
+          from z(1) have False
+          proof(cases z rule: CH_cop_F_cases)
+            case CH
+            show False
+              using cop_F_CH_CD_on_disjoint by blast
+          next
+            obtain fp' where "fp' \<subseteq> fp \<and> z \<in> fp' \<and> above (Pd (Xd z)) z \<subseteq> fp' \<and> Xd z \<notin> Xd ` CH fp'"
+              unfolding cop_F_rejected_inv_def by (fastforce simp: mem_CH_Ch)
+              using no_renegotiation_union[where x=z and X="fp'" and Y="cop_F ds fp"] cop_F_increasing
+              by (clarsimp simp: mem_Ch_CH image_iff) (metis Un_absorb1 mem_CH_Ch subset_trans)
+          next
+              by (meson CD_on_inj_on_Xd DiffD1 inj_onD)
+          qed }
+        with True have False by clarsimp blast
+        then show ?thesis ..
+      qed
+    next
+      show ?thesis by (metis cop_F_closed_inv_def subsetI valid_def)
+    qed
+  qed
+qed
+
+lemma fp_cop_F_rejected_inv:
+  shows "cop_F_rejected_inv ds (fp_cop_F ds)"
+proof %invisible -
+  have "invariant ds (\<lambda>ds fp. cop_F_range_inv ds fp \<and> cop_F_closed_inv ds fp \<and> allocation (CH fp) \<and> cop_F_rejected_inv ds fp)"
+    using cop_F_range_inv cop_F_closed_inv cop_F_allocation_inv cop_F_rejected_inv
+    by - (rule valid_conj | blast | rule valid_pre)+
+  then show ?thesis by (blast dest: invariantD)
+qed
+
+
+theorem Theorem_4:
+  assumes "cop_F_rejected_inv ds fp"
+  assumes "x \<in> RH fp"
+  shows "x \<in> RH (cop_F ds fp)"
+using %invisible bspec[OF assms[unfolded cop_F_rejected_inv_def]] cop_F_increasing[of fp ds]
+      no_renegotiation_union[where x=x and h="Xh x" and Y="cop_F ds fp"]
+by (auto simp: mem_CH_Ch image_iff Ch_CH_irc_idem) (metis le_iff_sup mem_Ch_CH sup.coboundedI1)
+
+
+corollary fp_cop_F_worst:
+  assumes "x \<in> cop ds"
+  assumes "y \<in> fp_cop_F ds"
+  assumes "Xd y = Xd x"
+  shows "(x, y) \<in> Pd (Xd x)"
+proof %invisible (rule ccontr)
+  assume "(x, y) \<notin> Pd (Xd x)"
+  with assms have "(y, x) \<in> Pd (Xd x) \<and> x \<noteq> y"
+    by (metis CH_range' Pd_linear eq_iff fp_cop_F_range_inv' order_on_defs(3) total_on_def underS_incl_iff)
+  with assms have "y \<notin> (cop ds)"
+    using fp_cop_F_allocation by (blast dest: inj_onD)
+  obtain fp' where "fp' \<subseteq> fp_cop_F ds \<and> y \<in> fp' \<and> above (Pd (Xd y)) y \<subseteq> fp' \<and> Xd y \<notin> Xd ` CH fp'"
+    unfolding cop_F_rejected_inv_def by fastforce
+    using no_renegotiation_union[where x=x and h="Xh x" and X=fp' and Y="fp_cop_F ds"]
+    unfolding above_def
+    by (clarsimp simp: mem_CH_Ch image_iff) (metis contra_subsetD le_iff_sup mem_Ch_CH mem_Collect_eq)
+qed
+
+
+definition
+  theorem_5_inv :: "'b set \<Rightarrow> 'a set \<Rightarrow> bool"
+where
+  "theorem_5_inv ds fp \<longleftrightarrow> RH fp \<inter> \<Union>{X. stable_on ds X} = {}"
+
+
+lemma theorem_5_invI:
+  assumes "\<And>z X. \<lbrakk>z \<in> RH fp; z \<in> X; stable_on ds X\<rbrakk> \<Longrightarrow> False"
+  shows "theorem_5_inv ds fp"
+unfolding theorem_5_inv_def using assms by blast
+
+
+lemma theorem_5_inv:
+  shows "valid ds (\<lambda>ds fp. cop_F_range_inv ds fp \<and> cop_F_closed_inv ds fp
+                     \<and> allocation (CH fp) \<and> cop_F_rejected_inv ds fp) theorem_5_inv"
+proof(induct rule: validI)
+  case base show ?case unfolding theorem_5_inv_def by simp
+next
+  case (step fp)
+  then have "cop_F_range_inv ds fp"
+        and "cop_F_closed_inv ds fp"
+        and "allocation (CH fp)"
+        and "cop_F_rejected_inv ds fp"
+        and "theorem_5_inv ds fp" by blast+
+  show ?case
+  proof(rule theorem_5_invI)
+    fix z X assume z: "z \<in> RH (cop_F ds fp)" and "z \<in> X" and "stable_on ds X"
+    have z': "z \<notin> RH fp" unfolding theorem_5_inv_def by blast
+    define Y where "Y \<equiv> Ch (Xh z) (cop_F ds fp)"
+    from z have YYY: "z \<notin> Ch (Xh z) (insert z Y)"
+      using consistencyD[OF Ch_consistency]
+      by (simp add: mem_CH_Ch Y_def)
+         (metis Ch_f_range f_range_on_def insert_subset subset_insertI top_greatest)
+    have yRx: "(x, y) \<in> Pd (Xd y)" if "x \<in> X" and "y \<in> Y" and "Xd y = Xd x" for x y
+    proof(rule ccontr)
+      assume "(x, y) \<notin> Pd (Xd y)"
+      have BBB: "(y, x) \<in> Pd (Xd y) \<and> x \<noteq> y"
+        unfolding Y_def cop_F_def cop_F_range_inv_def order_on_defs total_on_def
+        by (clarsimp simp: mem_CD_on_Cd dest!: Ch_range') (metis Cd_range' Int_iff refl_onD stable_on_range')
+        unfolding cop_F_def cop_F_closed_inv_def theorem_5_inv_def above_def Y_def
+        by (fastforce simp: mem_CD_on_Cd dest: Ch_range' Cd_preferred)
+        unfolding theorem_5_inv_def by (force simp: mem_CH_Ch)
+        by (metis Ch_range' inj_onD mem_CH_Ch)
+        by (metis Ch_range' Diff_iff mem_CH_Ch)
+    qed
+    have "Xd z \<notin> Xd ` Y"
+    proof(safe)
+      fix w assume w: "Xd z = Xd w" "w \<in> Y"
+      show False
+      proof(cases "z \<in> fp")
+        show False
+        proof(cases "w \<in> fp")
+            unfolding Y_def CH_def by simp
+        next
+            unfolding Y_def by (blast dest: Ch_range')
+          show False
+            unfolding cop_F_closed_inv_def cop_F_range_inv_def above_def
+            by (fastforce simp: cop_F_def mem_CD_on_Cd Cd_greatest greatest_def)
+        qed
+      next
+          unfolding cop_F_range_inv_def cop_F_closed_inv_def above_def
+          by (clarsimp simp: mem_CD_on_Cd Cd_greatest greatest_def dest!: mem_Ch_CH elim!: cop_F_cases)
+             (blast dest: CH_range')
+          by (clarsimp simp: Y_def cop_F_def mem_CH_Ch)
+             (metis CD_on_inj_on_Xd Ch_range' Un_iff inj_onD no_renegotiation_union)
+      qed
+    qed
+    show False
+    proof(cases "z \<in> Ch (Xh z) (X \<union> Y)")
+        using no_renegotiation_union[where X="insert z Y" and Y="X - {z}" and x=z and h="Xh z"]
+        by clarsimp (metis Un_insert_right insert_Diff Un_commute)
+    next
+      have "\<not>stable_on ds X"
+      proof(rule blocking_on_imp_not_stable[OF blocking_onI])
+        show "Ch (Xh z) (X \<union> Y) \<noteq> Ch (Xh z) X"
+          using mem_CH_Ch stable_on_CH by blast
+        show "Ch (Xh z) (X \<union> Y) = Ch (Xh z) (X \<union> Ch (Xh z) (X \<union> Y))"
+          using Ch_range' by (blast intro!: consistencyD[OF Ch_consistency])
+      next
+        fix x assume "x \<in> Ch (Xh z) (X \<union> Y)"
+        with Ch_singular'[of "Xh z" "X \<union> Ch (Xh z) (cop_F ds fp)"]
+        show "x \<in> CD_on ds (X \<union> Ch (Xh z) (X \<union> Y))"
+          unfolding cop_F_range_inv_def
+          by (clarsimp simp: mem_CD_on_Cd Cd_greatest greatest_def)
+             (metis Ch_range' IntE Pd_range' Pd_refl Un_iff Y_def inj_onD yRx)
+      qed
+    qed
+  qed
+qed
+
+lemma fp_cop_F_theorem_5_inv:
+  shows "theorem_5_inv ds (fp_cop_F ds)"
+proof %invisible -
+  have "invariant ds (\<lambda>ds fp. cop_F_range_inv ds fp \<and> cop_F_closed_inv ds fp \<and> allocation (CH fp) \<and> cop_F_rejected_inv ds fp \<and> theorem_5_inv ds fp)"
+    using cop_F_range_inv cop_F_closed_inv cop_F_allocation_inv cop_F_rejected_inv theorem_5_inv
+    by - (rule valid_conj | blast | rule valid_pre)+
+  then show ?thesis by (blast dest: invariantD)
+qed
+
+theorem Theorem_5:
+  assumes "stable_on ds X"
+  assumes "x \<in> X"
+  shows "\<exists>y \<in> cop ds. (x, y) \<in> Pd (Xd x)"
+proof -
+  from fp_cop_F_theorem_5_inv assms
+  have x: "x \<notin> RH (fp_cop_F ds)"
+    unfolding theorem_5_inv_def by blast
+  show ?thesis
+  proof(cases "Xd x \<in> Xd ` cop ds")
+    case True
+    then obtain z where z: "z \<in> cop ds" "Xd z = Xd x" by auto
+    show ?thesis
+    proof(cases "(x, z) \<in> Pd (Xd x)")
+      case True with z show ?thesis by blast
+    next
+      case False
+      with Pd_linear'[where d="Xd x"] fp_cop_F_range_inv'[of z ds] assms z
+      have "(z, x) \<in> Pd (Xd x)"
+        unfolding order_on_defs total_on_def by (metis CH_range' refl_onD stable_on_range')
+      with fp_cop_F_closed_inv'[of z ds x] x z have "x \<in> fp_cop_F ds"
+        unfolding above_def by (force simp: mem_CH_Ch dest: Ch_range')
+      with fp_cop_F_allocation x z have "z = x" by (fastforce dest: inj_onD)
+      with Pd_linear assms z show ?thesis
+        by (meson equalityD2 stable_on_range' underS_incl_iff)
+    qed
+  next
+    with assms x show ?thesis
+      by (metis DiffI Diff_eq_empty_iff fp_cop_F_all emptyE imageI stable_on_Xd stable_on_range')
+  qed
+qed
+
+theorem fp_cop_F_doctor_optimal_match:
+  shows "doctor_optimal_match ds (cop ds)"
+by %invisible (rule doctor_optimal_matchI[OF Theorem_1 Theorem_5]) auto
+
+end
+
+
+context Contracts
+begin
+
+definition dpref :: "'x set \<Rightarrow> 'x set \<Rightarrow> bool" where
+  "dpref X Y = (\<forall>x\<in>X. \<exists>y\<in>Y. (x, y) \<in> Pd (Xd x))"
+
+lemmas %invisible dprefI = iffD2[OF dpref_def, rule_format]
+
+end
+
+context ContractsWithIRC
+begin
+
+theorem Lemma_1:
+  assumes "stable_on ds Y"
+  assumes "stable_on ds Z"
+  assumes "dpref Z Y"
+  assumes "x \<in> Ch h Z"
+  shows "x \<in> Ch h (Y \<union> Z)"
+proof(rule ccontr)
+  assume "x \<notin> Ch h (Y \<union> Z)"
+  have "Ch h (Y \<union> Z) \<noteq> Ch h Z" by blast
+  moreover
+  have "Ch h (Y \<union> Z) = Ch h (Z \<union> Ch h (Y \<union> Z))"
+   by (rule consistency_onD[OF Ch_consistency]; auto dest: Ch_range')
+  moreover
+  have "y \<in> CD_on ds (Z \<union> Ch h (Y \<union> Z))" if "y \<in> Ch h (Y \<union> Z)" for y
+  proof -
+    have "Xd y \<in> ds \<and> y \<in> Field (Pd (Xd y))"
+      using stable_on_Xd stable_on_range' Ch_range' by (meson Un_iff)
+      unfolding dpref_def
+      by (clarsimp simp: mem_CD_on_Cd Cd_greatest greatest_def)
+         (metis Ch_range' Pd_Xd Un_iff eq_iff inj_on_contraD stable_on_allocation underS_incl_iff)
+  qed
+qed
+
+end
+
+
+context ContractsWithUnilateralSubstitutesAndIRC
+begin
+
+theorem Corollary_1:
+  assumes "stable_on ds Z"
+  shows "dpref Z (cop ds)"
+    and "x \<in> Z \<Longrightarrow> x \<in> Ch (Xh x) (cop ds \<union> Z)"
+proof -
+  show "dpref Z (cop ds)"
+  fix x assume "x \<in> Z" with assms show "x \<in> Ch (Xh x) (cop ds \<union> Z)"
+    by (fastforce simp: mem_CH_Ch)
+qed
+
+
+end
+
+
+
+
+locale ContractsWithUnilateralSubstitutesAndIRCAndLAD = ContractsWithUnilateralSubstitutesAndIRC + ContractsWithLAD
+
+sublocale ContractsWithSubstitutesAndLAD < ContractsWithUnilateralSubstitutesAndIRCAndLAD
+using %invisible Ch_lad by unfold_locales
+
+context ContractsWithUnilateralSubstitutesAndIRCAndLAD
+begin
+
+context
+  fixes ds :: "'b set"
+  fixes X :: "'a set"
+  assumes "stable_on ds X"
+begin
+
+
+lemma RHT_Cd_card:
+  assumes "d \<in> ds"
+  shows "card (Cd d X) \<le> card (Cd d (cop ds))"
+proof %invisible (cases "d \<in> Xd ` X")
+  case True
+  then obtain x where "x \<in> X" "Xd x = d" by blast
+    using Cd_singleton mem_CD_on_Cd stable_on_CD_on by blast
+  moreover
+  ultimately show ?thesis by simp
+next
+  case False
+  then have "Cd d X = {}"
+    using Cd_Xd Cd_range' by blast
+  then show ?thesis by simp
+qed
+
+lemma RHT_Ch_card:
+  shows "card (Ch h (fp_cop_F ds)) \<le> card (Ch h X)"
+proof -
+  define A where "A \<equiv> \<lambda>X. {y |y. Xd y \<in> ds \<and> y \<in> Field (Pd (Xd y)) \<and> (\<forall>x \<in> X. Xd x = Xd y \<longrightarrow> (x, y) \<in> Pd (Xd x))}"
+  have "A (cop ds) = fp_cop_F ds" (is "?lhs = ?rhs")
+  proof(rule set_elem_equalityI)
+    fix x assume "x \<in> ?lhs"
+    show "x \<in> ?rhs"
+    proof(cases "Xd x \<in> Xd ` cop ds")
+        unfolding A_def by clarsimp (metis CH_range' above_def fp_cop_F_closed_inv' mem_Collect_eq)
+    next
+        unfolding A_def by blast
+    qed
+  next
+    fix x assume "x \<in> ?rhs"
+    with fp_cop_F_worst show "x \<in> ?lhs"
+  qed
+  moreover
+  have "CH (A X) = X"
+  proof(rule ccontr)
+    assume "CH (A X) \<noteq> X"
+    then obtain h where XXX: "Ch h (A X) \<noteq> Ch h X" using mem_CH_Ch by blast
+    have "\<not>stable_on ds X"
+    proof(rule blocking_on_imp_not_stable[OF blocking_onI])
+      show "Ch h (A X) \<noteq> Ch h X" by fact
+        unfolding A_def
+        by - (rule consistencyD[OF Ch_consistency],
+              auto 10 0 dest: Ch_range' stable_on_Xd stable_on_range' stable_on_allocation inj_onD underS_incl_iff)
+    next
+      fix x assume "x \<in> Ch h (A X)"
+      with Ch_singular Pd_linear show "x \<in> CD_on ds (X \<union> Ch h (A X))"
+        unfolding A_def
+        by (auto 9 3 simp: mem_CD_on_Cd Cd_greatest greatest_def
+                     dest: Ch_range' Pd_range' Cd_Xd Cd_single inj_onD underS_incl_iff
+                    intro: FieldI1)
+    qed
+  qed
+  moreover
+    unfolding A_def order_on_defs by (fastforce dest: Pd_Xd elim: transE)
+  then have "card (Ch h (A (cop ds))) \<le> card (Ch h (A X))"
+    by (fastforce intro: ladD[OF spec[OF Ch_lad]])
+  ultimately show ?thesis by (metis (no_types, lifting) Ch_CH_irc_idem)
+qed
+
+
+lemma Theorem_6_fp_cop_F:
+  shows "d \<in> ds \<Longrightarrow> card (Cd d X) = card (Cd d (cop ds))"
+    and "card (Ch h X) = card (Ch h (fp_cop_F ds))"
+proof -
+  let ?Sum_Cd_COP = "\<Sum>d\<in>ds. card (Cd d (cop ds))"
+  let ?Sum_Ch_COP = "\<Sum>h\<in>UNIV. card (Ch h (fp_cop_F ds))"
+  let ?Sum_Cd_X = "\<Sum>d\<in>ds. card (Cd d X)"
+  let ?Sum_Ch_X = "\<Sum>h\<in>UNIV. card (Ch h X)"
+
+  have "?Sum_Cd_COP = ?Sum_Ch_COP"
+    using Theorem_1 stable_on_CD_on CD_on_card[symmetric] CH_card[symmetric] by simp
+  also have "\<dots> \<le> ?Sum_Ch_X"
+    using RHT_Ch_card by (simp add: sum_mono)
+  also have "\<dots> = ?Sum_Cd_X"
+    using CD_on_card[symmetric] CH_card[symmetric]
+  finally have "?Sum_Cd_X = ?Sum_Cd_COP"
+    using RHT_Cd_card by (simp add: eq_iff sum_mono)
+  with RHT_Cd_card show "d \<in> ds \<Longrightarrow> card (Cd d X) = card (Cd d (cop ds))"
+    by (fastforce elim: sum_mono_inv)
+
+  have "?Sum_Ch_X = ?Sum_Cd_X"
+  also have "\<dots> \<le> ?Sum_Cd_COP"
+    using RHT_Cd_card by (simp add: sum_mono)
+  also have "\<dots> = ?Sum_Ch_COP"
+    using CD_on_card[symmetric] CH_card[symmetric]
+    using Theorem_1 stable_on_CD_on stable_on_CH by auto
+  finally have "?Sum_Ch_COP = ?Sum_Ch_X"
+    using RHT_Ch_card by (simp add: eq_iff sum_mono)
+  with RHT_Ch_card show "card (Ch h X) = card (Ch h (fp_cop_F ds))"
+    by (fastforce elim: sym[OF sum_mono_inv])
+qed
+
+end
+
+theorem Theorem_6:
+  assumes "stable_on ds X"
+  assumes "stable_on ds Y"
+  shows "d \<in> ds \<Longrightarrow> card (Cd d X) = card (Cd d Y)"
+    and "card (Ch h X) = card (Ch h Y)"
+using %invisible Theorem_6_fp_cop_F assms by simp_all
+
+end
+
+
+
+
+end

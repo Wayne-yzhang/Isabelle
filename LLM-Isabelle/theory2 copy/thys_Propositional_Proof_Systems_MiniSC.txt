@@ -1,0 +1,86 @@
+theory MiniSC
+imports MiniFormulas SC
+begin
+
+abbreviation "is_mini_mset \<Gamma> \<equiv> \<forall>F \<in> set_mset \<Gamma>. is_mini_formula F"
+lemma to_mini_mset_is: "is_mini_mset (image_mset to_mini_formula \<Gamma>)" by simp
+
+lemma SC_full_to_mini:
+  defines "tms \<equiv> image_mset to_mini_formula"
+  assumes asm: "\<Gamma> \<Rightarrow> \<Delta>"
+  shows "tms \<Gamma> \<Rightarrow> tms \<Delta>"
+proof -
+  have tmsi[simp]: "tms (F,S) = to_mini_formula F, tms S" for F S unfolding tms_def by simp
+  from asm show ?thesis
+  proof(induction \<Gamma> \<Delta> rule: SCp.induct)
+    case (BotL \<Gamma>)
+    hence "\<bottom> \<in># tms \<Gamma>" unfolding tms_def by force
+    thus ?case using SCp.BotL by blast
+  next
+    case (Ax k \<Gamma> \<Delta>)
+    hence "Atom k \<in># tms \<Gamma>" "Atom k \<in># tms \<Delta>" unfolding tms_def using image_iff by fastforce+
+    thus ?case using SCp.Ax[of k] by blast
+  next
+    case (NotR F \<Gamma> \<Delta>) thus ?case 
+      unfolding tmsi to_mini_formula.simps
+      using weakenR SCp.ImpR by blast
+  next
+    case (NotL \<Gamma> F \<Delta>) from this(2) show ?case
+      by(auto intro!: SCp.ImpL)
+  next
+    case ImpR thus ?case using SCp.ImpR by simp
+  next
+    case ImpL thus ?case using SCp.ImpL by simp
+  next
+    case AndR from AndR(3,4) show ?case 
+      using weakenR by(auto intro!: SCp.ImpR SCp.ImpL)
+  next
+    case AndL from AndL(2) show ?case 
+      using weakenR[where 'a='a] by(fastforce intro!: SCp.ImpR SCp.ImpL)
+  next
+    case OrR from OrR(2) show ?case
+      using weakenR by(fastforce intro!: SCp.ImpR SCp.ImpL)
+  next
+    case (OrL F \<Gamma> \<Delta> G)
+    note SCp.ImpL
+    moreover {
+      have "to_mini_formula F, tms \<Gamma> \<Rightarrow> tms \<Delta>" using  OrL(3)[unfolded tmsi] .
+      with SCp.ImpR have "tms \<Gamma> \<Rightarrow> to_mini_formula F \<^bold>\<rightarrow> \<bottom>, tms \<Delta>" . }
+    ultimately have "(to_mini_formula F \<^bold>\<rightarrow> \<bottom>) \<^bold>\<rightarrow> to_mini_formula G, tms \<Gamma> \<Rightarrow> tms \<Delta>" .
+    thus ?case unfolding tmsi to_mini_formula.simps .
+  qed
+qed
+  
+lemma SC_mini_to_full:
+  defines "tms \<equiv> image_mset to_mini_formula"
+  assumes asm: "tms \<Gamma> \<Rightarrow> tms \<Delta>"
+  shows "\<Gamma> \<Rightarrow> \<Delta>"
+proof -
+  have tmsi[simp]: "tms (F,S) = to_mini_formula F, tms S" for F S unfolding tms_def by simp
+  note ImpL_inv ImpR_inv[dest]
+  have no: "f \<noteq> (\<lambda>F G. Not F)" "f \<noteq> Or" "f \<noteq> And" if "f F G, S' = tms S" for f F G S S'
+    by (metis that is_mini_formula.simps(4-6) msed_map_invR tms_def to_mini_is_mini union_commute)+
+  note dr = no(1)[where f="\<lambda>F G. Not F", simplified, dest!]
+            no(2)[where f=Or, simplified, dest!] 
+            no(3)[where f=And, simplified, dest!]
+    (\<exists>S2 H J. S = H \<^bold>\<rightarrow> J, S2 \<and> F = to_mini_formula H \<and> G = to_mini_formula J) \<or>
+    (\<exists>S2 H J. S = H \<^bold>\<or> J, S2 \<and> F = (to_mini_formula H \<^bold>\<rightarrow> \<bottom>) \<and> G = to_mini_formula J) \<or>
+    (\<exists>S2 H J. S = H \<^bold>\<and> J, S2 \<and> F =  to_mini_formula H \<^bold>\<rightarrow> to_mini_formula J \<^bold>\<rightarrow> \<bottom> \<and> G = \<bottom>) \<or>
+    (\<exists>S2 H. S = \<^bold>\<not> H, S2 \<and> F = to_mini_formula H \<and> G = \<bottom>)
+    note that[unfolded tms_def]
+    then obtain S2 pim where S2: "S1 = image_mset to_mini_formula S2"
+                        and   S: "S = pim, S2"
+                        and pim: "F \<^bold>\<rightarrow> G = to_mini_formula pim"
+      by (metis msed_map_invR union_commute)
+    show ?thesis using pim unfolding S by(cases pim; simp; blast)
+  qed
+  from asm show ?thesis
+  proof(induction "tms \<Gamma>"  "tms \<Delta>" arbitrary: \<Gamma> \<Delta> rule: SCp.induct)
+    have *: "to_mini_formula F = \<bottom> \<Longrightarrow> F = \<bottom>" for F by(cases F; simp)
+    case BotL thus ?case unfolding tms_def using * SCp.BotL by (metis image_iff multiset.set_map)
+  next
+    have *: "Atom k = to_mini_formula F \<Longrightarrow> F = Atom k" for F k by(cases F; simp)
+    case (Ax _ k) thus ?case
+      unfolding tms_def unfolding in_image_mset Set.image_iff
+      apply(elim bexE)
+      apply(drule *)+

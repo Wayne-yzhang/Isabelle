@@ -1,0 +1,165 @@
+theory RegExp2NAe
+imports "Regular-Sets.Regular_Exp" NAe
+begin
+
+type_synonym 'a bitsNAe = "('a,bool list)nae"
+
+definition
+ epsilon :: "'a bitsNAe" where
+"epsilon = ([],\<lambda>a s. {}, \<lambda>s. s=[])"
+
+definition
+"atom"  :: "'a \<Rightarrow> 'a bitsNAe" where
+"atom a = ([True],
+            \<lambda>b s. if s=[True] \<and> b=Some a then {[False]} else {},
+            \<lambda>s. s=[False])"
+
+definition
+ or :: "'a bitsNAe \<Rightarrow> 'a bitsNAe \<Rightarrow> 'a bitsNAe" where
+"or = (\<lambda>(ql,dl,fl)(qr,dr,fr).
+   ([],
+    \<lambda>a s. case s of
+            [] \<Rightarrow> if a=None then {True#ql,False#qr} else {}
+          | left#s \<Rightarrow> if left then True ## dl a s
+                              else False ## dr a s,
+    \<lambda>s. case s of [] \<Rightarrow> False | left#s \<Rightarrow> if left then fl s else fr s))"
+
+definition
+ conc :: "'a bitsNAe \<Rightarrow> 'a bitsNAe \<Rightarrow> 'a bitsNAe" where
+"conc = (\<lambda>(ql,dl,fl)(qr,dr,fr).
+   (True#ql,
+    \<lambda>a s. case s of
+            [] \<Rightarrow> {}
+          | left#s \<Rightarrow> if left then (True ## dl a s) \<union>
+                                   (if fl s \<and> a=None then {False#qr} else {})
+                              else False ## dr a s,
+    \<lambda>s. case s of [] \<Rightarrow> False | left#s \<Rightarrow> \<not>left \<and> fr s))"
+
+definition
+ star :: "'a bitsNAe \<Rightarrow> 'a bitsNAe" where
+"star = (\<lambda>(q,d,f).
+   ([],
+    \<lambda>a s. case s of
+            [] \<Rightarrow> if a=None then {True#q} else {}
+          | left#s \<Rightarrow> if left then (True ## d a s) \<union>
+                                   (if f s \<and> a=None then {True#q} else {})
+                              else {},
+    \<lambda>s. case s of [] \<Rightarrow> True | left#s \<Rightarrow> left \<and> f s))"
+
+primrec rexp2nae :: "'a rexp \<Rightarrow> 'a bitsNAe" where
+"rexp2nae Zero       = ([], \<lambda>a s. {}, \<lambda>s. False)" |
+"rexp2nae One        = epsilon" |
+"rexp2nae(Atom a)    = atom a" |
+"rexp2nae(Plus r s)  = or   (rexp2nae r) (rexp2nae s)" |
+"rexp2nae(Times r s) = conc (rexp2nae r) (rexp2nae s)" |
+"rexp2nae(Star r)    = star (rexp2nae r)"
+
+declare split_paired_all[simp]
+
+
+lemma step_epsilon[simp]: "step epsilon a = {}"
+by(simp add:epsilon_def step_def)
+
+lemma steps_epsilon: "((p,q) : steps epsilon w) = (w=[] \<and> p=q)"
+by (induct "w") auto
+
+lemma accepts_epsilon[simp]: "accepts epsilon w = (w = [])"
+apply (simp add: steps_epsilon accepts_def)
+apply (simp add: epsilon_def)
+done
+
+
+lemma fin_atom: "(fin (atom a) q) = (q = [False])"
+by(simp add:atom_def)
+
+lemma start_atom: "start (atom a) = [True]"
+by(simp add:atom_def)
+
+
+lemma eps_atom[simp]:
+ "eps(atom a) = {}"
+by (simp add:atom_def step_def)
+
+lemma in_step_atom_Some[simp]:
+ "(p,q) : step (atom a) (Some b) = (p=[True] \<and> q=[False] \<and> b=a)"
+by (simp add:atom_def step_def)
+
+lemma False_False_in_steps_atom:
+  "([False],[False]) : steps (atom a) w = (w = [])"
+apply (induct "w")
+ apply (simp)
+apply (simp add: relcomp_unfold)
+done
+
+lemma start_fin_in_steps_atom:
+  "(start (atom a), [False]) : steps (atom a) w = (w = [a])"
+apply (induct "w")
+ apply (simp add: start_atom rtrancl_empty)
+apply (simp add: False_False_in_steps_atom relcomp_unfold start_atom)
+done
+
+lemma accepts_atom: "accepts (atom a) w = (w = [a])"
+by (simp add: accepts_def start_fin_in_steps_atom fin_atom)
+
+
+
+
+lemma fin_or_True[iff]:
+ "\<And>L R. fin (or L R) (True#p) = fin L p"
+by(simp add:or_def)
+
+lemma fin_or_False[iff]:
+ "\<And>L R. fin (or L R) (False#p) = fin R p"
+by(simp add:or_def)
+
+
+lemma True_in_step_or[iff]:
+"\<And>L R. (True#p,q) : step (or L R) a = (\<exists>r. q = True#r \<and> (p,r) : step L a)"
+apply (simp add:or_def step_def)
+apply blast
+done
+
+lemma False_in_step_or[iff]:
+"\<And>L R. (False#p,q) : step (or L R) a = (\<exists>r. q = False#r \<and> (p,r) : step R a)"
+apply (simp add:or_def step_def)
+apply blast
+done
+
+
+
+lemma lemma1a:
+ "(tp,tq) : (eps(or L R))\<^sup>* \<Longrightarrow> 
+ (\<And>p. tp = True#p \<Longrightarrow> \<exists>q. (p,q) : (eps L)\<^sup>* \<and> tq = True#q)"
+apply (induct rule:rtrancl_induct)
+ apply (blast)
+apply (clarify)
+apply (simp)
+apply (blast intro: rtrancl_into_rtrancl)
+done
+
+lemma lemma1b:
+ "(tp,tq) : (eps(or L R))\<^sup>* \<Longrightarrow> 
+ (\<And>p. tp = False#p \<Longrightarrow> \<exists>q. (p,q) : (eps R)\<^sup>* \<and> tq = False#q)"
+apply (induct rule:rtrancl_induct)
+ apply (blast)
+apply (clarify)
+apply (simp)
+apply (blast intro: rtrancl_into_rtrancl)
+done
+
+lemma lemma2a:
+ "(p,q) : (eps L)\<^sup>*  \<Longrightarrow> (True#p, True#q) : (eps(or L R))\<^sup>*"
+apply (induct rule: rtrancl_induct)
+ apply (blast)
+apply (blast intro: rtrancl_into_rtrancl)
+done
+
+lemma lemma2b:
+ "(p,q) : (eps R)\<^sup>*  \<Longrightarrow> (False#p, False#q) : (eps(or L R))\<^sup>*"
+apply (induct rule: rtrancl_induct)
+ apply (blast)
+apply (blast intro: rtrancl_into_rtrancl)
+done
+
+lemma True_epsclosure_or[iff]:
+ "(True#p,q) : (eps(or L R))\<^sup>* = (\<exists>r. q = True#r \<and> (p,r) : (eps L)\<^sup>*)"

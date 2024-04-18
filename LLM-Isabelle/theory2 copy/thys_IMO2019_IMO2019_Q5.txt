@@ -1,0 +1,90 @@
+theory IMO2019_Q5
+  imports Complex_Main
+begin
+
+
+
+definition flip :: "bool list \<Rightarrow> nat \<Rightarrow> bool list" where
+  "flip xs i = xs[i := \<not>xs ! i]"
+
+lemma flip_Cons_pos [simp]: "n > 0 \<Longrightarrow> flip (x # xs) n = x # flip xs (n - 1)"
+  by (cases n) (auto simp: flip_def)
+
+lemma flip_Cons_0 [simp]: "flip (x # xs) 0 = (\<not>x) # xs"
+  by (simp add: flip_def)
+
+lemma flip_append1 [simp]: "n < length xs \<Longrightarrow> flip (xs @ ys) n = flip xs n @ ys"
+  and flip_append2 [simp]: "n \<ge> length xs \<Longrightarrow> n < length xs + length ys \<Longrightarrow>
+                               flip (xs @ ys) n = xs @ flip ys (n - length xs)"
+  by (auto simp: flip_def list_update_append nth_append)
+
+lemma length_flip [simp]: "length (flip xs i) = length xs"
+  by (simp add: flip_def)
+
+
+
+definition heads :: "bool list \<Rightarrow> nat" where "heads xs = length (filter id xs)"
+
+lemma heads_True [simp]: "heads (True # xs) = 1 + heads xs"
+  and heads_False [simp]: "heads (False # xs) = heads xs"
+  and heads_append [simp]: "heads (xs @ ys) = heads xs + heads ys"
+  and heads_Nil [simp]: "heads [] = 0"
+  by (auto simp: heads_def)
+
+lemma heads_Cons: "heads (x # xs) = (if x then heads xs + 1 else heads xs)"
+  by (auto simp: heads_def)
+
+lemma heads_pos: "True \<in> set xs \<Longrightarrow> heads xs > 0"
+  by (induction xs) (auto simp: heads_Cons)
+
+lemma heads_eq_0 [simp]: "True \<notin> set xs \<Longrightarrow> heads xs = 0"
+  by (induction xs) (auto simp: heads_Cons)
+
+lemma heads_eq_0_iff [simp]: "heads xs = 0 \<longleftrightarrow> True \<notin> set xs"
+  by (induction xs) (auto simp: heads_Cons)
+
+lemma heads_pos_iff [simp]: "heads xs > 0 \<longleftrightarrow> True \<in> set xs"
+  by (induction xs) (auto simp: heads_Cons)
+
+lemma heads_le_length: "heads xs \<le> length xs"
+  by (auto simp: heads_def)
+
+
+definition harry_step :: "bool list \<Rightarrow> bool list" where
+  "harry_step xs = flip xs (heads xs - 1)"
+
+lemma length_harry_step [simp]: "length (harry_step xs) = length xs"
+  by (simp add: harry_step_def)
+
+
+function harry_meas where
+  "harry_meas xs =
+     (if xs = [] then 0
+      else if hd xs then 1 + harry_meas (tl xs)
+      else if \<not>last xs then harry_meas (butlast xs)
+      else let n = length xs in harry_meas (take (n - 2) (tl xs)) + 2 * n - 1)"
+  by auto
+termination by (relation "Wellfounded.measure length") (auto simp: min_def)
+
+lemmas [simp del] = harry_meas.simps
+
+
+
+lemma head_last_cases [case_names Nil True False False_True]:
+  assumes "xs = [] \<Longrightarrow> P"
+  assumes "\<And>ys. xs = True # ys \<Longrightarrow> P" "\<And>ys. xs = ys @ [False] \<Longrightarrow> P"
+          "\<And>ys. xs = False # ys @ [True] \<Longrightarrow> P"
+  shows   "P"
+proof -
+  consider "length xs = 0" | "length xs = 1" | "length xs \<ge> 2" by linarith
+  thus ?thesis
+  proof cases
+    assume "length xs = 1"
+    hence "xs = [hd xs]" by (cases xs) auto
+    thus P using assms(2)[of "[]"] assms(3)[of "[]"] by (cases "hd xs") auto
+  next
+    assume len: "length xs \<ge> 2"
+    from len obtain x xs' where *: "xs = x # xs'"
+      by (cases xs) auto
+    have **: "xs' = butlast xs' @ [last xs']"
+      using len by (subst append_butlast_last_id) (auto simp: *)

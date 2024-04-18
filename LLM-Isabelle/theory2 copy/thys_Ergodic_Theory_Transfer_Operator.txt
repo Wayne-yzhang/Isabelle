@@ -1,0 +1,84 @@
+theory Transfer_Operator
+  imports Recurrence
+begin
+
+context qmpt begin
+
+
+
+definition nn_transfer_operator :: "('a \<Rightarrow> ennreal) \<Rightarrow> ('a \<Rightarrow> ennreal)"
+where
+  "nn_transfer_operator f = (if f \<in> borel_measurable M then RN_deriv M (distr (density M f) M T)
+                              else (\<lambda>_. 0))"
+
+lemma borel_measurable_nn_transfer_operator [measurable]:
+  "nn_transfer_operator f \<in> borel_measurable M"
+unfolding nn_transfer_operator_def by auto
+
+lemma borel_measurable_nn_transfer_operator_iterates [measurable]:
+  assumes [measurable]: "f \<in> borel_measurable M"
+  shows "(nn_transfer_operator^^n) f \<in> borel_measurable M"
+by (cases n, auto)
+
+
+lemma nn_transfer_operator_intg:
+  assumes [measurable]: "f \<in> borel_measurable M" "g \<in> borel_measurable M"
+  shows "(\<integral>\<^sup>+ x. f x * nn_transfer_operator g x \<partial>M) = (\<integral>\<^sup>+ x. f (T x) * g x \<partial>M)"
+proof -
+  have *: "density M (RN_deriv M (distr (density M g) M T)) = distr (density M g) M T"
+    by (rule density_RN_deriv) (auto intro!: quasi_measure_preserving_absolutely_continuous simp add: Tqm)
+  have "(\<integral>\<^sup>+ x. f x * nn_transfer_operator g x \<partial>M) = (\<integral>\<^sup>+ x. f x \<partial>(density M (RN_deriv M (distr (density M g) M T))))"
+    unfolding nn_transfer_operator_def by (simp add: nn_integral_densityR)
+  also have "... = (\<integral>\<^sup>+ x. f x \<partial>(distr (density M g) M T))"
+    unfolding * by simp
+  also have "... = (\<integral>\<^sup>+ x. f (T x) \<partial>(density M g))"
+    by (rule nn_integral_distr, auto)
+  also have "... = (\<integral>\<^sup>+ x. f (T x) * g x \<partial>M)"
+    by (simp add: nn_integral_densityR)
+  finally show ?thesis by auto
+qed
+
+lemma nn_transfer_operator_intTn_g:
+  assumes "f \<in> borel_measurable M" "g \<in> borel_measurable M"
+  shows "(\<integral>\<^sup>+ x. f x * (nn_transfer_operator^^n) g x \<partial>M) = (\<integral>\<^sup>+ x. f ((T^^n) x) * g x \<partial>M)"
+proof -
+  have "\<And>f g. f \<in> borel_measurable M \<Longrightarrow> g \<in> borel_measurable M \<Longrightarrow> (\<integral>\<^sup>+ x. f x * (nn_transfer_operator^^n) g x \<partial>M) = (\<integral>\<^sup>+ x. f ((T^^n) x) * g x \<partial>M)" for n
+  proof (induction n)
+    case (Suc n)
+    have [measurable]: "f \<in> borel_measurable M" "g \<in> borel_measurable M" by fact+
+    have "(\<integral>\<^sup>+ x. f x * (nn_transfer_operator ^^ Suc n) g x \<partial>M) = (\<integral>\<^sup>+ x. f x * (nn_transfer_operator ((nn_transfer_operator^^n) g)) x \<partial>M)"
+      apply (rule nn_integral_cong) using funpow.simps(2) unfolding comp_def by auto
+    also have "... = (\<integral>\<^sup>+ x. f (T x) * (nn_transfer_operator^^n) g x \<partial>M)"
+      by (rule nn_transfer_operator_intg, auto)
+    also have "... = (\<integral>\<^sup>+ x. (\<lambda>x. f (T x)) ((T^^n) x) * g x \<partial>M)"
+      by (rule Suc.IH, auto)
+    also have "... = (\<integral>\<^sup>+ x. f ((T^^(Suc n)) x) * g x \<partial>M)"
+      apply (rule nn_integral_cong) using funpow.simps(2) unfolding comp_def by auto
+    finally show ?case by auto
+  qed (simp)
+  then show ?thesis using assms by auto
+qed
+
+lemma nn_transfer_operator_intg_Tn:
+  assumes "f \<in> borel_measurable M" "g \<in> borel_measurable M"
+  shows "(\<integral>\<^sup>+ x. (nn_transfer_operator^^n) g x * f x \<partial>M) = (\<integral>\<^sup>+ x. g x * f ((T^^n) x) \<partial>M)"
+using nn_transfer_operator_intTn_g[OF assms, of n] by (simp add: algebra_simps)
+
+lemma nn_transfer_operator_charact:
+  assumes "\<And>A. A \<in> sets M \<Longrightarrow> (\<integral>\<^sup>+ x. indicator A x * g x \<partial>M) = (\<integral>\<^sup>+ x. indicator A (T x) * f x \<partial>M)" and
+          [measurable]: "f \<in> borel_measurable M" "g \<in> borel_measurable M"
+  shows "AE x in M. nn_transfer_operator f x = g x"
+proof -
+  have *:"set_nn_integral M A g = set_nn_integral M A (nn_transfer_operator f)" if [measurable]: "A \<in> sets M" for A
+  proof -
+    have "set_nn_integral M A g = (\<integral>\<^sup>+ x. indicator A x * g x \<partial>M)"
+      using mult.commute by metis
+    also have "... = (\<integral>\<^sup>+ x. indicator A (T x) * f x \<partial>M)"
+      using assms(1) by auto
+    also have "... = (\<integral>\<^sup>+ x. indicator A x * nn_transfer_operator f x \<partial>M)"
+      by (rule nn_transfer_operator_intg[symmetric], auto)
+    finally show ?thesis
+      using mult.commute by (metis (no_types, lifting) nn_integral_cong)
+  qed
+  show ?thesis
+    by (rule sigma_finite_measure.density_unique2, auto simp add: sigma_finite_measure_axioms *)

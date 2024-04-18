@@ -1,0 +1,333 @@
+theory Poincare_Distance
+  imports Poincare_Lines_Ideal_Points Hyperbolic_Functions
+begin
+
+
+
+abbreviation Re_cross_ratio where "Re_cross_ratio z u v w \<equiv> Re (to_complex (cross_ratio z u v w))"
+
+definition calc_poincare_distance :: "complex_homo \<Rightarrow> complex_homo \<Rightarrow> complex_homo \<Rightarrow> complex_homo \<Rightarrow> real" where
+  [simp]: "calc_poincare_distance u i1 v i2 = abs (ln (Re_cross_ratio u i1 v i2))"
+
+definition poincare_distance_pred :: "complex_homo \<Rightarrow> complex_homo \<Rightarrow> real \<Rightarrow> bool" where
+  [simp]: "poincare_distance_pred u v d \<longleftrightarrow>
+            (u = v \<and> d = 0) \<or> (u \<noteq> v \<and> (\<forall> i1 i2. ideal_points (poincare_line u v) = {i1, i2} \<longrightarrow> d = calc_poincare_distance u i1 v i2))"
+
+definition poincare_distance :: "complex_homo \<Rightarrow> complex_homo \<Rightarrow> real" where
+  "poincare_distance u v = (THE d. poincare_distance_pred u v d)"
+
+lemma distance_cross_ratio_real_positive:
+  assumes "u \<in> unit_disc" and "v \<in> unit_disc" and "u \<noteq> v"
+  shows "\<forall> i1 i2. ideal_points (poincare_line u v) = {i1, i2} \<longrightarrow> 
+                  cross_ratio u i1 v i2 \<noteq> \<infinity>\<^sub>h \<and> is_real (to_complex (cross_ratio u i1 v i2)) \<and> Re_cross_ratio u i1 v i2 > 0" (is "?P u v")
+proof (rule wlog_positive_x_axis[OF assms])
+  fix x
+  assume *: "is_real x" "0 < Re x" "Re x < 1"
+  hence "x \<noteq> -1" "x \<noteq> 1"
+    by auto
+  hence **: "of_complex x \<noteq> \<infinity>\<^sub>h" "of_complex x \<noteq> 0\<^sub>h" "of_complex x \<noteq> of_complex (-1)" "of_complex 1 \<noteq> of_complex x"
+        "of_complex x \<in> circline_set x_axis"
+    using *
+    unfolding circline_set_x_axis
+    by (auto simp add: of_complex_inj)
+
+  have ***:  "0\<^sub>h \<noteq> of_complex (-1)" "0\<^sub>h \<noteq> of_complex 1"
+    by (metis of_complex_zero_iff zero_neq_neg_one, simp)
+
+  have ****: "- x - 1 \<noteq> 0" "x - 1 \<noteq> 0"
+    by (metis add.inverse_inverse eq_iff_diff_eq_0, simp)
+
+  have "poincare_line 0\<^sub>h (of_complex x) = x_axis"
+    using **
+    by (simp add: poincare_line_0_real_is_x_axis)
+  thus "?P 0\<^sub>h (of_complex x)"
+    using * ** *** ****
+    using cross_ratio_not_inf[of "0\<^sub>h" "of_complex 1" "of_complex (-1)" "of_complex x"]
+    using cross_ratio_not_inf[of "0\<^sub>h" "of_complex (-1)" "of_complex 1" "of_complex x"]
+    using cross_ratio_real[of 0 "-1" x 1] cross_ratio_real[of 0 1 x "-1"]
+    apply (auto simp add: poincare_line_0_real_is_x_axis doubleton_eq_iff circline_set_x_axis)
+    apply (subst cross_ratio, simp_all, subst Re_complex_div_gt_0, simp, subst mult_neg_neg, simp_all)+
+    done
+next
+  fix M u v
+  let ?Mu = "moebius_pt M u" and ?Mv = "moebius_pt M v"
+  assume *: "unit_disc_fix M" "u \<in> unit_disc" "v \<in> unit_disc" "u \<noteq> v"
+            "?P ?Mu ?Mv"
+  show "?P u v"
+  proof safe
+    fix i1 i2
+    let ?cr = "cross_ratio u i1 v i2"
+    assume **: "ideal_points (poincare_line u v) = {i1, i2}"
+    have "i1 \<noteq> u" "i1 \<noteq> v" "i2 \<noteq> u" "i2 \<noteq> v" "i1 \<noteq> i2"
+      by auto
+    hence "0 < Re (to_complex ?cr) \<and> is_real (to_complex ?cr) \<and> ?cr \<noteq> \<infinity>\<^sub>h"
+      using * **
+      apply (erule_tac x="moebius_pt M i1" in allE)
+      apply (erule_tac x="moebius_pt M i2" in allE)
+      apply (subst (asm) ideal_points_poincare_line_moebius[of M u v i1 i2], simp_all)
+      done
+    thus "0 < Re (to_complex ?cr)" "is_real (to_complex ?cr)" "?cr = \<infinity>\<^sub>h \<Longrightarrow> False"
+      by simp_all
+  qed
+qed
+
+lemma distance_unique:
+  assumes "u \<in> unit_disc" and "v \<in> unit_disc"
+  shows "\<exists>! d. poincare_distance_pred u v d"
+proof (cases "u = v")
+  case True
+  thus ?thesis
+    by auto
+next
+  case False
+  obtain i1 i2 where *: "i1 \<noteq> i2" "ideal_points (poincare_line u v) = {i1, i2}"
+    by blast
+  let ?d = "calc_poincare_distance u i1 v i2"
+  show ?thesis
+  proof (rule ex1I)
+    show "poincare_distance_pred u v ?d"
+    proof (simp del: calc_poincare_distance_def, safe)
+      fix i1' i2'
+      assume "{i1, i2} = {i1', i2'}"
+      hence **: "(i1' = i1 \<and> i2' = i2) \<or> (i1' = i2 \<and> i2' = i1)"
+        using doubleton_eq_iff[of i1 i2 i1' i2']
+        by blast
+      have all_different: "u \<noteq> i1" "u \<noteq> i2" "v \<noteq> i1" "v \<noteq> i2" "u \<noteq> i1'" "u \<noteq> i2'" "v \<noteq> i1'" "v \<noteq> i2'" "i1 \<noteq> i2"
+        by auto
+
+      show "calc_poincare_distance u i1 v i2 = calc_poincare_distance u i1' v i2'"
+      proof-
+        let ?cr = "cross_ratio u i1 v i2"
+        let ?cr' = "cross_ratio u i1' v i2'"
+
+        have "Re (to_complex ?cr) > 0" "is_real (to_complex ?cr)"
+             "Re (to_complex ?cr') > 0" "is_real (to_complex ?cr')"
+          using False distance_cross_ratio_real_positive[OF assms(1-2)] * **
+          by auto
+
+        thus ?thesis
+          using **
+          using cross_ratio_not_zero cross_ratio_not_inf all_different
+          by auto (subst cross_ratio_commute_24, subst reciprocal_real, simp_all add: ln_div)
+      qed
+    qed
+  next
+    fix d
+    assume "poincare_distance_pred u v d"
+    thus "d = ?d"
+      by auto
+  qed
+qed
+
+lemma poincare_distance_satisfies_pred [simp]:
+  assumes "u \<in> unit_disc" and "v \<in> unit_disc"
+  shows "poincare_distance_pred u v (poincare_distance u v)"
+    using distance_unique[OF assms] theI'[of "poincare_distance_pred u v"]
+    unfolding poincare_distance_def
+    by blast
+
+lemma poincare_distance_I:
+  assumes "u \<in> unit_disc" and "v \<in> unit_disc" and "u \<noteq> v" and "ideal_points (poincare_line u v) = {i1, i2}"
+  shows "poincare_distance u v = calc_poincare_distance u i1 v i2"
+  using assms
+  using poincare_distance_satisfies_pred[OF assms(1-2)]
+  by simp
+
+lemma poincare_distance_refl [simp]:
+  assumes "u \<in> unit_disc"
+  shows "poincare_distance u u = 0"
+  using assms
+  using poincare_distance_satisfies_pred[OF assms assms]
+  by simp
+
+lemma unit_disc_fix_preserve_poincare_distance [simp]:
+  assumes "unit_disc_fix M" and "u \<in> unit_disc" and "v \<in> unit_disc"
+  shows "poincare_distance (moebius_pt M u) (moebius_pt M v) = poincare_distance u v"
+proof (cases "u = v")
+  case True
+  have "moebius_pt M u \<in> unit_disc" "moebius_pt M v \<in> unit_disc"
+    using unit_disc_fix_iff[OF assms(1), symmetric] assms
+    by blast+
+  thus ?thesis
+    by simp
+next
+  case False
+  obtain i1 i2 where *: "ideal_points (poincare_line u v) = {i1, i2}"
+    by (rule obtain_ideal_points[OF is_poincare_line_poincare_line[of u v]])
+  let ?Mu = "moebius_pt M u" and ?Mv = "moebius_pt M v" and ?Mi1 = "moebius_pt M i1" and ?Mi2 = "moebius_pt M i2"
+
+  have **: "?Mu \<in> unit_disc" "?Mv \<in> unit_disc"
+    using assms
+    using unit_disc_fix_iff
+    by blast+
+
+  have ***: "?Mu \<noteq> ?Mv"   
+    by simp
+
+  have "poincare_distance u v = calc_poincare_distance u i1 v i2"
+    by auto
+  moreover
+  have "unit_circle_fix M"
+    using assms
+    by simp
+  hence ++: "ideal_points (poincare_line ?Mu ?Mv) = {?Mi1, ?Mi2}"
+    by simp
+  have "poincare_distance ?Mu ?Mv = calc_poincare_distance ?Mu ?Mi1 ?Mv ?Mi2"
+    by (rule poincare_distance_I[OF ** *** ++])
+  moreover
+  have "calc_poincare_distance ?Mu ?Mi1 ?Mv ?Mi2 = calc_poincare_distance u i1 v i2"
+    unfolding calc_poincare_distance_def
+    by (subst moebius_preserve_cross_ratio[symmetric], simp_all)
+  ultimately
+  show ?thesis
+    by simp
+qed
+
+
+lemma poincare_distance_x_axis_x_axis:
+  assumes "x \<in> unit_disc" and "y \<in> unit_disc" and "x \<in> circline_set x_axis" and "y \<in> circline_set x_axis"
+  shows "poincare_distance x y =
+            (let x' = to_complex x; y' = to_complex y
+              in abs (ln (Re (((1 + x') * (1 - y')) / ((1 - x') * (1 + y'))))))"
+proof-
+  obtain x' y' where *: "x = of_complex x'" "y = of_complex y'"
+    by auto
+
+  have "cmod x' < 1" "cmod y' < 1"
+    by (metis unit_disc_iff_cmod_lt_1)+
+  hence **: "x' \<noteq> 1" "x' \<noteq> 1" "y' \<noteq> -1" "y' \<noteq> 1"
+    by auto
+
+  have "1 + y' \<noteq> 0"
+    using **
+    by (metis add.left_cancel add_neg_numeral_special(7))
+
+  show ?thesis
+  proof (cases "x = y")
+    case True
+    thus ?thesis
+      using assms(1-2)
+      by auto
+      
+  next
+    case False
+    hence "poincare_line x y = x_axis"
+      using poincare_line_x_axis[OF assms]
+      by simp
+    hence "ideal_points (poincare_line x y) = {of_complex (-1), of_complex 1}"
+      by simp
+    hence "poincare_distance x y = calc_poincare_distance x (of_complex (-1)) y (of_complex 1)"
+      by auto
+    also have "... = abs (ln (Re (((x' + 1) * (y' - 1)) / ((x' - 1) * (y' + 1)))))"
+      by (simp, transfer, transfer, auto)
+    finally
+    show ?thesis
+      using *
+      by (metis (no_types, lifting) add.commute minus_diff_eq minus_divide_divide mult_minus_left mult_minus_right to_complex_of_complex)
+  qed
+qed
+
+lemma poincare_distance_zero_x_axis:
+  assumes "x \<in> unit_disc" and "x \<in> circline_set x_axis"
+  shows "poincare_distance 0\<^sub>h x = (let x' = to_complex x in abs (ln (Re ((1 - x') / (1 + x')))))"
+  using assms
+  using poincare_distance_x_axis_x_axis[of "0\<^sub>h" x]
+  by (simp add: Let_def)
+
+lemma poincare_distance_zero:
+  assumes "x \<in> unit_disc"
+  shows "poincare_distance 0\<^sub>h x = (let x' = to_complex x in abs (ln (Re ((1 - cmod x') / (1 + cmod x')))))" (is "?P x")
+proof (cases "x = 0\<^sub>h")
+  case True
+  thus ?thesis
+    by auto
+next
+  case False
+  show ?thesis
+  proof (rule wlog_rotation_to_positive_x_axis)
+    show "x \<in> unit_disc" "x \<noteq> 0\<^sub>h" by fact+
+  next
+    fix \<phi> u
+    assume "u \<in> unit_disc" "u \<noteq> 0\<^sub>h" "?P (moebius_pt (moebius_rotation \<phi>) u)"
+    thus "?P u"
+      using unit_disc_fix_preserve_poincare_distance[of "moebius_rotation \<phi>" "0\<^sub>h" u]
+      by (cases "u = \<infinity>\<^sub>h") (simp_all add: Let_def)
+  next
+    fix x
+    assume "is_real x" "0 < Re x" "Re x < 1"
+    thus "?P (of_complex x)"
+      using poincare_distance_zero_x_axis[of "of_complex x"]
+      by simp (auto simp add: circline_set_x_axis cmod_eq_Re complex_is_Real_iff)
+  qed
+qed
+
+lemma poincare_distance_zero_opposite [simp]:
+  assumes "of_complex z \<in> unit_disc"
+  shows "poincare_distance 0\<^sub>h (of_complex (- z)) = poincare_distance 0\<^sub>h (of_complex z)"
+proof-
+  have *: "of_complex (-z) \<in> unit_disc"
+    using assms
+    by auto
+  show ?thesis
+    using poincare_distance_zero[OF assms]
+    using poincare_distance_zero[OF *]
+    by simp
+qed
+
+
+
+abbreviation "cosh_dist u v \<equiv> cosh (poincare_distance u v)"
+
+lemma cosh_poincare_distance_cross_ratio_average:
+  assumes "u \<in> unit_disc" "v \<in> unit_disc" "u \<noteq> v" "ideal_points (poincare_line u v) = {i1, i2}"
+  shows "cosh_dist u v =
+           ((Re_cross_ratio u i1 v i2) + (Re_cross_ratio v i1 u i2)) / 2"
+proof-
+  let ?cr = "cross_ratio u i1 v i2"
+  let ?crRe = "Re (to_complex ?cr)"
+  have "?cr \<noteq> \<infinity>\<^sub>h" "is_real (to_complex ?cr)" "?crRe > 0" 
+    using distance_cross_ratio_real_positive[OF assms(1-3)] assms(4)
+    by simp_all
+  then obtain cr where *: "cross_ratio u i1 v i2 = of_complex cr" "cr \<noteq> 0" "is_real cr" "Re cr > 0"
+    using inf_or_of_complex[of "cross_ratio u i1 v i2"]
+    by (smt to_complex_of_complex zero_complex.simps(1))
+  thus ?thesis
+    using *
+    using assms cross_ratio_commute_13[of v i1 u i2]
+    unfolding poincare_distance_I[OF assms] calc_poincare_distance_def cosh_def
+    by (cases "Re cr \<ge> 1")
+       (auto simp add: ln_div[of 0] exp_minus field_simps Re_divide power2_eq_square complex.expand)
+qed
+
+definition poincare_distance_formula' :: "complex \<Rightarrow> complex \<Rightarrow> real" where
+[simp]: "poincare_distance_formula' u v = 1 + 2 * ((cmod (u - v))\<^sup>2 / ((1 - (cmod u)\<^sup>2) * (1 - (cmod v)\<^sup>2)))"
+
+
+definition poincare_distance_formula :: "complex \<Rightarrow> complex \<Rightarrow> real" where
+  [simp]: "poincare_distance_formula u v = arcosh (poincare_distance_formula' u v)"
+
+lemma blaschke_preserve_distance_formula [simp]:
+  assumes "of_complex k \<in> unit_disc" "u \<in> unit_disc" "v \<in> unit_disc"
+  shows "poincare_distance_formula (to_complex (moebius_pt (blaschke k) u)) (to_complex (moebius_pt (blaschke k) v)) =
+         poincare_distance_formula (to_complex u) (to_complex v)"
+proof (cases "k = 0")
+  case True
+  thus ?thesis
+    by simp
+next
+  case False
+  obtain u' v' where *: "u' = to_complex u" "v' = to_complex v"
+    by auto
+
+  have "cmod u' < 1" "cmod v' < 1" "cmod k < 1"
+    using assms *
+    using inf_or_of_complex[of u] inf_or_of_complex[of v]
+    by auto
+
+  obtain nu du nv dv d kk ddu ddv where
+    **: "nu = u' - k" "du = 1 - cnj k *u'" "nv = v' - k" "dv = 1 - cnj k * v'"
+        "d = u' - v'" "ddu = 1 - u'*cnj u'" "ddv = 1 - v'*cnj v'" "kk = 1 - k*cnj k"
+    by auto
+
+  have d: "nu*dv - nv*du = d*kk"                          
+    by (subst **)+ (simp add: field_simps)

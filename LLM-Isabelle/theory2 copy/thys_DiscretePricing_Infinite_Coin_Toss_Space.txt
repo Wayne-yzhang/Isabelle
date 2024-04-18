@@ -1,0 +1,248 @@
+theory Infinite_Coin_Toss_Space imports Filtration Generated_Subalgebra Disc_Cond_Expect
+
+begin
+
+
+lemma decompose_init_prod:
+  fixes n::nat
+  shows "(\<Prod> i\<in> {0..n}. f i) = f 0 * (\<Prod> i\<in> {1..n}. f i)"
+proof (cases "Suc 0 \<le> n")
+  case True
+  thus ?thesis
+    by (metis One_nat_def Suc_le_D True prod.atLeast0_atMost_Suc_shift prod.atLeast_Suc_atMost_Suc_shift)
+next
+  case False
+  thus ?thesis
+    by (metis One_nat_def atLeastLessThanSuc_atLeastAtMost prod.atLeast0_lessThan_Suc_shift
+        prod.atLeast_Suc_lessThan_Suc_shift)
+qed
+
+
+lemma Inter_nonempty_distrib:
+  assumes "A \<noteq> {}"
+  shows "\<Inter>A \<inter> B = (\<Inter> C\<in> A. (C\<inter> B))"
+proof
+  show "(\<Inter>C\<in>A. C \<inter> B) \<subseteq> \<Inter>A \<inter> B"
+  proof
+    fix x
+    assume mem: "x \<in> (\<Inter>C\<in>A. C \<inter> B)"
+    hence "x\<in> C\<inter> B" using mem by blast
+    hence in1: "x\<in> B" by auto
+    have "\<And>C. C\<in> A \<Longrightarrow> x \<in> C\<inter>B" using mem by blast
+    hence "\<And>C. C\<in> A \<Longrightarrow> x\<in> C" by auto
+    hence in2: "x\<in> \<Inter>A" by auto
+    thus "x\<in> \<Inter>A \<inter> B" using in1 in2 by simp
+  qed
+qed auto
+
+
+
+lemma enn2real_sum: shows "finite A \<Longrightarrow> (\<And>a. a\<in> A\<Longrightarrow> f a < top) \<Longrightarrow>enn2real (sum f A) = (\<Sum> a\<in> A. enn2real (f a))"
+proof (induct rule:finite_induct)
+  case empty
+  thus ?case by simp
+next
+  case (insert a A)
+  have "enn2real (sum f (insert a A)) = enn2real (f a + (sum f A))"
+    by (simp add: insert.hyps(1) insert.hyps(2))
+  also have "... = enn2real (f a) + enn2real (sum f A)"
+    by (simp add: enn2real_plus insert.hyps(1) insert.prems)
+  also have "... = enn2real (f a) + (\<Sum> a\<in> A. enn2real (f a))"
+    by (simp add: insert.hyps(3) insert.prems)
+  also have "... = (\<Sum> a\<in> (insert a A). enn2real (f a))"
+    by (metis calculation insert.hyps(1) insert.hyps(2) sum.insert)
+  finally show ?case .
+qed
+
+lemma ennreal_sum: shows "finite A \<Longrightarrow> (\<And>a. 0 \<le> f a) \<Longrightarrow> (\<Sum>a\<in> A. ennreal (f a)) = ennreal (\<Sum>a\<in> A. f a)"
+proof (induct rule:finite_induct)
+  case empty
+  thus ?case by simp
+next
+  case (insert a A)
+  have "(\<Sum>a\<in> (insert a A). ennreal (f a)) = ennreal (f a) + (\<Sum>a\<in> A. ennreal (f a))"
+    by (simp add: insert.hyps(1) insert.hyps(2))
+  also have "... = ennreal (f a) + ennreal (\<Sum>a\<in> A. f a)"
+    by (simp add: insert.prems)
+  also have "... = ennreal (f a + (\<Sum>a\<in> A. f a))"
+    by (simp add: insert.prems sum_nonneg)
+  also have "... = ennreal (\<Sum>a\<in> (insert a A). (f a))"
+    using insert.hyps(1) insert.hyps(2) by auto
+  finally show ?case .
+qed
+
+
+lemma stake_snth:
+  assumes "stake n w = stake n x"
+  shows "Suc i \<le> n \<Longrightarrow> snth w i = snth x i"
+by (metis Suc_le_eq assms stake_nth)
+
+lemma stake_snth_charact:
+  assumes "stake n w = stake n x"
+  shows "\<forall>i < n. snth w i = snth x i"
+proof (intro allI impI)
+  fix i
+  assume "i < n"
+  thus "snth w i = snth x i" using Suc_leI assms stake_snth by blast
+qed
+
+lemma stake_snth':
+  shows "(\<And>i. Suc i \<le> n \<Longrightarrow> snth w i = snth x i) \<Longrightarrow>stake n w = stake n x"
+proof (induct n arbitrary:w x)
+case 0
+  then show ?case by auto
+next
+case (Suc n)
+  hence mh: "\<And>i. Suc i \<le> Suc n \<Longrightarrow> w !! i = x !! i" by auto
+  hence seq:"snth w n = snth x n"  by auto
+  have "stake n w = stake n x" using mh Suc by (meson Suc_leD Suc_le_mono)
+  thus "stake (Suc n) w = stake (Suc n) x" by (metis seq stake_Suc)
+qed
+
+lemma  stake_inter_snth:
+  fixes x
+  assumes "Suc 0 \<le> n"
+  shows "{w\<in> space M. (stake n w = stake n x)} = (\<Inter> i \<in> {0.. n-1}. {w\<in> space M. (snth w i = snth x i)})"
+proof
+  let ?S =  "{w\<in> space M. (stake n w = stake n x)}"
+  show "?S \<subseteq> (\<Inter>i\<in>{0..n-1}. {w \<in> space M. w !! i = x !! i})" using stake_snth assms by fastforce
+  show "(\<Inter>i\<in>{0..n-1}. {w \<in> space M. w !! i = x !! i}) \<subseteq> ?S"
+  proof
+    fix w
+    assume inter: "w \<in> (\<Inter>i\<in>{0..n-1}. {w \<in> space M. w !! i = x !! i})"
+    have "\<forall> i. 0 \<le> i \<and> i \<le> n-1 \<longrightarrow> snth w i = snth x i"
+    proof (intro allI impI)
+      fix i
+      assume "0 \<le> i \<and> i \<le> n-1"
+      thus "snth w i = snth x i" using inter by auto
+    qed
+    hence "stake n w = stake n x"
+      by (metis One_nat_def Suc_le_D diff_Suc_Suc diff_is_0_eq diff_zero le0 stake_snth')
+    thus "w\<in> ?S" using inter by auto
+  qed
+qed
+
+lemma streams_stake_set:
+  shows "pw \<in> streams A \<Longrightarrow> set (stake n pw) \<subseteq> A"
+proof (induct n arbitrary: pw)
+  case (Suc n) note hyp = this
+  have "set (stake (Suc 0) pw) \<subseteq> A"
+  proof -
+    have "shd pw \<in> A" using hyp  streams_shd[of pw A] by simp
+    have "stake (Suc 0) pw = [shd pw]" by auto
+    hence "set (stake (Suc 0) pw) = {shd pw}" by auto
+  qed
+  thus ?case by (simp add: Suc.hyps Suc.prems streams_stl)
+qed simp
+
+
+lemma stake_finite_universe_induct:
+  assumes "finite A"
+  and "A \<noteq> {}"
+  shows "(stake (Suc n) `(streams A)) = {s#w| s w. s\<in> A \<and> w\<in> (stake n `(streams A))}" (is "?L = ?R")
+proof
+  show "?L \<subseteq> ?R"
+  proof
+    fix l::"'a list"
+    assume "l\<in> ?L"
+    hence "\<exists>pw. pw \<in> streams A \<and> l = stake (Suc n) pw" by auto
+    from this obtain pw where "pw \<in> streams A" and  "l = stake (Suc n) pw" by blast
+    hence "l = shd pw # stake n (stl pw)" unfolding stake_def by auto
+  qed
+  show "?R \<subseteq> ?L"
+  proof
+    fix l::"'a list"
+    assume "l\<in> ?R"
+    hence "\<exists> s w. s\<in> A \<and> w\<in> (stake n `(streams A)) \<and> l = s# w" by auto
+    from this obtain s and w where "s\<in> A" and "w\<in> (stake n `(streams A))" and "l = s# w" by blast
+      note swprop = this
+    have "\<exists>pw. pw \<in> streams A \<and> w = stake n pw" using swprop by auto
+    from this obtain pw where "pw\<in> streams A" and "w = stake n pw" by blast note pwprop = this
+    have "l \<in> lists A"
+    proof -
+      have "s\<in> A" using swprop by simp
+      have "set w \<subseteq> A" using pwprop streams_stake_set by simp
+      have "set l = set w \<union> {s}" using swprop by auto
+    qed
+    have "\<exists>x. x \<in> A" using assms by auto
+    from this obtain x where "x\<in> A" by blast
+    let ?sx = "sconst x"
+    let ?st = "shift l ?sx"
+    have "l = stake (Suc n) ?st" by (simp add: pwprop(2) stake_shift swprop(3))
+    have "sset ?sx = {x}" by simp
+    hence "?sx \<in> streams A" using sset_streams[of "sconst x"] by simp
+  qed
+qed
+
+
+lemma stake_finite_universe_finite:
+  assumes "finite A"
+  and "A \<noteq> {}"
+  shows "finite (stake n `(streams A))"
+proof (induction n)
+  let ?L = "(stake 0 `(streams A))"
+  have "streams A \<noteq> {}"
+  proof
+    assume "streams A = {}"
+    have "\<exists>x. x \<in> A" using assms by auto
+    from this obtain x where "x\<in> A" by blast
+    let ?sx = "sconst x"
+    have "sset ?sx = {x}" by simp
+    hence "?sx \<in> streams A" using sset_streams[of "sconst x"] by simp
+  qed
+  have "stake 0 = (\<lambda>s. [])" unfolding stake_def by simp
+next
+  fix n assume "finite (stake n `(streams A))" note hyp = this
+  have "(stake (Suc n) `(streams A)) = {s#w| s w. s\<in> A \<and> w\<in> (stake n `(streams A))}" (is "?L = ?R")
+  using assms stake_finite_universe_induct[of A n] by simp
+  have "finite ?R"  by (simp add: assms(1) finite_image_set2 hyp)
+qed
+
+
+lemma  diff_streams_only_if:
+  assumes "w \<noteq> x"
+  shows "\<exists>n. snth w n \<noteq> snth x n"
+proof -
+  have f1: "smap (\<lambda>n. x !! (n - Suc 0)) (fromN (Suc 0)) \<noteq> w"
+    by (metis assms stream_smap_fromN)
+  obtain nn :: "'a stream \<Rightarrow> nat stream \<Rightarrow> (nat \<Rightarrow> 'a) \<Rightarrow> nat" where
+    "\<forall>x0 x1 x2. (\<exists>v3. x2 (x1 !! v3) \<noteq> x0 !! v3) = (x2 (x1 !! nn x0 x1 x2) \<noteq> x0 !! nn x0 x1 x2)"
+    by moura
+  then have "x !! (fromN (Suc 0) !! nn w (fromN (Suc 0)) (\<lambda>n. x !! (n - Suc 0)) - Suc 0) \<noteq> w !! nn w (fromN (Suc 0)) (\<lambda>n. x !! (n - Suc 0))"
+    using f1 by (meson smap_alt)
+  then show ?thesis
+    by (metis (no_types) snth_smap stream_smap_fromN)
+qed
+
+lemma diff_streams_if:
+  assumes "\<exists>n. snth w n \<noteq> snth x n"
+  shows "w\<noteq> x"
+  using assms by auto
+
+lemma sigma_set_union_count:
+  assumes "\<forall> y\<in> A. B y \<in> sigma_sets X Y"
+and "countable A"
+  shows "(\<Union> y\<in> A. B y) \<in> sigma_sets X Y"
+  by (metis (mono_tags, lifting) assms countable_image imageE sigma_sets_UNION)
+
+lemma sigma_set_inter_init:
+  assumes "\<And>i. i\<le>(n::nat) \<Longrightarrow> A i \<in> sigma_sets sp B"
+and "B \<subseteq> Pow sp"
+shows "(\<Inter> i\<in> {m. m\<le> n}. A i) \<in> sigma_sets sp B"
+  by (metis (full_types) assms(1) assms(2) bot.extremum empty_iff mem_Collect_eq sigma_sets_INTER)
+
+
+
+lemma  adapt_sigma_sets:
+assumes "\<And>i. i \<le> n\<Longrightarrow> (X i) \<in> measurable M N"
+shows "sigma_algebra (space M) (sigma_sets (space M) (\<Union>i\<in>{m. m \<le> n}. {X i -` A \<inter> space M |A. A \<in> sets N}))"
+proof (rule sigma_algebra_sigma_sets)
+  show "(\<Union>i\<in>{m. m \<le> n}. {X i -` A \<inter> space M |A. A \<in> sets N}) \<subseteq> Pow (space M)"
+  proof (rule UN_subset_iff[THEN iffD2], intro ballI)
+    fix i
+    assume "i \<in> {m. m\<le> n}"
+    show "{X i -` A \<inter> space M |A. A \<in> sets N} \<subseteq> Pow (space M)" by auto
+  qed
+qed
+
+

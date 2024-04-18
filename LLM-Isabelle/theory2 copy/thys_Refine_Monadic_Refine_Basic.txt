@@ -1,0 +1,205 @@
+theory Refine_Basic
+imports Main 
+  "HOL-Library.Monad_Syntax" 
+  Refine_Misc
+  "Generic/RefineG_Recursion"
+  "Generic/RefineG_Assert"
+begin
+
+
+
+
+datatype 'a nres = FAILi | RES "'a set"
+instantiation nres :: (type) complete_lattice
+begin
+fun less_eq_nres where
+  "_ \<le> FAILi \<longleftrightarrow> True" |
+  "(RES a) \<le> (RES b) \<longleftrightarrow> a\<subseteq>b" |
+  "FAILi \<le> (RES _) \<longleftrightarrow> False"
+
+fun less_nres where
+  "FAILi < _ \<longleftrightarrow> False" |
+  "(RES _) < FAILi \<longleftrightarrow> True" |
+  "(RES a) < (RES b) \<longleftrightarrow> a\<subset>b"
+
+fun sup_nres where
+  "sup _ FAILi = FAILi" |
+  "sup FAILi _ = FAILi" |
+  "sup (RES a) (RES b) = RES (a\<union>b)"
+
+fun inf_nres where 
+  "inf x FAILi = x" |
+  "inf FAILi x = x" |
+  "inf (RES a) (RES b) = RES (a\<inter>b)"
+
+definition "Sup X \<equiv> if FAILi\<in>X then FAILi else RES (\<Union>{x . RES x \<in> X})"
+definition "Inf X \<equiv> if \<exists>x. RES x\<in>X then RES (\<Inter>{x . RES x \<in> X}) else FAILi"
+
+definition "bot \<equiv> RES {}"
+definition "top \<equiv> FAILi"
+
+instance
+  apply (intro_classes)
+  unfolding Sup_nres_def Inf_nres_def bot_nres_def top_nres_def
+  apply (case_tac x, case_tac [!] y, auto) []
+  apply (case_tac x, auto) []
+  apply (case_tac x, case_tac [!] y, case_tac [!] z, auto) []
+  apply (case_tac x, (case_tac [!] y)?, auto) []
+  apply (case_tac x, (case_tac [!] y)?, simp_all) []
+  apply (case_tac x, (case_tac [!] y)?, auto) []
+  apply (case_tac x, case_tac [!] y, case_tac [!] z, auto) []
+  apply (case_tac x, (case_tac [!] y)?, auto) []
+  apply (case_tac x, (case_tac [!] y)?, auto) []
+  apply (case_tac x, case_tac [!] y, case_tac [!] z, auto) []
+  apply (case_tac x, auto) []
+  apply (case_tac z, fastforce+) []
+  apply (case_tac x, auto) []
+  apply (case_tac z, fastforce+) []
+  apply auto []
+  apply auto []
+  done
+  
+end
+
+abbreviation "FAIL \<equiv> top::'a nres"
+abbreviation "SUCCEED \<equiv> bot::'a nres"
+abbreviation "SPEC \<Phi> \<equiv> RES (Collect \<Phi>)"
+definition "RETURN x \<equiv> RES {x}"
+
+\<close>
+subsubsection \<open>Pointwise Reasoning\<close>
+ML \<open>
+  structure refine_pw_simps = Named_Thms
+    ( val name = @{binding refine_pw_simps}
+      val description = "Refinement Framework: " ^
+        "Simplifier rules for pointwise reasoning" )
+\<close>    
+setup \<open>refine_pw_simps.setup\<close>
+text \<open>The following two lemmas will introduce pointwise reasoning for
+  orderings and equalities.\<close>
+text \<open>
+  When proving refinement, we may assume that the refined program does not 
+  fail.\<close>
+text \<open>The following lemmas push pointwise reasoning over operators,
+  thus converting an expression over lattice operators into a logical
+  formula.\<close>
+subsubsection \<open>Monad Operators\<close>
+text \<open>\paragraph{Monad Laws}\<close>
+text \<open>\paragraph{Congruence rule for bind}\<close>
+text \<open>\paragraph{Monotonicity and Related Properties}\<close>
+subsection \<open>VCG Setup\<close>
+ML \<open>
+structure Refine = struct
+
+  structure vcg = Named_Thms
+    ( val name = @{binding refine_vcg}
+      val description = "Refinement Framework: " ^ 
+        "Verification condition generation rules (intro)" )
+
+  structure vcg_cons = Named_Thms
+    ( val name = @{binding refine_vcg_cons}
+      val description = "Refinement Framework: " ^
+        "Consequence rules tried by VCG" )
+
+  structure refine0 = Named_Thms
+    ( val name = @{binding refine0}
+      val description = "Refinement Framework: " ^
+        "Refinement rules applied first (intro)" )
+
+  structure refine = Named_Thms
+    ( val name = @{binding refine}
+      val description = "Refinement Framework: Refinement rules (intro)" )
+
+  structure refine2 = Named_Thms
+    ( val name = @{binding refine2}
+      val description = "Refinement Framework: " ^
+        "Refinement rules 2nd stage (intro)" )
+
+  val no_prod_split = 
+    Attrib.setup_config_bool @{binding refine_no_prod_split} (K false);
+
+  fun rcg_tac add_thms ctxt = 
+    let 
+      val cons_thms = vcg_cons.get ctxt
+      val ref_thms = (refine0.get ctxt 
+        @ add_thms @ refine.get ctxt @ refine2.get ctxt);
+      val prod_ss = (Splitter.add_split @{thm prod.split} 
+        (put_simpset HOL_basic_ss ctxt));
+      val prod_simp_tac = 
+        if Config.get ctxt no_prod_split then 
+          K no_tac
+        else
+          (simp_tac prod_ss THEN' 
+            REPEAT_ALL_NEW (resolve_tac ctxt @{thms impI allI}));
+    in
+      REPEAT_ALL_NEW_FWD (DETERM o FIRST' [
+        resolve_tac ctxt ref_thms,
+        resolve_tac ctxt cons_thms THEN' resolve_tac ctxt ref_thms,
+        prod_simp_tac
+      ])
+    end;
+
+  fun post_tac ctxt = REPEAT_ALL_NEW_FWD (FIRST' [
+    eq_assume_tac,
+    SOLVED' (Tagged_Solver.solve_tac ctxt)]) 
+         
+
+end;
+\<close>
+setup \<open>Refine.vcg.setup\<close>
+setup \<open>Refine.vcg_cons.setup\<close>
+setup \<open>Refine.refine0.setup\<close>
+setup \<open>Refine.refine.setup\<close>
+setup \<open>Refine.refine2.setup\<close>
+  \<open>Attrib.thms >> (fn add_thms => fn ctxt => SIMPLE_METHOD' (
+    Refine.rcg_tac add_thms ctxt THEN_ALL_NEW_FWD (TRY o Refine.post_tac ctxt)
+  ))\<close> 
+  \<open>Attrib.thms >> (fn add_thms => fn ctxt => SIMPLE_METHOD' (
+    Refine.rcg_tac (add_thms @ Refine.vcg.get ctxt) ctxt THEN_ALL_NEW_FWD (TRY o Refine.post_tac ctxt)
+  ))\<close> 
+subsection \<open>Data Refinement\<close>
+text \<open>
+  In this section we establish a notion of pointwise data refinement, by
+  our result lattice.
+
+  a value in the abstract result.
+
+  Note that our concretization function forms no Galois connection, i.e.,
+  However, we get a Galois connection for the special case of 
+  single-valued relations.
+ 
+  that also uses the adjuncts of
+  a Galois connection to express data refinement by program refinement.
+\<close>
+subsubsection \<open>Transitivity Reasoner Setup\<close>
+text \<open>WARNING: The order of the single statements is important here!\<close>
+text \<open>WARNING: The order of the single statements is important here!\<close>
+subsection \<open>Derived Program Constructs\<close>
+text \<open>
+  In this section, we introduce some programming constructs that are derived 
+  from the basic monad and ordering operations of our nondeterminism monad.
+\<close>
+subsubsection \<open>ASSUME and ASSERT\<close>
+text \<open>Order matters! \<close>
+subsubsection \<open>Recursion\<close>
+subsection \<open>Proof Rules\<close>
+subsubsection \<open>Proving Correctness\<close>
+text \<open>
+  In this section, we establish Hoare-like rules to prove that a program
+  meets its specification.
+\<close>
+text \<open>This lemma is just to demonstrate that our rule is complete.\<close>
+  \<comment> \<open>Note: @{text "\<eta>"}-expanded version helps Isabelle's unification to keep meaningful 
+      variable names from the program\<close>
+subsubsection \<open>Proving Monotonicity\<close>
+subsubsection \<open>Proving Refinement\<close>
+text \<open>In this subsection, we establish rules to prove refinement between 
+  structurally similar programs. All rules are formulated including a possible
+  data refinement via a refinement relation. If this is not required, the 
+  refinement relation can be chosen to be the identity relation.
+\<close>
+text \<open>If we have two identical programs, this rule solves the refinement goal
+  immediately, using the identity refinement relation.\<close>
+text \<open>The next two rules are incomplete, but a good approximation for refining
+  structurally similar programs.\<close>
+text \<open>Special cases for refinement of binding to \<open>RES\<close>

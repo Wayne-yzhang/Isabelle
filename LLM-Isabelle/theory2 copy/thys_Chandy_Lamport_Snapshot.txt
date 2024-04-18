@@ -1,0 +1,451 @@
+theory Snapshot
+  imports
+    "HOL-Library.Sublist"
+    Distributed_System
+    Trace
+    Util
+    Swap
+
+begin
+
+
+
+locale computation = distributed_system +
+  fixes
+    init final :: "('a, 'b, 'c) configuration"
+  assumes
+    finite_channels:
+      "finite {i. \<exists>p q. channel i = Some (p, q)}" and
+    strongly_connected_raw:
+      "\<forall>p q. (p \<noteq> q) \<longrightarrow>
+         (tranclp (\<lambda>p q. (\<exists>i. channel i = Some (p, q)))) p q" and
+
+    at_least_two_processes:
+      "card (UNIV :: 'a set) > 1" and
+    finite_processes:
+      "finite (UNIV :: 'a set)" and
+
+    no_initial_Marker:
+      "\<forall>i. (\<exists>p q. channel i = Some (p, q))
+      \<longrightarrow> Marker \<notin> set (msgs init i)" and
+    no_msgs_if_no_channel:
+      "\<forall>i. channel i = None \<longrightarrow> msgs init i = []" and
+    no_initial_process_snapshot:
+      "\<forall>p. ~ has_snapshotted init p" and
+    no_initial_channel_snapshot:
+      "\<forall>i. channel_snapshot init i = ([], NotStarted)" and
+
+    valid: "\<exists>t. trace init t final" and
+    l1: "\<forall>t i cid. trace init t final
+                 \<and> Marker \<in> set (msgs (s init t i) cid)
+      \<longrightarrow> (\<exists>j. j \<ge> i \<and> Marker \<notin> set (msgs (s init t j) cid))" and
+    l2: "\<forall>t p. trace init t final
+      \<longrightarrow> (\<exists>i. has_snapshotted (s init t i) p \<and> i \<le> length t)"
+begin
+
+definition has_channel where
+  "has_channel p q \<longleftrightarrow> (\<exists>i. channel i = Some (p, q))"
+
+lemmas strongly_connected = strongly_connected_raw[folded has_channel_def]
+
+lemma exists_some_channel:
+  shows "\<exists>i p q. channel i = Some (p, q)"
+proof -
+  obtain p q where "p : (UNIV :: 'a set) \<and> q : (UNIV :: 'a set) \<and> p \<noteq> q" 
+    by (metis (mono_tags) One_nat_def UNIV_eq_I all_not_in_conv at_least_two_processes card_Suc_Diff1 card.empty finite_processes insert_iff iso_tuple_UNIV_I less_numeral_extra(4) n_not_Suc_n)
+  then have "(tranclp has_channel) p q" using strongly_connected by simp
+  then obtain r s where "has_channel r s" 
+    by (meson tranclpD)
+  then show ?thesis using has_channel_def by auto
+qed
+
+abbreviation S where
+  "S \<equiv> s init"
+
+lemma no_messages_if_no_channel:
+  assumes "trace init t final"
+  shows "channel cid = None \<Longrightarrow> msgs (s init t i) cid = []"
+  using no_messages_introduced_if_no_channel[OF assms no_msgs_if_no_channel] by blast
+
+lemma S_induct [consumes 3, case_names S_init S_step]:
+  "\<lbrakk> trace init t final; i \<le> j; j \<le> length t;
+     \<And>i. P i i;
+     \<And>i j. i < j \<Longrightarrow> j \<le> length t \<Longrightarrow> (S t i) \<turnstile> (t ! i) \<mapsto> (S t (Suc i)) \<Longrightarrow> P (Suc i) j \<Longrightarrow> P i j
+   \<rbrakk> \<Longrightarrow> P i j"
+proof (induct "j - i" arbitrary: i)
+  case 0
+  then show ?case by simp
+next
+  case (Suc n)
+  then have "(S t i) \<turnstile> (t ! i) \<mapsto> (S t (Suc i))" using Suc step_Suc by simp
+  then show ?case using Suc by simp
+qed
+
+lemma exists_index:
+  assumes
+    "trace init t final" and
+    "ev \<in> set (take (j - i) (drop i t))"
+  shows
+    "\<exists>k. i \<le> k \<and> k < j \<and> ev = t ! k"
+proof -
+  have "trace (S t i) (take (j - i) (drop i t)) (S t j)" 
+    by (metis assms(1) assms(2) diff_is_0_eq' exists_trace_for_any_i_j list.distinct(1) list.set_cases nat_le_linear take_eq_Nil)
+  obtain l where "ev = (take (j - i) (drop i t)) ! l" "l < length (take (j - i) (drop i t))"
+    by (metis assms(2) in_set_conv_nth)
+  let ?k = "l + i"
+  have "(take (j - i) (drop i t)) ! l = drop i t ! l" 
+  also have "... = t ! ?k" 
+    by (metis add.commute assms(2) drop_all empty_iff list.set(1) nat_le_linear nth_drop take_Nil)
+  finally have "ev = t ! ?k" 
+  moreover have "i \<le> ?k \<and> ?k < j" 
+  ultimately show ?thesis by blast
+qed
+
+lemma no_change_if_ge_length_t:
+  assumes
+    "trace init t final" and
+    "i \<ge> length t" and
+    "j \<ge> i"
+  shows
+    "S t i = S t j"
+proof -
+  have "trace (S t i) (take (j - i) (drop i t)) (S t j)" 
+    using assms(1) assms(3) exists_trace_for_any_i_j by blast
+  moreover have "(take (j - i) (drop i t)) = Nil" 
+    by (simp add: assms(2))
+  ultimately show ?thesis 
+    by (metis tr_init trace_and_start_determines_end)
+qed
+
+lemma no_marker_if_no_snapshot:
+  shows
+    "\<lbrakk> trace init t final; channel cid = Some (p, q);
+       ~ has_snapshotted (S t i) p \<rbrakk>
+     \<Longrightarrow>  Marker \<notin> set (msgs (S t i) cid)"
+proof (induct i)
+  case 0
+  then show ?case 
+    by (metis exists_trace_for_any_i no_initial_Marker take_eq_Nil tr_init trace_and_start_determines_end)
+next
+  case (Suc n)
+  then have IH: "Marker \<notin> set (msgs (S t n) cid)" 
+    by (meson distributed_system.exists_trace_for_any_i_j distributed_system.snapshot_stable_2 distributed_system_axioms eq_iff le_Suc_eq)
+  then obtain tr where decomp: "trace (S t n) tr (S t (Suc n))" "tr = take (Suc n - n) (drop n t)"
+    using Suc exists_trace_for_any_i_j le_Suc_eq by blast
+  have "Marker \<notin> set (msgs (S t (Suc n)) cid)"
+  proof (cases "tr = []")
+    case True
+    then show ?thesis 
+      by (metis IH decomp(1) tr_init trace_and_start_determines_end)
+  next
+    case False
+    then obtain ev where step: "tr = [ev]" "(S t n) \<turnstile> ev \<mapsto> (S t (Suc n))" 
+    then show ?thesis
+    proof (cases ev)
+      case (Snapshot p')
+      then show ?thesis 
+        by (metis IH Suc.prems(2) Suc.prems(3) local.step(2) new_Marker_in_set_implies_nonregular_occurence new_msg_in_set_implies_occurrence nonregular_event_induces_snapshot snapshot_state_unchanged)
+    next
+      case (RecvMarker cid' p' q')
+      have "p' \<noteq> p"
+      proof (rule ccontr)
+        assume asm: "~ p' \<noteq> p"
+        then have "has_snapshotted (S t (Suc n)) p"
+        proof -
+          have "~ regular_event ev" using RecvMarker by auto
+          moreover have "occurs_on ev = p" using asm RecvMarker by auto
+          ultimately show ?thesis using step(2) Suc.hyps Suc.prems 
+            by (metis nonregular_event_induces_snapshot snapshot_state_unchanged)
+        qed
+        then show False using Suc.prems by blast
+      qed
+      moreover have "cid \<noteq> cid'"
+      proof (rule ccontr)
+        assume "~ cid \<noteq> cid'"
+        then have "hd (msgs (S t n) cid) = Marker \<and> length (msgs (S t n) cid) > 0" 
+          using step RecvMarker can_occur_def by auto
+        then have "Marker : set (msgs (S t n) cid)" 
+          using list.set_sel(1) by fastforce
+        then show False using IH by simp
+      qed
+      ultimately have "msgs (S t (Suc n)) cid = msgs (S t n) cid"
+      proof -
+        have "\<nexists>r. channel cid = Some (p', r)" 
+      qed
+      then show ?thesis by (simp add: IH)
+    next
+      case (Trans p' s s')
+      then show ?thesis 
+        using IH local.step(2) by force
+    next
+      case (Send cid' p' q' s s' m)
+      with step IH show ?thesis by (cases "cid' = cid", auto)
+    next
+      case (Recv cid' p' q' s s' m)
+      with step IH show ?thesis by (cases "cid' = cid", auto)
+    qed
+  qed
+  then show ?case by blast
+qed
+
+
+
+lemma must_exist_snapshot:
+  assumes
+    "trace init t final"
+  shows
+    "\<exists>p i. Snapshot p = t ! i"
+proof (rule ccontr)
+  assume "\<nexists>p i. Snapshot p = t ! i"
+  have "\<forall>i p. ~ has_snapshotted (S t i) p"
+  proof (rule allI)
+    fix i
+    show "\<forall>p. ~ has_snapshotted (S t i) p"
+    proof (induct i)
+      case 0
+      then show ?case 
+       by (metis assms distributed_system.trace_and_start_determines_end distributed_system_axioms exists_trace_for_any_i computation.no_initial_process_snapshot computation_axioms take0 tr_init)
+    next
+      case (Suc n)
+      then have IH: "\<forall>p. ~ has_snapshotted (S t n) p" by auto
+      then obtain tr where "trace (S t n) tr (S t (Suc n))" "tr = take (Suc n - n) (drop n t)"
+        using assms exists_trace_for_any_i_j le_Suc_eq by blast
+      show "\<forall>p. ~ has_snapshotted (S t (Suc n)) p"
+      proof (cases "tr = []")
+        case True
+        then show ?thesis
+      next
+        case False
+        then obtain ev where step: "tr = [ev]" "(S t n) \<turnstile> ev \<mapsto> (S t (Suc n))"
+        then show ?thesis
+        using step Suc.hyps proof (cases ev)
+          case (Snapshot q)
+          then show ?thesis 
+        next
+          case (RecvMarker cid' q r)
+          then have m: "Marker \<in> set (msgs (S t n) cid')" 
+            using RecvMarker_implies_Marker_in_set step by blast
+          have "~ has_snapshotted (S t n) q" using Suc by auto
+          then have "Marker \<notin> set (msgs (S t n) cid')"
+          proof -
+            have "channel cid' = Some (r, q)" using step can_occur_def RecvMarker by auto
+            then show ?thesis 
+              using IH assms no_marker_if_no_snapshot by blast
+          qed
+          then show ?thesis using m by auto
+        qed auto
+      qed
+    qed
+  qed
+  obtain j p where "has_snapshotted (S t j) p" using l2 assms by blast
+  then show False 
+qed
+
+lemma recv_marker_means_snapshotted:
+  assumes
+    "trace init t final" and
+    "ev = RecvMarker cid p q" and
+    "(S t i) \<turnstile> ev \<mapsto> (S t (Suc i))"
+  shows
+    "has_snapshotted (S t i) q"
+proof -
+  have "Marker = hd (msgs (S t i) cid) \<and> length (msgs (S t i) cid) > 0" 
+  proof -
+    have "Marker # msgs (S t (Suc i)) cid = msgs (S t i) cid"
+      using assms(2) assms(3) next_recv_marker by blast
+    then show ?thesis 
+      by (metis length_greater_0_conv list.discI list.sel(1))
+  qed
+  then have "Marker \<in> set (msgs (S t i) cid)" 
+    using hd_in_set by fastforce
+  then show "has_snapshotted (S t i) q"
+  proof -
+    have "channel cid = Some (q, p)" using assms can_occur_def by auto
+    then show ?thesis 
+  qed
+qed
+
+lemma recv_marker_means_cs_Done:
+  assumes
+    "trace init t final" and
+    "t ! i = RecvMarker cid p q" and
+    "i < length t"
+  shows
+    "snd (cs (S t (i+1)) cid) = Done"
+proof -
+  have "(S t i) \<turnstile> (t ! i) \<mapsto> (S t (i+1))" 
+    using assms(1) assms(3) step_Suc by auto
+  then show ?thesis 
+    by (simp add: assms(2))
+qed
+
+lemma snapshot_produces_marker:
+  assumes
+    "trace init t final" and
+    "~ has_snapshotted (S t i) p" and
+    "has_snapshotted (S t (Suc i)) p" and
+    "channel cid = Some (p, q)"
+  shows
+    "Marker : set (msgs (S t (Suc i)) cid) \<or> has_snapshotted (S t i) q"
+proof -
+  obtain ev where ex_ev: "(S t i) \<turnstile> ev \<mapsto> (S t (Suc i))"
+    by (metis append_Nil2 append_take_drop_id assms(1) assms(2) assms(3) distributed_system.step_Suc distributed_system_axioms drop_eq_Nil less_Suc_eq_le nat_le_linear not_less_eq s_def)
+  then have "occurs_on ev = p" 
+    using assms(2) assms(3) no_state_change_if_no_event by force
+  then show ?thesis
+  using assms ex_ev proof (cases ev)
+    case (Snapshot r)
+    then have "Marker \<in> set (msgs (S t (Suc i)) cid)" 
+      using ex_ev assms(2) assms(3) assms(4) by fastforce
+    then show ?thesis by simp
+  next
+    case (RecvMarker cid' r s)
+      by (simp add: RecvMarker)
+    then show ?thesis
+    proof (cases "cid = cid'")
+      case True
+      then have "has_snapshotted (S t i) q" 
+        using RecvMarker RecvMarker_implies_Marker_in_set assms(1) assms(2) assms(4) ex_ev no_marker_if_no_snapshot by blast
+      then show ?thesis by simp
+    next
+      case False
+      then have "msgs (S t (Suc i)) cid = msgs (S t i) cid @ [Marker]"
+      then show ?thesis by simp
+    qed
+  qed auto
+qed
+
+lemma exists_snapshot_for_all_p:
+  assumes
+    "trace init t final"
+  shows
+    "\<exists>i. ~ has_snapshotted (S t i) p \<and> has_snapshotted (S t (Suc i)) p" (is ?Q)
+proof -
+  obtain i where "has_snapshotted (S t i) p" using l2 assms by blast
+  let ?j = "LEAST j. has_snapshotted (S t j) p"
+  have "?j \<noteq> 0"
+  proof -
+    have "~ has_snapshotted (S t 0) p" 
+      by (metis exists_trace_for_any_i list.discI no_initial_process_snapshot s_def take_eq_Nil trace.simps)
+    then show ?thesis 
+  qed
+  have "?j \<le> i" 
+  have "\<not> has_snapshotted (S t (?j - 1)) p" (is ?P)
+  proof (rule ccontr)
+    assume "\<not> ?P"
+    then have "has_snapshotted (S t (?j - 1)) p" by simp
+    then have "\<exists>j. j < ?j \<and> has_snapshotted (S t j) p" 
+    then show False 
+      using not_less_Least by blast
+  qed
+  show ?thesis
+  proof (rule ccontr)
+    assume "\<not> ?Q"
+    have "\<forall>i. \<not> has_snapshotted (S t i) p"
+    proof (rule allI)
+      fix i'
+      show "\<not> has_snapshotted (S t i') p"
+      proof (induct i')
+        case 0
+        then show ?case 
+      next
+        case (Suc i'')
+        then show ?case 
+      qed
+    qed
+    then show False 
+  qed
+qed
+
+lemma all_processes_snapshotted_in_final_state:
+  assumes
+    "trace init t final"
+  shows
+    "has_snapshotted final p"
+proof -
+  obtain i where "has_snapshotted (S t i) p \<and> i \<le> length t"
+    using assms l2 by blast
+  moreover have "final = (S t (length t))"
+    by (metis (no_types, lifting) assms exists_trace_for_any_i le_Suc_eq length_Cons take_Nil take_all trace.simps trace_and_start_determines_end)
+  ultimately show ?thesis 
+    using assms exists_trace_for_any_i_j snapshot_stable by blast
+qed
+
+definition next_marker_free_state where
+  "next_marker_free_state t i cid = (LEAST j. j \<ge> i \<and> Marker \<notin> set (msgs (S t j) cid))"
+
+lemma exists_next_marker_free_state:
+  assumes
+    "channel cid = Some (p, q)"
+    "trace init t final"
+  shows
+    "\<exists>!j. next_marker_free_state t i cid = j \<and> j \<ge> i \<and> Marker \<notin> set (msgs (S t j) cid)"
+proof (cases "Marker \<in> set (msgs (S t i) cid)")
+  case False
+  then have "next_marker_free_state t i cid = i" unfolding next_marker_free_state_def
+    by (metis (no_types, lifting) Least_equality order_refl)
+  then show ?thesis using False assms by blast
+next
+  case True
+  then obtain j where "j \<ge> i" "Marker \<notin> set (msgs (S t j) cid)" using l1 assms by blast
+  then show ?thesis
+    by (metis (no_types, lifting) LeastI_ex next_marker_free_state_def)
+qed
+
+theorem snapshot_algorithm_must_terminate:
+  assumes
+    "trace init t final"
+  shows
+    "\<exists>phi. ((\<forall>p. has_snapshotted (S t phi) p)
+          \<and> (\<forall>cid. Marker \<notin> set (msgs (S t phi) cid)))"
+proof -
+  let ?i = "{i. i \<le> length t \<and> (\<forall>p. has_snapshotted (S t i) p)}"
+  have fin_i: "finite ?i" by auto
+  moreover have "?i \<noteq> empty"
+  proof -
+    have "\<forall>p. has_snapshotted (S t (length t)) p" 
+      by (meson assms exists_trace_for_any_i_j l2 snapshot_stable_2)
+    then show ?thesis by blast
+  qed
+  then obtain i where asm: "\<forall>p. has_snapshotted (S t i) p" by blast
+  have f: "\<forall>j. j \<ge> i \<longrightarrow> (\<forall>p. has_snapshotted (S t j) p)"
+    using snapshot_stable asm exists_trace_for_any_i_j valid assms by blast
+  let ?s = "(\<lambda>cid. (next_marker_free_state t i cid)) ` { cid. channel cid \<noteq> None }"
+  have "?s \<noteq> empty" using exists_some_channel by auto
+  have fin_s: "finite ?s" using finite_channels by simp
+  let ?phi = "Max ?s"
+  have "?phi \<ge> i"
+  proof (rule ccontr)
+    assume asm: "\<not> ?phi \<ge> i"
+    obtain cid p q where g: "channel cid = Some (p, q)" using exists_some_channel by auto
+    then have "next_marker_free_state t i cid \<ge> i" using exists_next_marker_free_state assms by blast
+    then have "Max ?s \<ge> i" using Max_ge_iff g fin_s by fast
+    then show False using asm by simp
+  qed
+  then have "\<And>cid. Marker \<notin> set (msgs (S t ?phi) cid)"
+  proof -
+    fix cid
+    show "Marker \<notin> set (msgs (S t ?phi) cid)"
+    proof (cases "Marker : set (msgs (S t i) cid)")
+      case False
+      then show ?thesis
+    next
+      case True
+      then have cpq: "channel cid \<noteq> None" using no_messages_if_no_channel assms by fastforce
+      then obtain p q where chan: "channel cid = Some (p, q)" by auto
+      then obtain j where i: "j = next_marker_free_state t i cid" "Marker \<notin> set (msgs (S t j) cid)"
+        using exists_next_marker_free_state assms by fast
+      have "j \<le> ?phi" using cpq fin_s i(1) pair_imageI by simp
+      then show "Marker \<notin> set (msgs (S t ?phi) cid)"
+      proof -
+        have "trace (S t j) (take (?phi - j) (drop j t)) (S t ?phi)" 
+        moreover have "\<forall>p. has_snapshotted (S t j) p" 
+          by (metis assms chan f computation.exists_next_marker_free_state computation_axioms i(1))
+        ultimately show ?thesis 
+          using i(2) no_markers_if_all_snapshotted by blast
+      qed
+    qed
+  qed
+qed
+
+

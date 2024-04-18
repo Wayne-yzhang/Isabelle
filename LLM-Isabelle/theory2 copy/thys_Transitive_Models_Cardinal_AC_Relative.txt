@@ -1,0 +1,121 @@
+theory Cardinal_AC_Relative
+  imports
+    CardinalArith_Relative
+
+begin
+
+locale M_AC =
+  fixes M
+  assumes
+    choice_ax: "choice_ax(M)"
+
+locale M_cardinal_AC = M_cardinal_arith + M_AC +
+  assumes
+    lam_replacement_minimum:"lam_replacement(M, \<lambda>p. minimum(fst(p),snd(p)))"
+begin
+
+lemma lam_replacement_minimum_vimage:
+  "M(f) \<Longrightarrow> M(r) \<Longrightarrow> lam_replacement(M, \<lambda>x. minimum(r, f -`` {x}))"
+  using lam_replacement_minimum lam_replacement_vimage_sing_fun lam_replacement_constant
+    lam_replacement_identity lam_replacement_hcomp2[of _ _ minimum]
+  by simp
+
+lemmas surj_imp_inj_replacement4 = lam_replacement_minimum_vimage[unfolded lam_replacement_def]
+
+lemmas surj_imp_inj_replacement =
+  surj_imp_inj_replacement1 surj_imp_inj_replacement2 surj_imp_inj_replacement4
+  lam_replacement_vimage_sing_fun[THEN lam_replacement_imp_strong_replacement]
+
+lemma well_ord_surj_imp_lepoll_rel:
+  assumes "well_ord(A,r)" "h \<in> surj(A,B)" and
+    types:"M(A)" "M(r)" "M(h)" "M(B)"
+  shows "B \<lesssim>\<^bsup>M\<^esup> A"
+proof -
+  from assms
+  have "(\<lambda>b\<in>B. minimum(r, {a\<in>A. h`a=b})) \<in> inj(B,A)" (is "?f\<in>_")
+    using well_ord_surj_imp_inj_inverse assms(1,2) by simp
+  with assms
+  have "M(?f`b)" if "b\<in>B" for b
+  with assms
+  have "M(?f)"
+    using lam_closed surj_imp_inj_replacement4 eq by auto
+  have "?f \<in> inj\<^bsup>M\<^esup>(B,A)"
+    using mem_inj_abs by simp
+  show ?thesis unfolding lepoll_rel_def by auto
+qed
+
+lemma surj_imp_well_ord_M:
+  assumes wos: "well_ord(A,r)" "h \<in> surj(A,B)"
+    and
+    types: "M(A)" "M(r)" "M(h)" "M(B)"
+  shows "\<exists>s[M]. well_ord(B,s)"
+  using assms lepoll_rel_well_ord
+    well_ord_surj_imp_lepoll_rel by fast
+
+
+lemma choice_ax_well_ord: "M(S) \<Longrightarrow> \<exists>r[M]. well_ord(S,r)"
+  using choice_ax well_ord_Memrel[THEN surj_imp_well_ord_M]
+  unfolding choice_ax_def by auto
+
+lemma Finite_cardinal_rel_Finite:
+  assumes "Finite(|i|\<^bsup>M\<^esup>)" "M(i)"
+  shows "Finite(i)"
+proof -
+  note assms
+  moreover from this
+  obtain r where "M(r)" "well_ord(i,r)"
+    using choice_ax_well_ord by auto
+  moreover from calculation
+  have "|i|\<^bsup>M\<^esup> \<approx>\<^bsup>M\<^esup> i"
+    using well_ord_cardinal_rel_eqpoll_rel
+    by auto
+  ultimately
+  show ?thesis
+    using eqpoll_rel_imp_Finite
+    by auto
+qed
+
+
+locale M_Pi_assumptions_choice = M_Pi_assumptions + M_cardinal_AC +
+  assumes
+    B_replacement: "strong_replacement(M, \<lambda>x y. y = B(x))"
+    and
+    minimum_replacement: "M(r) \<Longrightarrow> strong_replacement(M, \<lambda>x y. y = \<langle>x, minimum(r, B(x))\<rangle>)"
+begin
+
+lemma AC_M:
+  assumes "a \<in> A" "\<And>x. x \<in> A \<Longrightarrow> \<exists>y. y \<in> B(x)"
+  shows "\<exists>z[M]. z \<in> Pi\<^bsup>M\<^esup>(A, B)"
+proof -
+  have "M(\<Union>x\<in>A. B(x))" using assms family_union_closed Pi_assumptions B_replacement by simp
+  then
+  obtain r where "well_ord(\<Union>x\<in>A. B(x),r)" "M(r)"
+    using choice_ax_well_ord by blast
+  let ?f="\<lambda>x\<in>A. minimum(r,B(x))"
+  have "M(minimum(r, B(x)))" if "x\<in>A" for x
+  proof -
+    have "well_ord(B(x),r)" using well_ord_subset UN_upper by simp
+    show ?thesis using Pi_assumptions by blast
+  qed
+  have "M(?f)"
+    using Pi_assumptions minimum_replacement lam_closed
+    by simp
+  moreover from assms and calculation
+  have "?f \<in> Pi\<^bsup>M\<^esup>(A,B)"
+      Pi_rel_char by auto
+  ultimately
+  show ?thesis by blast
+qed
+
+lemma AC_Pi_rel: assumes "\<And>x. x \<in> A \<Longrightarrow> \<exists>y. y \<in> B(x)"
+  shows "\<exists>z[M]. z \<in> Pi\<^bsup>M\<^esup>(A, B)"
+proof (cases "A=0")
+  interpret Pi0:M_Pi_assumptions_0
+    using Pi_assumptions by unfold_locales auto
+  case True
+  then
+  show ?thesis using assms by simp
+next
+  case False
+  then
+  obtain a where "a \<in> A" by auto

@@ -1,0 +1,188 @@
+theory JVMPostdomination imports JVMInterpretation "../StaticInter/Postdomination" begin
+
+context CFG begin
+
+lemma vp_snocI:
+  "\<lbrakk>n -as\<rightarrow>\<^sub>\<surd>* n'; n' -[a]\<rightarrow>* n''; \<forall>Q p ret fs. kind a \<noteq> Q\<hookleftarrow>\<^bsub>p\<^esub>ret \<rbrakk> \<Longrightarrow> n -as @ [a]\<rightarrow>\<^sub>\<surd>* n''"
+  by (cases "kind a") (auto intro: path_Append valid_path_aux_Append simp: vp_def valid_path_def)
+
+lemma valid_node_cases' [case_names Source Target, consumes 1]:
+  "\<lbrakk> valid_node n; \<And>e. \<lbrakk> valid_edge e; sourcenode e = n \<rbrakk> \<Longrightarrow> thesis;
+  \<And>e. \<lbrakk> valid_edge e; targetnode e = n \<rbrakk> \<Longrightarrow> thesis \<rbrakk>
+  \<Longrightarrow> thesis"
+  by (auto simp: valid_node_def)
+
+end
+
+lemma disjE_strong: "\<lbrakk>P \<or> Q; P \<Longrightarrow> R; \<lbrakk>Q; \<not> P\<rbrakk> \<Longrightarrow> R\<rbrakk> \<Longrightarrow> R"
+  by auto
+
+lemmas path_intros [intro] = JVMCFG_Interpret.path.Cons_path JVMCFG_Interpret.path.empty_path
+declare JVMCFG_Interpret.vp_snocI [intro]
+declare JVMCFG_Interpret.valid_node_def [simp add]
+  valid_edge_def [simp add]
+  JVMCFG_Interpret.intra_path_def [simp add]
+
+abbreviation vp_snoc :: "wf_jvmprog \<Rightarrow> cname \<Rightarrow> mname \<Rightarrow> cfg_edge list \<Rightarrow> cfg_node
+  \<Rightarrow> (var, val, cname \<times> mname \<times> pc, cname \<times> mname) edge_kind \<Rightarrow> cfg_node \<Rightarrow> bool"
+  where "vp_snoc P C0 Main as n ek n'
+  \<equiv> JVMCFG_Interpret.valid_path' P C0 Main
+  (ClassMain P, MethodMain P, None, Enter) (as @ [(n,ek,n')]) n'"
+
+lemma
+  "(P, C0, Main) \<turnstile> (C, M, pc, nt) -ek\<rightarrow> (C', M', pc', nt')
+  \<Longrightarrow> (\<exists>as. CFG.valid_path' sourcenode targetnode kind (valid_edge (P, C0, Main))
+  (get_return_edges P) (ClassMain P, MethodMain P, None, Enter) as (C, M, pc, nt)) \<and>
+  (\<exists>as. CFG.valid_path' sourcenode targetnode kind (valid_edge (P, C0, Main))
+  (get_return_edges P) (ClassMain P, MethodMain P, None, Enter) as (C', M', pc', nt'))"
+  and valid_Entry_path: "(P, C0, Main) \<turnstile> \<Rightarrow>(C, M, pc, nt)
+  \<Longrightarrow> \<exists>as. CFG.valid_path' sourcenode targetnode kind (valid_edge (P, C0, Main))
+  (get_return_edges P) (ClassMain P, MethodMain P, None, Enter) as (C, M, pc, nt)"
+proof (induct rule: JVMCFG_reachable_inducts)
+  case (Entry_reachable P C0 Main)
+  hence "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) [] (ClassMain P, MethodMain P, None, Enter)"
+    by (fastforce intro: JVMCFG_Interpret.intra_path_vp Method_LTrue
+      JVMCFG_reachable.Entry_reachable)
+  thus ?case by blast
+next
+  case (reachable_step P C0 Main C M pc nt ek C' M' pc' nt')
+  thus ?case by simp
+next
+  case (Main_to_Call P C0 Main)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, Enter) \<Up>id
+    (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, Normal)"
+    by (fastforce intro: JVMCFG_reachable.Main_to_Call)
+  ultimately show ?case by blast
+next
+  case (Main_Call_LFalse P C0 Main)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, Normal)"
+    by blast
+  have "vp_snoc P C0 Main as (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, Normal) (\<lambda>s. False)\<^sub>\<surd>
+    (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, Return)"
+    by (fastforce intro: JVMCFG_reachable.Main_Call_LFalse)
+  ultimately show ?case by blast
+next
+  case (Main_Call P C0 Main T mxs mxl\<^sub>0 "is" xt D initParams ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, Normal)"
+    by blast
+  have "vp_snoc P C0 Main as (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, Normal)
+    ((\<lambda>(s, ret). True):(ClassMain P, MethodMain P, 0)\<hookrightarrow>\<^bsub>(D, Main)\<^esub>[(\<lambda>s. s Heap),(\<lambda>s. \<lfloor>Value Null\<rfloor>)])
+    (D, Main, None, Enter)"
+    by (fastforce intro: JVMCFG_reachable.Main_Call)
+  ultimately show ?case by blast
+next
+  case (Main_Return_to_Exit P C0 Main)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, nodeType.Return)"
+    by blast
+  have "vp_snoc P C0 Main as (ClassMain P, MethodMain P, \<lfloor>0\<rfloor>, nodeType.Return) \<Up>id
+    (ClassMain P, MethodMain P, None, nodeType.Return)"
+    by (fastforce intro: JVMCFG_reachable.Main_Return_to_Exit)
+  ultimately show ?case by blast
+next
+  case (Method_LFalse P C0 Main C M)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, None, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, None, Enter) (\<lambda>s. False)\<^sub>\<surd> (C, M, None, Return)"
+    by (fastforce intro: JVMCFG_reachable.Method_LFalse)
+  ultimately show ?case by blast
+next
+  case (Method_LTrue P C0 Main C M)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, None, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, None, Enter) (\<lambda>s. True)\<^sub>\<surd> (C, M, \<lfloor>0\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.Method_LTrue)
+  ultimately show ?case by blast
+next
+  case (CFG_Load C P C0 Main M pc n ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>Suc pc\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_Load)
+  ultimately show ?case by blast
+next
+  case (CFG_Store C P C0 Main M pc n ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>Suc pc\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_Store)
+  ultimately show ?case by blast
+next
+  case (CFG_Push C P C0 Main M pc v ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>Suc pc\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_Push)
+  ultimately show ?case by blast
+next
+  case (CFG_Pop C P C0 Main M pc ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>Suc pc\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_Pop)
+  ultimately show ?case by blast
+next
+  case (CFG_IAdd C P C0 Main M pc ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>Suc pc\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_IAdd)
+  ultimately show ?case by blast
+next
+  case (CFG_Goto C P C0 Main M pc i)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) (\<lambda>s. True)\<^sub>\<surd> (C, M, \<lfloor>nat (int pc + i)\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_Goto)
+  ultimately show ?case by blast
+next
+  case (CFG_CmpEq C P C0 Main M pc ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>Suc pc\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_CmpEq)
+  ultimately show ?case by blast
+next
+  case (CFG_IfFalse_False C P C0 Main M pc i ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>nat (int pc + i)\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_IfFalse_False)
+  ultimately show ?case by blast
+next
+  case (CFG_IfFalse_True C P C0 Main M pc i ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>Suc pc\<rfloor>, Enter)"
+    by (fastforce intro: JVMCFG_reachable.CFG_IfFalse_True)
+  ultimately show ?case by blast
+next
+  case (CFG_New_Check_Normal C P C0 Main M pc Cl ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast
+  have "vp_snoc P C0 Main as (C, M, \<lfloor>pc\<rfloor>, Enter) ek (C, M, \<lfloor>pc\<rfloor>, Normal)"
+    by (fastforce intro: JVMCFG_reachable.CFG_New_Check_Normal)
+  ultimately show ?case by blast
+next
+  case (CFG_New_Check_Exceptional C P C0 Main M pc Cl pc' ek)
+  then obtain as where "JVMCFG_Interpret.valid_path' P C0 Main
+    (ClassMain P, MethodMain P, None, Enter) as (C, M, \<lfloor>pc\<rfloor>, Enter)"
+    by blast

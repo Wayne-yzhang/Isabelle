@@ -1,0 +1,91 @@
+theory OAlist
+  imports Deriving.Comparator
+begin
+
+  list (i.\,e. a list of pairs) such that the keys are distinct and sorted wrt. some linear
+  order relation, and no key is mapped to @{term 0}. The latter invariant allows to implement various
+  functions operating on oalists more efficiently.
+
+  This means that oalists may be ordered wrt. different orderings, even if they are of the same type.
+  of their arguments are identical by re-ordering one argument wrt. the order relation of the other.
+  This, however, implies that equality of order relations must be effectively decidable if executable
+  code is to be generated.\<close>
+subsection \<open>Preliminaries\<close>
+      with assms(1) \<open>rel x (min_list_param rel xs)\<close> show ?thesis by (rule transpD)
+      with \<open>x \<in> set (x # xs)\<close> have "rel x (min_list_param rel (y # ys)) \<or> rel (min_list_param rel (y # ys)) x"
+      with \<open>\<not> rel x (min_list_param rel (y # ys))\<close> have "rel (min_list_param rel (y # ys)) x" by simp
+      thus ?thesis by (simp only: \<open>z = x\<close>)
+subsection \<open>Syntactic Type Class for Default Elements\<close>
+text \<open>We do not want to use the existing type-class @{class default}, but instead introduce a new one:\<close>
+subsection \<open>Type \<open>key_order\<close>\<close>
+    by (metis Diff_iff Linear_order_in_diff_Id UNIV_I \<open>well_order r\<close> well_order_on_Field)
+    by (meson \<open>linear_order r\<close> antisymD linear_order_on_def partial_order_on_def)
+    by (meson \<open>linear_order r\<close> linear_order_on_def order_on_defs(1) partial_order_on_def trans_def)
+        with \<open>(x, z) \<in> r\<close> have "x = z" by (rule antisym)
+        from \<open>(z, y) \<notin> r\<close> \<open>(x, y) \<in> r\<close> show False unfolding \<open>x = z\<close> ..
+subsection \<open>Invariant in Context @{locale comparator}\<close>
+  hence "lt k (fst x)" using \<open>x \<in> set xs\<close> ..
+  thus ?thesis by (simp only: \<open>k' = fst x\<close>)
+    moreover from \<open>a \<in> set xs\<close> have "0 \<in> snd ` set xs" by (simp add: \<open>snd a = 0\<close>[symmetric])
+  moreover from \<open>oalist_inv_raw xs\<close> have "P xs" by (rule Cons(1))
+subsection \<open>Operations on Lists of Pairs in Context @{locale comparator}\<close>
+text \<open>@{const lookup_dflt} is only an auxiliary function needed for proving some lemmas.\<close>
+text \<open>The difference between @{const List.map} and @{const map_pair} is that the latter removes
+  @{term 0} values, whereas the former does not.\<close>
+text \<open>@{const prod_ord_pair} is actually just a special case of @{const lex_ord_pair}, as proved below
+
+
+lemma lookup_pair_eq_0:
+  assumes "oalist_inv_raw xs"
+  shows "lookup_pair xs k = 0 \<longleftrightarrow> (k \<notin> fst ` set xs)"
+  using assms
+proof (induct xs rule: oalist_inv_raw_induct)
+  case Nil
+  show ?case by simp
+next
+  case (Cons k' v' xs)
+  show ?case
+  proof (simp add: Cons(3) eq split: order.splits, rule, simp_all only: atomize_imp[symmetric])
+    assume "comp k k' = Lt"
+    hence "k \<noteq> k'" by auto
+    moreover have "k \<notin> fst ` set xs"
+    proof
+      assume "k \<in> fst ` set xs"
+      hence "lt k' k" by (rule Cons(4))
+    qed
+    ultimately show "k \<noteq> k' \<and> k \<notin> fst ` set xs" ..
+  next
+    assume "comp k k' = Gt"
+    hence "k \<noteq> k'" by auto
+    thus "(lookup_pair xs k = 0) = (k \<noteq> k' \<and> k \<notin> fst ` set xs)" by (simp add: Cons(5))
+  qed
+qed
+
+lemma lookup_pair_eq_value:
+  assumes "oalist_inv_raw xs" and "v \<noteq> 0"
+  shows "lookup_pair xs k = v \<longleftrightarrow> ((k, v) \<in> set xs)"
+  using assms(1)
+proof (induct xs rule: oalist_inv_raw_induct)
+  case Nil
+  from assms(2) show ?case by simp
+next
+  case (Cons k' v' xs)
+  have *: "(k', u) \<notin> set xs" for u
+  proof
+    assume "(k', u) \<in> set xs"
+    hence "fst (k', u) \<in> fst ` set xs" by fastforce
+    hence "k' \<in> fst ` set xs" by simp
+    hence "lt k' k'" by (rule Cons(4))
+    thus False by (simp add: lt_of_key_order_alt[symmetric])
+  qed
+  show ?case
+  proof (simp add: assms(2) Cons(5) eq split: order.split, intro conjI impI)
+    assume "comp k k' = Lt"
+    show "(k, v) \<notin> set xs"
+    proof
+      assume "(k, v) \<in> set xs"
+      hence "fst (k, v) \<in> fst ` set xs" by fastforce
+      hence "k \<in> fst ` set xs" by simp
+      hence "lt k' k" by (rule Cons(4))
+    qed
+  qed (auto simp: *)

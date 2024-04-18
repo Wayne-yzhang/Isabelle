@@ -1,0 +1,733 @@
+theory Floyd_Warshall
+  imports Main
+begin
+
+
+
+lemma distinct_list_single_elem_decomp: "{xs. set xs \<subseteq> {0} \<and> distinct xs} = {[], [0]}"
+proof (standard, goal_cases)
+  case 1
+  { fix xs :: "'a list" assume xs: "xs \<in> {xs. set xs \<subseteq> {0} \<and> distinct xs}"
+    have "xs \<in> {[], [0]}"
+    proof (cases xs)
+      case (Cons y ys)
+      hence y: "y = 0" using xs by auto
+      with Cons xs have "ys = []" by (cases ys, auto)
+      thus ?thesis using y Cons by simp
+    qed simp
+  }
+  thus ?case by blast
+qed simp
+
+
+
+abbreviation "cnt x xs \<equiv> length (filter (\<lambda>y. x = y) xs)"
+
+fun remove_cycles :: "'a list \<Rightarrow> 'a \<Rightarrow> 'a list \<Rightarrow> 'a list"
+where
+  "remove_cycles [] _ acc = rev acc" |
+  "remove_cycles (x#xs) y acc =
+    (if x = y then remove_cycles xs y [x] else remove_cycles xs y (x#acc))"
+
+lemma cnt_rev: "cnt x (rev xs) = cnt x xs" by (metis length_rev rev_filter)
+
+value "as @ [x] @ bs @ [x] @ cs @ [x] @ ds"
+
+lemma remove_cycles_removes: "cnt x (remove_cycles xs x ys) \<le> max 1 (cnt x ys)"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case
+  by (simp, cases "x \<in> set ys", (auto simp: cnt_rev[of x ys]))
+next
+  case (Cons y xs)
+  thus ?case
+  proof (cases "x = y")
+    case True
+    thus ?thesis using Cons[of "[y]"] True by auto
+  next
+    case False
+    thus ?thesis using Cons[of "y # ys"] by auto
+  qed
+qed
+
+lemma remove_cycles_id: "x \<notin> set xs \<Longrightarrow> remove_cycles xs x ys = rev ys @ xs"
+by (induction xs arbitrary: ys) auto
+
+lemma remove_cycles_cnt_id:
+  "x \<noteq> y \<Longrightarrow> cnt y (remove_cycles xs x ys) \<le> cnt y ys + cnt y xs"
+proof (induction xs arbitrary: ys x)
+  case Nil thus ?case by (simp add: cnt_rev)
+next
+  case (Cons z xs)
+  thus ?case
+  proof (cases "x = z")
+    case True thus ?thesis using Cons.IH[of z "[z]"] Cons.prems by auto
+  next
+    case False
+    thus ?thesis using Cons.IH[of x "z # ys"] Cons.prems False by auto
+  qed
+qed
+
+lemma remove_cycles_ends_cycle: "remove_cycles xs x ys \<noteq> rev ys @ xs \<Longrightarrow> x \<in> set xs"
+using remove_cycles_id by fastforce
+
+lemma remove_cycles_begins_with: "x \<in> set xs \<Longrightarrow> \<exists> zs. remove_cycles xs x ys = x # zs \<and> x \<notin> set zs"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case by auto
+next
+  case (Cons y xs)
+  thus ?case
+  proof (cases "x = y")
+    case True thus ?thesis
+    proof (cases "x \<in> set xs", goal_cases)
+      case 1 with Cons show ?case by auto
+    next
+      case 2 with remove_cycles_id[of x xs "[y]"] show ?case by auto
+    qed
+  next
+    case False
+    with Cons show ?thesis by auto
+  qed
+qed
+
+lemma remove_cycles_self:
+  "x \<in> set xs \<Longrightarrow> remove_cycles (remove_cycles xs x ys) x zs = remove_cycles xs x ys"
+proof -
+  assume x:"x \<in> set xs"
+  then obtain ws where ws: "remove_cycles xs x ys = x # ws" "x \<notin> set ws"
+  using remove_cycles_begins_with[OF x, of ys] by blast
+  from remove_cycles_id[OF this(2)] have "remove_cycles ws x [x] = x # ws" by auto
+  with ws(1) show "remove_cycles (remove_cycles xs x ys) x zs = remove_cycles xs x ys" by simp
+qed
+
+lemma remove_cycles_one: "remove_cycles (as @ x # xs) x ys = remove_cycles (x#xs) x ys"
+by (induction as arbitrary: ys) auto
+
+lemma remove_cycles_cycles:
+  "x \<in> set xs \<Longrightarrow> \<exists> xxs as. as @ concat (map (\<lambda> xs. x # xs) xxs) @ remove_cycles xs x ys = xs \<and> x \<notin> set as"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case by auto
+next
+  case (Cons y xs)
+  thus ?case
+  proof (cases "x = y")
+    case True thus ?thesis
+    proof (cases "x \<in> set xs", goal_cases)
+      case 1
+      then obtain as xxs where "as @ concat (map (\<lambda>xs. y#xs) xxs) @ remove_cycles xs y [y] = xs"
+      using Cons.IH[of "[y]"] by auto
+      hence "[] @ concat (map (\<lambda>xs. x#xs) (as#xxs)) @ remove_cycles (y#xs) x ys = y # xs"
+      thus ?thesis by fastforce
+    next
+      case 2
+      hence "remove_cycles (y # xs) x ys = y # xs" using remove_cycles_id[of x xs "[y]"] by auto
+      hence "[] @ concat (map (\<lambda>xs. x # xs) []) @ remove_cycles (y#xs) x ys = y # xs" by auto
+      thus ?thesis by fastforce
+    qed
+  next
+    case False
+    then obtain as xxs where as:
+      "as @ concat (map (\<lambda>xs. x # xs) xxs) @ remove_cycles xs x (y#ys) = xs" "x \<notin> set as"
+    using Cons.IH[of "y # ys"] Cons.prems by auto
+    hence "(y # as) @ concat (map (\<lambda>xs. x # xs) xxs) @ remove_cycles (y#xs) x ys = y # xs"
+  qed
+qed
+
+fun start_remove :: "'a list \<Rightarrow> 'a \<Rightarrow> 'a list \<Rightarrow> 'a list"
+where
+  "start_remove [] _ acc = rev acc" |
+  "start_remove (x#xs) y acc =
+    (if x = y then rev acc @ remove_cycles xs y [y] else start_remove xs y (x # acc))"
+
+lemma start_remove_decomp:
+  "x \<in> set xs \<Longrightarrow> \<exists> as bs. xs = as @ x # bs \<and> start_remove xs x ys = rev ys @ as @ remove_cycles bs x [x]"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case by auto
+next
+  case (Cons y xs)
+  thus ?case
+  proof (auto, goal_cases)
+    case 1
+    from 1(1)[of "y # ys"]
+    obtain as bs where 
+      "xs = as @ x # bs" "start_remove xs x (y # ys) = rev (y # ys) @ as @ remove_cycles bs x [x]"
+    by blast
+    hence "y # xs = (y # as) @ x # bs"
+          "start_remove xs x (y # ys) = rev ys @ (y # as) @ remove_cycles bs x [x]" by simp+
+    thus ?case by blast
+  qed
+qed
+
+lemma start_remove_removes: "cnt x (start_remove xs x ys) \<le> Suc (cnt x ys)"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case using cnt_rev[of x ys] by auto
+next
+  case (Cons y xs)
+  thus ?case
+  proof (cases "x = y")
+    case True
+    thus ?thesis using remove_cycles_removes[of y xs "[y]"] cnt_rev[of y ys] by auto
+  next
+    case False
+    thus ?thesis using Cons[of "y # ys"] by auto
+  qed
+qed
+
+lemma start_remove_id[simp]: "x \<notin> set xs \<Longrightarrow> start_remove xs x ys = rev ys @ xs"
+by (induction xs arbitrary: ys) auto
+
+lemma start_remove_cnt_id:
+  "x \<noteq> y \<Longrightarrow> cnt y (start_remove xs x ys) \<le> cnt y ys + cnt y xs"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case by (simp add: cnt_rev)
+next
+  case (Cons z xs)
+  thus ?case
+  proof (cases "x = z", goal_cases)
+    case 1 thus ?case using remove_cycles_cnt_id[of x y xs "[x]"] by (simp add: cnt_rev)
+  next
+    case 2 from this(1)[of "(z # ys)"] this(2,3) show ?case by auto
+  qed
+qed
+
+fun remove_all_cycles :: "'a list \<Rightarrow> 'a list \<Rightarrow> 'a list"
+where
+  "remove_all_cycles [] xs = xs" |
+  "remove_all_cycles (x # xs) ys = remove_all_cycles xs (start_remove ys x [])"
+
+lemma cnt_remove_all_mono:"cnt y (remove_all_cycles xs ys) \<le> max 1 (cnt y ys)"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case by auto
+next
+  case (Cons x xs)
+  thus ?case
+  proof (cases "x = y")
+    case True thus ?thesis using start_remove_removes[of y ys "[]"] Cons[of "start_remove ys y []"]
+    by auto
+  next
+    case False
+    hence "cnt y (start_remove ys x []) \<le> cnt y ys"
+    using start_remove_cnt_id[of x y ys "[]"] by auto
+    thus ?thesis using Cons[of "start_remove ys x []"] by auto
+  qed
+qed
+
+
+lemma cnt_remove_all_cycles: "x \<in> set xs \<Longrightarrow> cnt x (remove_all_cycles xs ys) \<le> 1"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case by auto
+next
+  case (Cons y xs)
+  thus ?case
+  using start_remove_removes[of x ys "[]"] cnt_remove_all_mono[of y xs "start_remove ys y []"]
+  by auto
+qed
+
+lemma cnt_mono:
+  "cnt a (b # xs) \<le> cnt a (b # c # xs)"
+by (induction xs) auto
+  
+lemma cnt_distinct_intro: "\<forall> x \<in> set xs. cnt x xs \<le> 1 \<Longrightarrow> distinct xs"
+proof (induction xs)
+  case Nil thus ?case by auto
+next
+  case (Cons x xs)
+  from this(2) have "\<forall> x \<in> set xs. cnt x xs \<le> 1"
+  by (metis filter.simps(2) impossible_Cons linorder_class.linear list.set_intros(2)
+      preorder_class.order_trans)
+  with Cons.IH have "distinct xs" by auto
+  moreover have "x \<notin> set xs" using Cons.prems
+  proof (induction xs)
+    case Nil then show ?case by auto
+  next
+    case (Cons a xs)
+    from this(2) have "\<forall>xa\<in>set (x # xs). cnt xa (x # a # xs) \<le> 1"
+    by auto
+    then have *: "\<forall>xa\<in>set (x # xs). cnt xa (x # xs) \<le> 1"
+    proof (safe, goal_cases)
+      case (1 b)
+      then have "cnt b (x # a # xs) \<le> 1" by auto
+      with cnt_mono[of b x xs a] show ?case by fastforce
+    qed
+    with Cons(1) have "x \<notin> set xs" by auto
+    moreover have "x \<noteq> a"
+    by (metis (full_types) Cons.prems One_nat_def * empty_iff filter.simps(2) impossible_Cons
+                           le_0_eq le_Suc_eq length_0_conv list.set(1) list.set_intros(1)) 
+    ultimately show ?case by auto
+  qed
+  ultimately show ?case by auto
+qed
+
+lemma remove_cycles_subs:
+  "set (remove_cycles xs x ys) \<subseteq> set xs \<union> set ys"
+by (induction xs arbitrary: ys; auto; fastforce)
+
+lemma start_remove_subs:
+  "set (start_remove xs x ys) \<subseteq> set xs \<union> set ys"
+using remove_cycles_subs by (induction xs arbitrary: ys; auto; fastforce)
+
+lemma remove_all_cycles_subs:
+  "set (remove_all_cycles xs ys) \<subseteq> set ys"
+using start_remove_subs by (induction xs arbitrary: ys, auto) (fastforce+)
+
+lemma remove_all_cycles_distinct: "set ys \<subseteq> set xs \<Longrightarrow> distinct (remove_all_cycles xs ys)"
+proof -
+  assume "set ys \<subseteq> set xs"
+  hence "\<forall> x \<in> set ys. cnt x (remove_all_cycles xs ys) \<le> 1" using cnt_remove_all_cycles by fastforce
+  hence "\<forall> x \<in> set (remove_all_cycles xs ys). cnt x (remove_all_cycles xs ys) \<le> 1"
+  using remove_all_cycles_subs by fastforce
+  thus "distinct (remove_all_cycles xs ys)" using cnt_distinct_intro by auto
+qed
+
+lemma distinct_remove_cycles_inv: "distinct (xs @ ys) \<Longrightarrow> distinct (remove_cycles xs x ys)"
+proof (induction xs arbitrary: ys)
+  case Nil thus ?case by auto
+next
+  case (Cons y xs)
+  thus ?case by auto
+qed
+
+definition "remove_all x xs = (if x \<in> set xs then tl (remove_cycles xs x []) else xs)"
+
+definition "remove_all_rev x xs = (if x \<in> set xs then rev (tl (remove_cycles (rev xs) x [])) else xs)"
+
+lemma remove_all_distinct:
+  "distinct xs \<Longrightarrow> distinct (x # remove_all x xs)"
+proof (cases "x \<in> set xs", goal_cases)
+  case 1
+  from remove_cycles_begins_with[OF 1(2), of "[]"] obtain zs
+  where "remove_cycles xs x [] = x # zs" "x \<notin> set zs" by auto
+  thus ?thesis using 1(1) distinct_remove_cycles_inv[of "xs" "[]" x] by (simp add: remove_all_def)
+next
+  case 2 thus ?thesis by (simp add: remove_all_def)
+qed
+
+lemma remove_all_removes:
+  "x \<notin> set (remove_all x xs)"
+by (metis list.sel(3) remove_all_def remove_cycles_begins_with)
+
+lemma remove_all_subs:
+  "set (remove_all x xs) \<subseteq> set xs"
+using remove_cycles_subs remove_all_def
+by (metis (no_types, lifting) append_Nil2 list.sel(2) list.set_sel(2) set_append subsetCE subsetI)
+
+lemma remove_all_rev_distinct: "distinct xs \<Longrightarrow> distinct (x # remove_all_rev x xs)"
+proof (cases "x \<in> set xs", goal_cases)
+  case 1
+  then have "x \<in> set (rev xs)" by auto
+  from remove_cycles_begins_with[OF this, of "[]"] obtain zs
+  where "remove_cycles (rev xs) x [] = x # zs" "x \<notin> set zs" by auto
+  thus ?thesis using 1(1) distinct_remove_cycles_inv[of "rev xs" "[]" x] by (simp add: remove_all_rev_def)
+next
+  case 2 thus ?thesis by (simp add: remove_all_rev_def)
+qed
+
+lemma remove_all_rev_removes: "x \<notin> set (remove_all_rev x xs)"
+by (metis remove_all_def remove_all_removes remove_all_rev_def set_rev)
+
+lemma remove_all_rev_subs: "set (remove_all_rev x xs) \<subseteq> set xs"
+by (metis remove_all_def remove_all_subs set_rev remove_all_rev_def)
+
+abbreviation "rem_cycles i j xs \<equiv> remove_all i (remove_all_rev j (remove_all_cycles xs xs))"
+
+lemma rem_cycles_distinct': "i \<noteq> j \<Longrightarrow> distinct (i # j # rem_cycles i j xs)"
+proof -
+  assume "i \<noteq> j"
+  have "distinct (remove_all_cycles xs xs)" by (simp add: remove_all_cycles_distinct)
+  from remove_all_rev_distinct[OF this] have
+    "distinct (remove_all_rev j (remove_all_cycles xs xs))"
+  by simp
+  from remove_all_distinct[OF this] have "distinct (i # rem_cycles i j xs)" by simp
+  moreover have
+    "j \<notin> set (rem_cycles i j xs)"
+  using remove_all_subs remove_all_rev_removes remove_all_removes by fastforce
+qed
+
+lemma rem_cycles_removes_last: "j \<notin> set (rem_cycles i j xs)"
+by (meson remove_all_rev_removes remove_all_subs rev_subsetD)
+
+lemma rem_cycles_distinct: "distinct (rem_cycles i j xs)"
+by (meson distinct.simps(2) order_refl remove_all_cycles_distinct
+          remove_all_distinct remove_all_rev_distinct) 
+
+lemma rem_cycles_subs: "set (rem_cycles i j xs) \<subseteq> set xs"
+by (meson order_trans remove_all_cycles_subs remove_all_subs remove_all_rev_subs)
+
+
+
+class linordered_ab_monoid_add = linordered_ab_semigroup_add +
+  fixes neutral :: 'a ("\<one>")
+    assumes neutl[simp]: "\<one> + x = x"
+    assumes neutr[simp]: "x + \<one> = x"
+begin
+
+lemmas assoc = add.assoc
+
+type_synonym 'c mat = "nat \<Rightarrow> nat \<Rightarrow> 'c"
+
+definition (in -) upd :: "'c mat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> 'c \<Rightarrow> 'c mat"
+where
+  "upd m x y v = m (x := (m x) (y := v))"
+
+definition fw_upd :: "'a mat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> 'a mat" where
+  "fw_upd m k i j \<equiv> upd m i j (min (m i j) (m i k + m k j))"
+
+lemma fw_upd_mono:
+  "fw_upd m k i j i' j' \<le> m i' j'" 
+by (cases "i = i'", cases "j = j'") (auto simp: fw_upd_def upd_def)
+
+fun fw :: "'a mat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> 'a mat" where
+  "fw m n 0       0       0        = fw_upd m 0 0 0" |
+  "fw m n (Suc k) 0       0        = fw_upd (fw m n k n n) (Suc k) 0 0" |
+  "fw m n k       (Suc i) 0        = fw_upd (fw m n k i n) k (Suc i) 0" |
+  "fw m n k       i       (Suc j)  = fw_upd (fw m n k i j) k i (Suc j)"
+
+lemma fw_invariant_aux_1:
+  "j'' \<le> j \<Longrightarrow> i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> k \<le> n \<Longrightarrow> fw m n k i j i' j' \<le> fw m n k i j'' i' j'"
+proof (induction j)
+  case 0 thus ?case by simp
+next
+  case (Suc j) thus ?case
+  proof (cases "j'' = Suc j")
+    case True thus ?thesis by simp
+  next
+    case False
+    have "fw_upd (fw m n k i j) k i (Suc j) i' j' \<le> fw m n k i j i' j'" by (simp add: fw_upd_mono)
+    thus ?thesis using Suc False by simp
+  qed
+qed
+
+lemma fw_invariant_aux_2:
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> k \<le> n \<Longrightarrow> i'' \<le> i \<Longrightarrow> j'' \<le> j
+   \<Longrightarrow> fw m n k i j i' j' \<le> fw m n k i'' j'' i' j'"
+proof (induction i)
+  case 0 thus ?case using fw_invariant_aux_1 by auto
+next
+  case (Suc i) thus ?case
+  proof (cases "i'' = Suc i")
+    case True thus ?thesis using Suc fw_invariant_aux_1 by simp
+  next
+    case False
+    have "fw m n k (Suc i) j i' j' \<le> fw m n k (Suc i) 0 i' j'"
+    using fw_invariant_aux_1[of 0 j "Suc i" n k] Suc(2-) by simp
+    also have "\<dots> \<le> fw m n k i n i' j'" by (simp add: fw_upd_mono)
+    also have "\<dots> \<le> fw m n k i j i' j'" using fw_invariant_aux_1[of j n i n k] False Suc by simp
+    also have "\<dots> \<le> fw m n k i'' j'' i' j'" using Suc False by simp
+    finally show ?thesis by simp
+  qed
+qed
+
+lemma fw_invariant:
+  "k' \<le> k \<Longrightarrow> i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> k \<le> n \<Longrightarrow> j'' \<le> j \<Longrightarrow> i'' \<le> i
+   \<Longrightarrow> fw m n k i j i' j' \<le> fw m n k' i'' j'' i' j'"
+proof (induction k)
+  case 0 thus ?case using fw_invariant_aux_2 by auto
+next
+  case (Suc k) thus ?case
+  proof (cases "k' = Suc k")
+    case True thus ?thesis using Suc fw_invariant_aux_2 by simp
+  next
+    case False
+    have "fw m n (Suc k) i j i' j' \<le> fw m n (Suc k) 0 0 i' j'"
+    using fw_invariant_aux_2[of i n j "Suc k" 0 0] Suc(2-) by simp
+    also have "\<dots> \<le> fw m n k n n i' j'" by (simp add: fw_upd_mono)
+    also have "\<dots> \<le> fw m n k i j i' j'" using fw_invariant_aux_2[of n n n k] False Suc by simp
+    also have "\<dots> \<le> fw m n k' i'' j'' i' j'" using Suc False by simp
+    finally show ?thesis by simp
+  qed
+qed
+
+lemma single_row_inv:
+  "j' < j \<Longrightarrow> j \<le> n \<Longrightarrow> i' \<le> n \<Longrightarrow> fw m n k i' j i' j' = fw m n k i' j' i' j'"
+proof (induction j)
+  case 0 thus ?case by simp
+next
+  case (Suc j) thus ?case by (cases "j' = j") (simp add: fw_upd_def upd_def)+
+qed
+
+lemma single_iteration_inv':
+  "i' < i \<Longrightarrow> j' \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> i \<le> n \<Longrightarrow> fw m n k i j i' j' = fw m n k i' j' i' j'"
+proof (induction i arbitrary: j)
+  case 0 thus ?case by simp
+next
+  case (Suc i) thus ?case
+  proof (induction j)
+    case 0 thus ?case
+    proof (cases "i = i'", goal_cases)
+      case 2 thus ?case by (simp add: fw_upd_def upd_def)
+    next
+      case 1 thus ?case using single_row_inv[of j' n n i' m k] 
+      by (cases "j' = n") (fastforce simp add: fw_upd_def upd_def)+
+    qed
+  next
+    case (Suc j) thus ?case by (simp add: fw_upd_def upd_def)
+  qed
+qed
+
+lemma single_iteration_inv:
+  "i' \<le> i \<Longrightarrow> j' \<le> j \<Longrightarrow> i \<le> n \<Longrightarrow> j \<le> n\<Longrightarrow> fw m n k i j i' j' = fw m n k i' j' i' j'"
+proof (induction i arbitrary: j)
+  case 0 thus ?case
+  proof (induction j)
+    case 0 thus ?case by simp
+  next
+    case (Suc j) thus ?case using 0 by (cases "j' = Suc j") (simp add: fw_upd_def upd_def)+
+  qed
+next
+  case (Suc i) thus ?case
+  proof (induction j)
+    case 0 thus ?case by (cases "i' = Suc i") (simp add: fw_upd_def upd_def)+
+  next
+    case (Suc j) thus ?case
+    proof (cases "i' = Suc i", goal_cases)
+      case 1 thus ?case
+      proof (cases "j' = Suc j", goal_cases)
+        case 1 thus ?case by simp
+      next
+        case 2 thus ?case by (simp add: fw_upd_def upd_def)
+      qed
+    next
+      case 2 thus ?case
+      proof (cases "j' = Suc j", goal_cases)
+        case 1 thus ?case using single_iteration_inv'[of i' "Suc i" j' n "Suc j" m k] by simp
+      next
+        case 2 thus ?case by (simp add: fw_upd_def upd_def)
+      qed
+    qed
+  qed
+qed
+
+lemma fw_innermost_id:
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> j' \<le> n \<Longrightarrow> i' < i \<Longrightarrow> fw m n 0 i' j' i j = m i j"
+proof (induction i' arbitrary: j')
+  case 0 thus ?case
+  proof (induction j')
+    case 0 thus ?case by (simp add: fw_upd_def upd_def)
+  next
+    case (Suc j') thus ?case by (auto simp: fw_upd_def upd_def)
+  qed
+next
+  case (Suc i') thus ?case
+  proof (induction j')
+    case 0 thus ?case by (auto simp add: fw_upd_def upd_def)
+  next
+    case (Suc j') thus ?case by (auto simp add: fw_upd_def upd_def)
+  qed
+qed
+
+lemma fw_middle_id:
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> j' < j \<Longrightarrow> i' \<le> i \<Longrightarrow> fw m n 0 i' j' i j = m i j"
+proof (induction i' arbitrary: j')
+  case 0 thus ?case
+  proof (induction j')
+    case 0 thus ?case by (simp add: fw_upd_def upd_def)
+  next
+    case (Suc j') thus ?case by (auto simp: fw_upd_def upd_def)
+  qed
+next
+  case (Suc i') thus ?case
+  proof (induction j')
+    case 0 thus ?case using fw_innermost_id by (auto simp add: fw_upd_def upd_def)
+  next
+    case (Suc j') thus ?case by (auto simp add: fw_upd_def upd_def)
+  qed
+qed
+
+lemma fw_outermost_mono:
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> fw m n 0 i j i j \<le> m i j"
+proof (cases j)
+  case 0
+  assume "i \<le> n"
+  thus ?thesis
+  proof (cases i)
+  next
+    case (Suc i')
+    hence "fw m n 0 i' n (Suc i') 0 = m (Suc i') 0" using fw_innermost_id[of "Suc i'" n 0 n i' m]
+  qed
+next
+  case (Suc j')
+  assume "i \<le> n" "j \<le> n"
+  hence "fw m n 0 i j' i (Suc j') = m i (Suc j')"
+  using fw_middle_id[of i n "Suc j'" j' i m] Suc by simp
+  thus ?thesis using Suc by (simp add: fw_upd_def upd_def)
+qed
+
+lemma Suc_innermost_id1:
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> j' \<le> n \<Longrightarrow> i' < i \<Longrightarrow> fw m n (Suc k) i' j' i j = fw m n k i j i j"
+proof (induction i' arbitrary: j')
+  case 0 thus ?case
+  proof (induction j')
+    case 0
+    hence "fw m n k n n i j = fw m n k i j i j" using single_iteration_inv[of i n j n n m k] by simp
+    thus ?case using 0 by (simp add: fw_upd_def upd_def)
+  next
+    case (Suc j') thus ?case by (auto simp: fw_upd_def upd_def)
+  qed
+next
+  case (Suc i') thus ?case
+  proof (induction j')
+    case 0 thus ?case by (auto simp add: fw_upd_def upd_def)
+  next
+    case (Suc j') thus ?case by (auto simp add: fw_upd_def upd_def)
+  qed
+qed
+
+lemma Suc_innermost_id2:
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> j' < j \<Longrightarrow> i' \<le> i \<Longrightarrow> fw m n (Suc k) i' j' i j = fw m n k i j i j"
+proof (induction i' arbitrary: j')
+  case 0
+  hence "fw m n k n n i j = fw m n k i j i j" using single_iteration_inv[of i n j n n m k] by simp
+  with 0 show ?case
+  proof (induction j')
+    case 0
+    thus ?case by (auto simp add: fw_upd_def upd_def)
+  next
+    case (Suc j') thus ?case by (auto simp: fw_upd_def upd_def)
+  qed
+next
+  case (Suc i') thus ?case
+  proof (induction j')
+    case 0 thus ?case using Suc_innermost_id1 by (auto simp add: fw_upd_def upd_def)
+  next
+    case (Suc j') thus ?case by (auto simp add: fw_upd_def upd_def)
+  qed
+qed
+
+lemma Suc_innermost_id1':
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> j' \<le> n \<Longrightarrow> i' < i \<Longrightarrow> fw m n (Suc k) i' j' i j = fw m n k n n i j"
+proof goal_cases
+  case 1
+  hence "fw m n (Suc k) i' j' i j = fw m n k i j i j" using Suc_innermost_id1 by simp
+  thus ?thesis using 1 single_iteration_inv[of i n] by simp
+qed
+
+lemma Suc_innermost_id2':
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> j' < j \<Longrightarrow> i' \<le> i \<Longrightarrow> fw m n (Suc k) i' j' i j = fw m n k n n i j"
+proof goal_cases
+  case 1
+  hence "fw m n (Suc k) i' j' i j = fw m n k i j i j" using Suc_innermost_id2 by simp
+  thus ?thesis using 1 single_iteration_inv[of i n] by simp
+qed
+
+lemma Suc_innermost_mono:
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> fw m n (Suc k) i j i j \<le> fw m n k i j i j"
+proof (cases j)
+  case 0
+  assume "i \<le> n"
+  thus ?thesis
+  proof (cases i)
+    by (simp add: fw_upd_def upd_def)
+  next
+    case (Suc i')
+    by (auto simp: fw_upd_def upd_def local.min.coboundedI1)
+  qed
+next
+  case (Suc j')
+  assume "i \<le> n" "j \<le> n"
+  thus ?thesis using Suc Suc_innermost_id2 by (auto simp: fw_upd_def upd_def local.min.coboundedI1)
+qed
+
+lemma fw_mono':
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> fw m n k i j i j \<le> m i j"
+proof (induction k)
+  case 0 thus ?case using fw_outermost_mono by simp
+next
+  case (Suc k) thus ?case using Suc_innermost_mono[OF Suc.prems, of m k] by simp
+qed
+
+lemma fw_mono:
+  "i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> i' \<le> n \<Longrightarrow> j' \<le> n \<Longrightarrow> fw m n k i j i' j' \<le> m i' j'"
+proof (cases k)
+  case 0
+  assume 0: "i \<le> n" "j \<le> n" "i' \<le> n" "j' \<le> n" "k = 0"
+  thus ?thesis
+  proof (cases "i' \<le> i")
+    case False thus ?thesis using 0 fw_innermost_id by simp
+  next
+    case True thus ?thesis
+    proof (cases "j' \<le> j")
+      case True
+      also have "fw m n 0 i' j' i' j' \<le> m i' j'" using 0 fw_outermost_mono by blast
+    next
+      case False thus ?thesis
+      proof (cases "i = i'", goal_cases)
+        case 1 then show ?thesis using fw_middle_id[of i' n j' j i' m] 0 by simp
+      next
+        case 2
+        then show ?case
+              fw_outermost_mono[of i' n j' m] 0
+        by simp
+      qed
+    qed
+  qed
+next
+  case (Suc k)
+  assume prems: "i \<le> n" "j \<le> n" "i' \<le> n" "j' \<le> n"
+  thus ?thesis
+  proof (cases "i' \<le> i \<and> j' \<le> j")
+    case True
+    hence "fw m n (Suc k) i j i' j' = fw m n (Suc k) i' j' i' j'"
+    using prems single_iteration_inv by blast
+    thus ?thesis using Suc prems fw_mono' by auto
+  next
+    case False thus ?thesis
+    proof auto
+      assume "\<not> i' \<le> i"
+      thus ?thesis using Suc prems fw_mono' Suc_innermost_id1 by auto
+    next
+      assume "\<not> j' \<le> j"
+      hence "j < j'" by simp
+      show ?thesis
+      proof (cases "i \<le> i'")
+        case True
+      next
+        case False
+        thus ?thesis using single_iteration_inv' Suc prems fw_mono' by auto
+      qed
+    qed
+  qed
+qed
+
+lemma add_mono_neutr:
+  assumes "\<one> \<le> b"
+  shows "a \<le> a + b"
+using neutr add_mono assms by force
+
+lemma add_mono_neutl:
+  assumes "\<one> \<le> b"
+  shows "a \<le> b + a"
+using neutr add_mono assms by force
+
+lemma fw_step_0:
+  "m 0 0 \<ge> \<one> \<Longrightarrow> i \<le> n \<Longrightarrow> j \<le> n \<Longrightarrow> fw m n 0 i j i j = min (m i j) (m i 0 + m 0 j)"
+proof (induction i)
+  case 0 thus ?case
+  proof (cases j)
+    case 0 thus ?thesis by (simp add: fw_upd_def upd_def)
+  next
+    case (Suc j)
+    hence "fw m n 0 0 j 0 (Suc j) = m 0 (Suc j)" using 0 fw_middle_id[of 0 n "Suc j" j 0 m] by fast
+    moreover have "fw m n 0 0 j 0 0 = m 0 0" using single_iteration_inv[of 0 0 0 j n m 0] Suc 0
+    by (auto simp add: fw_upd_def upd_def min_def intro: add_mono_neutl)
+    ultimately show ?thesis using Suc by (simp add: fw_upd_def upd_def)
+  qed
+next
+  case (Suc i)
+  note A = this
+  show ?case
+  proof (cases j)
+    case 0
+    have "fw m n 0 i n (Suc i) 0 = m (Suc i) 0" using fw_innermost_id[of "Suc i" n 0 n i m] Suc by simp
+    moreover have "fw m n 0 i n 0 0 = m 0 0" using Suc single_iteration_inv[of 0 i 0 n n m 0]
+    by (auto simp add: fw_upd_def upd_def min_def intro: add_mono_neutl)
+    ultimately show ?thesis using 0 by (simp add: fw_upd_def upd_def)
+  next
+    case (Suc j)
+    have *: "fw m n 0 0 j 0 0 = m 0 0" using single_iteration_inv[ of 0 0 0 j n m 0] A Suc
+    by (auto simp add: fw_upd_def upd_def min_def intro: add_mono_neutl)
+    have **: "fw m n 0 i n 0 0 = m 0 0" using single_iteration_inv[of 0 i 0 n n m 0] A
+    by (auto simp add: fw_upd_def upd_def min_def intro: add_mono_neutl)
+    by (auto simp add: fw_upd_def upd_def min_def intro: add_mono_neutl)
+    also have "\<dots> = fw m n 0 0 (Suc j) 0 (Suc j)" using fw_middle_id[of 0 n "Suc j" j 0 m] Suc A(4)
+    by (simp add: fw_upd_def upd_def *)
+end (* End of local class context *)
+end (* End of theory *)

@@ -1,0 +1,2026 @@
+theory Continued_Fractions
+imports
+  Complex_Main
+  "Coinductive.Lazy_LList"
+  "Coinductive.Coinductive_Nat"
+  "HOL-Number_Theory.Fib"
+  "HOL-Library.BNF_Corec"
+  "Coinductive.Coinductive_Stream"
+begin
+
+
+coinductive linfinite :: "'a llist \<Rightarrow> bool" where
+  "linfinite xs \<Longrightarrow> linfinite (LCons x xs)"
+
+lemma llength_llist_of_stream [simp]: "llength (llist_of_stream xs) = \<infinity>"
+  by (simp add: not_lfinite_llength)
+
+lemma linfinite_conv_llength: "linfinite xs \<longleftrightarrow> llength xs = \<infinity>"
+proof
+  assume "linfinite xs"
+  thus "llength xs = \<infinity>"                          
+  proof (coinduction arbitrary: xs rule: enat_coinduct2)
+    fix xs :: "'a llist"
+    assume "llength xs \<noteq> 0" "linfinite xs"
+    thus "(\<exists>xs'::'a llist. epred (llength xs) = llength xs' \<and> epred \<infinity> = \<infinity> \<and> linfinite xs') \<or>
+             epred (llength xs) = epred \<infinity>"
+      by (intro disjI1 exI[of _ "ltl xs"]) (auto simp: linfinite.simps[of xs])
+  next
+    fix xs :: "'a llist" assume "linfinite xs"thus "(llength xs = 0) \<longleftrightarrow> (\<infinity> = (0::enat))"
+      by (subst (asm) linfinite.simps) auto
+  qed
+next
+  assume "llength xs = \<infinity>"
+  thus "linfinite xs"
+  proof (coinduction arbitrary: xs)
+    case linfinite
+    thus "\<exists>xsa x.
+             xs = LCons x xsa \<and>
+             ((\<exists>xs. xsa = xs \<and> llength xs = \<infinity>) \<or>
+              linfinite xsa)"
+      by (cases xs) (auto simp: eSuc_eq_infinity_iff)
+  qed
+qed
+
+definition lnth_default :: "'a \<Rightarrow> 'a llist \<Rightarrow> nat \<Rightarrow> 'a" where
+  "lnth_default dflt xs n = (if n < llength xs then lnth xs n else dflt)"
+
+lemma lnth_default_code [code]:
+  "lnth_default dflt xs n =
+     (if lnull xs then dflt else if n = 0 then lhd xs else lnth_default dflt (ltl xs) (n - 1))"
+proof (induction n arbitrary: xs)
+  case 0
+  thus ?case
+    by (cases xs) (auto simp: lnth_default_def simp flip: zero_enat_def)
+next
+  case (Suc n)
+  show ?case
+  proof (cases xs)
+    case LNil
+    thus ?thesis
+      by (auto simp: lnth_default_def)
+  next
+    case (LCons x xs')
+    thus ?thesis
+      by (auto simp: lnth_default_def Suc_ile_eq)
+  qed
+qed
+
+lemma enat_le_iff:
+  "enat n \<le> m \<longleftrightarrow> m = \<infinity> \<or> (\<exists>m'. m = enat m' \<and> n \<le> m')"
+  by (cases m) auto
+
+lemma enat_less_iff:
+  "enat n < m \<longleftrightarrow> m = \<infinity> \<or> (\<exists>m'. m = enat m' \<and> n < m')"
+  by (cases m) auto
+
+lemma real_of_int_divide_in_Ints_iff:
+  "real_of_int a / real_of_int b \<in> \<int> \<longleftrightarrow> b dvd a \<or> b = 0"
+proof safe
+  assume "real_of_int a / real_of_int b \<in> \<int>" "b \<noteq> 0"
+  then obtain n where "real_of_int a / real_of_int b = real_of_int n"
+    by (auto simp: Ints_def)
+  hence "real_of_int b * real_of_int n = real_of_int a"
+  also have "real_of_int b * real_of_int n = real_of_int (b * n)"
+    by simp
+  finally have "b * n = a"
+    by linarith
+  thus "b dvd a"
+    by auto
+qed auto
+
+lemma frac_add_of_nat: "frac (of_nat y + x) = frac x"
+  unfolding frac_def by simp
+
+lemma frac_add_of_int: "frac (of_int y + x) = frac x"
+  unfolding frac_def by simp
+
+lemma frac_fraction: "frac (real_of_int a / real_of_int b) = (a mod b) / b"
+proof -
+  have "frac (a / b) = frac ((a mod b + b * (a div b)) / b)"
+    by (subst mod_mult_div_eq) auto
+  also have "(a mod b + b * (a div b)) / b = of_int (a div b) + a mod b / b"
+    unfolding of_int_add by (subst add_divide_distrib) auto
+  also have "frac \<dots> = frac (a mod b / b)"
+    by (rule frac_add_of_int)
+  also have "\<dots> = a mod b / b"
+    by (simp add: floor_divide_of_int_eq frac_def)
+  finally show ?thesis .
+qed
+
+lemma Suc_fib_ge: "Suc (fib n) \<ge> n"
+proof (induction n rule: fib.induct)
+  case (3 n)
+  show ?case
+  proof (cases "n < 2")
+    case True
+    thus ?thesis by (cases n) auto
+  next
+    case False
+    hence "Suc (Suc (Suc n)) \<le> Suc n + n" by simp
+    also have "\<dots> \<le> Suc (fib (Suc n)) + Suc (fib n)"
+      by (intro add_mono 3)
+    also have "\<dots> = Suc (Suc (fib (Suc (Suc n))))"
+      by simp
+    finally show ?thesis by (simp only: Suc_le_eq)
+  qed
+qed auto
+
+lemma fib_ge: "fib n \<ge> n - 1"
+  using Suc_fib_ge[of n] by simp
+
+lemma frac_diff_of_nat_right [simp]: "frac (x - of_nat y) = frac x"
+  using floor_diff_of_int[of x "int y"] by (simp add: frac_def)
+
+lemma funpow_cycle:
+  assumes "m > 0"
+  assumes "(f ^^ m) x = x"
+  shows   "(f ^^ k) x = (f ^^ (k mod m)) x"
+proof (induction k rule: less_induct)
+  case (less k)
+  show ?case
+  proof (cases "k < m")
+    case True
+  next
+    case False
+    hence "k = (k - m) + m" by simp
+    also have "(f ^^ \<dots>) x = (f ^^ (k - m)) ((f ^^ m) x)"
+      by (simp add: funpow_add)
+    also have "(f ^^ m) x = x" by fact
+    also have "(f ^^ (k - m)) x = (f ^^ (k mod m)) x"
+      using assms False by (subst less.IH) (auto simp: mod_geq)
+    finally show ?thesis .
+  qed
+qed
+
+lemma of_nat_ge_1_iff: "of_nat n \<ge> (1 :: 'a :: linordered_semidom) \<longleftrightarrow> n > 0"
+  using of_nat_le_iff[of 1 n] unfolding of_nat_1 by auto
+
+lemma not_frac_less_0: "\<not>frac x < 0"
+  by (simp add: frac_def not_less)
+
+lemma frac_le_1: "frac x \<le> 1"
+  unfolding frac_def by linarith
+
+lemma divide_in_Rats_iff1:
+  "(x::real) \<in> \<rat> \<Longrightarrow> x \<noteq> 0 \<Longrightarrow> x / y \<in> \<rat> \<longleftrightarrow> y \<in> \<rat>"
+proof safe
+  assume *: "x \<in> \<rat>" "x \<noteq> 0" "x / y \<in> \<rat>"
+  from *(1,3) have "x / (x / y) \<in> \<rat>"
+    by (rule Rats_divide)
+  also from * have "x / (x / y) = y" by simp
+  finally show "y \<in> \<rat>" .
+qed (auto intro: Rats_divide)
+
+lemma divide_in_Rats_iff2:
+  "(y::real) \<in> \<rat> \<Longrightarrow> y \<noteq> 0 \<Longrightarrow> x / y \<in> \<rat> \<longleftrightarrow> x \<in> \<rat>"
+proof safe
+  assume *: "y \<in> \<rat>" "y \<noteq> 0" "x / y \<in> \<rat>"
+  from *(3,1) have "x / y * y \<in> \<rat>"
+    by (rule Rats_mult)
+  also from * have "x / y * y = x" by simp
+  finally show "x \<in> \<rat>" .
+qed (auto intro: Rats_divide)
+
+lemma add_in_Rats_iff1: "x \<in> \<rat> \<Longrightarrow> x + y \<in> \<rat> \<longleftrightarrow> y \<in> \<rat>"
+  using Rats_diff[of "x + y" x] by auto
+
+lemma add_in_Rats_iff2: "y \<in> \<rat> \<Longrightarrow> x + y \<in> \<rat> \<longleftrightarrow> x \<in> \<rat>"
+  using Rats_diff[of "x + y" y] by auto
+
+lemma diff_in_Rats_iff1: "x \<in> \<rat> \<Longrightarrow> x - y \<in> \<rat> \<longleftrightarrow> y \<in> \<rat>"
+  using Rats_diff[of x "x - y"] by auto
+
+lemma diff_in_Rats_iff2: "y \<in> \<rat> \<Longrightarrow> x - y \<in> \<rat> \<longleftrightarrow> x \<in> \<rat>"
+  using Rats_add[of "x - y" y] by auto
+
+lemma frac_in_Rats_iff [simp]: "frac x \<in> \<rat> \<longleftrightarrow> x \<in> \<rat>"
+  by (simp add: frac_def diff_in_Rats_iff2)
+
+lemma filterlim_sequentially_shift:
+  "filterlim (\<lambda>n. f (n + m)) F sequentially \<longleftrightarrow> filterlim f F sequentially"
+proof (induction m)
+  case (Suc m)
+  have "filterlim (\<lambda>n. f (n + Suc m)) F at_top \<longleftrightarrow>
+          filterlim (\<lambda>n. f (Suc n + m)) F at_top" by simp
+  also have "\<dots> \<longleftrightarrow> filterlim (\<lambda>n. f (n + m)) F at_top"
+    by (rule filterlim_sequentially_Suc)
+  also have "\<dots> \<longleftrightarrow> filterlim f F at_top"
+    by (rule Suc.IH)
+  finally show ?case .
+qed simp_all
+
+
+
+lemma alternating_decreasing_sum_bounds:
+  fixes f :: "nat \<Rightarrow> 'a :: {linordered_ring, ring_1}"
+  assumes "m \<le> n" "\<And>k. k \<in> {m..n} \<Longrightarrow> f k \<ge> 0"
+          "\<And>k. k \<in> {m..<n} \<Longrightarrow> f (Suc k) \<le> f k"
+  defines "S \<equiv> (\<lambda>m. (\<Sum>k=m..n. (-1) ^ k * f k))"
+  shows   "if even m then S m \<in> {0..f m} else S m \<in> {-f m..0}"
+  using assms(1)
+proof (induction rule: inc_induct)
+  case (step m')
+  have [simp]: "-a \<le> b \<longleftrightarrow> a + b \<ge> (0 :: 'a)" for a b
+    by (metis le_add_same_cancel1 minus_add_cancel)
+  have [simp]: "S m' = (-1) ^ m' * f m' + S (Suc m')"
+    using step.hyps unfolding S_def
+    by (subst sum.atLeast_Suc_atMost) simp_all
+  from step.hyps have nonneg: "f m' \<ge> 0"
+    by (intro assms) auto
+  from step.hyps have mono: "f (Suc m') \<le> f m'"
+    by (intro assms) auto
+  show ?case
+  proof (cases "even m'")
+    case True
+    hence "0 \<le> f (Suc m') + S (Suc m')"
+      using step.IH by simp
+    also note mono
+    finally show ?thesis using True step.IH by auto
+  next
+    case False
+    with step.IH have "S (Suc m') \<le> f (Suc m')"
+      by simp
+    also note mono
+    finally show ?thesis using step.IH False by auto
+  qed
+qed (insert assms, auto)
+
+lemma alternating_decreasing_sum_bounds':
+  fixes f :: "nat \<Rightarrow> 'a :: {linordered_ring, ring_1}"
+  assumes "m < n" "\<And>k. k \<in> {m..n-1} \<Longrightarrow> f k \<ge> 0"
+          "\<And>k. k \<in> {m..<n-1} \<Longrightarrow> f (Suc k) \<le> f k"
+  defines "S \<equiv> (\<lambda>m. (\<Sum>k=m..<n. (-1) ^ k * f k))"
+  shows   "if even m then S m \<in> {0..f m} else S m \<in> {-f m..0}"
+proof (cases n)
+  case 0
+  thus ?thesis using assms by auto
+next
+  case (Suc n')
+  hence "if even m then (\<Sum>k=m..n-1. (-1) ^ k * f k) \<in> {0..f m}
+           else (\<Sum>k=m..n-1. (-1) ^ k * f k) \<in> {-f m..0}"
+    using assms by (intro alternating_decreasing_sum_bounds) auto
+  also have "(\<Sum>k=m..n-1. (-1) ^ k * f k) = S m"
+    unfolding S_def by (intro sum.cong) (auto simp: Suc)
+  finally show ?thesis .
+qed
+
+lemma alternating_decreasing_sum_upper_bound:
+  fixes f :: "nat \<Rightarrow> 'a :: {linordered_ring, ring_1}"
+  assumes "m \<le> n" "\<And>k. k \<in> {m..n} \<Longrightarrow> f k \<ge> 0"
+          "\<And>k. k \<in> {m..<n} \<Longrightarrow> f (Suc k) \<le> f k"
+  shows   "(\<Sum>k=m..n. (-1) ^ k * f k) \<le> f m"
+  using alternating_decreasing_sum_bounds[of m n f, OF assms] assms(1)
+  by (auto split: if_splits intro: order.trans[OF _ assms(2)])
+
+lemma alternating_decreasing_sum_upper_bound':
+  fixes f :: "nat \<Rightarrow> 'a :: {linordered_ring, ring_1}"
+  assumes "m < n" "\<And>k. k \<in> {m..n-1} \<Longrightarrow> f k \<ge> 0"
+          "\<And>k. k \<in> {m..<n-1} \<Longrightarrow> f (Suc k) \<le> f k"
+  shows   "(\<Sum>k=m..<n. (-1) ^ k * f k) \<le> f m"
+  using alternating_decreasing_sum_bounds'[of m n f, OF assms] assms(1)
+  by (auto split: if_splits intro: order.trans[OF _ assms(2)])
+
+lemma abs_alternating_decreasing_sum_upper_bound:
+  fixes f :: "nat \<Rightarrow> 'a :: {linordered_ring, ring_1}"
+  assumes "m \<le> n" "\<And>k. k \<in> {m..n} \<Longrightarrow> f k \<ge> 0"
+          "\<And>k. k \<in> {m..<n} \<Longrightarrow> f (Suc k) \<le> f k"
+  shows   "\<bar>(\<Sum>k=m..n. (-1) ^ k * f k)\<bar> \<le> f m" (is "abs ?S \<le> _")
+  using alternating_decreasing_sum_bounds[of m n f, OF assms]
+  by (auto split: if_splits simp: minus_le_iff)
+
+lemma abs_alternating_decreasing_sum_upper_bound':
+  fixes f :: "nat \<Rightarrow> 'a :: {linordered_ring, ring_1}"
+  assumes "m < n" "\<And>k. k \<in> {m..n-1} \<Longrightarrow> f k \<ge> 0"
+          "\<And>k. k \<in> {m..<n-1} \<Longrightarrow> f (Suc k) \<le> f k"
+  shows   "\<bar>(\<Sum>k=m..<n. (-1) ^ k * f k)\<bar> \<le> f m"
+  using alternating_decreasing_sum_bounds'[of m n f, OF assms]
+  by (auto split: if_splits simp: minus_le_iff)
+
+lemma abs_alternating_decreasing_sum_lower_bound:
+  fixes f :: "nat \<Rightarrow> 'a :: {linordered_ring, ring_1}"
+  assumes "m < n" "\<And>k. k \<in> {m..n} \<Longrightarrow> f k \<ge> 0"
+          "\<And>k. k \<in> {m..<n} \<Longrightarrow> f (Suc k) \<le> f k"
+  shows   "\<bar>(\<Sum>k=m..n. (-1) ^ k * f k)\<bar> \<ge> f m - f (Suc m)"
+proof -
+  have "(\<Sum>k=m..n. (-1) ^ k * f k) = (\<Sum>k\<in>insert m {m<..n}. (-1) ^ k * f k)"
+    using assms by (intro sum.cong) auto
+  also have "\<dots> = (-1) ^ m * f m + (\<Sum>k\<in>{m<..n}. (-1) ^ k * f k)"
+    by auto
+  also have "(\<Sum>k\<in>{m<..n}. (-1) ^ k * f k) = (\<Sum>k\<in>{m..<n}. (-1) ^ Suc k * f (Suc k))"
+    by (intro sum.reindex_bij_witness[of _ Suc "\<lambda>i. i - 1"]) auto
+  also have "(-1)^m * f m + \<dots> = (-1)^m * f m - (\<Sum>k\<in>{m..<n}. (-1) ^ k * f (Suc k))"
+    by (simp add: sum_negf)
+  also have "\<bar>\<dots>\<bar> \<ge> \<bar>(-1)^m * f m\<bar> - \<bar>(\<Sum>k\<in>{m..<n}. (-1) ^ k * f (Suc k))\<bar>"
+    by (rule abs_triangle_ineq2)
+  also have "\<bar>(-1)^m * f m\<bar> = f m"
+    using assms by (cases "even m") auto
+  finally have "f m - \<bar>\<Sum>k = m..<n. (- 1) ^ k * f (Suc k)\<bar>
+                  \<le> \<bar>\<Sum>k = m..n. (- 1) ^ k * f k\<bar>" .
+  moreover have "f m - \<bar>(\<Sum>k\<in>{m..<n}. (-1) ^ k * f (Suc k))\<bar> \<ge> f m - f (Suc m)"
+    using assms by (intro diff_mono abs_alternating_decreasing_sum_upper_bound') auto
+  ultimately show ?thesis by (rule order.trans[rotated])
+qed
+
+lemma abs_alternating_decreasing_sum_lower_bound':
+  fixes f :: "nat \<Rightarrow> 'a :: {linordered_ring, ring_1}"
+  assumes "m+1 < n" "\<And>k. k \<in> {m..n} \<Longrightarrow> f k \<ge> 0"
+          "\<And>k. k \<in> {m..<n} \<Longrightarrow> f (Suc k) \<le> f k"
+  shows   "\<bar>(\<Sum>k=m..<n. (-1) ^ k * f k)\<bar> \<ge> f m - f (Suc m)"
+proof (cases n)
+  case 0
+  thus ?thesis using assms by auto
+next
+  case (Suc n')
+  hence "\<bar>(\<Sum>k=m..n-1. (-1) ^ k * f k)\<bar> \<ge> f m - f (Suc m)"
+    using assms by (intro abs_alternating_decreasing_sum_lower_bound) auto
+  also have "(\<Sum>k=m..n-1. (-1) ^ k * f k) = (\<Sum>k=m..<n. (-1) ^ k * f k)"
+    by (intro sum.cong) (auto simp: Suc)
+  finally show ?thesis .
+qed
+
+lemma alternating_decreasing_suminf_bounds:
+  assumes "\<And>k. f k \<ge> (0 :: real)" "\<And>k. f (Suc k) \<le> f k"
+          "f \<longlonglongrightarrow> 0"
+  shows   "(\<Sum>k. (-1) ^ k * f k) \<in> {f 0 - f 1..f 0}"
+proof -
+  have "summable (\<lambda>k. (-1) ^ k * f k)"
+    by (intro summable_Leibniz' assms)
+  hence lim: "(\<lambda>n. \<Sum>k\<le>n. (-1) ^ k * f k) \<longlonglongrightarrow> (\<Sum>k. (-1) ^ k * f k)"
+    by (auto dest: summable_LIMSEQ')
+  have bounds: "(\<Sum>k=0..n. (- 1) ^ k * f k) \<in> {f 0 - f 1..f 0}"
+    if "n > 0" for n
+    using alternating_decreasing_sum_bounds[of 1 n f] assms that
+    by (subst sum.atLeast_Suc_atMost) auto
+  note [simp] = atLeast0AtMost
+  note [intro!] = eventually_mono[OF eventually_gt_at_top[of 0]]
+ 
+  from lim have "(\<Sum>k. (-1) ^ k * f k) \<ge> f 0 - f 1"
+    by (rule tendsto_lowerbound) (insert bounds, auto)
+  moreover from lim have "(\<Sum>k. (-1) ^ k * f k) \<le> f 0"
+    by (rule tendsto_upperbound) (use bounds in auto)
+  ultimately show ?thesis by simp
+qed
+
+lemma
+  assumes "\<And>k. k \<ge> m \<Longrightarrow> f k \<ge> (0 :: real)"
+          "\<And>k. k \<ge> m \<Longrightarrow> f (Suc k) \<le> f k" "f \<longlonglongrightarrow> 0"
+  defines "S \<equiv> (\<Sum>k. (-1) ^ (k + m) * f (k + m))"
+  shows   summable_alternating_decreasing: "summable (\<lambda>k. (-1) ^ (k + m) * f (k + m))"
+    and   alternating_decreasing_suminf_bounds':
+            "if even m then S \<in> {f m - f (Suc m) .. f m}
+               else S \<in> {-f m..f (Suc m) - f m}" (is ?th1)
+    and   abs_alternating_decreasing_suminf:
+            "abs S \<in> {f m - f (Suc m)..f m}" (is ?th2)
+proof -
+  have summable: "summable (\<lambda>k. (-1) ^ k * f (k + m))"
+    using assms by (intro summable_Leibniz') (auto simp: filterlim_sequentially_shift)
+  thus "summable (\<lambda>k. (-1) ^ (k + m) * f (k + m))"
+    by (subst add.commute) (auto simp: power_add mult.assoc intro: summable_mult)
+  have "S = (\<Sum>k. (-1) ^ m * ((-1) ^ k * f (k + m)))"
+    by (simp add: S_def power_add mult_ac)
+  also have "\<dots> = (-1) ^ m * (\<Sum>k. (-1) ^ k * f (k + m))"
+    using summable by (rule suminf_mult)
+  finally have "S = (- 1) ^ m * (\<Sum>k. (- 1) ^ k * f (k + m))" .
+  moreover have "(\<Sum>k. (-1) ^ k * f (k + m)) \<in>
+     {f (0 + m) - f (1 + m) .. f (0 + m)}"
+    using assms
+    by (intro alternating_decreasing_suminf_bounds)
+       (auto simp: filterlim_sequentially_shift)
+  ultimately show ?th1 by (auto split: if_splits)
+  thus ?th2 using assms(2)[of m] by (auto split: if_splits)
+qed
+
+lemma
+  assumes "\<And>k. k \<ge> m \<Longrightarrow> f k \<ge> (0 :: real)"
+          "\<And>k. k \<ge> m \<Longrightarrow> f (Suc k) < f k" "f \<longlonglongrightarrow> 0"
+  defines "S \<equiv> (\<Sum>k. (-1) ^ (k + m) * f (k + m))"
+  shows   alternating_decreasing_suminf_bounds_strict':
+            "if even m then S \<in> {f m - f (Suc m)<..<f m}
+               else S \<in> {-f m<..<f (Suc m) - f m}" (is ?th1)
+    and   abs_alternating_decreasing_suminf_strict:
+            "abs S \<in> {f m - f (Suc m)<..<f m}" (is ?th2)
+proof -
+  define S' where "S' = (\<Sum>k. (-1) ^ (k + Suc (Suc m)) * f (k + Suc (Suc m)))"
+  have "(\<lambda>k. (-1) ^ (k + m) * f (k + m)) sums S" using assms unfolding S_def
+    by (intro summable_sums summable_Leibniz' summable_alternating_decreasing)
+       (auto simp: less_eq_real_def)
+  from sums_split_initial_segment[OF this, of 2]
+    have S': "S' = S - (-1) ^ m * (f m - f (Suc m))"
+    by (simp_all add: sums_iff S'_def algebra_simps lessThan_nat_numeral)
+  have "if even (Suc (Suc m)) then S' \<in> {f (Suc (Suc m)) - f (Suc (Suc (Suc m)))..f (Suc (Suc m))}
+        else S' \<in> {- f (Suc (Suc m))..f (Suc (Suc (Suc m))) - f (Suc (Suc m))}" unfolding S'_def
+    using assms by (intro alternating_decreasing_suminf_bounds') (auto simp: less_eq_real_def)
+  thus ?th1 using assms(2)[of "Suc m"] assms(2)[of "Suc (Suc m)"]
+    unfolding S' by (auto simp: algebra_simps)
+  thus ?th2 using assms(2)[of m] by (auto split: if_splits)
+qed
+
+
+datatype cfrac = CFrac int "nat llist"
+
+quickcheck_generator cfrac constructors: CFrac
+
+lemma type_definition_cfrac':
+  "type_definition (\<lambda>x. case x of CFrac a b \<Rightarrow> (a, b)) (\<lambda>(x,y). CFrac x y) UNIV"
+  by (auto simp: type_definition_def split: cfrac.splits)
+
+setup_lifting type_definition_cfrac'
+
+lift_definition cfrac_of_int :: "int \<Rightarrow> cfrac" is
+  "\<lambda>n. (n, LNil)" .
+
+lemma cfrac_of_int_code [code]: "cfrac_of_int n = CFrac n LNil"
+  by (auto simp: cfrac_of_int_def)
+
+lift_definition cfrac_of_stream :: "int stream \<Rightarrow> cfrac" is
+  "\<lambda>xs. (shd xs, llist_of_stream (smap (\<lambda>x. nat (x - 1)) (stl xs)))" .
+
+instantiation cfrac :: zero
+begin
+definition zero_cfrac where "0 = cfrac_of_int 0"
+instance ..
+end
+
+instantiation cfrac :: one
+begin
+definition one_cfrac where "1 = cfrac_of_int 1"
+instance ..
+end
+
+lift_definition cfrac_tl :: "cfrac \<Rightarrow> cfrac" is
+  "\<lambda>(_, bs) \<Rightarrow> case bs of LNil \<Rightarrow> (1, LNil) | LCons b bs' \<Rightarrow> (int b + 1, bs')" .
+
+lemma cfrac_tl_code [code]:
+  "cfrac_tl (CFrac a bs) =
+     (case bs of LNil \<Rightarrow> CFrac 1 LNil | LCons b bs' \<Rightarrow> CFrac (int b + 1) bs')"
+  by (auto simp: cfrac_tl_def split: llist.splits)
+
+definition cfrac_drop :: "nat \<Rightarrow> cfrac \<Rightarrow> cfrac" where
+  "cfrac_drop n c = (cfrac_tl ^^ n) c"
+
+lemma cfrac_drop_Suc_right: "cfrac_drop (Suc n) c = cfrac_drop n (cfrac_tl c)"
+  by (simp add: cfrac_drop_def funpow_Suc_right del: funpow.simps)
+
+lemma cfrac_drop_Suc_left: "cfrac_drop (Suc n) c = cfrac_tl (cfrac_drop n c)"
+  by (simp add: cfrac_drop_def)
+
+lemma cfrac_drop_add: "cfrac_drop (m + n) c = cfrac_drop m (cfrac_drop n c)"
+  by (simp add: cfrac_drop_def funpow_add)
+
+lemma cfrac_drop_0 [simp]: "cfrac_drop 0 = (\<lambda>x. x)"
+  by (simp add: fun_eq_iff cfrac_drop_def)
+
+lemma cfrac_drop_1 [simp]: "cfrac_drop 1 = cfrac_tl"
+  by (simp add: fun_eq_iff cfrac_drop_def)
+
+lift_definition cfrac_length :: "cfrac \<Rightarrow> enat" is
+  "\<lambda>(_, bs) \<Rightarrow> llength bs" .
+
+lemma cfrac_length_code [code]: "cfrac_length (CFrac a bs) = llength bs"
+  by (simp add: cfrac_length_def)
+
+lemma cfrac_length_tl [simp]: "cfrac_length (cfrac_tl c) = cfrac_length c - 1"
+  by transfer (auto split: llist.splits)
+
+lemma enat_diff_Suc_right [simp]: "m - enat (Suc n) = m - n - 1"
+  by (auto simp: diff_enat_def enat_1_iff split: enat.splits)
+
+lemma cfrac_length_drop [simp]: "cfrac_length (cfrac_drop n c) = cfrac_length c - n"
+  by (induction n) (auto simp: cfrac_drop_def)
+
+lemma cfrac_length_of_stream [simp]: "cfrac_length (cfrac_of_stream xs) = \<infinity>"
+  by transfer auto
+
+lift_definition cfrac_nth :: "cfrac \<Rightarrow> nat \<Rightarrow> int" is
+  "\<lambda>(a :: int, bs :: nat llist). \<lambda>(n :: nat).
+      if n = 0 then a
+      else if n \<le> llength bs then int (lnth bs (n - 1)) + 1 else 1" .
+
+lemma cfrac_nth_code [code]:
+  "cfrac_nth (CFrac a bs) n = (if n = 0 then a else lnth_default 0 bs (n - 1) + 1)"
+proof -
+  have "n > 0 \<longrightarrow> enat (n - Suc 0) < llength bs \<longleftrightarrow> enat n \<le> llength bs"
+    by (metis Suc_ile_eq Suc_pred)
+  thus ?thesis by (auto simp: cfrac_nth_def lnth_default_def)
+qed
+
+lemma cfrac_nth_nonneg [simp, intro]: "n > 0 \<Longrightarrow> cfrac_nth c n \<ge> 0"
+  by transfer auto
+
+lemma cfrac_nth_nonzero [simp]: "n > 0 \<Longrightarrow> cfrac_nth c n \<noteq> 0"
+  by transfer (auto split: if_splits)
+
+lemma cfrac_nth_pos[simp, intro]: "n > 0 \<Longrightarrow> cfrac_nth c n > 0"
+  by transfer auto
+
+lemma cfrac_nth_ge_1[simp, intro]: "n > 0 \<Longrightarrow> cfrac_nth c n \<ge> 1"
+  by transfer auto
+
+lemma cfrac_nth_not_less_1[simp, intro]: "n > 0 \<Longrightarrow> \<not>cfrac_nth c n < 1"
+  by transfer (auto split: if_splits)
+
+lemma cfrac_nth_tl [simp]: "cfrac_nth (cfrac_tl c) n = cfrac_nth c (Suc n)"
+  apply transfer
+  apply (auto split: llist.splits nat.splits simp: Suc_ile_eq lnth_LCons enat_0_iff
+              simp flip: zero_enat_def)
+  done
+
+lemma cfrac_nth_drop [simp]: "cfrac_nth (cfrac_drop n c) m = cfrac_nth c (m + n)"
+  by (induction n arbitrary: m) (auto simp: cfrac_drop_def)
+
+lemma cfrac_nth_0_of_int [simp]: "cfrac_nth (cfrac_of_int n) 0 = n"
+  by transfer auto
+
+lemma cfrac_nth_gt0_of_int [simp]: "m > 0 \<Longrightarrow> cfrac_nth (cfrac_of_int n) m = 1"
+  by transfer (auto simp: enat_0_iff)
+
+lemma cfrac_nth_of_stream:
+  assumes "sset (stl xs) \<subseteq> {0<..}"
+  shows   "cfrac_nth (cfrac_of_stream xs) n = snth xs n"
+  using assms
+proof (transfer', goal_cases)
+  case (1 xs n)
+  thus ?case
+    by (cases xs; cases n) (auto simp: subset_iff)
+qed
+
+
+lift_definition cfrac :: "(nat \<Rightarrow> int) \<Rightarrow> cfrac" is
+  "\<lambda>f. (f 0, inf_llist (\<lambda>n. nat (f (Suc n) - 1)))" .
+
+definition is_cfrac :: "(nat \<Rightarrow> int) \<Rightarrow> bool" where "is_cfrac f \<longleftrightarrow> (\<forall>n>0. f n > 0)"
+
+lemma cfrac_nth_cfrac [simp]:
+  assumes "is_cfrac f"
+  shows   "cfrac_nth (cfrac f) n = f n"
+  using assms unfolding is_cfrac_def by transfer auto
+
+lemma llength_eq_infty_lnth: "llength b = \<infinity> \<Longrightarrow> inf_llist (lnth b) = b"
+  by (simp add: llength_eq_infty_conv_lfinite)
+
+lemma cfrac_cfrac_nth [simp]: "cfrac_length c = \<infinity> \<Longrightarrow> cfrac (cfrac_nth c) = c"
+  by transfer (auto simp: llength_eq_infty_lnth)
+
+lemma cfrac_length_cfrac [simp]: "cfrac_length (cfrac f) = \<infinity>"
+  by transfer auto
+
+
+lift_definition cfrac_of_list :: "int list \<Rightarrow> cfrac" is
+  "\<lambda>xs. if xs = [] then (0, LNil) else (hd xs, llist_of (map (\<lambda>n. nat n - 1) (tl xs)))" .
+
+lemma cfrac_length_of_list [simp]: "cfrac_length (cfrac_of_list xs) = length xs - 1"
+  by transfer (auto simp: zero_enat_def)
+
+lemma cfrac_of_list_Nil [simp]: "cfrac_of_list [] = 0"
+  unfolding zero_cfrac_def by transfer auto
+
+lemma cfrac_nth_of_list [simp]:
+  assumes "n < length xs" and "\<forall>i\<in>{0<..<length xs}. xs ! i > 0"
+  shows   "cfrac_nth (cfrac_of_list xs) n = xs ! n"
+  using assms
+proof (transfer, goal_cases)
+  case (1 n xs)
+  show ?case
+  proof (cases n)
+    case (Suc n')
+    with 1 have "xs ! n > 0"
+      using 1 by auto
+    hence "int (nat (tl xs ! n') - Suc 0) + 1 = xs ! Suc n'"
+      using 1(1) Suc by (auto simp: nth_tl of_nat_diff)
+    thus ?thesis
+      using Suc 1(1) by (auto simp: hd_conv_nth zero_enat_def)
+qed
+
+
+primcorec cfrac_of_real_aux :: "real \<Rightarrow> nat llist" where
+  "cfrac_of_real_aux x =
+     (if x \<in> {0<..<1} then LCons (nat \<lfloor>1/x\<rfloor> - 1) (cfrac_of_real_aux (frac (1/x))) else LNil)"
+
+lemma cfrac_of_real_aux_code [code]:
+  "cfrac_of_real_aux x =
+     (if x > 0 \<and> x < 1 then LCons (nat \<lfloor>1/x\<rfloor> - 1) (cfrac_of_real_aux (frac (1/x))) else LNil)"
+  by (subst cfrac_of_real_aux.code) auto
+  
+
+lemma cfrac_of_real_aux_LNil [simp]: "x \<notin> {0<..<1} \<Longrightarrow> cfrac_of_real_aux x = LNil"
+  by (subst cfrac_of_real_aux.code) auto
+
+lemma cfrac_of_real_aux_0 [simp]: "cfrac_of_real_aux 0 = LNil"
+  by (subst cfrac_of_real_aux.code) auto
+
+lemma cfrac_of_real_aux_eq_LNil_iff [simp]: "cfrac_of_real_aux x = LNil \<longleftrightarrow> x \<notin> {0<..<1}"
+  by (subst cfrac_of_real_aux.code) auto
+
+lemma lnth_cfrac_of_real_aux:
+  assumes "n < llength (cfrac_of_real_aux x)"
+  shows   "lnth (cfrac_of_real_aux x) (Suc n) = lnth (cfrac_of_real_aux (frac (1/x))) n"
+  using assms
+  apply (induction n arbitrary: x)
+   apply (subst cfrac_of_real_aux.code)
+   apply auto []
+  apply (subst cfrac_of_real_aux.code)
+  apply (auto)
+  done
+
+lift_definition cfrac_of_real :: "real \<Rightarrow> cfrac" is
+  "\<lambda>x. (\<lfloor>x\<rfloor>, cfrac_of_real_aux (frac x))" .
+
+lemma cfrac_of_real_code [code]: "cfrac_of_real x = CFrac \<lfloor>x\<rfloor> (cfrac_of_real_aux (frac x))"
+  by (simp add: cfrac_of_real_def)
+
+lemma eq_epred_iff: "m = epred n \<longleftrightarrow> m = 0 \<and> n = 0 \<or> n = eSuc m"
+  by (cases m; cases n) (auto simp: enat_0_iff enat_eSuc_iff infinity_eq_eSuc_iff)
+
+lemma epred_eq_iff: "epred n = m \<longleftrightarrow> m = 0 \<and> n = 0 \<or> n = eSuc m"
+  by (cases m; cases n) (auto simp: enat_0_iff enat_eSuc_iff infinity_eq_eSuc_iff)
+
+lemma epred_less: "n > 0 \<Longrightarrow> n \<noteq> \<infinity> \<Longrightarrow> epred n < n"
+  by (cases n) (auto simp: enat_0_iff)
+
+lemma cfrac_nth_of_real_0 [simp]:
+  "cfrac_nth (cfrac_of_real x) 0 = \<lfloor>x\<rfloor>"
+  by transfer auto
+
+lemma frac_eq_0 [simp]: "x \<in> \<int> \<Longrightarrow> frac x = 0"
+  by simp
+
+lemma cfrac_tl_of_real:
+  assumes "x \<notin> \<int>"
+  shows   "cfrac_tl (cfrac_of_real x) = cfrac_of_real (1 / frac x)"
+  using assms
+proof (transfer, goal_cases)
+  case (1 x)
+  hence "int (nat \<lfloor>1 / frac x\<rfloor> - Suc 0) + 1 = \<lfloor>1 / frac x\<rfloor>"
+    by (subst of_nat_diff) (auto simp: le_nat_iff frac_le_1)
+  by (subst cfrac_of_real_aux.code) (auto split: llist.splits simp: frac_lt_1)
+qed
+
+lemma cfrac_nth_of_real_Suc:
+  assumes "x \<notin> \<int>"
+  shows   "cfrac_nth (cfrac_of_real x) (Suc n) = cfrac_nth (cfrac_of_real (1 / frac x)) n"
+proof -
+  have "cfrac_nth (cfrac_of_real x) (Suc n) =
+          cfrac_nth (cfrac_tl (cfrac_of_real x)) n"
+    by simp
+  also have "cfrac_tl (cfrac_of_real x) = cfrac_of_real (1 / frac x)"
+    by (simp add: cfrac_tl_of_real assms)
+  finally show ?thesis .
+qed
+
+
+fun conv :: "cfrac \<Rightarrow> nat \<Rightarrow> real" where
+  "conv c 0 = real_of_int (cfrac_nth c 0)"
+| "conv c (Suc n) = real_of_int (cfrac_nth c 0) + 1 / conv (cfrac_tl c) n"
+
+
+fun conv_num :: "cfrac \<Rightarrow> nat \<Rightarrow> int" where
+  "conv_num c 0 = cfrac_nth c 0"
+| "conv_num c (Suc 0) = cfrac_nth c 1 * cfrac_nth c 0 + 1"
+| "conv_num c (Suc (Suc n)) = cfrac_nth c (Suc (Suc n)) * conv_num c (Suc n) + conv_num c n"
+
+fun conv_denom :: "cfrac \<Rightarrow> nat \<Rightarrow> int" where
+  "conv_denom c 0 = 1"
+| "conv_denom c (Suc 0) = cfrac_nth c 1"
+| "conv_denom c (Suc (Suc n)) = cfrac_nth c (Suc (Suc n)) * conv_denom c (Suc n) + conv_denom c n"
+
+lemma conv_num_rec:
+  "n \<ge> 2 \<Longrightarrow> conv_num c n = cfrac_nth c n * conv_num c (n - 1) + conv_num c (n - 2)"
+  by (cases n; cases "n - 1") auto
+
+lemma conv_denom_rec:
+  "n \<ge> 2 \<Longrightarrow> conv_denom c n = cfrac_nth c n * conv_denom c (n - 1) + conv_denom c (n - 2)"
+  by (cases n; cases "n - 1") auto
+
+
+fun conv' :: "cfrac \<Rightarrow> nat \<Rightarrow> real \<Rightarrow> real" where
+  "conv' c 0 z = z"
+| "conv' c (Suc n) z = conv' c n (real_of_int (cfrac_nth c n) + 1 / z)"
+
+definition conv_num_int :: "cfrac \<Rightarrow> int \<Rightarrow> int" where
+  "conv_num_int c n = (if n = -1 then 1 else if n < 0 then 0 else conv_num c (nat n))"
+
+definition conv_denom_int :: "cfrac \<Rightarrow> int \<Rightarrow> int" where
+  "conv_denom_int c n = (if n = -2 then 1 else if n < 0 then 0 else conv_denom c (nat n))"
+
+lemma conv_num_int_rec:
+  assumes "n \<ge> 0"
+  shows   "conv_num_int c n = cfrac_nth c (nat n) * conv_num_int c (n - 1) + conv_num_int c (n - 2)"
+proof (cases "n \<ge> 2")
+  case True
+  define n' where "n' = nat (n - 2)"
+  have n: "n = int (Suc (Suc n'))"
+    using True by (simp add: n'_def)
+  show ?thesis
+    by (simp add: n conv_num_int_def nat_add_distrib)
+
+lemma conv_denom_int_rec:
+  assumes "n \<ge> 0"
+  shows   "conv_denom_int c n = cfrac_nth c (nat n) * conv_denom_int c (n - 1) + conv_denom_int c (n - 2)"
+proof -
+  consider "n = 0" | "n = 1" | "n \<ge> 2"
+    using assms by force
+  thus ?thesis
+  proof cases
+    assume "n \<ge> 2"
+    define n' where "n' = nat (n - 2)"
+    have n: "n = int (Suc (Suc n'))"
+    show ?thesis
+      by (simp add: n conv_denom_int_def nat_add_distrib)
+qed
+
+definition cfrac_lim :: "cfrac \<Rightarrow> real" where
+  "cfrac_lim c =
+     (case cfrac_length c of \<infinity> \<Rightarrow> lim (conv c) | enat l \<Rightarrow> conv c l)"
+
+lemma cfrac_lim_code [code]:
+  "cfrac_lim c =
+     (case cfrac_length c of enat l \<Rightarrow> conv c l
+      | _ \<Rightarrow> Code.abort (STR ''Cannot compute infinite continued fraction'') (\<lambda>_. cfrac_lim c))"
+  by (simp add: cfrac_lim_def split: enat.splits)
+
+definition cfrac_remainder where "cfrac_remainder c n = cfrac_lim (cfrac_drop n c)"
+
+lemmas conv'_Suc_right = conv'.simps(2)
+
+lemma conv'_Suc_left:
+  assumes "z > 0"
+  shows "conv' c (Suc n) z =
+           real_of_int (cfrac_nth c 0) + 1 / conv' (cfrac_tl c) n z"
+  using assms
+proof (induction n arbitrary: z)
+  case (Suc n z)
+  have "conv' c (Suc (Suc n)) z = 
+          conv' c (Suc n) (real_of_int (cfrac_nth c (Suc n)) + 1 / z)"
+    by simp
+  also have "\<dots> = cfrac_nth c 0 + 1 / conv' (cfrac_tl c) (Suc n) z"
+    using Suc.prems by (subst Suc.IH) (auto intro!: add_nonneg_pos cfrac_nth_nonneg)
+  finally show ?case .
+qed simp_all
+
+lemmas [simp del] = conv'.simps(2)
+
+lemma conv'_left_induct:
+  assumes "\<And>c. P c 0 z" "\<And>c n. P (cfrac_tl c) n z \<Longrightarrow> P c (Suc n) z"
+  shows   "P c n z"
+  using assms by (rule conv.induct)
+
+lemma enat_less_diff_conv [simp]:
+  assumes "a = \<infinity> \<or> b < \<infinity> \<or> c < \<infinity>"
+  shows   "a < c - (b :: enat) \<longleftrightarrow> a + b < c"
+  using assms by (cases a; cases b; cases c) auto
+
+lemma conv_eq_conv': "conv c n = conv' c n (cfrac_nth c n)"
+proof (cases "n = 0")
+  case False
+  hence "cfrac_nth c n > 0" by (auto intro!: cfrac_nth_pos)
+  thus ?thesis
+    by (induction c n rule: conv.induct) (simp_all add: conv'_Suc_left)
+qed simp_all
+
+lemma conv_num_pos':
+  assumes "cfrac_nth c 0 > 0"
+  shows   "conv_num c n > 0"
+  using assms by (induction n rule: fib.induct) (auto simp: intro!: add_pos_nonneg)
+
+lemma conv_num_nonneg: "cfrac_nth c 0 \<ge> 0 \<Longrightarrow> conv_num c n \<ge> 0"
+  by (induction c n rule: conv_num.induct)
+     (auto simp: intro!: mult_nonneg_nonneg add_nonneg_nonneg
+           intro: cfrac_nth_nonneg)
+
+lemma conv_num_pos:
+  "cfrac_nth c 0 \<ge> 0 \<Longrightarrow> n > 0 \<Longrightarrow> conv_num c n > 0"
+  by (induction c n rule: conv_num.induct)
+     (auto intro!: mult_pos_pos mult_nonneg_nonneg add_pos_nonneg conv_num_nonneg cfrac_nth_pos
+           intro: cfrac_nth_nonneg simp:  enat_le_iff)
+
+lemma conv_denom_pos [simp, intro]: "conv_denom c n > 0"
+  by (induction c n rule: conv_num.induct)
+     (auto intro!: add_nonneg_pos mult_nonneg_nonneg cfrac_nth_nonneg
+           simp: enat_le_iff)
+
+lemma conv_denom_not_nonpos [simp]: "\<not>conv_denom c n \<le> 0"
+  using conv_denom_pos[of c n] by linarith
+
+lemma conv_denom_not_neg [simp]: "\<not>conv_denom c n < 0"
+  using conv_denom_pos[of c n] by linarith
+
+lemma conv_denom_nonzero [simp]: "conv_denom c n \<noteq> 0"
+  using conv_denom_pos[of c n] by linarith
+
+lemma conv_denom_nonneg [simp, intro]: "conv_denom c n \<ge> 0"
+  using conv_denom_pos[of c n] by linarith
+
+lemma conv_num_int_neg1 [simp]: "conv_num_int c (-1) = 1"
+  by (simp add: conv_num_int_def)
+
+lemma conv_num_int_neg [simp]: "n < 0 \<Longrightarrow> n \<noteq> -1 \<Longrightarrow> conv_num_int c n = 0"
+  by (simp add: conv_num_int_def)
+
+lemma conv_num_int_of_nat [simp]: "conv_num_int c (int n) = conv_num c n"
+  by (simp add: conv_num_int_def)
+
+lemma conv_num_int_nonneg [simp]: "n \<ge> 0 \<Longrightarrow> conv_num_int c n = conv_num c (nat n)"
+  by (simp add: conv_num_int_def)
+
+lemma conv_denom_int_neg2 [simp]: "conv_denom_int c (-2) = 1"
+  by (simp add: conv_denom_int_def)
+
+lemma conv_denom_int_neg [simp]: "n < 0 \<Longrightarrow> n \<noteq> -2 \<Longrightarrow> conv_denom_int c n = 0"
+  by (simp add: conv_denom_int_def)
+
+lemma conv_denom_int_of_nat [simp]: "conv_denom_int c (int n) = conv_denom c n"
+  by (simp add: conv_denom_int_def)
+
+lemma conv_denom_int_nonneg [simp]: "n \<ge> 0 \<Longrightarrow> conv_denom_int c n = conv_denom c (nat n)"
+  by (simp add: conv_denom_int_def)
+
+lemmas conv_Suc [simp del] = conv.simps(2)
+
+
+lemma conv'_gt_1:
+  assumes "cfrac_nth c 0 > 0" "x > 1"
+  shows   "conv' c n x > 1"
+  using assms
+proof (induction n arbitrary: c x)
+  case (Suc n c x)
+  from Suc.prems have pos: "cfrac_nth c n > 0" using cfrac_nth_pos[of n c]
+    by (cases "n = 0") (auto simp: enat_le_iff)
+  have "1 < 1 + 1 / x"
+    using Suc.prems by simp
+  also have "\<dots> \<le> cfrac_nth c n + 1 / x" using pos
+    by (intro add_right_mono) (auto simp: of_nat_ge_1_iff)
+  finally show ?case
+    by (subst conv'_Suc_right, intro Suc.IH)
+qed auto
+
+lemma enat_eq_iff: "a = enat b \<longleftrightarrow> (\<exists>a'. a = enat a' \<and> a' = b)"
+  by (cases a) auto
+
+lemma eq_enat_iff: "enat a = b \<longleftrightarrow> (\<exists>b'. b = enat b' \<and> a = b')"
+  by (cases b) auto
+
+lemma enat_diff_one [simp]: "enat a - 1 = enat (a - 1)"
+  by (cases "enat (a - 1)") (auto simp flip: idiff_enat_enat)
+
+lemma conv'_eqD:
+  assumes "conv' c n x = conv' c' n x" "x > 1" "m < n"
+  shows   "cfrac_nth c m = cfrac_nth c' m"
+  using assms
+proof (induction n arbitrary: m c c')
+  case (Suc n m c c')
+  have gt: "conv' (cfrac_tl c) n x > 1" "conv' (cfrac_tl c') n x > 1"
+    by (rule conv'_gt_1;
+  have eq: "cfrac_nth c 0 + 1 / conv' (cfrac_tl c) n x =
+            cfrac_nth c' 0 + 1 / conv' (cfrac_tl c') n x"
+    using Suc.prems by (subst (asm) (1 2) conv'_Suc_left) auto
+  hence "\<lfloor>cfrac_nth c 0 + 1 / conv' (cfrac_tl c) n x\<rfloor> =
+         \<lfloor>cfrac_nth c' 0 + 1 / conv' (cfrac_tl c') n x\<rfloor>"
+    by (simp only: )
+  also from gt have "floor (cfrac_nth c 0 + 1 / conv' (cfrac_tl c) n x) = cfrac_nth c 0"
+    by (intro floor_unique) auto
+  also from gt have "floor (cfrac_nth c' 0 + 1 / conv' (cfrac_tl c') n x) = cfrac_nth c' 0"
+    by (intro floor_unique) auto
+  finally have [simp]: "cfrac_nth c 0 = cfrac_nth c' 0" by simp
+
+  show ?case
+  proof (cases m)
+    case (Suc m')
+    from eq and gt have "conv' (cfrac_tl c) n x = conv' (cfrac_tl c') n x"
+      by simp
+    hence "cfrac_nth (cfrac_tl c) m' = cfrac_nth (cfrac_tl c') m'"
+      using Suc.prems
+      by (intro Suc.IH[of "cfrac_tl c" "cfrac_tl c'"]) (auto simp: o_def Suc enat_le_iff)
+    with Suc show ?thesis by simp
+  qed simp_all
+qed simp_all
+
+context
+  fixes c :: cfrac and h k
+  defines "h \<equiv> conv_num c" and "k \<equiv> conv_denom c"
+begin
+
+lemma conv'_num_denom_aux:
+  assumes z: "z > 0"
+  shows   "conv' c (Suc (Suc n)) z * (z * k (Suc n) + k n) = 
+             (z * h (Suc n) + h n)"
+  using z
+proof (induction n arbitrary: z)
+  case 0
+  hence "1 + z * cfrac_nth c 1 > 0"
+    by (intro add_pos_nonneg) (auto simp: cfrac_nth_nonneg)
+  with 0 show ?case
+    by (auto simp add: h_def k_def field_simps conv'_Suc_right max_def not_le)
+next
+  case (Suc n)
+  have [simp]: "h (Suc (Suc n)) = cfrac_nth c (n+2) * h (n+1) + h n"
+    by (simp add: h_def)
+  have [simp]: "k (Suc (Suc n)) = cfrac_nth c (n+2) * k (n+1) + k n"
+    by (simp add: k_def)
+  define z' where "z' = cfrac_nth c (n+2) + 1 / z"
+    by (auto simp: z'_def intro!: add_nonneg_pos cfrac_nth_nonneg)
+
+  have "z * real_of_int (h (Suc (Suc n))) + real_of_int (h (Suc n)) =
+          z * (z' * h (Suc n) + h n)"
+  also have "\<dots> = z * (conv' c (Suc (Suc n)) z' * (z' * k (Suc n) + k n))"
+  also have "\<dots> = conv' c (Suc (Suc (Suc n))) z *
+            (z * k (Suc (Suc n)) + k (Suc n))"
+    by (subst (2) conv'_Suc_right) (simp add: algebra_simps)
+  finally show ?case ..
+qed
+
+lemma conv'_num_denom:
+  assumes "z > 0"
+  shows   "conv' c (Suc (Suc n)) z =
+             (z * h (Suc n) + h n) / (z * k (Suc n) + k n)"
+proof -
+  have "z * real_of_int (k (Suc n)) + real_of_int (k n) > 0"
+    using assms by (intro add_pos_nonneg mult_pos_pos) (auto simp: k_def)
+  with conv'_num_denom_aux[of z n] assms show ?thesis
+    by (simp add: divide_simps)
+qed
+
+lemma conv_num_denom: "conv c n = h n / k n"
+proof -
+  consider "n = 0" | "n = Suc 0" | m where "n = Suc (Suc m)"
+    using not0_implies_Suc by blast
+  thus ?thesis
+  proof cases
+    assume "n = Suc 0"
+    thus ?thesis
+      by (auto simp: h_def k_def field_simps max_def conv_Suc)
+  next
+    fix m assume [simp]: "n = Suc (Suc m)"
+    have "conv c n = conv' c (Suc (Suc m)) (cfrac_nth c (Suc (Suc m)))"
+      by (subst conv_eq_conv') simp_all
+    also have "\<dots> = h n / k n"
+      by (subst conv'_num_denom) (simp_all add: h_def k_def)
+    finally show ?thesis .
+  qed (auto simp: h_def k_def)
+qed
+
+lemma conv'_num_denom':
+  assumes "z > 0" and "n \<ge> 2"
+  shows   "conv' c n z = (z * h (n - 1) + h (n - 2)) / (z * k (n - 1) + k (n - 2))"
+  using assms conv'_num_denom[of z "n - 2"]
+  by (auto simp: eval_nat_numeral Suc_diff_Suc)
+
+lemma conv'_num_denom_int:
+  assumes "z > 0"
+  shows   "conv' c n z =
+             (z * conv_num_int c (int n - 1) + conv_num_int c (int n - 2)) /
+             (z * conv_denom_int c (int n - 1) + conv_denom_int c (int n - 2))"
+proof -
+  consider "n = 0" | "n = 1" | "n \<ge> 2" by force
+  thus ?thesis
+  proof cases
+    case 1
+    thus ?thesis using conv_num_int_neg1 by auto
+  next
+    case 2
+    thus ?thesis using assms by (auto simp: conv'_Suc_right field_simps)
+  next
+    case 3
+    thus ?thesis using conv'_num_denom'[OF assms(1), of "nat n"]
+      by (auto simp: nat_diff_distrib h_def k_def)
+  qed
+qed
+
+lemma conv_nonneg: "cfrac_nth c 0 \<ge> 0 \<Longrightarrow> conv c n \<ge> 0"
+  by (subst conv_num_denom)
+    (auto intro!: divide_nonneg_nonneg conv_num_nonneg simp: h_def k_def)
+
+lemma conv_pos:
+  assumes "cfrac_nth c 0 > 0"
+  shows   "conv c n > 0"
+proof -
+  have "conv c n = h n / k n"
+    using assms by (intro conv_num_denom)
+  also from assms have "\<dots> > 0" unfolding h_def k_def
+    by (intro divide_pos_pos) (auto intro!: conv_num_pos')
+  finally show ?thesis .
+qed
+
+lemma conv_num_denom_prod_diff:
+  "k n * h (Suc n) - k (Suc n) * h n = (-1) ^ n"
+  by (induction c n rule: conv_num.induct)
+     (auto simp: k_def h_def algebra_simps)
+
+lemma conv_num_denom_prod_diff':
+  "k (Suc n) * h n - k n * h (Suc n) = (-1) ^ Suc n"
+  by (induction c n rule: conv_num.induct)
+     (auto simp: k_def h_def algebra_simps)
+
+lemma
+  fixes n :: int
+  assumes "n \<ge> -2"
+  shows   conv_num_denom_int_prod_diff:
+            "conv_denom_int c n * conv_num_int c (n + 1) - 
+               conv_denom_int c (n + 1) * conv_num_int c n = (-1) ^ (nat (n + 2))" (is ?th1)
+  and     conv_num_denom_int_prod_diff':
+            "conv_denom_int c (n + 1) * conv_num_int c n - 
+               conv_denom_int c n * conv_num_int c (n + 1) = (-1) ^ (nat (n + 3))" (is ?th2)
+proof -
+  from assms consider "n = -2" | "n = -1" | "n \<ge> 0" by force
+  thus ?th1 using conv_num_denom_prod_diff[of "nat n"]
+    by cases (auto simp: h_def k_def nat_add_distrib)
+  moreover from assms have "nat (n + 3) = Suc (nat (n + 2))" by (simp add: nat_add_distrib)
+  ultimately show ?th2 by simp
+qed
+
+lemma coprime_conv_num_denom: "coprime (h n) (k n)"
+proof (cases n)
+  case [simp]: (Suc m)
+  {
+    fix d :: int
+    assume "d dvd h n" and "d dvd k n"
+    hence "abs d dvd abs (k n * h (Suc n) - k (Suc n) * h n)"
+      by simp
+    also have "\<dots> = 1"
+      by (subst conv_num_denom_prod_diff) auto
+    finally have "is_unit d" by simp
+  }
+  thus ?thesis by (rule coprimeI)
+qed (auto simp: h_def k_def)
+
+lemma coprime_conv_num_denom_int:
+  assumes "n \<ge> -2"
+  shows   "coprime (conv_num_int c n) (conv_denom_int c n)"
+proof -
+  from assms consider "n = -2" | "n = -1" | "n \<ge> 0" by force
+  thus ?thesis by cases (insert coprime_conv_num_denom[of "nat n"], auto simp: h_def k_def)
+qed
+
+lemma mono_conv_num:
+  assumes "cfrac_nth c 0 \<ge> 0"
+  shows   "mono h"
+proof (rule incseq_SucI)
+  show "h n \<le> h (Suc n)" for n
+  proof (cases n)
+    case 0
+    have "1 * cfrac_nth c 0 + 1 \<le> cfrac_nth c (Suc 0) * cfrac_nth c 0 + 1"
+      using assms by (intro add_mono mult_right_mono) auto
+    thus ?thesis using assms by (simp add: le_Suc_eq Suc_le_eq h_def 0)
+  next
+    case (Suc m)
+    have "1 * h (Suc m) + 0 \<le> cfrac_nth c (Suc (Suc m)) * h (Suc m) + h m"
+      using assms
+      by (intro add_mono mult_right_mono)
+         (auto simp: Suc_le_eq h_def intro!: conv_num_nonneg)
+    with Suc show ?thesis by (simp add: h_def)
+  qed
+qed
+
+lemma mono_conv_denom: "mono k"
+proof (rule incseq_SucI)
+  show "k n \<le> k (Suc n)" for n
+  proof (cases n)
+    case 0
+    thus ?thesis by (simp add: le_Suc_eq Suc_le_eq k_def)
+  next
+    case (Suc m)
+    have "1 * k (Suc m) + 0 \<le> cfrac_nth c (Suc (Suc m)) * k (Suc m) + k m"
+      by (intro add_mono mult_right_mono) (auto simp: Suc_le_eq k_def)
+    with Suc show ?thesis by (simp add: k_def)
+  qed
+qed
+
+lemma conv_num_leI: "cfrac_nth c 0 \<ge> 0 \<Longrightarrow> m \<le> n \<Longrightarrow> h m \<le> h n"
+  using mono_conv_num by (auto simp: mono_def)
+
+lemma conv_denom_leI: "m \<le> n \<Longrightarrow> k m \<le> k n"
+  using mono_conv_denom by (auto simp: mono_def)
+
+lemma conv_denom_lessI:
+  assumes "m < n" "1 < n"
+  shows   "k m < k n"
+proof (cases n)
+  case [simp]: (Suc n')
+  show ?thesis
+  proof (cases n')
+    case [simp]: (Suc n'')
+    from assms have "k m \<le> 1 * k n' + 0"
+      by (auto intro: conv_denom_leI simp: less_Suc_eq)
+    also have "\<dots> \<le> cfrac_nth c n * k n' + 0"
+      using assms by (intro add_mono mult_mono) (auto simp: Suc_le_eq k_def)
+    also have "\<dots> < cfrac_nth c n * k n' + k n''" unfolding k_def
+      by (intro add_strict_left_mono conv_denom_pos assms)
+    also have "\<dots> = k n" by (simp add: k_def)
+    finally show ?thesis .
+  qed (insert assms, auto simp: k_def)
+qed (insert assms, auto)
+
+lemma conv_num_lower_bound:
+  assumes "cfrac_nth c 0 \<ge> 0"
+  shows   "h n \<ge> fib n" unfolding h_def
+  using assms
+proof (induction c n rule: conv_denom.induct)
+  case (3 c n)
+  hence "conv_num c (Suc (Suc n)) \<ge> 1 * int (fib (Suc n)) + int (fib n)"
+    using "3.prems" unfolding conv_num.simps
+    by (intro add_mono mult_mono "3.IH") auto
+  thus ?case by simp
+qed auto
+
+lemma conv_denom_lower_bound: "k n \<ge> fib (Suc n)"
+  unfolding k_def
+proof (induction c n rule: conv_denom.induct)
+  case (3 c n)
+  hence "conv_denom c (Suc (Suc n)) \<ge> 1 * int (fib (Suc (Suc n))) + int (fib (Suc n))"
+    using "3.prems" unfolding conv_denom.simps
+    by (intro add_mono mult_mono "3.IH") auto
+  thus ?case by simp
+qed (auto simp: Suc_le_eq)
+
+lemma conv_diff_eq: "conv c (Suc n) - conv c n = (-1) ^ n / (k n * k (Suc n))"
+proof -
+  have pos: "k n > 0" "k (Suc n) > 0" unfolding k_def
+    by (intro conv_denom_pos)+
+  have "conv c (Suc n) - conv c n =
+          (k n * h (Suc n) - k (Suc n) * h n) / (k n * k (Suc n))"
+    using pos by (subst (1 2) conv_num_denom) (simp add: conv_num_denom field_simps)
+  also have "k n * h (Suc n) - k (Suc n) * h n = (-1) ^ n"
+    by (rule conv_num_denom_prod_diff)
+  finally show ?thesis by simp
+qed
+
+lemma conv_telescope:
+  assumes "m \<le> n"
+  shows   "conv c m + (\<Sum>i=m..<n. (-1) ^ i / (k i * k (Suc i))) = conv c n"
+proof -
+  have "(\<Sum>i=m..<n. (-1) ^ i / (k i * k (Suc i))) =
+          (\<Sum>i=m..<n. conv c (Suc i) - conv c i)"
+    by (simp add: conv_diff_eq assms del: conv.simps)
+  also have "conv c m + \<dots> = conv c n"
+    using assms by (induction rule: dec_induct) simp_all
+  finally show ?thesis .
+qed
+
+lemma fib_at_top: "filterlim fib at_top at_top"
+proof (rule filterlim_at_top_mono)
+  show "eventually (\<lambda>n. fib n \<ge> n - 1) at_top"
+    by (intro always_eventually fib_ge allI)
+  show "filterlim (\<lambda>n::nat. n - 1) at_top at_top"
+    by (subst filterlim_sequentially_Suc [symmetric])
+       (simp_all add: filterlim_ident)
+qed
+
+lemma conv_denom_at_top: "filterlim k at_top at_top"
+proof (rule filterlim_at_top_mono)
+  show "filterlim (\<lambda>n. int (fib (Suc n))) at_top at_top"
+    by (rule filterlim_compose[OF filterlim_int_sequentially])
+       (simp add: fib_at_top filterlim_sequentially_Suc)
+  show "eventually (\<lambda>n. fib (Suc n) \<le> k n) at_top"
+    by (intro always_eventually conv_denom_lower_bound allI)
+qed
+
+lemma
+  shows   summable_conv_telescope:
+            "summable (\<lambda>i. (-1) ^ i / (k i * k (Suc i)))" (is ?th1)
+    and   cfrac_remainder_bounds:
+            "\<bar>(\<Sum>i. (-1) ^ (i + m) / (k (i + m) * k (Suc i + m)))\<bar> \<in>
+                {1/(k m * (k m + k (Suc m))) <..< 1 / (k m * k (Suc m))}" (is ?th2)
+proof -
+  have [simp]: "k n > 0" "k n \<ge> 0" "\<not>k n = 0" for n
+    by (auto simp: k_def)
+  have k_rec: "k (Suc (Suc n)) = cfrac_nth c (Suc (Suc n)) * k (Suc n) + k n" for n
+    by (simp add: k_def)
+  have [simp]: "a + b = 0 \<longleftrightarrow> a = 0 \<and> b = 0" if "a \<ge> 0" "b \<ge> 0" for a b :: real
+    using that by linarith
+
+  define g where "g = (\<lambda>i. inverse (real_of_int (k i * k (Suc i))))"
+
+  {
+    fix m :: nat
+    have "filterlim (\<lambda>n. k n) at_top at_top" and "filterlim (\<lambda>n. k (Suc n)) at_top at_top"
+      by (force simp: filterlim_sequentially_Suc intro: conv_denom_at_top)+
+    hence lim: "g \<longlonglongrightarrow> 0"
+      unfolding g_def of_int_mult
+      by (intro tendsto_inverse_0_at_top filterlim_at_top_mult_at_top
+                filterlim_compose[OF filterlim_real_of_int_at_top])
+    from lim have A: "summable (\<lambda>n. (-1) ^ (n + m) * g (n + m))" unfolding g_def
+      by (intro summable_alternating_decreasing)
+         (auto intro!: conv_denom_leI mult_nonneg_nonneg)
+
+    have "1 / (k m * (real_of_int (k (Suc m)) + k m / 1)) \<le>
+            1 / (k m * (k (Suc m) + k m / cfrac_nth c (m+2)))"
+      by (intro divide_left_mono mult_left_mono add_left_mono mult_pos_pos add_pos_pos divide_pos_pos)
+         (auto simp: of_nat_ge_1_iff)
+    also have "\<dots> = g m - g (Suc m)"
+      by (simp add: g_def k_rec field_simps add_pos_pos)
+    finally have le: "1 / (k m * (real_of_int (k (Suc m)) + k m / 1)) \<le> g m - g (Suc m)" by simp
+    have *: "\<bar>(\<Sum>i. (-1) ^ (i + m) * g (i + m))\<bar> \<in> {g m - g (Suc m) <..< g m}"
+      using lim unfolding g_def
+      by (intro abs_alternating_decreasing_suminf_strict) (auto intro!: conv_denom_lessI)
+    also from le have "\<dots> \<subseteq> {1 / (k m * (k (Suc m) + k m)) <..< g m}"
+      by (subst greaterThanLessThan_subseteq_greaterThanLessThan) auto
+    finally have B: "\<bar>\<Sum>i. (- 1) ^ (i + m) * g (i + m)\<bar> \<in> \<dots>" .
+    note A B
+  } note AB = this
+
+  from AB(1)[of 0] show ?th1 by (simp add: field_simps g_def)
+  from AB(2)[of m] show ?th2 by (simp add: g_def divide_inverse add_ac)
+qed
+ 
+lemma convergent_conv: "convergent (conv c)"
+proof -
+  have "convergent (\<lambda>n. conv c 0 + (\<Sum>i<n. (-1) ^ i / (k i * k (Suc i))))"
+    using summable_conv_telescope
+    by (intro convergent_add convergent_const)
+       (simp_all add: summable_iff_convergent)
+  also have "\<dots> = conv c"
+    by (rule ext, subst (2) conv_telescope [of 0, symmetric]) (simp_all add: atLeast0LessThan)
+  finally show ?thesis .
+qed
+
+lemma LIMSEQ_cfrac_lim: "cfrac_length c = \<infinity> \<Longrightarrow> conv c \<longlonglongrightarrow> cfrac_lim c"
+  using convergent_conv by (auto simp: convergent_LIMSEQ_iff cfrac_lim_def)
+
+lemma cfrac_lim_nonneg:
+  assumes "cfrac_nth c 0 \<ge> 0"
+  shows   "cfrac_lim c \<ge> 0"
+proof (cases "cfrac_length c")
+  case infinity
+  have "conv c \<longlonglongrightarrow> cfrac_lim c"
+    by (rule LIMSEQ_cfrac_lim) fact
+  thus ?thesis
+    by (rule tendsto_lowerbound)
+       (auto intro!: conv_nonneg always_eventually assms)
+next
+  case (enat l)
+  thus ?thesis using assms
+    by (auto simp: cfrac_lim_def conv_nonneg)
+qed
+
+lemma sums_cfrac_lim_minus_conv:
+  assumes "cfrac_length c = \<infinity>"
+  shows "(\<lambda>i. (-1) ^ (i + m) / (k (i + m) * k (Suc i + m))) sums (cfrac_lim c - conv c m)"
+proof -
+  have "(\<lambda>n. conv c (n + m) - conv c m) \<longlonglongrightarrow> cfrac_lim c - conv c m"
+    by (auto intro!: tendsto_diff LIMSEQ_cfrac_lim simp: filterlim_sequentially_shift assms)
+  also have "(\<lambda>n. conv c (n + m) - conv c m) =
+          (\<lambda>n. (\<Sum>i=0 + m..<n + m. (-1) ^ i / (k i * k (Suc i))))"
+    by (subst conv_telescope [of m, symmetric]) simp_all
+  also have "\<dots> = (\<lambda>n. (\<Sum>i<n. (-1) ^ (i + m) / (k (i + m) * k (Suc i + m))))"
+    by (subst sum.shift_bounds_nat_ivl) (simp_all add: atLeast0LessThan)
+  finally show ?thesis unfolding sums_def .
+qed
+
+lemma cfrac_lim_minus_conv_upper_bound:
+  assumes "m \<le> cfrac_length c"
+  shows   "\<bar>cfrac_lim c - conv c m\<bar> \<le> 1 / (k m * k (Suc m))"
+proof (cases "cfrac_length c")
+  case infinity
+  have "cfrac_lim c - conv c m = (\<Sum>i. (-1) ^ (i + m) / (k (i + m) * k (Suc i + m)))"
+    using sums_cfrac_lim_minus_conv infinity by (simp add: sums_iff)
+  also note cfrac_remainder_bounds[of m]
+  finally show ?thesis by simp
+next
+  case [simp]: (enat l)
+  show ?thesis
+  proof (cases "l = m")
+    case True
+    thus ?thesis by (auto simp: cfrac_lim_def k_def)
+  next
+    case False
+    let ?S = "(\<Sum>i=m..<l. (-1) ^ i * (1 / real_of_int (k i * k (Suc i))))"
+    have [simp]: "k n \<ge> 0" "k n > 0" for n
+      by (simp_all add: k_def)
+    hence "cfrac_lim c - conv c m = conv c l - conv c m"
+      by (simp add: cfrac_lim_def)
+    also have "\<dots> = ?S"
+      using assms by (subst conv_telescope [symmetric, of m]) auto
+    finally have "cfrac_lim c - conv c m = ?S" .
+    moreover have "\<bar>?S\<bar> \<le> 1 / real_of_int (k m * k (Suc m))"
+      unfolding of_int_mult using assms False
+      by (intro abs_alternating_decreasing_sum_upper_bound' divide_nonneg_nonneg frac_le mult_mono)
+         (simp_all add: conv_denom_leI del: conv_denom.simps)
+    ultimately show ?thesis by simp
+  qed
+qed
+
+lemma cfrac_lim_minus_conv_lower_bound:
+  assumes "m < cfrac_length c"
+  shows   "\<bar>cfrac_lim c - conv c m\<bar> \<ge> 1 / (k m * (k m + k (Suc m)))"
+proof (cases "cfrac_length c")
+  case infinity
+  have "cfrac_lim c - conv c m = (\<Sum>i. (-1) ^ (i + m) / (k (i + m) * k (Suc i + m)))"
+    using sums_cfrac_lim_minus_conv infinity by (simp add: sums_iff)
+  also note cfrac_remainder_bounds[of m]
+  finally show ?thesis by simp
+next
+  case [simp]: (enat l)
+  let ?S = "(\<Sum>i=m..<l. (-1) ^ i * (1 / real_of_int (k i * k (Suc i))))"
+  have [simp]: "k n \<ge> 0" "k n > 0" for n
+    by (simp_all add: k_def)
+  hence "cfrac_lim c - conv c m = conv c l - conv c m"
+    by (simp add: cfrac_lim_def)
+  also have "\<dots> = ?S"
+    using assms by (subst conv_telescope [symmetric, of m]) (auto simp: split: enat.splits)
+  finally have "cfrac_lim c - conv c m = ?S" .
+
+  moreover have "\<bar>?S\<bar> \<ge> 1 / (k m * (k m + k (Suc m)))"
+  proof (cases "m < cfrac_length c - 1")
+    case False
+    hence [simp]: "m = l - 1" and "l > 0" using assms
+      by (auto simp: not_less)
+    have "1 / (k m * (k m + k (Suc m))) \<le> 1 / (k m * k (Suc m))"
+      unfolding of_int_mult
+      by (intro divide_left_mono mult_mono mult_pos_pos) (auto intro!: add_pos_pos)
+    hence "1 / (k m * k (Suc m)) = \<bar>?S\<bar>"
+      by simp
+    finally show ?thesis .
+  next
+    case True
+    with assms have less: "m < l - 1"
+      by auto
+    have "k m + k (Suc m) > 0"
+      by (intro add_pos_pos) (auto simp: k_def)
+    hence "1 / (k m * (k m + k (Suc m))) \<le> 1 / (k m * k (Suc m)) - 1 / (k (Suc m) * k (Suc (Suc m)))"
+      by (simp add: divide_simps) (auto simp: k_def algebra_simps)
+    also have "\<dots> \<le> \<bar>?S\<bar>"
+      unfolding of_int_mult using less
+      by (intro abs_alternating_decreasing_sum_lower_bound' divide_nonneg_nonneg frac_le mult_mono)
+         (simp_all add: conv_denom_leI del: conv_denom.simps)
+    finally show ?thesis .
+  qed
+  ultimately show ?thesis by simp
+qed
+
+lemma cfrac_lim_minus_conv_bounds:
+  assumes "m < cfrac_length c"
+  shows   "\<bar>cfrac_lim c - conv c m\<bar> \<in> {1 / (k m * (k m + k (Suc m)))..1 / (k m * k (Suc m))}"
+  using cfrac_lim_minus_conv_lower_bound[of m] cfrac_lim_minus_conv_upper_bound[of m] assms
+  by auto
+
+end
+
+
+lemma conv_pos':
+  assumes "n > 0" "cfrac_nth c 0 \<ge> 0"
+  shows   "conv c n > 0"
+  using assms by (cases n) (auto simp: conv_Suc intro!: add_nonneg_pos conv_pos)
+
+lemma conv_in_Rats [intro]: "conv c n \<in> \<rat>"
+  by (induction c n rule: conv.induct) (auto simp: conv_Suc o_def)
+
+lemma
+  assumes "0 < z1" "z1 \<le> z2"
+  shows   conv'_even_mono: "even n \<Longrightarrow> conv' c n z1 \<le> conv' c n z2"
+    and   conv'_odd_mono:  "odd n \<Longrightarrow> conv' c n z1 \<ge> conv' c n z2"
+proof -
+  let ?P = "(\<lambda>n (f::nat\<Rightarrow>real\<Rightarrow>real). 
+               if even n then f n z1 \<le> f n z2 else f n z1 \<ge> f n z2)"
+  have "?P n (conv' c)" using assms
+  proof (induction n arbitrary: z1 z2)
+    case (Suc n)
+    note z12 = Suc.prems
+    consider "n = 0" | "even n" "n > 0" | "odd n" by force
+    thus ?case
+    proof cases
+      assume "n = 0"
+      thus ?thesis using Suc by (simp add: conv'_Suc_right field_simps)
+    next
+      assume n: "even n" "n > 0"
+      with Suc.IH have IH: "conv' c n z1 \<le> conv' c n z2"
+        if "0 < z1" "z1 \<le> z2" for z1 z2 using that by auto
+      show ?thesis using Suc.prems n z12
+        by (auto simp: conv'_Suc_right field_simps intro!: IH add_pos_nonneg mult_nonneg_nonneg)
+    next
+      assume n: "odd n"
+      hence [simp]: "n > 0" by (auto intro!: Nat.gr0I)
+      from n and Suc.IH have IH: "conv' c n z1 \<ge> conv' c n z2"
+        if "0 < z1" "z1 \<le> z2" for z1 z2 using that by auto
+      show ?thesis using Suc.prems n
+        by (auto simp: conv'_Suc_right field_simps
+                 intro!: IH add_pos_nonneg mult_nonneg_nonneg)
+    qed
+  qed auto
+  thus "even n \<Longrightarrow> conv' c n z1 \<le> conv' c n z2"
+       "odd n \<Longrightarrow> conv' c n z1 \<ge> conv' c n z2" by auto
+qed
+
+lemma
+  shows   conv_even_mono: "even n \<Longrightarrow> n \<le> m \<Longrightarrow> conv c n \<le> conv c m"
+    and   conv_odd_mono:  "odd n  \<Longrightarrow> n \<le> m \<Longrightarrow> conv c n \<ge> conv c m"
+proof -
+  assume "even n"
+  have A: "conv c n \<le> conv c (Suc (Suc n))" if "even n" for n
+  proof (cases "n = 0")
+    case False
+      by (auto simp add: conv_eq_conv' conv'_Suc_right intro: conv'_even_mono)
+  qed (auto simp:  conv_Suc)
+
+  have B: "conv c n \<le> conv c (Suc n)" if "even n" for n
+  proof (cases "n = 0")
+    case False
+      by (auto simp add: conv_eq_conv' conv'_Suc_right intro: conv'_even_mono)
+  qed (auto simp:  conv_Suc)
+
+  show "conv c n \<le> conv c m" if "n \<le> m" for m
+    using that
+  proof (induction m rule: less_induct)
+    case (less m)
+      by force
+    thus ?case
+    proof cases
+      assume m: "even m" "m > n"
+      with m have "conv c n \<le> conv c (m - 2)"
+        by (intro less.IH) auto
+      also have "\<dots> \<le> conv c (Suc (Suc (m - 2)))"
+        using m m' by (intro A) auto
+      also have "Suc (Suc (m - 2)) = m"
+        using m by presburger
+      finally show ?thesis .
+    next
+      assume m: "odd m" "m > n"
+      hence "conv c n \<le> conv c (m - 1)"
+        by (intro less.IH) auto
+      also have "\<dots> \<le> conv c (Suc (m - 1))"
+        using m by (intro B) auto
+      also have "Suc (m - 1) = m"
+        using m by simp
+      finally show ?thesis .
+    qed simp_all
+  qed
+next
+  assume "odd n"
+  have A: "conv c n \<ge> conv c (Suc (Suc n))" if "odd n" for n
+    using that
+    by (auto simp add: conv_eq_conv' conv'_Suc_right odd_pos intro!: conv'_odd_mono)
+  have B: "conv c n \<ge> conv c (Suc n)" if "odd n" for n using that
+    by (auto simp add: conv_eq_conv' conv'_Suc_right odd_pos intro!: conv'_odd_mono)
+
+  show "conv c n \<ge> conv c m" if "n \<le> m" for m
+    using that
+  proof (induction m rule: less_induct)
+    case (less m)
+      by force
+    thus ?case
+    proof cases
+      assume m: "odd m" "m > n"
+      also have "conv c \<dots> \<le> conv c (m - 2)"
+        using m m' by (intro A) auto
+      also have "\<dots> \<le> conv c n"
+        using m m' by (intro less.IH) auto
+      finally show ?thesis .
+    next
+      assume m: "even m" "m > n"
+      from m have "m = Suc (m - 1)" by presburger
+      also have "conv c \<dots> \<le> conv c (m - 1)"
+        using m by (intro B) auto
+      also have "\<dots> \<le> conv c n"
+        using m by (intro less.IH) auto
+      finally show ?thesis .
+    qed simp_all
+  qed
+qed
+
+lemma
+  assumes "m \<le> cfrac_length c"
+  shows   conv_le_cfrac_lim: "even m \<Longrightarrow> conv c m \<le> cfrac_lim c"
+    and   conv_ge_cfrac_lim: "odd m \<Longrightarrow> conv c m \<ge> cfrac_lim c"
+proof -
+  have "if even m then conv c m \<le> cfrac_lim c else conv c m \<ge> cfrac_lim c"
+  proof (cases "cfrac_length c")
+    case [simp]: infinity
+    show ?thesis
+    proof (cases "even m")
+      case True
+      have "eventually (\<lambda>i. conv c m \<le> conv c i) at_top"
+        using eventually_ge_at_top[of m] by eventually_elim (rule conv_even_mono[OF True])
+      hence "conv c m \<le> cfrac_lim c"
+        by (intro tendsto_lowerbound[OF LIMSEQ_cfrac_lim]) auto
+      thus ?thesis using True by simp
+    next
+      case False
+      have "eventually (\<lambda>i. conv c m \<ge> conv c i) at_top"
+        using eventually_ge_at_top[of m] by eventually_elim (rule conv_odd_mono[OF False])
+      hence "conv c m \<ge> cfrac_lim c"
+        by (intro tendsto_upperbound[OF LIMSEQ_cfrac_lim]) auto
+      thus ?thesis using False by simp
+    qed
+  next
+    case [simp]: (enat l)
+    show ?thesis
+      using conv_even_mono[of m l c] conv_odd_mono[of m l c] assms
+      by (auto simp: cfrac_lim_def)
+  qed
+  thus "even m \<Longrightarrow> conv c m \<le> cfrac_lim c" and "odd m \<Longrightarrow> conv c m \<ge> cfrac_lim c"
+    by auto
+qed
+
+lemma cfrac_lim_ge_first: "cfrac_lim c \<ge> cfrac_nth c 0"
+  using conv_le_cfrac_lim[of 0 c] by (auto simp: less_eq_enat_def split: enat.splits)
+
+lemma cfrac_lim_pos: "cfrac_nth c 0 > 0 \<Longrightarrow> cfrac_lim c > 0"
+  by (rule less_le_trans[OF _ cfrac_lim_ge_first]) auto
+
+lemma conv'_eq_iff:
+  assumes "0 \<le> z1 \<or> 0 \<le> z2"
+  shows   "conv' c n z1 = conv' c n z2 \<longleftrightarrow> z1 = z2"
+proof
+  assume "conv' c n z1 = conv' c n z2"
+  thus "z1 = z2" using assms
+  proof (induction n arbitrary: z1 z2)
+    case (Suc n)
+    show ?case
+    proof (cases "n = 0")
+      case True
+      thus ?thesis using Suc by (auto simp: conv'_Suc_right)
+    next
+      case False
+      have "conv' c n (real_of_int (cfrac_nth c n) + 1 / z1) =
+               conv' c n (real_of_int (cfrac_nth c n) + 1 / z2)" using Suc.prems
+        by (simp add: conv'_Suc_right)
+      hence "real_of_int (cfrac_nth c n) + 1 / z1 = real_of_int (cfrac_nth c n) + 1 / z2"
+        by (rule Suc.IH)
+           (insert Suc.prems False, auto intro!: add_nonneg_pos add_nonneg_nonneg)
+      with Suc.prems show "z1 = z2" by simp
+    qed
+  qed auto
+qed auto
+
+lemma conv_even_mono_strict:
+  assumes "even n" "n < m"
+  shows   "conv c n < conv c m"
+proof (cases "m = n + 1")
+  case [simp]: True
+  show ?thesis
+  proof (cases "n = 0")
+    case True
+    thus ?thesis using assms by (auto simp: conv_Suc)
+  next
+    case False
+    hence "conv' c n (real_of_int (cfrac_nth c n)) \<noteq>
+           conv' c n (real_of_int (cfrac_nth c n) + 1 / real_of_int (cfrac_nth c (Suc n)))"
+      by (subst conv'_eq_iff) auto
+    with assms have "conv c n \<noteq> conv c m"
+      by (auto simp: conv_eq_conv' conv'_eq_iff conv'_Suc_right field_simps)
+    moreover from assms have "conv c n \<le> conv c m"
+      by (intro conv_even_mono) auto
+   
+    ultimately show ?thesis by simp
+  qed
+next
+  case False
+  show ?thesis
+  proof (cases "n = 0")
+    case True
+    thus ?thesis using assms
+      by (cases m) (auto simp: conv_Suc conv_pos)
+  next
+    case False
+    have "1 + real_of_int (cfrac_nth c (n+1)) * cfrac_nth c (n+2) > 0"
+      by (intro add_pos_nonneg) auto
+    with assms have "conv c n \<noteq> conv c (Suc (Suc n))"
+      unfolding conv_eq_conv' conv'_Suc_right using False
+      by (subst conv'_eq_iff) (auto simp: field_simps)
+    moreover from assms have "conv c n \<le> conv c (Suc (Suc n))"
+      by (intro conv_even_mono) auto
+    ultimately have "conv c n < conv c (Suc (Suc n))" by simp
+      by (intro conv_even_mono) auto
+    finally show ?thesis .
+  qed
+qed
+
+lemma conv_odd_mono_strict:
+  assumes "odd n" "n < m"
+  shows   "conv c n > conv c m"
+proof (cases "m = n + 1")
+  case [simp]: True
+  from assms have "n > 0" by (intro Nat.gr0I) auto
+  hence "conv' c n (real_of_int (cfrac_nth c n)) \<noteq>
+         conv' c n (real_of_int (cfrac_nth c n) + 1 / real_of_int (cfrac_nth c (Suc n)))"
+    by (subst conv'_eq_iff) auto
+  hence "conv c n \<noteq> conv c m"
+    by (simp add: conv_eq_conv' conv'_Suc_right)
+  moreover from assms have "conv c n \<ge> conv c m"
+    by (intro conv_odd_mono) auto
+  ultimately show ?thesis by simp
+next
+  case False
+  from assms have "n > 0" by (intro Nat.gr0I) auto
+  have "1 + real_of_int (cfrac_nth c (n+1)) * cfrac_nth c (n+2) > 0"
+    by (intro add_pos_nonneg) auto
+    unfolding conv_eq_conv' conv'_Suc_right
+    by (subst conv'_eq_iff) (auto simp: field_simps)
+  moreover from assms have "conv c n \<ge> conv c (Suc (Suc n))"
+    by (intro conv_odd_mono) auto
+  ultimately have "conv c n > conv c (Suc (Suc n))" by simp
+  moreover have "conv c (Suc (Suc n)) \<ge> conv c m" using assms False
+    by (intro conv_odd_mono) auto
+  ultimately show ?thesis by linarith
+qed
+
+lemma conv_less_cfrac_lim:
+  assumes "even n" "n < cfrac_length c"
+  shows   "conv c n < cfrac_lim c"
+proof (cases "cfrac_length c")
+  case (enat l)
+  with assms show ?thesis by (auto simp: cfrac_lim_def conv_even_mono_strict)
+next
+  case [simp]: infinity
+  from assms have "conv c n < conv c (n + 2)"
+    by (intro conv_even_mono_strict) auto
+  also from assms have "\<dots> \<le> cfrac_lim c"
+    by (intro conv_le_cfrac_lim) auto
+  finally show ?thesis .
+qed
+
+lemma conv_gt_cfrac_lim:
+  assumes "odd n" "n < cfrac_length c"
+  shows   "conv c n > cfrac_lim c"
+proof (cases "cfrac_length c")
+  case (enat l)
+  with assms show ?thesis by (auto simp: cfrac_lim_def conv_odd_mono_strict)
+next
+  case [simp]: infinity
+  from assms have "cfrac_lim c \<le> conv c (n + 2)"
+    by (intro conv_ge_cfrac_lim) auto
+  also from assms have "\<dots> < conv c n"
+    by (intro conv_odd_mono_strict) auto
+  finally show ?thesis .
+qed
+
+lemma conv_neq_cfrac_lim:
+  assumes "n < cfrac_length c"
+  shows   "conv c n \<noteq> cfrac_lim c"
+  using conv_gt_cfrac_lim[OF _ assms] conv_less_cfrac_lim[OF _ assms]
+  by (cases "even n") auto
+
+lemma conv_ge_first: "conv c n \<ge> cfrac_nth c 0"
+  using conv_even_mono[of 0 n c] by simp
+
+
+definition cfrac_is_zero :: "cfrac \<Rightarrow> bool" where "cfrac_is_zero c \<longleftrightarrow> c = 0"
+
+lemma cfrac_is_zero_code [code]: "cfrac_is_zero (CFrac n xs) \<longleftrightarrow> lnull xs \<and> n = 0"
+  unfolding cfrac_is_zero_def lnull_def zero_cfrac_def cfrac_of_int_def
+  by (auto simp: cfrac_length_def)
+
+
+definition cfrac_is_int where "cfrac_is_int c \<longleftrightarrow> cfrac_length c = 0"
+
+lemma cfrac_is_int_code [code]: "cfrac_is_int (CFrac n xs) \<longleftrightarrow> lnull xs"
+  unfolding cfrac_is_int_def lnull_def by (auto simp: cfrac_length_def)
+
+lemma cfrac_length_of_int [simp]: "cfrac_length (cfrac_of_int n) = 0"
+  by transfer auto
+
+lemma cfrac_is_int_of_int [simp, intro]: "cfrac_is_int (cfrac_of_int n)"
+  unfolding cfrac_is_int_def by simp
+
+lemma cfrac_is_int_iff: "cfrac_is_int c \<longleftrightarrow> (\<exists>n. c = cfrac_of_int n)"
+proof -
+  have "c = cfrac_of_int (cfrac_nth c 0)" if "cfrac_is_int c"
+    using that unfolding cfrac_is_int_def by transfer auto
+  thus ?thesis
+    by auto
+qed  
+
+lemma cfrac_lim_reduce:
+  assumes "\<not>cfrac_is_int c"
+  shows   "cfrac_lim c = cfrac_nth c 0 + 1 / cfrac_lim (cfrac_tl c)"
+proof (cases "cfrac_length c")
+  case [simp]: infinity
+  have "0 < cfrac_nth (cfrac_tl c) 0"
+    by simp
+  also have "\<dots> \<le> cfrac_lim (cfrac_tl c)"
+    by (rule cfrac_lim_ge_first)
+  finally have "(\<lambda>n. real_of_int (cfrac_nth c 0) + 1 / conv (cfrac_tl c) n) \<longlonglongrightarrow>
+           real_of_int (cfrac_nth c 0) + 1 / cfrac_lim (cfrac_tl c)"
+    by (intro tendsto_intros LIMSEQ_cfrac_lim) auto
+  also have "(\<lambda>n. real_of_int (cfrac_nth c 0) + 1 / conv (cfrac_tl c) n) = conv c \<circ> Suc"
+    by (simp add: o_def conv_Suc)
+  finally have *: "conv c \<longlonglongrightarrow> real_of_int (cfrac_nth c 0) + 1 / cfrac_lim (cfrac_tl c)"
+    by (simp add: o_def filterlim_sequentially_Suc)
+  show ?thesis
+    by (rule tendsto_unique[OF _ LIMSEQ_cfrac_lim *]) auto
+next
+  case [simp]: (enat l)
+  from assms obtain l' where [simp]: "l = Suc l'"
+    by (cases l) (auto simp: cfrac_is_int_def zero_enat_def)
+  thus ?thesis
+    by (auto simp: cfrac_lim_def conv_Suc)
+qed
+
+lemma cfrac_lim_tl:
+  assumes "\<not>cfrac_is_int c"
+  shows   "cfrac_lim (cfrac_tl c) = 1 / (cfrac_lim c - cfrac_nth c 0)"
+  using cfrac_lim_reduce[OF assms] by simp
+
+
+
+lemma cfrac_remainder_Suc':
+  assumes "n < cfrac_length c"
+  shows "cfrac_remainder c (Suc n) * (cfrac_remainder c n - cfrac_nth c n) = 1"
+proof -
+  have "0 < real_of_int (cfrac_nth c (Suc n))" by simp
+  also have "cfrac_nth c (Suc n) \<le> cfrac_remainder c (Suc n)"
+    using cfrac_lim_ge_first[of "cfrac_drop (Suc n) c"]
+    by (simp add: cfrac_remainder_def)
+  finally have "\<dots> > 0" .
+
+  have "cfrac_remainder c (Suc n) = cfrac_lim (cfrac_tl (cfrac_drop n c))"
+    by (simp add: o_def cfrac_remainder_def cfrac_drop_Suc_left)                   
+  also have "\<dots> = 1 / (cfrac_remainder c n - cfrac_nth c n)" using assms
+    by (subst cfrac_lim_tl) (auto simp: cfrac_remainder_def cfrac_is_int_def enat_less_iff enat_0_iff)
+  finally show ?thesis
+    by (auto simp add: cfrac_remainder_def field_simps)
+qed
+
+lemma cfrac_remainder_Suc:
+  assumes "n < cfrac_length c"
+  shows   "cfrac_remainder c (Suc n) = 1 / (cfrac_remainder c n - cfrac_nth c n)"
+proof -
+  have "cfrac_remainder c (Suc n) = cfrac_lim (cfrac_tl (cfrac_drop n c))"
+    by (simp add: o_def cfrac_remainder_def cfrac_drop_Suc_left)
+  also have "\<dots> = 1 / (cfrac_remainder c n - cfrac_nth c n)" using assms
+    by (subst cfrac_lim_tl) (auto simp: cfrac_remainder_def cfrac_is_int_def enat_less_iff enat_0_iff)
+  finally show ?thesis .
+qed
+
+lemma cfrac_remainder_0 [simp]: "cfrac_remainder c 0 = cfrac_lim c"
+  by (simp add: cfrac_remainder_def)
+
+context
+  fixes c h k x
+  defines "h \<equiv> conv_num c" and "k \<equiv> conv_denom c" and "x \<equiv> cfrac_remainder c"
+begin
+
+lemma cfrac_lim_eq_num_denom_remainder_aux:  
+  assumes "Suc (Suc n) \<le> cfrac_length c"
+  shows   "cfrac_lim c * (k (Suc n) * x (Suc (Suc n)) + k n) = h (Suc n) * x (Suc (Suc n)) + h n"
+  using assms
+proof (induction n)
+  case 0
+  have "cfrac_lim c \<noteq> cfrac_nth c 0"
+    using conv_neq_cfrac_lim[of 0 c] 0 by (auto simp: enat_le_iff)
+  moreover have "cfrac_nth c 1 * (cfrac_lim c - cfrac_nth c 0) \<noteq> 1"
+    using conv_neq_cfrac_lim[of 1 c] 0
+    by (auto simp: enat_le_iff conv_Suc field_simps)
+  ultimately show ?case using assms
+    by (auto simp: cfrac_remainder_Suc divide_simps x_def h_def k_def enat_le_iff)
+       (auto simp: field_simps)
+next
+  case (Suc n)
+  have less: "enat (Suc (Suc n)) < cfrac_length c"
+    using Suc.prems by (cases "cfrac_length c") auto
+  have *: "x (Suc (Suc n)) \<noteq> real_of_int (cfrac_nth c (Suc (Suc n)))"
+    using conv_neq_cfrac_lim[of 0 "cfrac_drop (n+2) c"] Suc.prems
+    by (cases "cfrac_length c") (auto simp: x_def cfrac_remainder_def)
+  hence "cfrac_lim c * (k (Suc (Suc n)) * x (Suc (Suc (Suc n))) + k (Suc n)) =
+           (cfrac_lim c * (k (Suc n) * x (Suc (Suc n)) + k n)) / (x (Suc (Suc n)) - cfrac_nth c (Suc (Suc n)))"
+    unfolding x_def k_def h_def using less
+    by (subst cfrac_remainder_Suc) (auto simp: field_simps)
+  also have "cfrac_lim c * (k (Suc n) * x (Suc (Suc n)) + k n) =
+               h (Suc n) * x (Suc (Suc n)) + h n" using less
+    by (intro Suc.IH) auto
+  also have "(h (Suc n) * x (Suc (Suc n)) + h n) / (x (Suc (Suc n)) - cfrac_nth c (Suc (Suc n))) = 
+               h (Suc (Suc n)) * x (Suc (Suc (Suc n))) + h (Suc n)" using *
+    unfolding x_def k_def h_def using less
+    by (subst (3) cfrac_remainder_Suc) (auto simp: field_simps)
+  finally show ?case .
+qed
+
+lemma cfrac_remainder_nonneg: "cfrac_nth c n \<ge> 0 \<Longrightarrow> cfrac_remainder c n \<ge> 0"
+  unfolding cfrac_remainder_def by (rule cfrac_lim_nonneg) auto
+
+lemma cfrac_remainder_pos: "cfrac_nth c n > 0 \<Longrightarrow> cfrac_remainder c n > 0"
+  unfolding cfrac_remainder_def by (rule cfrac_lim_pos) auto
+
+lemma cfrac_lim_eq_num_denom_remainder:
+  assumes "Suc (Suc n) < cfrac_length c"
+  shows   "cfrac_lim c = (h (Suc n) * x (Suc (Suc n)) + h n) / (k (Suc n) * x (Suc (Suc n)) + k n)"
+proof -
+  have "k (Suc n) * x (Suc (Suc n)) + k n > 0"
+    by (intro add_nonneg_pos mult_nonneg_nonneg)
+       (auto simp: k_def x_def intro!: conv_denom_pos cfrac_remainder_nonneg)
+  with cfrac_lim_eq_num_denom_remainder_aux[of n] assms show ?thesis
+    by (auto simp add: field_simps h_def k_def x_def)
+qed
+
+lemma abs_diff_successive_convs:
+  shows   "\<bar>conv c (Suc n) - conv c n\<bar> = 1 / (k n * k (Suc n))"
+proof -
+  have [simp]: "k n \<noteq> 0" for n :: nat
+    unfolding k_def using conv_denom_pos[of c n] by auto
+  have "conv c (Suc n) - conv c n = h (Suc n) / k (Suc n) - h n / k n"
+    by (simp add: conv_num_denom k_def h_def)
+  also have "\<dots> = (k n * h (Suc n) - k (Suc n) * h n) / (k n * k (Suc n))"
+    by (simp add: field_simps)
+  also have "k n * h (Suc n) - k (Suc n) * h n = (-1) ^ n"
+    unfolding h_def k_def by (intro conv_num_denom_prod_diff)
+  finally show ?thesis by (simp add: k_def)
+qed
+
+lemma conv_denom_plus2_ratio_ge: "k (Suc (Suc n)) \<ge> 2 * k n"
+proof -
+  have "1 * k n + k n \<le> cfrac_nth c (Suc (Suc n)) * k (Suc n) + k n"
+    by (intro add_mono mult_mono)
+       (auto simp: k_def Suc_le_eq intro!: conv_denom_leI)
+  thus ?thesis by (simp add: k_def)
+qed
+
+end
+
+lemma conv'_cfrac_remainder:
+  assumes "n < cfrac_length c"
+  shows   "conv' c n (cfrac_remainder c n) = cfrac_lim c"
+  using assms
+proof (induction n arbitrary: c)
+  case (Suc n c)
+  have "conv' c (Suc n) (cfrac_remainder c (Suc n)) =
+          cfrac_nth c 0 + 1 / conv' (cfrac_tl c) n (cfrac_remainder c (Suc n))"
+    using Suc.prems
+    by (subst conv'_Suc_left) (auto intro!: cfrac_remainder_pos)
+  also have "cfrac_remainder c (Suc n) = cfrac_remainder (cfrac_tl c) n"
+    by (simp add: cfrac_remainder_def cfrac_drop_Suc_right)
+  also have "conv' (cfrac_tl c) n \<dots> = cfrac_lim (cfrac_tl c)"
+    using Suc.prems by (subst Suc.IH) (auto simp: cfrac_remainder_def enat_less_iff)
+  also have "cfrac_nth c 0 + 1 / \<dots> = cfrac_lim c"
+    using Suc.prems by (intro cfrac_lim_reduce [symmetric]) (auto simp: cfrac_is_int_def)
+  finally show ?case by (simp add: cfrac_remainder_def cfrac_drop_Suc_right)
+qed auto
+
+lemma cfrac_lim_rational [intro]:
+  assumes "cfrac_length c < \<infinity>"
+  shows   "cfrac_lim c \<in> \<rat>"
+  using assms by (cases "cfrac_length c") (auto simp: cfrac_lim_def)
+
+lemma linfinite_cfrac_of_real_aux:
+  "x \<notin> \<rat> \<Longrightarrow> x \<in> {0<..<1} \<Longrightarrow> linfinite (cfrac_of_real_aux x)"
+proof (coinduction arbitrary: x)
+  case (linfinite x)
+  hence "1 / x \<notin> \<rat>" using Rats_divide[of 1 "1 / x"] by auto
+  thus ?case using linfinite Ints_subset_Rats
+    by (intro disjI1 exI[of _ "nat \<lfloor>1/x\<rfloor> - 1"] exI[of _ "cfrac_of_real_aux (frac (1/x))"] 
+              exI[of _ "frac (1/x)"] conjI)
+       (auto simp: cfrac_of_real_aux.code[of x] frac_lt_1)
+qed
+
+lemma cfrac_length_of_real_irrational:
+  assumes "x \<notin> \<rat>"
+  shows   "cfrac_length (cfrac_of_real x) = \<infinity>"
+proof (insert assms, transfer, clarify)
+  fix x :: real assume "x \<notin> \<rat>"
+  thus "llength (cfrac_of_real_aux (frac x)) = \<infinity>"
+    using linfinite_cfrac_of_real_aux[of "frac x"] Ints_subset_Rats
+    by (auto simp: linfinite_conv_llength frac_lt_1)
+qed
+
+lemma cfrac_length_of_real_reduce:
+  assumes "x \<notin> \<int>"
+  shows   "cfrac_length (cfrac_of_real x) = eSuc (cfrac_length (cfrac_of_real (1 / frac x)))"
+  using assms
+  by (transfer, subst cfrac_of_real_aux.code) (auto simp: frac_lt_1)
+
+lemma cfrac_length_of_real_int [simp]: "x \<in> \<int> \<Longrightarrow> cfrac_length (cfrac_of_real x) = 0"
+  by transfer auto
+
+lemma conv_cfrac_of_real_le_ge:
+  assumes "n \<le> cfrac_length (cfrac_of_real x)"
+  shows   "if even n then conv (cfrac_of_real x) n \<le> x else conv (cfrac_of_real x) n \<ge> x"
+  using assms
+proof (induction n arbitrary: x)
+  case (Suc n x)
+  hence [simp]: "x \<notin> \<int>"
+    using Suc by (auto simp: enat_0_iff)
+  let ?x' = "1 / frac x"
+  have "enat n \<le> cfrac_length (cfrac_of_real (1 / frac x))"
+    using Suc.prems by (auto simp: cfrac_length_of_real_reduce simp flip: eSuc_enat)
+  hence IH: "if even n then conv (cfrac_of_real ?x') n \<le> ?x' else ?x' \<le> conv (cfrac_of_real ?x') n"
+    using Suc.prems by (intro Suc.IH) auto
+  have remainder_pos: "conv (cfrac_of_real ?x') n > 0"
+    by (rule conv_pos) (auto simp: frac_le_1)
+  show ?case
+  proof (cases "even n")
+    case True
+    have "x \<le> real_of_int \<lfloor>x\<rfloor> + frac x"
+      by (simp add: frac_def)
+    also have "frac x \<le> 1 / conv (cfrac_of_real ?x') n"
+      using IH True remainder_pos frac_gt_0_iff[of x] by (simp add: field_simps)
+    finally show ?thesis using True
+      by (auto simp: conv_Suc cfrac_tl_of_real)
+  next
+    case False
+    have "real_of_int \<lfloor>x\<rfloor> + 1 / conv (cfrac_of_real ?x') n \<le> real_of_int \<lfloor>x\<rfloor> + frac x"
+      using IH False remainder_pos frac_gt_0_iff[of x] by (simp add: field_simps)
+    also have "\<dots> = x"
+      by (simp add: frac_def)
+    finally show ?thesis using False
+      by (auto simp: conv_Suc cfrac_tl_of_real)
+  qed
+qed auto
+
+lemma cfrac_lim_of_real [simp]: "cfrac_lim (cfrac_of_real x) = x"
+proof (cases "cfrac_length (cfrac_of_real x)")
+  case (enat l)
+  hence "conv (cfrac_of_real x) l = x"
+  proof (induction l arbitrary: x)
+    case 0
+    hence "x \<in> \<int>"
+      using cfrac_length_of_real_reduce zero_enat_def by fastforce
+    thus ?case by (auto elim: Ints_cases)
+  next
+    case (Suc l x)
+    hence [simp]: "x \<notin> \<int>" 
+      by (auto simp: enat_0_iff)
+    have "eSuc (cfrac_length (cfrac_of_real (1 / frac x))) = enat (Suc l)"
+      using Suc.prems by (auto simp: cfrac_length_of_real_reduce)
+    hence "conv (cfrac_of_real (1 / frac x)) l = 1 / frac x"
+      by (intro Suc.IH) (auto simp flip: eSuc_enat)
+    thus ?case
+      by (simp add: conv_Suc cfrac_tl_of_real frac_def)
+  qed
+  thus ?thesis by (simp add: enat cfrac_lim_def)
+next
+  case [simp]: infinity
+  have lim: "conv (cfrac_of_real x) \<longlonglongrightarrow> cfrac_lim (cfrac_of_real x)"
+    by (simp add: LIMSEQ_cfrac_lim)
+  have "cfrac_lim (cfrac_of_real x) \<le> x"
+  proof (rule tendsto_upperbound)
+    show "(\<lambda>n. conv (cfrac_of_real x) (n * 2)) \<longlonglongrightarrow> cfrac_lim (cfrac_of_real x)"
+      by (intro filterlim_compose[OF lim] mult_nat_right_at_top) auto
+    show "eventually (\<lambda>n. conv (cfrac_of_real x) (n * 2) \<le> x) at_top"
+      using conv_cfrac_of_real_le_ge[of "n * 2" x for n] by (intro always_eventually) auto
+  qed auto
+  moreover have "cfrac_lim (cfrac_of_real x) \<ge> x"
+  proof (rule tendsto_lowerbound)
+    show "(\<lambda>n. conv (cfrac_of_real x) (Suc (n * 2))) \<longlonglongrightarrow> cfrac_lim (cfrac_of_real x)"
+      by (intro filterlim_compose[OF lim] filterlim_compose[OF filterlim_Suc]
+                mult_nat_right_at_top) auto
+    show "eventually (\<lambda>n. conv (cfrac_of_real x) (Suc (n * 2)) \<ge> x) at_top"
+      using conv_cfrac_of_real_le_ge[of "Suc (n * 2)" x for n] by (intro always_eventually) auto
+  qed auto
+  ultimately show ?thesis by (rule antisym)
+qed
+
+lemma Ints_add_left_cancel: "x \<in> \<int> \<Longrightarrow> x + y \<in> \<int> \<longleftrightarrow> y \<in> \<int>"
+  using Ints_diff[of "x + y" x] by auto
+
+lemma Ints_add_right_cancel: "y \<in> \<int> \<Longrightarrow> x + y \<in> \<int> \<longleftrightarrow> x \<in> \<int>"
+  using Ints_diff[of "x + y" y] by auto
+
+lemma cfrac_of_real_conv':
+  fixes m n :: nat
+  assumes "x > 1" "m < n"
+  shows   "cfrac_nth (cfrac_of_real (conv' c n x)) m = cfrac_nth c m"
+  using assms
+proof (induction n arbitrary: c m)
+  case (Suc n c m)
+  from Suc.prems have gt_1: "1 < conv' (cfrac_tl c) n x"
+    by (intro conv'_gt_1) (auto simp: enat_le_iff intro: cfrac_nth_pos)
+  show ?case
+  proof (cases m)
+    case 0
+    thus ?thesis using gt_1 Suc.prems
+      by (simp add: conv'_Suc_left nat_add_distrib floor_eq_iff)
+  next
+    case (Suc m')
+    from gt_1 have "1 / conv' (cfrac_tl c) n x \<in> {0<..<1}"
+      by auto
+    have "1 / conv' (cfrac_tl c) n x \<notin> \<int>"
+    proof
+      assume "1 / conv' (cfrac_tl c) n x \<in> \<int>"
+      then obtain k :: int where k: "1 / conv' (cfrac_tl c) n x = of_int k"
+        by (elim Ints_cases)
+      have "real_of_int k \<in> {0<..<1}"
+        using gt_1 by (subst k [symmetric]) auto
+      thus False by auto
+    qed
+    hence not_int: "real_of_int (cfrac_nth c 0) + 1 / conv' (cfrac_tl c) n x \<notin> \<int>"
+      by (subst Ints_add_left_cancel) (auto simp: field_simps elim!: Ints_cases)
+    have "cfrac_nth (cfrac_of_real (conv' c (Suc n) x)) m =
+          cfrac_nth (cfrac_of_real (of_int (cfrac_nth c 0) + 1 / conv' (cfrac_tl c) n x)) (Suc m')"
+    also have "\<dots> = cfrac_nth (cfrac_of_real (1 / frac (1 / conv' (cfrac_tl c) n x))) m'" 
+    also have "1 / conv' (cfrac_tl c) n x \<in> {0<..<1}" using gt_1
+      by (auto simp: field_simps)
+    hence "frac (1 / conv' (cfrac_tl c) n x) = 1 / conv' (cfrac_tl c) n x"
+      by (subst frac_eq) auto
+    hence "1 / frac (1 / conv' (cfrac_tl c) n x) = conv' (cfrac_tl c) n x"
+      by simp
+    also have "cfrac_nth (cfrac_of_real \<dots>) m' = cfrac_nth c m"
+      using Suc.prems by (subst Suc.IH) (auto simp: Suc enat_le_iff)
+    finally show ?thesis .
+  qed
+qed simp_all
+
+lemma cfrac_lim_irrational:
+  assumes [simp]: "cfrac_length c = \<infinity>"
+  shows   "cfrac_lim c \<notin> \<rat>"
+proof
+  assume "cfrac_lim c \<in> \<rat>"
+  then obtain a :: int and b :: nat where ab: "b > 0" "cfrac_lim c = a / b"
+    by (auto simp: Rats_eq_int_div_nat)
+  define h and k where "h = conv_num c" and "k = conv_denom c"
+
+  have "filterlim (\<lambda>m. conv_denom c (Suc m)) at_top at_top"
+    using conv_denom_at_top filterlim_Suc by (rule filterlim_compose)
+  then obtain m where m: "conv_denom c (Suc m) \<ge> b + 1"
+    by (auto simp: filterlim_at_top eventually_at_top_linorder)
+
+  have *: "(a * k m - b * h m) / (k m * b) = a / b - h m / k m"
+  have "\<bar>cfrac_lim c - conv c m\<bar> = \<bar>(a * k m - b * h m) / (k m * b)\<bar>"
+    by (subst *) (auto simp: ab h_def k_def conv_num_denom)

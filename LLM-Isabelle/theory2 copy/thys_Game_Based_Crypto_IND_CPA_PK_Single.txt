@@ -1,0 +1,43 @@
+theory IND_CPA_PK_Single imports
+  CryptHOL.Computational_Model
+begin
+
+
+locale ind_cpa = 
+begin
+
+
+type_synonym ('pub_key', 'plain', 'cipher', 'state) adversary = 
+  "('pub_key' \<Rightarrow> (('plain' \<times> 'plain') \<times> 'state) spmf)
+   \<times> ('cipher' \<Rightarrow> 'state \<Rightarrow> bool spmf)"
+
+primrec ind_cpa :: "('pub_key, 'plain, 'cipher, 'state) adversary \<Rightarrow> bool spmf"
+where
+  "ind_cpa (\<A>1, \<A>2) = TRY do {
+     (pk, sk) \<leftarrow> key_gen;
+     ((m0, m1), \<sigma>) \<leftarrow> \<A>1 pk;
+     _ :: unit \<leftarrow> assert_spmf (valid_plains m0 m1);
+     b \<leftarrow> coin_spmf;
+     cipher \<leftarrow> aencrypt pk (if b then m0 else m1);
+     b' \<leftarrow> \<A>2 cipher \<sigma>;
+     return_spmf (b = b')
+  } ELSE coin_spmf"
+
+declare ind_cpa.simps [simp del]
+
+definition advantage :: "('pub_key, 'plain, 'cipher, 'state) adversary \<Rightarrow> real"
+where "advantage \<A> = \<bar>spmf (ind_cpa \<A>) True - 1/2\<bar>"
+
+definition lossless :: "('pub_key, 'plain, 'cipher, 'state) adversary \<Rightarrow> bool"
+where
+  "lossless \<A> \<longleftrightarrow>
+   ((\<forall>pk. lossless_spmf (fst \<A> pk)) \<and>
+        (\<forall>cipher \<sigma>. lossless_spmf (snd \<A> cipher \<sigma>)))"
+
+lemma lossless_ind_cpa:
+  "\<lbrakk> lossless \<A>; lossless_spmf (key_gen) \<rbrakk> \<Longrightarrow> lossless_spmf (ind_cpa \<A>)"
+by(auto simp add: lossless_def ind_cpa_def split_def Let_def)
+
+end
+
+end

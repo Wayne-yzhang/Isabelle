@@ -1,0 +1,1501 @@
+theory Stateful_Protocol_Verification
+imports Stateful_Protocol_Model Term_Implication
+begin
+
+context stateful_protocol_model
+begin
+
+abbreviation pubval_terms::"('fun,'atom,'sets,'lbl) prot_terms" where
+  "pubval_terms \<equiv> {t. \<exists>f \<in> funs_term t. is_PubConstValue f}"
+
+abbreviation abs_terms::"('fun,'atom,'sets,'lbl) prot_terms" where
+  "abs_terms \<equiv> {t. \<exists>f \<in> funs_term t. is_Abs f}"
+
+definition intruder_deduct_GSMP::
+  "[('fun,'atom,'sets,'lbl) prot_terms,
+    ('fun,'atom,'sets,'lbl) prot_terms,
+    ('fun,'atom,'sets,'lbl) prot_term]
+    \<Rightarrow> bool" ("\<langle>_;_\<rangle> \<turnstile>\<^sub>G\<^sub>S\<^sub>M\<^sub>P _" 50)
+where
+  "\<langle>M; T\<rangle> \<turnstile>\<^sub>G\<^sub>S\<^sub>M\<^sub>P t \<equiv> intruder_deduct_restricted M (\<lambda>t. t \<in> GSMP T - (pubval_terms \<union> abs_terms)) t"
+
+lemma intruder_deduct_GSMP_induct[consumes 1, case_names AxiomH ComposeH DecomposeH]:
+  assumes "\<langle>M; T\<rangle> \<turnstile>\<^sub>G\<^sub>S\<^sub>M\<^sub>P t" "\<And>t. t \<in> M \<Longrightarrow> P M t"
+          "\<And>S f. \<lbrakk>length S = arity f; public f;
+                  \<And>s. s \<in> set S \<Longrightarrow> \<langle>M; T\<rangle> \<turnstile>\<^sub>G\<^sub>S\<^sub>M\<^sub>P s;
+                  \<And>s. s \<in> set S \<Longrightarrow> P M s;
+                  Fun f S \<in> GSMP T - (pubval_terms \<union> abs_terms)
+                  \<rbrakk> \<Longrightarrow> P M (Fun f S)"
+          "\<And>t K T' t\<^sub>i. \<lbrakk>\<langle>M; T\<rangle> \<turnstile>\<^sub>G\<^sub>S\<^sub>M\<^sub>P t; P M t; Ana t = (K, T'); \<And>k. k \<in> set K \<Longrightarrow> \<langle>M; T\<rangle> \<turnstile>\<^sub>G\<^sub>S\<^sub>M\<^sub>P k;
+                        \<And>k. k \<in> set K \<Longrightarrow> P M k; t\<^sub>i \<in> set T'\<rbrakk> \<Longrightarrow> P M t\<^sub>i"
+  shows "P M t"
+proof -
+  let ?Q = "\<lambda>t. t \<in> GSMP T - (pubval_terms \<union> abs_terms)"
+  show ?thesis
+    using intruder_deduct_restricted_induct[of M ?Q t "\<lambda>M Q t. P M t"] assms
+    unfolding intruder_deduct_GSMP_def
+    by blast
+qed
+
+lemma pubval_terms_subst:
+  assumes "t \<cdot> \<theta> \<in> pubval_terms" "\<theta> ` fv t \<inter> pubval_terms = {}"
+  shows "t \<in> pubval_terms"
+using assms(1,2)
+proof (induction t)
+  case (Fun f T)
+  let ?P = "\<lambda>f. is_PubConstValue f"
+  from Fun show ?case
+  proof (cases "?P f")
+    case False
+    then obtain t where t: "t \<in> set T" "t \<cdot> \<theta> \<in> pubval_terms"
+      using Fun.prems by auto
+    hence "\<theta> ` fv t \<inter> pubval_terms = {}" using Fun.prems(2) by auto
+    thus ?thesis using Fun.IH[OF t] t(1) by auto
+  qed force
+qed simp
+
+lemma abs_terms_subst:
+  assumes "t \<cdot> \<theta> \<in> abs_terms" "\<theta> ` fv t \<inter> abs_terms = {}"
+  shows "t \<in> abs_terms"
+using assms(1,2)
+proof (induction t)
+  case (Fun f T)
+  let ?P = "\<lambda>f. is_Abs f"
+  from Fun show ?case
+  proof (cases "?P f")
+    case False
+    then obtain t where t: "t \<in> set T" "t \<cdot> \<theta> \<in> abs_terms"
+      using Fun.prems by auto
+    hence "\<theta> ` fv t \<inter> abs_terms = {}" using Fun.prems(2) by auto
+    thus ?thesis using Fun.IH[OF t] t(1) by auto
+  qed force
+qed simp
+
+lemma pubval_terms_subst':
+  assumes "t \<cdot> \<theta> \<in> pubval_terms" "\<forall>n. PubConst Value n \<notin> \<Union>(funs_term ` (\<theta> ` fv t))"
+  shows "t \<in> pubval_terms"
+proof -
+  have False
+    when fs: "f \<in> funs_term s" "s \<in> subterms\<^sub>s\<^sub>e\<^sub>t (\<theta> ` fv t)" "is_PubConstValue f"
+    for f s
+  proof -
+    obtain T where T: "Fun f T \<in> subterms s" using funs_term_Fun_subterm[OF fs(1)] by moura
+    hence "Fun f T \<in> subterms\<^sub>s\<^sub>e\<^sub>t (\<theta> ` fv t)" using fs(2) in_subterms_subset_Union by blast
+    thus ?thesis
+      using assms(2) funs_term_Fun_subterm'[of f T] fs(3)
+      unfolding is_PubConstValue_def
+      by (cases f) force+
+  qed
+  thus ?thesis using pubval_terms_subst[OF assms(1)] by auto
+qed
+
+lemma abs_terms_subst':
+  assumes "t \<cdot> \<theta> \<in> abs_terms" "\<forall>n. Abs n \<notin> \<Union>(funs_term ` (\<theta> ` fv t))"
+  shows "t \<in> abs_terms"
+proof -
+  have "\<not>is_Abs f" when fs: "f \<in> funs_term s" "s \<in> subterms\<^sub>s\<^sub>e\<^sub>t (\<theta> ` fv t)" for f s
+  proof -
+    obtain T where T: "Fun f T \<in> subterms s" using funs_term_Fun_subterm[OF fs(1)] by moura  
+    hence "Fun f T \<in> subterms\<^sub>s\<^sub>e\<^sub>t (\<theta> ` fv t)" using fs(2) in_subterms_subset_Union by blast
+    thus ?thesis using assms(2) funs_term_Fun_subterm'[of f T] by (cases f) auto
+  qed
+  thus ?thesis using abs_terms_subst[OF assms(1)] by force
+qed
+
+lemma pubval_terms_subst_range_disj:
+  "subst_range \<theta> \<inter> pubval_terms = {} \<Longrightarrow> \<theta> ` fv t \<inter> pubval_terms = {}"
+proof (induction t)
+  case (Var x) thus ?case by (cases "x \<in> subst_domain \<theta>") auto
+qed auto
+
+lemma abs_terms_subst_range_disj:
+  "subst_range \<theta> \<inter> abs_terms = {} \<Longrightarrow> \<theta> ` fv t \<inter> abs_terms = {}"
+proof (induction t)
+  case (Var x) thus ?case by (cases "x \<in> subst_domain \<theta>") auto
+qed auto
+
+lemma pubval_terms_subst_range_comp:
+  assumes "subst_range \<theta> \<inter> pubval_terms = {}" "subst_range \<delta> \<inter> pubval_terms = {}"
+  shows "subst_range (\<theta> \<circ>\<^sub>s \<delta>) \<inter> pubval_terms = {}"
+proof -
+  { fix t f assume t:
+      "t \<in> subst_range (\<theta> \<circ>\<^sub>s \<delta>)" "f \<in> funs_term t" "is_PubConstValue f"
+    then obtain x where x: "(\<theta> \<circ>\<^sub>s \<delta>) x = t" by auto
+    have "\<theta> x \<notin> pubval_terms" using assms(1) by (cases "\<theta> x \<in> subst_range \<theta>") force+
+    hence "(\<theta> \<circ>\<^sub>s \<delta>) x \<notin> pubval_terms"
+      using assms(2) pubval_terms_subst[of "\<theta> x" \<delta>] pubval_terms_subst_range_disj
+      by (metis (mono_tags, lifting) subst_compose_def)
+    hence False using t(2,3) x by blast
+  } thus ?thesis by fast
+qed
+
+lemma pubval_terms_subst_range_comp':
+  assumes "(\<theta> ` X) \<inter> pubval_terms = {}" "(\<delta> ` fv\<^sub>s\<^sub>e\<^sub>t (\<theta> ` X)) \<inter> pubval_terms = {}"
+  shows "((\<theta> \<circ>\<^sub>s \<delta>) ` X) \<inter> pubval_terms = {}"
+proof -
+  { fix t f assume t:
+      "t \<in> (\<theta> \<circ>\<^sub>s \<delta>) ` X" "f \<in> funs_term t" "is_PubConstValue f"
+    then obtain x where x: "(\<theta> \<circ>\<^sub>s \<delta>) x = t" "x \<in> X" by auto
+    have "\<theta> x \<notin> pubval_terms" using assms(1) x(2) by force
+    moreover have "fv (\<theta> x) \<subseteq> fv\<^sub>s\<^sub>e\<^sub>t (\<theta> ` X)" using x(2) by (auto simp add: fv_subset)
+    hence "\<delta> ` fv (\<theta> x) \<inter> pubval_terms = {}" using assms(2) by auto
+    ultimately have "(\<theta> \<circ>\<^sub>s \<delta>) x \<notin> pubval_terms"
+      using pubval_terms_subst[of "\<theta> x" \<delta>]
+      by (metis (mono_tags, lifting) subst_compose_def)
+    hence False using t(2,3) x by blast
+  } thus ?thesis by fast
+qed
+
+lemma abs_terms_subst_range_comp:
+  assumes "subst_range \<theta> \<inter> abs_terms = {}" "subst_range \<delta> \<inter> abs_terms = {}"
+  shows "subst_range (\<theta> \<circ>\<^sub>s \<delta>) \<inter> abs_terms = {}"
+proof -
+  { fix t f assume t: "t \<in> subst_range (\<theta> \<circ>\<^sub>s \<delta>)" "f \<in> funs_term t" "is_Abs f"
+    then obtain x where x: "(\<theta> \<circ>\<^sub>s \<delta>) x = t" by auto
+    have "\<theta> x \<notin> abs_terms" using assms(1) by (cases "\<theta> x \<in> subst_range \<theta>") force+
+    hence "(\<theta> \<circ>\<^sub>s \<delta>) x \<notin> abs_terms"
+      using assms(2) abs_terms_subst[of "\<theta> x" \<delta>] abs_terms_subst_range_disj
+      by (metis (mono_tags, lifting) subst_compose_def)
+    hence False using t(2,3) x by blast
+  } thus ?thesis by fast
+qed
+
+lemma abs_terms_subst_range_comp':
+  assumes "(\<theta> ` X) \<inter> abs_terms = {}" "(\<delta> ` fv\<^sub>s\<^sub>e\<^sub>t (\<theta> ` X)) \<inter> abs_terms = {}"
+  shows "((\<theta> \<circ>\<^sub>s \<delta>) ` X) \<inter> abs_terms = {}"
+proof -
+  { fix t f assume t:
+      "t \<in> (\<theta> \<circ>\<^sub>s \<delta>) ` X" "f \<in> funs_term t" "is_Abs f"
+    then obtain x where x: "(\<theta> \<circ>\<^sub>s \<delta>) x = t" "x \<in> X" by auto
+    have "\<theta> x \<notin> abs_terms" using assms(1) x(2) by force
+    moreover have "fv (\<theta> x) \<subseteq> fv\<^sub>s\<^sub>e\<^sub>t (\<theta> ` X)" using x(2) by (auto simp add: fv_subset)
+    hence "\<delta> ` fv (\<theta> x) \<inter> abs_terms = {}" using assms(2) by auto
+    ultimately have "(\<theta> \<circ>\<^sub>s \<delta>) x \<notin> abs_terms"
+      using abs_terms_subst[of "\<theta> x" \<delta>]
+      by (metis (mono_tags, lifting) subst_compose_def)
+    hence False using t(2,3) x by blast
+  } thus ?thesis by fast
+qed
+
+context
+begin
+private lemma Ana_abs_aux1:
+  fixes \<delta>::"(('fun,'atom,'sets,'lbl) prot_fun, nat, ('fun,'atom,'sets,'lbl) prot_var) gsubst"
+    and \<alpha>::"nat \<Rightarrow> 'sets set"
+  assumes "Ana\<^sub>f f = (K,T)"
+  shows "(K \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<delta>) \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha> = K \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t (\<lambda>n. \<delta> n \<cdot>\<^sub>\<alpha> \<alpha>)"
+proof -
+  { fix k assume "k \<in> set K"
+    hence "k \<in> subterms\<^sub>s\<^sub>e\<^sub>t (set K)" by force
+    hence "k \<cdot> \<delta> \<cdot>\<^sub>\<alpha> \<alpha> = k \<cdot> (\<lambda>n. \<delta> n \<cdot>\<^sub>\<alpha> \<alpha>)"
+    proof (induction k)
+      case (Fun g S)
+      have "\<And>s. s \<in> set S \<Longrightarrow> s \<cdot> \<delta> \<cdot>\<^sub>\<alpha> \<alpha> = s \<cdot> (\<lambda>n. \<delta> n \<cdot>\<^sub>\<alpha> \<alpha>)"
+        using Fun.IH in_subterms_subset_Union[OF Fun.prems] Fun_param_in_subterms[of _ S g]
+        by (meson contra_subsetD)
+      thus ?case using Ana\<^sub>f_assm1_alt[OF assms Fun.prems] by (cases g) auto
+    qed simp
+  } thus ?thesis unfolding abs_apply_list_def by force
+qed
+
+private lemma Ana_abs_aux2:
+  fixes \<alpha>::"nat \<Rightarrow> 'sets set"
+    and K::"(('fun,'atom,'sets,'lbl) prot_fun, nat) term list"
+    and M::"nat list"
+    and T::"('fun,'atom,'sets,'lbl) prot_term list"
+  assumes "\<forall>i \<in> fv\<^sub>s\<^sub>e\<^sub>t (set K) \<union> set M. i < length T"
+    and "(K \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t (!) T) \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha> = K \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t (\<lambda>n. T ! n \<cdot>\<^sub>\<alpha> \<alpha>)"
+  shows "(K \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t (!) T) \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha> = K \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t (!) (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T)" (is "?A1 = ?A2")
+    and "(map ((!) T) M) \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha> = map ((!) (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T)) M" (is "?B1 = ?B2")
+proof -
+  have "T ! i \<cdot>\<^sub>\<alpha> \<alpha> = (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T) ! i" when "i \<in> fv\<^sub>s\<^sub>e\<^sub>t (set K)" for i
+    using that assms(1) by auto
+  hence "k \<cdot> (\<lambda>i. T ! i \<cdot>\<^sub>\<alpha> \<alpha>) = k \<cdot> (\<lambda>i. (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T) ! i)" when "k \<in> set K" for k
+    using that term_subst_eq_conv[of k "\<lambda>i. T ! i \<cdot>\<^sub>\<alpha> \<alpha>" "\<lambda>i. (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T) ! i"]
+    by auto
+  thus "?A1 = ?A2" using assms(2) by (force simp add: abs_apply_terms_def)
+
+  have "T ! i \<cdot>\<^sub>\<alpha> \<alpha> = map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T ! i" when "i \<in> set M" for i
+    using that assms(1) by auto
+  thus "?B1 = ?B2" by (force simp add: abs_apply_list_def)
+qed
+
+private lemma Ana_abs_aux1_set:
+  fixes \<delta>::"(('fun,'atom,'sets,'lbl) prot_fun, nat, ('fun,'atom,'sets,'lbl) prot_var) gsubst"
+    and \<alpha>::"nat \<Rightarrow> 'sets set"
+  assumes "Ana\<^sub>f f = (K,T)"
+  shows "(set K \<cdot>\<^sub>s\<^sub>e\<^sub>t \<delta>) \<cdot>\<^sub>\<alpha>\<^sub>s\<^sub>e\<^sub>t \<alpha> = set K \<cdot>\<^sub>s\<^sub>e\<^sub>t (\<lambda>n. \<delta> n \<cdot>\<^sub>\<alpha> \<alpha>)"
+proof -
+  { fix k assume "k \<in> set K"
+    hence "k \<in> subterms\<^sub>s\<^sub>e\<^sub>t (set K)" by force
+    hence "k \<cdot> \<delta> \<cdot>\<^sub>\<alpha> \<alpha> = k \<cdot> (\<lambda>n. \<delta> n \<cdot>\<^sub>\<alpha> \<alpha>)"
+    proof (induction k)
+      case (Fun g S)
+      have "\<And>s. s \<in> set S \<Longrightarrow> s \<cdot> \<delta> \<cdot>\<^sub>\<alpha> \<alpha> = s \<cdot> (\<lambda>n. \<delta> n \<cdot>\<^sub>\<alpha> \<alpha>)"
+        using Fun.IH in_subterms_subset_Union[OF Fun.prems] Fun_param_in_subterms[of _ S g]
+        by (meson contra_subsetD)
+      thus ?case using Ana\<^sub>f_assm1_alt[OF assms Fun.prems] by (cases g) auto
+    qed simp
+  } thus ?thesis unfolding abs_apply_terms_def by force
+qed
+
+private lemma Ana_abs_aux2_set:
+  fixes \<alpha>::"nat \<Rightarrow> 'sets set"
+    and K::"(('fun,'atom,'sets,'lbl) prot_fun, nat) terms"
+    and M::"nat set"
+    and T::"('fun,'atom,'sets,'lbl) prot_term list"
+  assumes "\<forall>i \<in> fv\<^sub>s\<^sub>e\<^sub>t K \<union> M. i < length T"
+    and "(K \<cdot>\<^sub>s\<^sub>e\<^sub>t (!) T) \<cdot>\<^sub>\<alpha>\<^sub>s\<^sub>e\<^sub>t \<alpha> = K \<cdot>\<^sub>s\<^sub>e\<^sub>t (\<lambda>n. T ! n \<cdot>\<^sub>\<alpha> \<alpha>)"
+  shows "(K \<cdot>\<^sub>s\<^sub>e\<^sub>t (!) T) \<cdot>\<^sub>\<alpha>\<^sub>s\<^sub>e\<^sub>t \<alpha> = K \<cdot>\<^sub>s\<^sub>e\<^sub>t (!) (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T)" (is "?A1 = ?A2")
+    and "((!) T ` M) \<cdot>\<^sub>\<alpha>\<^sub>s\<^sub>e\<^sub>t \<alpha> = (!) (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T) ` M" (is "?B1 = ?B2")
+proof -
+  have "T ! i \<cdot>\<^sub>\<alpha> \<alpha> = (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T) ! i" when "i \<in> fv\<^sub>s\<^sub>e\<^sub>t K" for i
+    using that assms(1) by auto
+  hence "k \<cdot> (\<lambda>i. T ! i \<cdot>\<^sub>\<alpha> \<alpha>) = k \<cdot> (\<lambda>i. (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T) ! i)" when "k \<in> K" for k
+    using that term_subst_eq_conv[of k "\<lambda>i. T ! i \<cdot>\<^sub>\<alpha> \<alpha>" "\<lambda>i. (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T) ! i"]
+    by auto
+  thus "?A1 = ?A2" using assms(2) by (force simp add: abs_apply_terms_def)
+
+  have "T ! i \<cdot>\<^sub>\<alpha> \<alpha> = map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) T ! i" when "i \<in> M" for i
+    using that assms(1) by auto
+  thus "?B1 = ?B2" by (force simp add: abs_apply_terms_def)
+qed
+
+lemma Ana_abs:
+  fixes t::"('fun,'atom,'sets,'lbl) prot_term"
+  assumes "Ana t = (K, T)"
+  shows "Ana (t \<cdot>\<^sub>\<alpha> \<alpha>) = (K \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha>, T \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha>)"
+  using assms
+proof (induction t rule: Ana.induct)
+  case (1 f S)
+  obtain K' T' where *: "Ana\<^sub>f f = (K',T')" by moura
+  show ?case using 1
+  proof (cases "arity\<^sub>f f = length S \<and> arity\<^sub>f f > 0")
+    case True
+    hence "K = K' \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t (!) S" "T = map ((!) S) T'"
+        and **: "arity\<^sub>f f = length (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) S)" "arity\<^sub>f f > 0"
+      using 1 * by auto
+    hence "K \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha> = K' \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t (!) (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) S)"
+          "T \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha> = map ((!) (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) S)) T'"
+      using Ana\<^sub>f_assm2_alt[OF *] Ana_abs_aux2[OF _ Ana_abs_aux1[OF *], of T' S \<alpha>]
+      unfolding abs_apply_list_def
+      by auto
+    moreover have "Fun (Fu f) S \<cdot>\<^sub>\<alpha> \<alpha> = Fun (Fu f) (map (\<lambda>s. s \<cdot>\<^sub>\<alpha> \<alpha>) S)" by simp
+    ultimately show ?thesis using Ana_Fu_intro[OF ** *] by metis
+  qed (auto simp add: abs_apply_list_def)
+qed (simp_all add: abs_apply_list_def)
+end
+
+lemma deduct_FP_if_deduct:
+  fixes M IK FP::"('fun,'atom,'sets,'lbl) prot_terms"
+  assumes IK: "IK \<subseteq> GSMP M - (pubval_terms \<union> abs_terms)" "\<forall>t \<in> IK \<cdot>\<^sub>\<alpha>\<^sub>s\<^sub>e\<^sub>t \<alpha>. FP \<turnstile>\<^sub>c t"
+    and t: "IK \<turnstile> t" "t \<in> GSMP M - (pubval_terms \<union> abs_terms)"
+  shows "FP \<turnstile> t \<cdot>\<^sub>\<alpha> \<alpha>"
+proof -
+  let ?P = "\<lambda>f. \<not>is_PubConstValue f"
+  let ?GSMP = "GSMP M - (pubval_terms \<union> abs_terms)"
+
+  have 1: "\<forall>m \<in> IK. m \<in> ?GSMP"
+    using IK(1) by blast
+
+  have 2: "\<forall>t t'. t \<in> ?GSMP \<longrightarrow> t' \<sqsubseteq> t \<longrightarrow> t' \<in> ?GSMP"
+  proof (intro allI impI)
+    fix t t' assume t: "t \<in> ?GSMP" "t' \<sqsubseteq> t"
+    hence "t' \<in> GSMP M" using ground_subterm unfolding GSMP_def by auto
+    moreover have "\<not>is_PubConstValue f"
+      when "f \<in> funs_term t" for f
+      using t(1) that by auto
+    hence "\<not>is_PubConstValue f"
+      when "f \<in> funs_term t'" for f
+      using that subtermeq_imp_funs_term_subset[OF t(2)] by auto
+    moreover have "\<not>is_Abs f" when "f \<in> funs_term t" for f using t(1) that by auto
+    hence "\<not>is_Abs f" when "f \<in> funs_term t'" for f
+      using that subtermeq_imp_funs_term_subset[OF t(2)] by auto
+    ultimately show "t' \<in> ?GSMP" by simp
+  qed
+
+  have 3: "\<forall>t K T k. t \<in> ?GSMP \<longrightarrow> Ana t = (K, T) \<longrightarrow> k \<in> set K \<longrightarrow> k \<in> ?GSMP"
+  proof (intro allI impI)
+    fix t K T k assume t: "t \<in> ?GSMP" "Ana t = (K, T)" "k \<in> set K"
+    hence "k \<in> GSMP M" using GSMP_Ana_key by blast
+    moreover have "\<forall>f \<in> funs_term t. ?P f" using t(1) by auto
+    with t(2,3) have "\<forall>f \<in> funs_term k. ?P f"
+    proof (induction t arbitrary: k rule: Ana.induct)
+      case 1 thus ?case by (metis Ana_Fu_keys_not_pubval_terms surj_pair)
+    qed auto
+    moreover have "\<forall>f \<in> funs_term t. \<not>is_Abs f" using t(1) by auto
+    with t(2,3) have "\<forall>f \<in> funs_term k. \<not>is_Abs f"
+    proof (induction t arbitrary: k rule: Ana.induct)
+      case 1 thus ?case by (metis Ana_Fu_keys_not_abs_terms surj_pair)
+    qed auto
+    ultimately show "k \<in> ?GSMP" by simp
+  qed
+
+  have "\<langle>IK; M\<rangle> \<turnstile>\<^sub>G\<^sub>S\<^sub>M\<^sub>P t"
+    unfolding intruder_deduct_GSMP_def
+    by (rule restricted_deduct_if_deduct'[OF 1 2 3 t])
+  thus ?thesis
+  proof (induction t rule: intruder_deduct_GSMP_induct)
+    case (AxiomH t)
+    show ?case using IK(2) abs_in[OF AxiomH.hyps] by force
+  next
+    case (ComposeH T f)
+    have *: "Fun f T \<cdot>\<^sub>\<alpha> \<alpha> = Fun f (map (\<lambda>t. t \<cdot>\<^sub>\<alpha> \<alpha>) T)"
+      using ComposeH.hyps(2,4)
+      by (cases f) auto
+
+    have **: "length (map (\<lambda>t. t \<cdot>\<^sub>\<alpha> \<alpha>) T) = arity f"
+      using ComposeH.hyps(1)
+      by auto
+
+    show ?case
+      using intruder_deduct.Compose[OF ** ComposeH.hyps(2)] ComposeH.IH(1) *
+      by auto
+  next
+    case (DecomposeH t K T' t\<^sub>i)
+    have *: "Ana (t \<cdot>\<^sub>\<alpha> \<alpha>) = (K \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha>, T' \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha>)"
+      using Ana_abs[OF DecomposeH.hyps(2)]
+      by metis
+
+    have **: "t\<^sub>i \<cdot>\<^sub>\<alpha> \<alpha> \<in> set (T' \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha>)"
+      using DecomposeH.hyps(4) abs_in abs_list_set_is_set_abs_set[of T']
+      by auto
+
+    have ***: "FP \<turnstile> k"
+      when k: "k \<in> set (K \<cdot>\<^sub>\<alpha>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<alpha>)" for k
+    proof -
+      obtain k' where k': "k' \<in> set K" "k = k' \<cdot>\<^sub>\<alpha> \<alpha>"
+        by (metis (no_types) k abs_apply_terms_def imageE abs_list_set_is_set_abs_set)
+
+      show "FP \<turnstile> k"
+        using DecomposeH.IH k' by blast
+    qed
+
+    show ?case
+      using intruder_deduct.Decompose[OF _ * _ **]
+            DecomposeH.IH(1) ***(1)
+      by blast
+  qed
+qed
+
+end
+
+
+context stateful_protocol_model
+begin
+
+abbreviation (input) "absc s \<equiv> (Fun (Abs s) []::('fun,'atom,'sets,'lbl) prot_term)"
+
+fun absdbupd where
+  "absdbupd [] _ a = a"
+| "absdbupd (insert\<langle>Var y, Fun (Set s) T\<rangle>#D) x a = (
+    if x = y then absdbupd D x (insert s a) else absdbupd D x a)"
+| "absdbupd (delete\<langle>Var y, Fun (Set s) T\<rangle>#D) x a = (
+    if x = y then absdbupd D x (a - {s}) else absdbupd D x a)"
+| "absdbupd (_#D) x a = absdbupd D x a"
+
+lemma absdbupd_cons_cases:
+  "absdbupd (insert\<langle>Var x, Fun (Set s) T\<rangle>#D) x d = absdbupd D x (insert s d)"
+  "absdbupd (delete\<langle>Var x, Fun (Set s) T\<rangle>#D) x d = absdbupd D x (d - {s})"
+  "t \<noteq> Var x \<or> (\<nexists>s T. u = Fun (Set s) T) \<Longrightarrow> absdbupd (insert\<langle>t,u\<rangle>#D) x d = absdbupd D x d"
+  "t \<noteq> Var x \<or> (\<nexists>s T. u = Fun (Set s) T) \<Longrightarrow> absdbupd (delete\<langle>t,u\<rangle>#D) x d = absdbupd D x d"
+proof -
+  assume *: "t \<noteq> Var x \<or> (\<nexists>s T. u = Fun (Set s) T)"
+  let ?P = "absdbupd (insert\<langle>t,u\<rangle>#D) x d = absdbupd D x d"
+  let ?Q = "absdbupd (delete\<langle>t,u\<rangle>#D) x d = absdbupd D x d"
+  { fix y f T assume "t = Fun f T \<or> u = Var y" hence ?P ?Q by auto
+  } moreover {
+    fix y f T assume "t = Var y" "u = Fun f T" hence ?P using * by (cases f) auto
+  } moreover {
+    fix y f T assume "t = Var y" "u = Fun f T" hence ?Q using * by (cases f) auto
+  } ultimately show ?P ?Q by (metis term.exhaust)+
+qed simp_all
+
+lemma absdbupd_filter: "absdbupd S x d = absdbupd (filter is_Update S) x d"
+by (induction S x d rule: absdbupd.induct) simp_all
+
+lemma absdbupd_append:
+  "absdbupd (A@B) x d = absdbupd B x (absdbupd A x d)"
+proof (induction A arbitrary: d)
+  case (Cons a A) thus ?case
+  proof (cases a)
+    case (Insert t u) thus ?thesis
+    proof (cases "t \<noteq> Var x \<or> (\<nexists>s T. u = Fun (Set s) T)")
+      case False
+      then obtain s T where "t = Var x" "u = Fun (Set s) T" by moura
+      thus ?thesis by (simp add: Insert Cons.IH absdbupd_cons_cases(1))
+    qed (simp_all add: Cons.IH absdbupd_cons_cases(3))
+  next
+    case (Delete t u) thus ?thesis
+    proof (cases "t \<noteq> Var x \<or> (\<nexists>s T. u = Fun (Set s) T)")
+      case False
+      then obtain s T where "t = Var x" "u = Fun (Set s) T" by moura
+      thus ?thesis by (simp add: Delete Cons.IH absdbupd_cons_cases(2))
+    qed (simp_all add: Cons.IH absdbupd_cons_cases(4))
+  qed simp_all
+qed simp
+
+lemma absdbupd_wellformed_transaction:
+  assumes T: "wellformed_transaction T"
+  shows "absdbupd (unlabel (transaction_strand T)) = absdbupd (unlabel (transaction_updates T))"
+proof -
+  define S0 where "S0 \<equiv> unlabel (transaction_strand T)"
+  define S1 where "S1 \<equiv> unlabel (transaction_receive T)"
+  define S2 where "S2 \<equiv> unlabel (transaction_checks T)"
+  define S3 where "S3 \<equiv> unlabel (transaction_updates T)"
+  define S4 where "S4 \<equiv> unlabel (transaction_send T)"
+
+  note S_defs = S0_def S1_def S2_def S3_def S4_def
+
+  have 0: "list_all is_Receive S1"
+          "list_all is_Check_or_Assignment S2"
+          "list_all is_Update S3"
+          "list_all is_Send S4"
+    using T unfolding wellformed_transaction_def S_defs by metis+
+
+  have "filter is_Update S1 = []"
+       "filter is_Update S2 = []"
+       "filter is_Update S3 = S3"
+       "filter is_Update S4 = []"
+    using list_all_filter_nil[OF 0(1), of is_Update]
+          list_all_filter_nil[OF 0(2), of is_Update]
+          list_all_filter_eq[OF 0(3)]
+          list_all_filter_nil[OF 0(4), of is_Update]
+    by blast+
+  moreover have "S0 = S1@S2@S3@S4"
+    unfolding S_defs transaction_strand_def unlabel_def by auto
+  ultimately have "filter is_Update S0 = S3"
+    using filter_append[of is_Update] list_all_append[of is_Update]
+    by simp
+  thus ?thesis
+    using absdbupd_filter[of S0]
+    unfolding S_defs by presburger
+qed
+
+fun abs_substs_set::
+  "[('fun,'atom,'sets,'lbl) prot_var list,
+    'sets set list,
+    ('fun,'atom,'sets,'lbl) prot_var \<Rightarrow> 'sets set,
+    ('fun,'atom,'sets,'lbl) prot_var \<Rightarrow> 'sets set,
+    ('fun,'atom,'sets,'lbl) prot_var \<Rightarrow> 'sets set \<Rightarrow> bool]
+  \<Rightarrow> ((('fun,'atom,'sets,'lbl) prot_var \<times> 'sets set) list) list"
+where
+  "abs_substs_set [] _ _ _ _ = [[]]"
+| "abs_substs_set (x#xs) as posconstrs negconstrs msgconstrs = (
+    let bs = filter (\<lambda>a. posconstrs x \<subseteq> a \<and> a \<inter> negconstrs x = {} \<and> msgconstrs x a) as;
+        \<Delta> = abs_substs_set xs as posconstrs negconstrs msgconstrs
+    in concat (map (\<lambda>b. map (\<lambda>\<delta>. (x, b)#\<delta>) \<Delta>) bs))"
+
+definition abs_substs_fun::
+  "[(('fun,'atom,'sets,'lbl) prot_var \<times> 'sets set) list,
+    ('fun,'atom,'sets,'lbl) prot_var]
+  \<Rightarrow> 'sets set"
+where
+  "abs_substs_fun \<delta> x = (case find (\<lambda>b. fst b = x) \<delta> of Some (_,a) \<Rightarrow> a | None \<Rightarrow> {})"
+
+lemmas abs_substs_set_induct = abs_substs_set.induct[case_names Nil Cons]
+
+fun transaction_poschecks_comp::
+  "(('fun,'atom,'sets,'lbl) prot_fun, ('fun,'atom,'sets,'lbl) prot_var) stateful_strand
+  \<Rightarrow> (('fun,'atom,'sets,'lbl) prot_var \<Rightarrow> 'sets set)"
+where
+  "transaction_poschecks_comp [] = (\<lambda>_. {})"
+| "transaction_poschecks_comp (\<langle>_: Var x \<in> Fun (Set s) []\<rangle>#T) = (
+    let f = transaction_poschecks_comp T in f(x := insert s (f x)))"
+| "transaction_poschecks_comp (_#T) = transaction_poschecks_comp T"
+
+fun transaction_negchecks_comp::
+  "(('fun,'atom,'sets,'lbl) prot_fun, ('fun,'atom,'sets,'lbl) prot_var) stateful_strand
+  \<Rightarrow> (('fun,'atom,'sets,'lbl) prot_var \<Rightarrow> 'sets set)"
+where
+  "transaction_negchecks_comp [] = (\<lambda>_. {})"
+| "transaction_negchecks_comp (\<langle>Var x not in Fun (Set s) []\<rangle>#T) = (
+    let f = transaction_negchecks_comp T in f(x := insert s (f x)))"
+| "transaction_negchecks_comp (_#T) = transaction_negchecks_comp T"
+
+definition transaction_check_pre where
+  "transaction_check_pre FPT T \<delta> \<equiv>
+    let (FP, _, TI) = FPT;
+        C = set (unlabel (transaction_checks T));
+        xs = fv_list\<^sub>s\<^sub>s\<^sub>t (unlabel (transaction_strand T));
+        \<theta> = \<lambda>\<delta> x. if fst x = TAtom Value then (absc \<circ> \<delta>) x else Var x
+    in (\<forall>x \<in> set (transaction_fresh T). \<delta> x = {}) \<and>
+       (\<forall>t \<in> trms\<^sub>l\<^sub>s\<^sub>s\<^sub>t (transaction_receive T). intruder_synth_mod_timpls FP TI (t \<cdot> \<theta> \<delta>)) \<and>
+       (\<forall>u \<in> C.
+          (is_InSet u \<longrightarrow> (
+            let x = the_elem_term u; s = the_set_term u
+            in (is_Var x \<and> is_Fun_Set s) \<longrightarrow> the_Set (the_Fun s) \<in> \<delta> (the_Var x))) \<and>
+          ((is_NegChecks u \<and> bvars\<^sub>s\<^sub>s\<^sub>t\<^sub>p u = [] \<and> the_eqs u = [] \<and> length (the_ins u) = 1) \<longrightarrow> (
+            let x = fst (hd (the_ins u)); s = snd (hd (the_ins u))
+            in (is_Var x \<and> is_Fun_Set s) \<longrightarrow> the_Set (the_Fun s) \<notin> \<delta> (the_Var x))))"
+
+definition transaction_check_post where
+  "transaction_check_post FPT T \<delta> \<equiv>
+    let (FP, _, TI) = FPT;
+        xs = fv_list\<^sub>s\<^sub>s\<^sub>t (unlabel (transaction_strand T));
+        \<theta> = \<lambda>\<delta> x. if fst x = TAtom Value then (absc \<circ> \<delta>) x else Var x;
+        u = \<lambda>\<delta> x. absdbupd (unlabel (transaction_updates T)) x (\<delta> x)
+    in (\<forall>x \<in> set xs - set (transaction_fresh T). \<delta> x \<noteq> u \<delta> x \<longrightarrow> List.member TI (\<delta> x, u \<delta> x)) \<and>
+       (\<forall>t \<in> trms\<^sub>l\<^sub>s\<^sub>s\<^sub>t (transaction_send T). intruder_synth_mod_timpls FP TI (t \<cdot> \<theta> (u \<delta>)))"
+
+definition fun_point_inter where "fun_point_inter f g \<equiv> \<lambda>x. f x \<inter> g x"
+definition fun_point_union where "fun_point_union f g \<equiv> \<lambda>x. f x \<union> g x"
+definition fun_point_Inter where "fun_point_Inter fs \<equiv> \<lambda>x. \<Inter>f \<in> fs. f x"
+definition fun_point_Union where "fun_point_Union fs \<equiv> \<lambda>x. \<Union>f \<in> fs. f x"
+definition fun_point_Inter_list where "fun_point_Inter_list fs \<equiv> \<lambda>x. \<Inter>(set (map (\<lambda>f. f x) fs))"
+definition fun_point_Union_list where "fun_point_Union_list fs \<equiv> \<lambda>x. \<Union>(set (map (\<lambda>f. f x) fs))"
+definition ticl_abs where "ticl_abs TI a \<equiv> set (a#map snd (filter (\<lambda>p. fst p = a) TI))"
+definition ticl_abss where "ticl_abss TI as \<equiv> \<Union>a \<in> as. ticl_abs TI a"
+
+lemma fun_point_Inter_set_eq:
+  "fun_point_Inter (set fs) = fun_point_Inter_list fs"
+unfolding fun_point_Inter_def fun_point_Inter_list_def by simp
+
+lemma fun_point_Union_set_eq:
+  "fun_point_Union (set fs) = fun_point_Union_list fs"
+unfolding fun_point_Union_def fun_point_Union_list_def by simp
+
+lemma ticl_abs_refl_in: "x \<in> ticl_abs TI x"
+unfolding ticl_abs_def by simp
+
+lemma ticl_abs_iff:
+  assumes TI: "set TI = {(a,b) \<in> (set TI)\<^sup>+. a \<noteq> b}"
+  shows "ticl_abs TI a = {b. (a,b) \<in> (set TI)\<^sup>*}"  
+proof (intro order_antisym subsetI)
+  fix x assume x: "x \<in> {b. (a, b) \<in> (set TI)\<^sup>*}"
+  hence "x = a \<or> (x \<noteq> a \<and> (a,x) \<in> (set TI)\<^sup>+)" by (metis mem_Collect_eq rtranclD)
+  moreover have "ticl_abs TI a = {a} \<union> {b. (a,b) \<in> set TI}" unfolding ticl_abs_def by force
+  ultimately show "x \<in> ticl_abs TI a" using TI by blast
+qed (fastforce simp add: ticl_abs_def)
+
+lemma ticl_abs_Inter:
+  assumes xs: "\<Inter>(ticl_abs TI ` xs) \<noteq> {}"
+    and TI: "set TI = {(a,b) \<in> (set TI)\<^sup>+. a \<noteq> b}"
+  shows "\<Inter>(ticl_abs TI ` \<Inter>(ticl_abs TI ` xs)) \<subseteq> \<Inter>(ticl_abs TI ` xs)"
+proof
+  fix x assume x: "x \<in> \<Inter>(ticl_abs TI ` \<Inter>(ticl_abs TI ` xs))"
+  have *: "\<Inter>(ticl_abs TI ` xs) = {b. \<forall>a \<in> xs. (a,b) \<in> (set TI)\<^sup>*}"
+    unfolding ticl_abs_iff[OF TI] by blast
+
+  have "(b,x) \<in> (set TI)\<^sup>*" when b: "\<forall>a \<in> xs. (a,b) \<in> (set TI)\<^sup>*" for b
+    using x b unfolding ticl_abs_iff[OF TI] by blast
+  hence "(a,x) \<in> (set TI)\<^sup>*" when "a \<in> xs" for a
+    using that xs rtrancl.rtrancl_into_rtrancl[of a _ "(set TI)\<^sup>*" x]
+    unfolding * rtrancl_idemp[of "set TI"] by blast
+  thus "x \<in> \<Inter>(ticl_abs TI ` xs)" unfolding * by blast
+qed
+
+function (sequential) match_abss'
+::"(('a,'b,'c,'d) prot_fun, 'e) term \<Rightarrow>
+   (('a,'b,'c,'d) prot_fun, 'e) term \<Rightarrow>
+   ('e \<Rightarrow> 'c set set) option"
+where
+  "match_abss' (Var x) (Fun (Abs a) _) = Some ((\<lambda>_. {})(x := {a}))"
+| "match_abss' (Fun f ts) (Fun g ss) = (
+    if f = g \<and> length ts = length ss
+    then map_option fun_point_Union_list (those (map2 match_abss' ts ss))
+    else None)"
+| "match_abss' _ _ = None"
+by pat_completeness auto
+termination
+proof -
+  let ?m = "measures [size \<circ> fst]"
+
+  have 0: "wf ?m" by simp
+
+  show ?thesis
+    apply (standard, use 0 in fast)
+    by (metis (no_types) comp_def fst_conv measures_less Fun_zip_size_lt(1))
+qed
+
+definition match_abss where
+  "match_abss OCC TI t s \<equiv> (
+    let xs = fv t;
+        OCC' = set OCC;
+        f = \<lambda>\<delta> x. if x \<in> xs then \<delta> x else OCC';
+        g = \<lambda>\<delta> x. \<Inter>(ticl_abs TI ` \<delta> x)
+    in case match_abss' t s of
+      Some \<delta> \<Rightarrow>
+        let \<delta>' = g \<delta>
+        in if \<forall>x \<in> xs. \<delta>' x \<noteq> {} then Some (f \<delta>') else None
+    | None \<Rightarrow> None)"
+
+lemma match_abss'_Var_inv:
+  assumes \<delta>: "match_abss' (Var x) t = Some \<delta>"
+  shows "\<exists>a ts. t = Fun (Abs a) ts \<and> \<delta> = (\<lambda>_. {})(x := {a})"
+proof -
+  obtain f ts where t: "t = Fun f ts" using \<delta> by (cases t) auto
+  then obtain a where a: "f = Abs a" using \<delta> by (cases f) auto
+  show ?thesis using \<delta> unfolding t a by simp 
+qed
+
+lemma match_abss'_Fun_inv:
+  assumes "match_abss' (Fun f ts) (Fun g ss) = Some \<delta>"
+  shows "f = g" (is ?A)
+    and "length ts = length ss" (is ?B)
+    and "\<exists>\<theta>. Some \<theta> = those (map2 match_abss' ts ss) \<and> \<delta> = fun_point_Union_list \<theta>" (is ?C)
+    and "\<forall>(t,s) \<in> set (zip ts ss). \<exists>\<sigma>. match_abss' t s = Some \<sigma>" (is ?D)
+proof -
+  note 0 = assms match_abss'.simps(2)[of f ts g ss] option.distinct(1)
+  show ?A by (metis 0)
+  show ?B by (metis 0)
+  show ?C by (metis (no_types, opaque_lifting) 0 map_option_eq_Some)
+  thus ?D using map2_those_Some_case[of match_abss' ts ss] by fastforce
+qed
+
+lemma match_abss'_FunI:
+  assumes \<Delta>: "\<And>i. i < length T \<Longrightarrow> match_abss' (U ! i) (T ! i) = Some (\<Delta> i)"
+    and T: "length T = length U"
+  shows "match_abss' (Fun f U) (Fun f T) = Some (fun_point_Union_list (map \<Delta> [0..<length T]))"
+proof -
+  have "match_abss' (Fun f U) (Fun f T) =
+          map_option fun_point_Union_list (those (map2 match_abss' U T))"
+    using T match_abss'.simps(2)[of f U f T] by presburger
+  moreover have "those (map2 match_abss' U T) = Some (map \<Delta> [0..<length T])"
+    using \<Delta> T those_map2_SomeI by metis
+  ultimately show ?thesis by simp
+qed
+
+lemma match_abss'_Fun_param_subset:
+  assumes "match_abss' (Fun f ts) (Fun g ss)  = Some \<delta>"
+    and "(t,s) \<in> set (zip ts ss)"
+    and "match_abss' t s = Some \<sigma>"
+  shows "\<sigma> x \<subseteq> \<delta> x"
+proof -
+  obtain \<theta> where \<theta>:
+      "those (map2 match_abss' ts ss) = Some \<theta>"
+      "\<delta> = fun_point_Union_list \<theta>"
+    using match_abss'_Fun_inv[OF assms(1)] by metis
+
+  have "\<sigma> \<in> set \<theta>" using \<theta>(1) assms(2-) those_Some_iff[of "map2 match_abss' ts ss" \<theta>] by force
+  thus ?thesis using \<theta>(2) unfolding fun_point_Union_list_def by auto
+qed
+
+lemma match_abss'_fv_is_nonempty:
+  assumes "match_abss' t s = Some \<delta>"
+    and "x \<in> fv t"
+  shows "\<delta> x \<noteq> {}" (is "?P \<delta>")
+using assms
+proof (induction t s arbitrary: \<delta> rule: match_abss'.induct)
+  case (2 f ts g ss)
+  note prems = "2.prems"
+  note IH = "2.IH"
+
+  have 0: "\<forall>(t,s) \<in> set (zip ts ss). \<exists>\<sigma>. match_abss' t s = Some \<sigma>" "f = g" "length ts = length ss"
+    using match_abss'_Fun_inv[OF prems(1)] by simp_all
+
+  obtain t where t: "t \<in> set ts" "x \<in> fv t" using prems(2) by auto
+  then obtain s where s: "s \<in> set ss" "(t,s) \<in> set (zip ts ss)"
+    by (meson 0(3) in_set_impl_in_set_zip1 in_set_zipE)
+  then obtain \<sigma> where \<sigma>: "match_abss' t s = Some \<sigma>" using 0(1) by fast
+
+  show ?case
+    using IH[OF conjI[OF 0(2,3)] s(2) _ \<sigma>] t(2) match_abss'_Fun_param_subset[OF prems(1) s(2) \<sigma>]
+    by auto
+qed auto
+
+lemma match_abss'_nonempty_is_fv:
+  fixes s t::"(('a,'b,'c,'d) prot_fun, 'v) term"
+  assumes "match_abss' s t = Some \<delta>"
+    and "\<delta> x \<noteq> {}"
+  shows "x \<in> fv s"
+using assms
+proof (induction s t arbitrary: \<delta> rule: match_abss'.induct)
+  case (2 f ts g ss)
+  note prems = "2.prems"
+  note IH = "2.IH"
+
+  obtain \<theta> where \<theta>: "Some \<theta> = those (map2 match_abss' ts ss)" "\<delta> = fun_point_Union_list \<theta>"
+      and fg: "f = g" "length ts = length ss"
+    using match_abss'_Fun_inv[OF prems(1)] by fast
+
+  have "\<exists>\<sigma> \<in> set \<theta>. \<sigma> x \<noteq> {}"
+    using fg(2) prems \<theta> unfolding fun_point_Union_list_def by auto
+  then obtain t' s' \<sigma> where ts':
+      "(t',s') \<in> set (zip ts ss)" "match_abss' t' s' = Some \<sigma>" "\<sigma> x \<noteq> {}"
+    using those_map2_SomeD[OF \<theta>(1)[symmetric]] by blast
+
+  show ?case
+    using ts'(3) IH[OF conjI[OF fg] ts'(1) _ ts'(2)] set_zip_leftD[OF ts'(1)] by force
+qed auto
+
+lemma match_abss'_Abs_in_funs_term:
+  fixes s t::"(('a,'b,'c,'d) prot_fun, 'v) term"
+  assumes "match_abss' s t = Some \<delta>"
+    and "a \<in> \<delta> x"
+  shows "Abs a \<in> funs_term t"
+using assms
+proof (induction s t arbitrary: a \<delta> rule: match_abss'.induct)
+  case (1 y b ts) show ?case
+    using match_abss'_Var_inv[OF "1.prems"(1)]  "1.prems"(2)
+    by (cases "x = y") simp_all
+next
+  case (2 f ts g ss)
+  note prems = "2.prems"
+  note IH = "2.IH"
+
+  obtain \<theta> where \<theta>: "Some \<theta> = those (map2 match_abss' ts ss)" "\<delta> = fun_point_Union_list \<theta>"
+      and fg: "f = g" "length ts = length ss"
+    using match_abss'_Fun_inv[OF prems(1)] by fast
+
+  obtain t' s' \<sigma> where ts': "(t',s') \<in> set (zip ts ss)" "match_abss' t' s' = Some \<sigma>" "a \<in> \<sigma> x"
+    using fg(2) prems \<theta> those_map2_SomeD[OF \<theta>(1)[symmetric]]
+    unfolding fun_point_Union_list_def by fastforce
+
+  show ?case
+    using ts'(1) IH[OF conjI[OF fg] ts'(1) _ ts'(2,3)]
+    by (meson set_zip_rightD term.set_intros(2))
+qed auto
+
+lemma match_abss'_subst_fv_ex_abs:
+  assumes "match_abss' s (s \<cdot> \<delta>) = Some \<sigma>"
+    and TI: "set TI = {(a,b) \<in> (set TI)\<^sup>+. a \<noteq> b}"
+  shows "\<forall>x \<in> fv s. \<exists>a ts. \<delta> x = Fun (Abs a) ts \<and> \<sigma> x = {a}" (is "?P s \<sigma>")
+using assms(1)
+proof (induction s "s \<cdot> \<delta>" arbitrary: \<sigma> rule: match_abss'.induct)
+  case (2 f ts g ss)
+  note prems = "2.prems"
+  note hyps = "2.hyps"
+
+  obtain \<theta> where \<theta>: "Some \<theta> = those (map2 match_abss' ts ss)" "\<sigma> = fun_point_Union_list \<theta>"
+      and fg: "f = g" "length ts = length ss" "ss = ts \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<delta>"
+      and ts: "\<forall>(t,s) \<in> set (zip ts ss). \<exists>\<sigma>. match_abss' t s = Some \<sigma>"
+    using match_abss'_Fun_inv[OF prems(1)[unfolded hyps(2)[symmetric]]] hyps(2) by fastforce
+
+  have 0: "those (map (\<lambda>t. match_abss' t (t \<cdot> \<delta>)) ts) = Some \<theta>"
+    using \<theta>(1) map2_map_subst unfolding fg(3) by metis
+
+  have 1: "\<forall>t \<in> set ts. \<exists>\<sigma>. match_abss' t (t \<cdot> \<delta>) = Some \<sigma>"
+    using ts zip_map_subst[of ts \<delta>] unfolding fg(3) by simp
+
+  have 2: "\<sigma>' \<in> set \<theta>"
+    when t: "t \<in> set ts" "match_abss' t (t \<cdot> \<delta>) = Some \<sigma>'" for t \<sigma>'
+    using t 0 those_Some_iff[of "map (\<lambda>t. match_abss' t (t \<cdot> \<delta>)) ts" \<theta>] by force
+
+  have 3: "?P t \<sigma>'" "\<sigma>' x \<noteq> {}"
+    when t: "t \<in> set ts" "x \<in> fv t" "match_abss' t (t \<cdot> \<delta>) = Some \<sigma>'" for t \<sigma>' x
+    using t hyps(1)[OF conjI[OF fg(1,2)], of "(t, t \<cdot> \<delta>)" t \<sigma>'] zip_map_subst[of ts \<delta>]
+          match_abss'_fv_is_nonempty[of t "t \<cdot> \<delta>" \<sigma>' x]
+    unfolding fg(3) by auto
+
+  have 4: "\<sigma>' x = {}"
+    when t: "x \<notin> fv t" "match_abss' t (t \<cdot> \<delta>) = Some \<sigma>'" for t \<sigma>' x
+    by (meson t match_abss'_nonempty_is_fv)
+
+  show ?case
+  proof
+    fix x assume "x \<in> fv (Fun f ts)"
+    then obtain t \<sigma>' where t: "t \<in> set ts" "x \<in> fv t" and \<sigma>': "match_abss' t (t \<cdot> \<delta>) = Some \<sigma>'"
+      using 1 by auto
+    then obtain a tsa where a: "\<delta> x = Fun (Abs a) tsa"
+      using 3[OF t \<sigma>'] by fast
+
+    have "\<sigma>'' x = {a} \<or> \<sigma>'' x = {}"
+      when "\<sigma>'' \<in> set \<theta>" for \<sigma>''
+      using that a 0 3[of _ x] 4[of x]
+      unfolding those_Some_iff by fastforce
+    thus "\<exists>a ts. \<delta> x = Fun (Abs a) ts \<and> \<sigma> x = {a}"
+      using a 2[OF t(1) \<sigma>'] 3[OF t \<sigma>'] unfolding \<theta>(2) fun_point_Union_list_def by auto
+  qed
+qed auto
+
+lemma match_abss'_subst_disj_nonempty:
+  assumes TI: "set TI = {(a,b) \<in> (set TI)\<^sup>+. a \<noteq> b}"
+    and "match_abss' s (s \<cdot> \<delta>) = Some \<sigma>"
+    and "x \<in> fv s"
+  shows "\<Inter>(ticl_abs TI ` \<sigma> x) \<noteq> {} \<and> (\<exists>a tsa. \<delta> x = Fun (Abs a) tsa \<and> \<sigma> x = {a})" (is "?P \<sigma>")
+using assms(2,3)
+proof (induction s "s \<cdot> \<delta>" arbitrary: \<sigma> rule: match_abss'.induct)
+  case (1 x a ts) thus ?case unfolding ticl_abs_def by force
+next
+  case (2 f ts g ss)
+  note prems = "2.prems"
+  note hyps = "2.hyps"
+
+  obtain \<theta> where \<theta>: "Some \<theta> = those (map2 match_abss' ts ss)" "\<sigma> = fun_point_Union_list \<theta>"
+      and fg: "f = g" "length ts = length ss" "ss = ts \<cdot>\<^sub>l\<^sub>i\<^sub>s\<^sub>t \<delta>"
+      and ts: "\<forall>(t,s) \<in> set (zip ts ss). \<exists>\<sigma>. match_abss' t s = Some \<sigma>"
+    using match_abss'_Fun_inv[OF prems(1)[unfolded hyps(2)[symmetric]]] hyps(2) by fastforce
+
+  define ts' where "ts' \<equiv> filter (\<lambda>t. x \<in> fv t) ts"
+  define \<theta>' where "\<theta>' \<equiv> map (\<lambda>t. (t, the (match_abss' t (t \<cdot> \<delta>)))) ts"
+  define \<theta>'' where "\<theta>'' \<equiv> map (\<lambda>t. the (match_abss' t (t \<cdot> \<delta>))) ts'"
+
+  have 0: "those (map (\<lambda>t. match_abss' t (t \<cdot> \<delta>)) ts) = Some \<theta>"
+    using \<theta>(1) map2_map_subst unfolding fg(3) by metis
+
+  have 1: "\<forall>t \<in> set ts. \<exists>\<sigma>. match_abss' t (t \<cdot> \<delta>) = Some \<sigma>"
+    using ts zip_map_subst[of ts \<delta>] unfolding fg(3) by simp
+
+  have ts_not_nil: "ts \<noteq> []"
+    using prems(2) by fastforce
+  hence "\<exists>t \<in> set ts. x \<in> fv t" using prems(2) by simp
+  then obtain a tsa where a: "\<delta> x = Fun (Abs a) tsa" 
+    using 1 match_abss'_subst_fv_ex_abs[OF _ TI, of _ \<delta>]
+    by metis
+  hence a': "\<sigma>' x = {a}"
+    when "t \<in> set ts" "x \<in> fv t" "match_abss' t (t \<cdot> \<delta>) = Some \<sigma>'"
+    for t \<sigma>'
+    using that match_abss'_subst_fv_ex_abs[OF _ TI, of _ \<delta>]
+    by fastforce
+
+  have "ts' \<noteq> []" using prems(2) unfolding ts'_def by (simp add: filter_empty_conv) 
+  hence \<theta>''_not_nil: "\<theta>'' \<noteq> []" unfolding \<theta>''_def by simp
+
+  have 2: "\<sigma>' \<in> set \<theta>"
+    when t: "t \<in> set ts" "match_abss' t (t \<cdot> \<delta>) = Some \<sigma>'" for t \<sigma>'
+    using t 0 those_Some_iff[of "map (\<lambda>t. match_abss' t (t \<cdot> \<delta>)) ts" \<theta>] by force
+
+  have 3: "?P \<sigma>'" "\<sigma>' x \<noteq> {}"
+    when t: "t \<in> set ts'" "match_abss' t (t \<cdot> \<delta>) = Some \<sigma>'" for t \<sigma>'
+    using t hyps(1)[OF conjI[OF fg(1,2)], of "(t, t \<cdot> \<delta>)" t \<sigma>'] zip_map_subst[of ts \<delta>]
+          match_abss'_fv_is_nonempty[of t "t \<cdot> \<delta>" \<sigma>' x]
+    unfolding fg(3) ts'_def by (force, force)
+
+  have 4: "\<sigma>' x = {}"
+    when t: "x \<notin> fv t" "match_abss' t (t \<cdot> \<delta>) = Some \<sigma>'" for t \<sigma>'
+    by (meson t match_abss'_nonempty_is_fv)
+
+  have 5: "\<theta> = map snd \<theta>'"
+    using 0 1 unfolding \<theta>'_def by (induct ts arbitrary: \<theta>) auto
+
+  have "fun_point_Union_list (map snd \<theta>') x =
+        fun_point_Union_list (map snd (filter (\<lambda>(t,_). x \<in> fv t) \<theta>')) x"
+    using 1 4 unfolding \<theta>'_def fun_point_Union_list_def by fastforce
+  hence 6: "fun_point_Union_list \<theta> x = fun_point_Union_list \<theta>'' x"
+    using 0 1 4 unfolding 5 \<theta>'_def \<theta>''_def fun_point_Union_list_def ts'_def by auto
+
+  have 7: "?P \<sigma>'" "\<sigma>' x \<noteq> {}"
+    when \<sigma>': "\<sigma>' \<in> set \<theta>''" for \<sigma>'
+    using that 1 3 unfolding \<theta>''_def ts'_def by auto
+
+  have "\<sigma>' x = {a}"
+    when \<sigma>': "\<sigma>' \<in> set \<theta>''" for \<sigma>'
+    using \<sigma>' a' 1 unfolding \<theta>''_def ts'_def by fastforce
+  hence "fun_point_Union_list \<theta>'' x = {b | b \<sigma>'. \<sigma>' \<in> set \<theta>'' \<and> b \<in> {a}}"
+    using \<theta>''_not_nil unfolding fun_point_Union_list_def by auto
+  hence 8: "fun_point_Union_list \<theta>'' x = {a}"
+    using \<theta>''_not_nil by auto
+
+  show ?case
+    using 8 a
+    unfolding \<theta>(2) 6 ticl_abs_iff[OF TI] by auto
+qed simp_all
+
+lemma match_abssD:
+  fixes OCC TI s
+  defines "f \<equiv> (\<lambda>\<delta> x. if x \<in> fv s then \<delta> x else set OCC)"
+    and "g \<equiv> (\<lambda>\<delta> x. \<Inter>(ticl_abs TI ` \<delta> x))"
+  assumes \<delta>': "match_abss OCC TI s t = Some \<delta>'" 
+  shows "\<exists>\<delta>. match_abss' s t = Some \<delta> \<and> \<delta>' = f (g \<delta>) \<and> (\<forall>x \<in> fv s. \<delta> x \<noteq> {} \<and> f (g \<delta>) x \<noteq> {}) \<and>
+             (set OCC \<noteq> {} \<longrightarrow> (\<forall>x. f (g \<delta>) x \<noteq> {}))"
+proof -
+  obtain \<delta> where \<delta>: "match_abss' s t = Some \<delta>"
+    using \<delta>' unfolding match_abss_def by force
+  hence "Some \<delta>' = (if \<forall>x \<in> fv s. g \<delta> x \<noteq> {} then Some (f (g \<delta>)) else None)"
+    using \<delta>' unfolding match_abss_def f_def g_def Let_def by simp
+  hence "\<delta>' = f (g \<delta>)" "\<forall>x \<in> fv s. \<delta> x \<noteq> {} \<and> f (g \<delta>) x \<noteq> {}"
+    by (metis (no_types, lifting) option.inject option.distinct(1),
+        metis (no_types, lifting) f_def option.distinct(1) match_abss'_fv_is_nonempty[OF \<delta>])
+  thus ?thesis using \<delta> unfolding f_def by force
+qed
+
+lemma match_abss_ticl_abs_Inter_subset:
+  assumes TI: "set TI = {(a,b). (a,b) \<in> (set TI)\<^sup>+ \<and> a \<noteq> b}"
+    and \<delta>: "match_abss OCC TI s t = Some \<delta>"
+    and x: "x \<in> fv s"
+  shows "\<Inter>(ticl_abs TI ` \<delta> x) \<subseteq> \<delta> x"
+proof -
+  let ?h1 = "\<lambda>\<delta> x. if x \<in> fv s then \<delta> x else set OCC"
+  let ?h2 = "\<lambda>\<delta> x. \<Inter>(ticl_abs TI ` \<delta> x)"
+
+  obtain \<delta>' where \<delta>':
+      "match_abss' s t = Some \<delta>'" "\<delta> = ?h1 (?h2 \<delta>')"
+      "\<forall>x \<in> fv s. \<delta>' x \<noteq> {} \<and> \<delta> x \<noteq> {}"
+    using match_abssD[OF \<delta>] by blast
+
+  have "\<delta> x = \<Inter>(ticl_abs TI ` \<delta>' x)" "\<delta>' x \<noteq> {}" "\<delta> x \<noteq> {}"
+    using x \<delta>'(2,3) by auto
+  thus ?thesis
+    using ticl_abs_Inter TI by simp
+qed
+
+lemma match_abss_fv_has_abs:
+  assumes "match_abss OCC TI s t = Some \<delta>"
+    and "x \<in> fv s"
+  shows "\<delta> x \<noteq> {}"
+using assms match_abssD by fast
+
+lemma match_abss_OCC_if_not_fv:
+  fixes s t::"(('a,'b,'c,'d) prot_fun, 'v) term"
+  assumes \<delta>': "match_abss OCC TI s t = Some \<delta>'"
+    and x: "x \<notin> fv s"
+  shows "\<delta>' x = set OCC"
+proof -
+  define f where "f \<equiv> \<lambda>s::(('a,'b,'c,'d) prot_fun, 'v) term. \<lambda>\<delta> x. if x \<in> fv s then \<delta> x else set OCC"
+  define g where "g \<equiv> \<lambda>\<delta>. \<lambda>x::'v. \<Inter>(ticl_abs TI ` \<delta> x)"
+
+  obtain \<delta> where \<delta>: "match_abss' s t = Some \<delta>" "\<delta>' = f s (g \<delta>)"
+    using match_abssD[OF \<delta>'] unfolding f_def g_def by blast
+
+  show ?thesis
+    using x \<delta>(2) unfolding f_def by presburger
+qed
+
+inductive synth_abs_substs_constrs_rel for FP OCC TI where
+  SolveNil:
+    "synth_abs_substs_constrs_rel FP OCC TI [] (\<lambda>_. set OCC)"
+| SolveCons:
+    "ts \<noteq> [] \<Longrightarrow> \<forall>t \<in> set ts. synth_abs_substs_constrs_rel FP OCC TI [t] (\<theta> t)
+      \<Longrightarrow> synth_abs_substs_constrs_rel FP OCC TI ts (fun_point_Inter (\<theta> ` set ts))"
+| SolvePubConst:
+    "arity c = 0 \<Longrightarrow> public c
+      \<Longrightarrow> synth_abs_substs_constrs_rel FP OCC TI [Fun c []] (\<lambda>_. set OCC)"
+| SolvePrivConstIn:
+    "arity c = 0 \<Longrightarrow> \<not>public c \<Longrightarrow> Fun c [] \<in> set FP
+      \<Longrightarrow> synth_abs_substs_constrs_rel FP OCC TI [Fun c []] (\<lambda>_. set OCC)"
+| SolvePrivConstNotin:
+    "arity c = 0 \<Longrightarrow> \<not>public c \<Longrightarrow> Fun c [] \<notin> set FP
+      \<Longrightarrow> synth_abs_substs_constrs_rel FP OCC TI [Fun c []] (\<lambda>_. {})"
+| SolveValueVar:
+    "\<theta> = ((\<lambda>_. set OCC)(x := ticl_abss TI {a \<in> set OCC. \<langle>a\<rangle>\<^sub>a\<^sub>b\<^sub>s \<in> set FP}))
+      \<Longrightarrow> synth_abs_substs_constrs_rel FP OCC TI [Var x] \<theta>"
+| SolveComposed:
+    "arity f > 0 \<Longrightarrow> length ts = arity f
+      \<Longrightarrow> \<forall>\<delta>. \<delta> \<in> \<Delta> \<longleftrightarrow> (\<exists>s \<in> set FP. match_abss OCC TI (Fun f ts) s = Some \<delta>)
+      \<Longrightarrow> \<theta>1 = fun_point_Union \<Delta>
+      \<Longrightarrow> synth_abs_substs_constrs_rel FP OCC TI ts \<theta>2
+      \<Longrightarrow> synth_abs_substs_constrs_rel FP OCC TI [Fun f ts] (fun_point_union \<theta>1 \<theta>2)"
+
+fun synth_abs_substs_constrs_aux where
+  "synth_abs_substs_constrs_aux FP OCC TI (Var x) = (
+    (\<lambda>_. set OCC)(x := ticl_abss TI (set (filter (\<lambda>a. \<langle>a\<rangle>\<^sub>a\<^sub>b\<^sub>s \<in> set FP) OCC))))"
+| "synth_abs_substs_constrs_aux FP OCC TI (Fun f ts) = (
+    if ts = []
+    then if \<not>public f \<and> Fun f ts \<notin> set FP then (\<lambda>_. {}) else (\<lambda>_. set OCC)
+    else let \<Delta> = map the (filter (\<lambda>\<delta>. \<delta> \<noteq> None) (map (match_abss OCC TI (Fun f ts)) FP));
+             \<theta>1 = fun_point_Union_list \<Delta>;
+             \<theta>2 = fun_point_Inter_list (map (synth_abs_substs_constrs_aux FP OCC TI) ts)
+         in fun_point_union \<theta>1 \<theta>2)"
+
+definition synth_abs_substs_constrs where
+  "synth_abs_substs_constrs FPT T \<equiv>
+    let (FP,OCC,TI) = FPT;
+        ts = trms_list\<^sub>s\<^sub>s\<^sub>t (unlabel (transaction_receive T));
+        f = fun_point_Inter_list \<circ> map (synth_abs_substs_constrs_aux FP OCC TI)
+    in if ts = [] then (\<lambda>_. set OCC) else f ts"
+
+definition transaction_check_comp::
+  "[('fun,'atom,'sets,'lbl) prot_var \<Rightarrow> 'sets set \<Rightarrow> bool,
+    ('fun,'atom,'sets,'lbl) prot_term list \<times>
+    'sets set list \<times>
+    ('sets set \<times> 'sets set) list,
+    ('fun,'atom,'sets,'lbl) prot_transaction]
+  \<Rightarrow> ((('fun,'atom,'sets,'lbl) prot_var \<times> 'sets set) list) list"
+where
+  "transaction_check_comp msgcs FPT T \<equiv>
+    let (_, OCC, _) = FPT;
+        S = unlabel (transaction_strand T);
+        C = unlabel (transaction_checks T);
+        xs = filter (\<lambda>x. x \<notin> set (transaction_fresh T) \<and> fst x = TAtom Value) (fv_list\<^sub>s\<^sub>s\<^sub>t S);
+        posconstrs = transaction_poschecks_comp C;
+        negconstrs = transaction_negchecks_comp C;
+        pre_check = transaction_check_pre FPT T;
+        \<Delta> = abs_substs_set xs OCC posconstrs negconstrs msgcs
+    in filter (\<lambda>\<delta>. pre_check (abs_substs_fun \<delta>)) \<Delta>"
+
+definition transaction_check'::
+  "[('fun,'atom,'sets,'lbl) prot_var \<Rightarrow> 'sets set \<Rightarrow> bool,
+    ('fun,'atom,'sets,'lbl) prot_term list \<times>
+    'sets set list \<times>
+    ('sets set \<times> 'sets set) list,
+    ('fun,'atom,'sets,'lbl) prot_transaction]
+  \<Rightarrow> bool"
+where
+  "transaction_check' msgcs FPT T \<equiv>
+    list_all (\<lambda>\<delta>. transaction_check_post FPT T (abs_substs_fun \<delta>))
+             (transaction_check_comp msgcs FPT T)"
+
+definition transaction_check::
+  "[('fun,'atom,'sets,'lbl) prot_term list \<times>
+    'sets set list \<times>
+    ('sets set \<times> 'sets set) list,
+    ('fun,'atom,'sets,'lbl) prot_transaction]
+  \<Rightarrow> bool"
+where
+  "transaction_check \<equiv> transaction_check' (\<lambda>_ _. True)"
+
+definition transaction_check_coverage_rcv::
+  "[('fun,'atom,'sets,'lbl) prot_term list \<times>
+    'sets set list \<times>
+    ('sets set \<times> 'sets set) list,
+    ('fun,'atom,'sets,'lbl) prot_transaction]
+  \<Rightarrow> bool"
+where
+  "transaction_check_coverage_rcv FPT T \<equiv>
+    let msgcs = synth_abs_substs_constrs FPT T
+    in transaction_check' (\<lambda>x a. a \<in> msgcs x) FPT T"
+
+lemma abs_subst_fun_cons:
+  "abs_substs_fun ((x,b)#\<delta>) = (abs_substs_fun \<delta>)(x := b)"
+unfolding abs_substs_fun_def by fastforce
+
+lemma abs_substs_cons:
+  assumes "\<delta> \<in> set (abs_substs_set xs as poss negs msgcs)"
+          "b \<in> set as" "poss x \<subseteq> b" "b \<inter> negs x = {}" "msgcs x b"
+  shows "(x,b)#\<delta> \<in> set (abs_substs_set (x#xs) as poss negs msgcs)"
+using assms by auto
+
+lemma abs_substs_cons':
+  assumes \<delta>: "\<delta> \<in> abs_substs_fun ` set (abs_substs_set xs as poss negs msgcs)"
+    and b: "b \<in> set as" "poss x \<subseteq> b" "b \<inter> negs x = {}" "msgcs x b"
+  shows "\<delta>(x := b) \<in> abs_substs_fun ` set (abs_substs_set (x#xs) as poss negs msgcs)"
+proof -
+  obtain \<theta> where \<theta>: "\<delta> = abs_substs_fun \<theta>" "\<theta> \<in> set (abs_substs_set xs as poss negs msgcs)"
+    using \<delta> by moura
+  have "abs_substs_fun ((x, b)#\<theta>) \<in> abs_substs_fun ` set (abs_substs_set (x#xs) as poss negs msgcs)"
+    using abs_substs_cons[OF \<theta>(2) b] by blast
+  thus ?thesis
+    using \<theta>(1) abs_subst_fun_cons[of x b \<theta>] by argo
+qed
+
+lemma abs_substs_has_abs:
+  assumes "\<forall>x. x \<in> set xs \<longrightarrow> \<delta> x \<in> set as"
+    and "\<forall>x. x \<in> set xs \<longrightarrow> poss x \<subseteq> \<delta> x"
+    and "\<forall>x. x \<in> set xs \<longrightarrow> \<delta> x \<inter> negs x = {}"
+    and "\<forall>x. x \<in> set xs \<longrightarrow> msgcs x (\<delta> x)"
+    and "\<forall>x. x \<notin> set xs \<longrightarrow> \<delta> x = {}"
+  shows "\<delta> \<in> abs_substs_fun ` set (abs_substs_set xs as poss negs msgcs)"
+using assms
+proof (induction xs arbitrary: \<delta>)
+  case (Cons x xs)
+  define \<theta> where "\<theta> \<equiv> \<lambda>y. if y \<in> set xs then \<delta> y else {}"
+
+  have "\<theta> \<in> abs_substs_fun ` set (abs_substs_set xs as poss negs msgcs)"
+    using Cons.prems Cons.IH by (simp add: \<theta>_def)
+  moreover have "\<delta> x \<in> set as" "poss x \<subseteq> \<delta> x" "\<delta> x \<inter> negs x = {}" "msgcs x (\<delta> x)"
+    by (simp_all add: Cons.prems(1,2,3,4))
+  ultimately have 0: "\<theta>(x := \<delta> x) \<in> abs_substs_fun ` set (abs_substs_set (x#xs) as poss negs msgcs)"
+    by (metis abs_substs_cons')
+
+  have "\<delta> = \<theta>(x := \<delta> x)"
+  proof
+    fix y show "\<delta> y = (\<theta>(x := \<delta> x)) y"
+    proof (cases "y \<in> set (x#xs)")
+      case False thus ?thesis using Cons.prems(5) by (fastforce simp add: \<theta>_def)
+    qed (auto simp add: \<theta>_def)
+  qed
+  thus ?case by (metis 0)
+qed (auto simp add: abs_substs_fun_def)
+
+lemma abs_substs_abss_bounded:
+  assumes "\<delta> \<in> abs_substs_fun ` set (abs_substs_set xs as poss negs msgcs)"
+    and "x \<in> set xs"
+  shows "\<delta> x \<in> set as"
+    and "poss x \<subseteq> \<delta> x"
+    and "\<delta> x \<inter> negs x = {}"
+    and "msgcs x (\<delta> x)"
+using assms
+proof (induct xs as poss negs msgcs arbitrary: \<delta> rule: abs_substs_set_induct)
+  case (Cons y xs as poss negs msgcs)
+  { case 1 thus ?case using Cons.hyps(1) unfolding abs_substs_fun_def by fastforce }
+
+  { case 2 thus ?case
+    proof (cases "x = y")
+      case False
+      then obtain \<delta>' where \<delta>':
+          "\<delta>' \<in> abs_substs_fun ` set (abs_substs_set xs as poss negs msgcs)" "\<delta>' x = \<delta> x"
+        using 2 unfolding abs_substs_fun_def by force
+      moreover have "x \<in> set xs" using 2(2) False by simp
+      moreover have "\<exists>b. b \<in> set as \<and> poss y \<subseteq> b \<and> b \<inter> negs y = {}"
+        using 2 False by auto
+      ultimately show ?thesis using Cons.hyps(2) by fastforce
+    qed (auto simp add: abs_substs_fun_def)
+  }
+
+  { case 3 thus ?case
+    proof (cases "x = y")
+      case False
+      then obtain \<delta>' where \<delta>':
+          "\<delta>' \<in> abs_substs_fun ` set (abs_substs_set xs as poss negs msgcs)" "\<delta>' x = \<delta> x"
+        using 3 unfolding abs_substs_fun_def by force
+      moreover have "x \<in> set xs" using 3(2) False by simp
+      moreover have "\<exists>b. b \<in> set as \<and> poss y \<subseteq> b \<and> b \<inter> negs y = {}"
+        using 3 False by auto
+      ultimately show ?thesis using Cons.hyps(3) by fastforce
+    qed (auto simp add: abs_substs_fun_def)
+  }
+
+  { case 4 thus ?case
+    proof (cases "x = y")
+      case False
+      then obtain \<delta>' where \<delta>':
+          "\<delta>' \<in> abs_substs_fun ` set (abs_substs_set xs as poss negs msgcs)" "\<delta>' x = \<delta> x"
+        using 4 unfolding abs_substs_fun_def by force
+      moreover have "x \<in> set xs" using 4(2) False by simp
+      moreover have "\<exists>b. b \<in> set as \<and> poss y \<subseteq> b \<and> b \<inter> negs y = {}"
+        using 4 False by auto
+      ultimately show ?thesis using Cons.hyps(4) by fastforce
+    qed (auto simp add: abs_substs_fun_def)
+  }
+qed (simp_all add: abs_substs_fun_def)
+
+lemma abs_substs_abss_bounded':
+  assumes "\<delta> \<in> abs_substs_fun ` set (abs_substs_set xs as poss negs msgcs)"
+    and "x \<notin> set xs"
+  shows "\<delta> x = {}"
+using assms unfolding abs_substs_fun_def
+by (induct xs as poss negs msgcs arbitrary: \<delta> rule: abs_substs_set_induct) (force, fastforce)
+
+lemma transaction_poschecks_comp_unfold:
+  "transaction_poschecks_comp C x = {s. \<exists>a. \<langle>a: Var x \<in> Fun (Set s) []\<rangle> \<in> set C}"
+proof (induction C)
+  case (Cons c C) thus ?case
+  proof (cases "\<exists>a y s. c = \<langle>a: Var y \<in> Fun (Set s) []\<rangle>")
+    case True
+    then obtain a y s where c: "c = \<langle>a: Var y \<in> Fun (Set s) []\<rangle>" by moura
+
+    define f where "f \<equiv> transaction_poschecks_comp C"
+
+    have "transaction_poschecks_comp (c#C) = f(y := insert s (f y))"
+      using c by (simp add: f_def Let_def)
+    moreover have "f x = {s. \<exists>a. \<langle>a: Var x \<in> Fun (Set s) []\<rangle> \<in> set C}"
+      using Cons.IH unfolding f_def by blast
+    ultimately show ?thesis using c by auto
+  next
+    case False
+    hence "transaction_poschecks_comp (c#C) = transaction_poschecks_comp C" (is ?P)
+      using transaction_poschecks_comp.cases[of "c#C" ?P] by force
+    thus ?thesis using False Cons.IH by auto
+  qed
+qed simp
+
+lemma transaction_poschecks_comp_notin_fv_empty:
+  assumes "x \<notin> fv\<^sub>s\<^sub>s\<^sub>t C"
+  shows "transaction_poschecks_comp C x = {}"
+using assms transaction_poschecks_comp_unfold[of C x] by fastforce
+
+lemma transaction_negchecks_comp_unfold:
+  "transaction_negchecks_comp C x = {s. \<langle>Var x not in Fun (Set s) []\<rangle> \<in> set C}"
+proof (induction C)
+  case (Cons c C) thus ?case
+  proof (cases "\<exists>y s. c = \<langle>Var y not in Fun (Set s) []\<rangle>")
+    case True
+    then obtain y s where c: "c = \<langle>Var y not in Fun (Set s) []\<rangle>" by moura
+
+    define f where "f \<equiv> transaction_negchecks_comp C"
+
+    have "transaction_negchecks_comp (c#C) = f(y := insert s (f y))"
+      using c by (simp add: f_def Let_def)
+    moreover have "f x = {s. \<langle>Var x not in Fun (Set s) []\<rangle> \<in> set C}"
+      using Cons.IH unfolding f_def by blast
+    ultimately show ?thesis using c by auto
+  next
+    case False
+    hence "transaction_negchecks_comp (c#C) = transaction_negchecks_comp C" (is ?P)
+      using transaction_negchecks_comp.cases[of "c#C" ?P] 
+      by force
+    thus ?thesis using False Cons.IH by fastforce
+  qed
+qed simp  
+
+lemma transaction_negchecks_comp_notin_fv_empty:
+  assumes "x \<notin> fv\<^sub>s\<^sub>s\<^sub>t C"
+  shows "transaction_negchecks_comp C x = {}"
+using assms transaction_negchecks_comp_unfold[of C x] by fastforce
+
+lemma transaction_check_preI[intro]:
+  fixes T
+  defines "\<theta> \<equiv> \<lambda>\<delta> x. if fst x = TAtom Value then (absc \<circ> \<delta>) x else Var x"
+    and "C \<equiv> set (unlabel (transaction_checks T))"
+  assumes a0: "\<forall>x \<in> set (transaction_fresh T). \<delta> x = {}"
+    and a1: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). fst x = TAtom Value \<longrightarrow> \<delta> x \<in> set OCC"
+    and a2: "\<forall>t \<in> trms\<^sub>l\<^sub>s\<^sub>s\<^sub>t (transaction_receive T). intruder_synth_mod_timpls FP TI (t \<cdot> \<theta> \<delta>)"
+    and a3: "\<forall>a x s. \<langle>a: Var x \<in> Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<delta> x"
+    and a4: "\<forall>x s. \<langle>Var x not in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<notin> \<delta> x"
+  shows "transaction_check_pre (FP, OCC, TI) T \<delta>"
+proof -
+  let ?P = "\<lambda>u. is_InSet u \<longrightarrow> (
+    let x = the_elem_term u; s = the_set_term u
+    in (is_Var x \<and> is_Fun_Set s) \<longrightarrow> the_Set (the_Fun s) \<in> \<delta> (the_Var x))"
+
+  let ?Q = "\<lambda>u. (is_NegChecks u \<and> bvars\<^sub>s\<^sub>s\<^sub>t\<^sub>p u = [] \<and> the_eqs u = [] \<and> length (the_ins u) = 1) \<longrightarrow> (
+    let x = fst (hd (the_ins u)); s = snd (hd (the_ins u))
+    in (is_Var x \<and> is_Fun_Set s) \<longrightarrow> the_Set (the_Fun s) \<notin> \<delta> (the_Var x))"
+
+  have 1: "?P u" when u: "u \<in> C" for u
+    apply (unfold Let_def, intro impI, elim conjE)
+    using u a3 Fun_Set_InSet_iff[of u] by metis
+
+  have 2: "?Q u" when u: "u \<in> C" for u
+    apply (unfold Let_def, intro impI, elim conjE)
+    using u a4 Fun_Set_NotInSet_iff[of u] by metis
+
+  show ?thesis
+    using a0 a1 a2 1 2 fv_list\<^sub>s\<^sub>s\<^sub>t_is_fv\<^sub>s\<^sub>s\<^sub>t[of "unlabel (transaction_strand T)"]
+    unfolding transaction_check_pre_def \<theta>_def C_def Let_def
+    by blast
+qed
+
+lemma transaction_check_pre_InSetE:
+  assumes T: "transaction_check_pre FPT T \<delta>"
+    and u: "u = \<langle>a: Var x \<in> Fun (Set s) []\<rangle>"
+           "u \<in> set (unlabel (transaction_checks T))"
+  shows "s \<in> \<delta> x"
+proof -
+  have "is_InSet u \<longrightarrow> is_Var (the_elem_term u) \<and> is_Fun_Set (the_set_term u) \<longrightarrow>
+        the_Set (the_Fun (the_set_term u)) \<in> \<delta> (the_Var (the_elem_term u))"
+    using T u unfolding transaction_check_pre_def Let_def by blast
+  thus ?thesis using Fun_Set_InSet_iff[of u a x s] u by argo
+qed
+
+lemma transaction_check_pre_NotInSetE:
+  assumes T: "transaction_check_pre FPT T \<delta>"
+    and u: "u = \<langle>Var x not in Fun (Set s) []\<rangle>"
+           "u \<in> set (unlabel (transaction_checks T))"
+  shows "s \<notin> \<delta> x"
+proof -
+  have "is_NegChecks u \<and> bvars\<^sub>s\<^sub>s\<^sub>t\<^sub>p u = [] \<and> the_eqs u = [] \<and> length (the_ins u) = 1 \<longrightarrow>
+         is_Var (fst (hd (the_ins u))) \<and> is_Fun_Set (snd (hd (the_ins u))) \<longrightarrow>
+         the_Set (the_Fun (snd (hd (the_ins u)))) \<notin> \<delta> (the_Var (fst (hd (the_ins u))))"
+    using T u unfolding transaction_check_pre_def Let_def by blast
+  thus ?thesis using Fun_Set_NotInSet_iff[of u  x s] u by argo
+qed
+
+lemma transaction_check_pre_ReceiveE:
+  defines "\<theta> \<equiv> \<lambda>\<delta> x. if fst x = TAtom Value then (absc \<circ> \<delta>) x else Var x"
+  assumes T: "transaction_check_pre (FP, OCC, TI) T \<delta>"
+    and t: "t \<in> trms\<^sub>l\<^sub>s\<^sub>s\<^sub>t (transaction_receive T)"
+  shows "intruder_synth_mod_timpls FP TI (t \<cdot> \<theta> \<delta>)"
+using T t unfolding transaction_check_pre_def Let_def \<theta>_def by blast
+
+lemma transaction_check_compI[intro]:
+  assumes T: "transaction_check_pre (FP, OCC, TI) T \<delta>"
+    and T_adm: "admissible_transaction' T"
+    and x1: "\<forall>x. (x \<in> fv_transaction T - set (transaction_fresh T) \<and> fst x = TAtom Value)
+                  \<longrightarrow> \<delta> x \<in> set OCC \<and> msgcs x (\<delta> x)"
+    and x2: "\<forall>x. (x \<notin> fv_transaction T - set (transaction_fresh T) \<or> fst x \<noteq> TAtom Value)
+                  \<longrightarrow> \<delta> x = {}"
+  shows "\<delta> \<in> abs_substs_fun ` set (transaction_check_comp msgcs (FP, OCC, TI) T)"
+proof -
+  define S where "S \<equiv> unlabel (transaction_strand T)"
+  define C where "C \<equiv> unlabel (transaction_checks T)"
+
+  let ?xs = "fv_list\<^sub>s\<^sub>s\<^sub>t S"
+
+  define poss where "poss \<equiv> transaction_poschecks_comp C"
+  define negs where "negs \<equiv> transaction_negchecks_comp C"
+  define ys where "ys \<equiv> filter (\<lambda>x. x \<notin> set (transaction_fresh T) \<and> fst x = TAtom Value) ?xs"
+
+  have ys: "{x \<in> fv_transaction T - set (transaction_fresh T). fst x = TAtom Value} = set ys"
+    using fv_list\<^sub>s\<^sub>s\<^sub>t_is_fv\<^sub>s\<^sub>s\<^sub>t[of S]
+    unfolding ys_def S_def by force
+  
+  have "\<delta> x \<in> set OCC" "msgcs x (\<delta> x)"
+    when x: "x \<in> set ys" for x
+    using x1 x ys by (blast, blast)
+  moreover have "\<delta> x = {}"
+    when x: "x \<notin> set ys" for x
+    using x2 x ys by blast
+  moreover have "poss x \<subseteq> \<delta> x" when x: "x \<in> set ys" for x
+  proof -
+    have "s \<in> \<delta> x" when u: "u = \<langle>a: Var x \<in> Fun (Set s) []\<rangle>" "u \<in> set C" for u a s
+      using T u transaction_check_pre_InSetE[of "(FP, OCC, TI)" T \<delta>]
+      unfolding C_def by blast
+    thus ?thesis
+      using transaction_poschecks_comp_unfold[of C x]
+      unfolding poss_def by blast
+  qed
+  moreover have "\<delta> x \<inter> negs x = {}" when x: "x \<in> set ys" for x
+  proof (cases "x \<in> fv\<^sub>s\<^sub>s\<^sub>t C")
+    case True
+    hence "s \<notin> \<delta> x" when u: "u = \<langle>Var x not in Fun (Set s) []\<rangle>" "u \<in> set C" for u s
+      using T u transaction_check_pre_NotInSetE[of "(FP, OCC, TI)" T \<delta>]
+      unfolding C_def by blast
+    thus ?thesis
+      using transaction_negchecks_comp_unfold[of C x]
+      unfolding negs_def by blast
+  next
+    case False
+    hence "negs x = {}"
+      using x transaction_negchecks_comp_notin_fv_empty
+      unfolding negs_def by blast
+    thus ?thesis by blast
+  qed
+  ultimately have "\<delta> \<in> abs_substs_fun ` set (abs_substs_set ys OCC poss negs msgcs)"
+    using abs_substs_has_abs[of ys \<delta> OCC poss negs msgcs]
+    by fast
+  thus ?thesis
+    using T
+    unfolding transaction_check_comp_def Let_def S_def C_def ys_def poss_def negs_def
+    by fastforce
+qed
+
+context
+begin
+private lemma transaction_check_comp_in_aux:
+  fixes T
+  defines "C \<equiv> set (unlabel (transaction_checks T))"
+  assumes T_adm: "admissible_transaction' T"
+    and a1: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). fst x = TAtom Value \<longrightarrow> (\<forall>s.
+          select\<langle>Var x, Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<alpha> x)"
+    and a2: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). fst x = TAtom Value \<longrightarrow> (\<forall>s.
+          \<langle>Var x in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<alpha> x)"
+    and a3: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). fst x = TAtom Value \<longrightarrow> (\<forall>s.
+          \<langle>Var x not in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<notin> \<alpha> x)"
+  shows "\<forall>a x s. \<langle>a: Var x \<in> Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<alpha> x" (is ?A)
+    and "\<forall>x s. \<langle>Var x not in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<notin> \<alpha> x" (is ?B)
+proof -
+  note * = admissible_transaction_strand_step_cases(2,3)[OF T_adm]
+
+  have 1: "fst x = TAtom Value" "x \<in> fv_transaction T - set (transaction_fresh T)"
+    when x: "\<langle>a: Var x \<in> Fun (Set s) []\<rangle> \<in> C" for a x s
+    using * x unfolding C_def by fast+
+
+  have 2: "fst x = TAtom Value" "x \<in> fv_transaction T - set (transaction_fresh T)"
+    when x: "\<langle>Var x not in Fun (Set s) []\<rangle> \<in> C" for x s
+    using * x unfolding C_def by fast+
+
+  show ?A
+  proof (intro allI impI)
+    fix a x s assume u: "\<langle>a: Var x \<in> Fun (Set s) []\<rangle> \<in> C"
+    thus "s \<in> \<alpha> x" using 1 a1 a2 by (cases a) metis+
+  qed
+
+  show ?B
+  proof (intro allI impI)
+    fix x s assume u: "\<langle>Var x not in Fun (Set s) []\<rangle> \<in> C"
+    thus "s \<notin> \<alpha> x" using 2 a3 by meson
+  qed
+qed
+
+lemma transaction_check_comp_in:
+  fixes T
+  defines "\<theta> \<equiv> \<lambda>\<delta> x. if fst x = TAtom Value then (absc \<circ> \<delta>) x else Var x"
+    and "C \<equiv> set (unlabel (transaction_checks T))"
+  assumes T_adm: "admissible_transaction' T"
+    and a1: "\<forall>x \<in> set (transaction_fresh T). \<alpha> x = {}"
+    and a2: "\<forall>t \<in> trms\<^sub>l\<^sub>s\<^sub>s\<^sub>t (transaction_receive T). intruder_synth_mod_timpls FP TI (t \<cdot> \<theta> \<alpha>)"
+    and a3: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). \<forall>s.
+          select\<langle>Var x, Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<alpha> x"
+    and a4: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). \<forall>s.
+          \<langle>Var x in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<alpha> x"
+    and a5: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). \<forall>s.
+          \<langle>Var x not in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<notin> \<alpha> x"
+    and a6: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T).
+          fst x = TAtom Value \<longrightarrow> \<alpha> x \<in> set OCC"
+    and a7: "\<forall>x \<in> fv_transaction T - set (transaction_fresh T).
+          fst x = TAtom Value \<longrightarrow> msgcs x (\<alpha> x)"
+  shows "\<exists>\<delta> \<in> abs_substs_fun ` set (transaction_check_comp msgcs (FP, OCC, TI) T).
+          \<forall>x \<in> fv_transaction T. fst x = TAtom Value \<longrightarrow> \<alpha> x = \<delta> x"
+proof -
+  let ?xs = "fv_list\<^sub>s\<^sub>s\<^sub>t (unlabel (transaction_strand T))"
+  let ?ys = "filter (\<lambda>x. x \<notin> set (transaction_fresh T)) ?xs"
+
+  define \<alpha>' where "\<alpha>' \<equiv> \<lambda>x.
+    if x \<in> fv_transaction T - set (transaction_fresh T) \<and> fst x = TAtom Value
+    then \<alpha> x
+    else {}"
+
+  note T_wf = admissible_transaction_is_wellformed_transaction(1)[OF T_adm]
+
+  have \<theta>\<alpha>_Fun: "is_Fun (t \<cdot> \<theta> \<alpha>) \<longleftrightarrow> is_Fun (t \<cdot> \<theta> \<alpha>')" for t
+    unfolding \<alpha>'_def \<theta>_def
+    by (induct t) auto
+
+  have "\<forall>t \<in> trms\<^sub>l\<^sub>s\<^sub>s\<^sub>t (transaction_receive T). intruder_synth_mod_timpls FP TI (t \<cdot> \<theta> \<alpha>')"
+  proof (intro ballI impI)
+    fix t assume t: "t \<in> trms\<^sub>l\<^sub>s\<^sub>s\<^sub>t (transaction_receive T)"
+
+    have 1: "intruder_synth_mod_timpls FP TI (t \<cdot> \<theta> \<alpha>)"
+      using t a2
+      by auto
+
+    obtain r where r:
+        "r \<in> set (unlabel (transaction_receive T))"
+        "t \<in> trms\<^sub>s\<^sub>s\<^sub>t\<^sub>p r"
+      using t by auto
+    hence "\<exists>ts. r = receive\<langle>ts\<rangle> \<and> t \<in> set ts"
+      using wellformed_transaction_unlabel_cases(1)[OF T_wf]
+      by fastforce
+    hence 2: "fv t \<subseteq> fv\<^sub>l\<^sub>s\<^sub>s\<^sub>t (transaction_receive T)" using r by force
+
+    have "fv t \<subseteq> fv_transaction T"
+      by (metis (no_types, lifting) 2 transaction_strand_def sst_vars_append_subset(1)
+                unlabel_append subset_Un_eq sup.bounded_iff)
+    moreover have "fv t \<inter> set (transaction_fresh T) = {}"
+      using 2 T_wf vars\<^sub>s\<^sub>s\<^sub>t_is_fv\<^sub>s\<^sub>s\<^sub>t_bvars\<^sub>s\<^sub>s\<^sub>t[of "unlabel (transaction_receive T)"]
+      unfolding wellformed_transaction_def
+      by fast
+    ultimately have "\<theta> \<alpha> x = \<theta> \<alpha>' x" when "x \<in> fv t" for x
+      using that unfolding \<alpha>'_def \<theta>_def by fastforce
+    hence 3: "t \<cdot> \<theta> \<alpha> = t \<cdot> \<theta> \<alpha>'"
+      using term_subst_eq by blast
+
+    show "intruder_synth_mod_timpls FP TI (t \<cdot> \<theta> \<alpha>')" using 1 3 by simp
+  qed
+  moreover have
+      "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). fst x = TAtom Value \<longrightarrow> (\<forall>s.
+          select\<langle>Var x, Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<alpha>' x)"
+      "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). fst x = TAtom Value \<longrightarrow> (\<forall>s.
+          \<langle>Var x in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<alpha>' x)"
+      "\<forall>x \<in> fv_transaction T - set (transaction_fresh T). fst x = TAtom Value \<longrightarrow> (\<forall>s.
+          \<langle>Var x not in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<notin> \<alpha>' x)"
+    using a3 a4 a5
+    unfolding \<alpha>'_def \<theta>_def C_def
+    by meson+
+  hence "\<forall>a x s. \<langle>a: Var x \<in> Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<in> \<alpha>' x"
+        "\<forall>x s. \<langle>Var x not in Fun (Set s) []\<rangle> \<in> C \<longrightarrow> s \<notin> \<alpha>' x"
+    using transaction_check_comp_in_aux[OF T_adm, of \<alpha>']
+    unfolding C_def
+    by (fast, fast)
+  ultimately have 4: "transaction_check_pre (FP, OCC, TI) T \<alpha>'"
+    using a6 transaction_check_preI[of T \<alpha>' OCC FP TI]
+    unfolding \<alpha>'_def \<theta>_def C_def
+    by simp
+
+  have 5: "\<forall>x \<in> fv_transaction T. fst x = TAtom Value \<longrightarrow> \<alpha> x = \<alpha>' x"
+    using a1 by (auto simp add: \<alpha>'_def)
+
+  have 6: "\<alpha>' \<in> abs_substs_fun ` set (transaction_check_comp msgcs (FP, OCC, TI) T)"
+    using transaction_check_compI[OF 4 T_adm, of msgcs] a6 a7
+    unfolding \<alpha>'_def 
+    by auto
+
+  show ?thesis using 5 6 by blast
+qed
+end
+
+lemma transaction_check_trivial_case:
+  assumes "transaction_updates T = []"
+    and "transaction_send T = []"
+  shows "transaction_check FPT T"
+using assms
+by (simp add: list_all_iff transaction_check_def transaction_check'_def transaction_check_post_def)
+
+end
+
+
+context stateful_protocol_model
+begin
+
+context
+begin
+
+additional message-transmission steps such that the following holds:
+receive-step.\<close>
+subsection \<open>Automatically Checking Protocol Security in a Typed Model\<close>
+    { \<comment> \<open>since \<open>y\<close> is fresh \<open>(\<xi> \<circ>\<^sub>s \<sigma> \<circ>\<^sub>s \<alpha>) y \<cdot> \<I>\<close> cannot be part of the database state of \<open>\<I> \<A>\<close>\<close>
+          using \<open>tu = Var u\<close> tu var_subterm_trms\<^sub>s\<^sub>s\<^sub>t_is_vars\<^sub>s\<^sub>s\<^sub>t by fastforce 
+          using \<open>tu = Var u\<close> \<open>tu \<cdot> \<I> = \<sigma> x\<close> by auto
+                \<open>fv t \<subseteq> fv_transaction T\<close> \<Gamma>\<^sub>v_TAtom''(2)[of x]
+   \<comment> \<open>The set-membership status of all value constants in T under \<open>\<I>\<close>, \<open>\<sigma>\<close>, \<open>\<alpha>\<close> are covered by the check\<close>
+  \<comment> \<open>All set-membership changes are covered by the term implication graph\<close>
+  \<comment> \<open>All set-membership changes are covered by the fixed point\<close>
+subsection \<open>Theorem: A Protocol is Secure if it is Covered by a Fixed-Point\<close>
+subsection \<open>Alternative Protocol-Coverage Check\<close>
+subsection \<open>Automatic Fixed-Point Computation\<close>
+subsection \<open>Locales for Protocols Proven Secure through Fixed-Point Coverage\<close>
+subsection \<open>Automatic Protocol Composition\<close>
+          using \<open>subst_domain \<delta>' = fv (s \<cdot> \<theta>)\<close> by auto
+        hence "fv t = {}" using \<open>s' = s \<cdot> \<theta> \<cdot> \<delta>'\<close> *(3) ground_subterm by blast

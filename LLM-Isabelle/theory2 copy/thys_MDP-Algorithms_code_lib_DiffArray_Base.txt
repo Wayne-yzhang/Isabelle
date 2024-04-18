@@ -1,0 +1,406 @@
+theory DiffArray_Base
+imports 
+  Main
+  "HOL-Library.Code_Target_Numeral"
+  
+begin
+
+
+
+definition "tabulate n f = map f [0..<n]"
+  
+context
+  notes [simp] = tabulate_def
+begin
+  
+lemma tabulate0[simp]: "tabulate 0 f = []" by simp
+
+lemma tabulate_Suc: "tabulate (Suc n) f = tabulate n f @ [f n]" by simp
+
+lemma tabulate_Suc': "tabulate (Suc n) f = f 0 # tabulate n (f o Suc)"
+  by (simp add: map_upt_Suc del: upt_Suc)
+
+lemma tabulate_const[simp]: "tabulate n (\<lambda>_. c) = replicate n c" by (auto simp: map_replicate_trivial)
+
+lemma length_tabulate[simp]: "length (tabulate n f) = n" by simp
+lemma nth_tabulate[simp]: "i<n \<Longrightarrow> tabulate n f ! i = f i" by simp 
+
+lemma upd_tabulate: "(tabulate n f)[i:=x] = tabulate n (f(i:=x))" 
+  apply (induction n)
+  by (auto simp: list_update_append split: nat.split)
+
+lemma take_tabulate: "take n (tabulate m f) = tabulate (min n m) f"
+  by (simp add: min_def take_map)
+  
+lemma hd_tabulate[simp]: "n\<noteq>0 \<Longrightarrow> hd (tabulate n f) = f 0" 
+  by (cases n) (simp add: map_upt_Suc del: upt_Suc)+
+  
+lemma tl_tabulate: "tl (tabulate n f) = tabulate (n-1) (f o Suc)"
+  apply (simp add: map_upt_Suc map_Suc_upt del: upt_Suc flip: map_tl map_map)
+  by (cases n; simp)
+
+lemma tabulate_cong[fundef_cong]: "n=n' \<Longrightarrow> (\<And>i. i<n \<Longrightarrow> f i = f' i) \<Longrightarrow> tabulate n f = tabulate n' f'"
+  by simp  
+
+lemma tabulate_nth_take: "n \<le> length xs \<Longrightarrow> tabulate n ((!) xs) = take n xs"  
+  by (rule nth_equalityI, auto)
+  
+end
+
+lemma drop_tabulate: "drop n (tabulate m f) = tabulate (m-n) (f o (+)n)"
+  apply (induction n arbitrary: m f)
+  apply (auto simp: drop_Suc drop_tl tl_tabulate comp_def)
+  done
+
+
+
+typedef 'a array = "UNIV :: 'a list set" 
+  morphisms array_\<alpha> Array
+  by blast
+setup_lifting type_definition_array
+
+lift_definition array_new :: "nat \<Rightarrow> 'a \<Rightarrow> 'a array" is "\<lambda>n a. replicate n a" .
+
+lift_definition array_tabulate :: "nat \<Rightarrow> (nat \<Rightarrow> 'a) \<Rightarrow> 'a array" is "\<lambda>n f. Array (tabulate n f)" .
+  
+lift_definition array_length :: "'a array \<Rightarrow> nat" is length .
+  
+lift_definition array_get :: "'a array \<Rightarrow> nat \<Rightarrow> 'a" is nth .
+
+lift_definition array_set :: "'a array \<Rightarrow> nat \<Rightarrow> 'a \<Rightarrow> 'a array" is list_update .
+  
+  
+ 
+
+named_theorems array_refine
+context
+  notes [simp] = Array_inverse
+begin
+
+  lemma array_\<alpha>_inj: "array_\<alpha> a = array_\<alpha> b \<Longrightarrow> a=b" by transfer auto
+
+  lemma array_eq_iff: "a=b \<longleftrightarrow> array_\<alpha> a = array_\<alpha> b" by transfer auto
+  
+  lemma array_new_refine[simp,array_refine]: "array_\<alpha> (array_new n a) = replicate n a" by transfer auto
+
+  lemma array_tabulate_refine[simp,array_refine]: "array_\<alpha> (array_tabulate n f) = tabulate n f" by transfer auto
+  
+  lemma array_length_refine[simp,array_refine]: "array_length a = length (array_\<alpha> a)" by transfer auto
+  
+  lemma array_get_refine[simp,array_refine]: "array_get a i = array_\<alpha> a ! i" by transfer auto
+
+  lemma array_set_refine[simp,array_refine]: "array_\<alpha> (array_set a i x) = (array_\<alpha> a)[i := x]" by transfer auto
+
+  lemma array_of_list_refine[simp,array_refine]: "array_\<alpha> (array_of_list xs) = xs" by transfer auto
+    
+end  
+
+lifting_update array.lifting
+lifting_forget array.lifting
+
+  
+
+definition "array_grow a n dflt = (
+  let la = array_length a in 
+  array_tabulate n (\<lambda>i. if i<la then array_get a i else dflt)
+)"
+
+lemma tabulate_grow: "tabulate n (\<lambda>i. if i < length xs then xs!i else d) = take n xs @ (replicate (n-length xs) d)"
+  apply (induction n)
+  apply (auto simp: tabulate_Suc take_Suc_conv_app_nth replicate_append_same Suc_diff_le)
+  done
+
+lemma array_grow_refine[simp,array_refine]: 
+  "array_\<alpha> (array_grow a n d) = take n (array_\<alpha> a) @ replicate (n-length (array_\<alpha> a)) d"
+  by (auto simp: array_grow_def tabulate_grow cong: if_cong)
+
+definition "array_take a n = (
+  let n = min (array_length a) n in
+  array_tabulate n (array_get a)
+)"
+  
+lemma tabulate_take: "tabulate (min (length xs) n) ((!) xs) = take n xs"
+  by (auto simp: min_def tabulate_nth_take)
+
+lemma array_take_refine[simp,array_refine]: "array_\<alpha> (array_take a n) = take n (array_\<alpha> a)"
+  by (auto simp: array_take_def tabulate_take cong: tabulate_cong)
+
+definition "array_get_oo x a i \<equiv>
+  if i<array_length a then array_get a i else x"
+
+lemma array_get_oo_refine[simp,array_refine]: "array_get_oo x a i = (if i<length (array_\<alpha> a) then array_\<alpha> a!i else x)"
+  by (simp add: array_get_oo_def)
+
+definition "array_set_oo f a i x \<equiv>
+  if i<array_length a then array_set a i x else f()"
+
+lemma array_set_oo_refine[simp,array_refine]: "array_\<alpha> (array_set_oo f a i x) 
+  = (if i<length (array_\<alpha> a) then (array_\<alpha> a)[i:=x] else array_\<alpha> (f ()))"
+  by (simp add: array_set_oo_def)
+  
+    
+definition "array_map f a \<equiv> array_tabulate (array_length a) (f o array_get a)"
+  
+lemma array_map_refine[simp,array_refine]: "array_\<alpha> (array_map f a) = map f (array_\<alpha> a)"
+  unfolding array_map_def
+  apply (auto simp: tabulate_def simp flip: map_map cong: map_cong)
+  by (smt (z3) atLeastLessThan_iff length_map map_eq_conv map_nth nth_map set_upt)
+
+lemma array_map_cong[fundef_cong]: "a=a' \<Longrightarrow> (\<And>x. x\<in>set (array_\<alpha> a) \<Longrightarrow> f x = f' x) \<Longrightarrow> array_map f a = array_map f' a'" 
+  by (simp add: array_eq_iff)
+
+
+context
+  fixes f :: "'a \<Rightarrow> 's \<Rightarrow> 's" and xs :: "'a list"
+begin  
+function foldl_idx where
+  "foldl_idx i s = (if i<length xs then foldl_idx (i+1) (f (xs!i) s) else s)"  
+  by pat_completeness auto
+termination
+  apply (relation "measure (\<lambda>(i,_). length xs - i)")
+  apply auto
+  done
+  
+lemmas [simp del] = foldl_idx.simps  
+  
+lemma foldl_idx_eq: "foldl_idx i s = fold f (drop i xs) s"
+  apply (induction i s rule: foldl_idx.induct)
+  apply (subst foldl_idx.simps)
+  apply (auto simp flip: Cons_nth_drop_Suc)
+  done
+
+lemma fold_by_idx: "fold f xs s = foldl_idx 0 s" using foldl_idx_eq by simp 
+      
+end  
+
+fun foldr_idx where
+  "foldr_idx f xs 0 s = s"
+| "foldr_idx f xs (Suc i) s = foldr_idx f xs i (f (xs!i) s)"  
+
+lemma foldr_idx_eq: "i\<le>length xs \<Longrightarrow> foldr_idx f xs i s = foldr f (take i xs) s"
+  apply (induction i arbitrary: s)
+  apply (auto simp: take_Suc_conv_app_nth)
+  done
+  
+lemma foldr_by_idx: "foldr f xs s = foldr_idx f xs (length xs) s" apply (subst foldr_idx_eq) by auto  
+
+
+context
+  fixes f :: "'a \<Rightarrow> 's \<Rightarrow> 's" and a :: "'a array"
+begin  
+
+function array_foldl_idx where
+  "array_foldl_idx i s = (if i<array_length a then array_foldl_idx (i+1) (f (array_get a i) s) else s)"  
+  by pat_completeness auto
+termination
+  apply (relation "measure (\<lambda>(i,_). array_length a - i)")
+  apply auto
+  done
+
+lemmas [simp del] = array_foldl_idx.simps  
+
+end
+
+lemma array_foldl_idx_refine[simp, array_refine]: "array_foldl_idx f a i s = foldl_idx f (array_\<alpha> a) i s"
+  apply (induction i s rule: foldl_idx.induct)
+  apply (subst array_foldl_idx.simps)
+  apply (subst foldl_idx.simps)
+  by fastforce
+
+definition "array_fold f a s \<equiv> array_foldl_idx f a 0 s"
+lemma array_fold_refine[simp, array_refine]: "array_fold f a s = fold f (array_\<alpha> a) s"  
+  unfolding array_fold_def
+  by (simp add: fold_by_idx)
+
+
+fun array_foldr_idx where
+  "array_foldr_idx f xs 0 s = s"
+| "array_foldr_idx f xs (Suc i) s = array_foldr_idx f xs i (f (array_get xs i) s)"  
+  
+lemma array_foldr_idx_refine[simp, array_refine]: "array_foldr_idx f xs i s = foldr_idx f (array_\<alpha> xs) i s"
+  apply (induction i arbitrary: s)
+  by auto  
+    
+definition "array_foldr f xs s \<equiv> array_foldr_idx f xs (array_length xs) s"  
+  
+lemma array_foldr_refine[simp, array_refine]: "array_foldr f xs s = foldr f (array_\<alpha> xs) s"
+  by (simp add: array_foldr_def foldr_by_idx)  
+
+
+
+
+
+definition [code del]: "array_new' == array_new o nat_of_integer"
+definition [code del]: "array_tabulate' n f \<equiv> array_tabulate (nat_of_integer n) (f o integer_of_nat)"
+
+definition [code del]: "array_length' == integer_of_nat o array_length"
+definition [code del]: "array_get' a == array_get a o nat_of_integer"
+definition [code del]: "array_set' a == array_set a o nat_of_integer"
+definition [code del]:
+  "array_get_oo' x a == array_get_oo x a o nat_of_integer"
+definition [code del]:
+  "array_set_oo' f a == array_set_oo f a o nat_of_integer"
+
+
+lemma [code]:
+  "array_new == array_new' o integer_of_nat"
+  "array_tabulate n f == array_tabulate' (integer_of_nat n) (f o nat_of_integer)"
+  "array_length == nat_of_integer o array_length'"
+  "array_get a == array_get' a o integer_of_nat"
+  "array_set a == array_set' a o integer_of_nat"
+  "array_get_oo x a == array_get_oo' x a o integer_of_nat"
+  "array_set_oo g a == array_set_oo' g a o integer_of_nat"
+  by (simp_all
+    del: array_refine
+    add: o_def
+    add: array_new'_def array_tabulate'_def array_length'_def array_get'_def array_set'_def
+      array_get_oo'_def array_set_oo'_def)
+
+
+lemmas array_get_oo'_fallback[code] = array_get_oo'_def[unfolded array_get_oo_def[abs_def]]
+lemmas array_set_oo'_fallback[code] = array_set_oo'_def[unfolded array_set_oo_def[abs_def]]
+
+lemma array_tabulate'_fallback[code]: 
+  "array_tabulate' n f = array_of_list (map (f o integer_of_nat) [0..<nat_of_integer n])"
+  unfolding array_tabulate'_def 
+  by (simp add: array_eq_iff tabulate_def)
+
+lemma array_new'_fallback[code]: "array_new' n x = array_of_list (replicate (nat_of_integer n) x)"  
+  by (simp add: array_new'_def array_eq_iff)
+  
+
+  
+  
+
+code_printing type_constructor array \<rightharpoonup>
+  (Haskell) "Array.ArrayType/ _"
+
+code_reserved Haskell array_of_list
+
+
+code_printing code_module "Array" \<rightharpoonup>
+
+
+
+
+code_printing constant Array \<rightharpoonup> (Haskell) "Array.array'_of'_list"
+code_printing constant array_new' \<rightharpoonup> (Haskell) "Array.array'_new"
+code_printing constant array_length' \<rightharpoonup> (Haskell) "Array.array'_length"
+code_printing constant array_get' \<rightharpoonup> (Haskell) "Array.array'_get"
+code_printing constant array_set' \<rightharpoonup> (Haskell) "Array.array'_set"
+code_printing constant array_of_list \<rightharpoonup> (Haskell) "Array.array'_of'_list"
+
+
+
+code_printing code_module "FArray" \<rightharpoonup>
+  (SML)
+
+
+code_printing
+  type_constructor array \<rightharpoonup> (SML) "_/ FArray.IsabelleMapping.ArrayType"
+| constant Array \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_of'_list"
+| constant array_new' \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_new"
+| constant array_tabulate' \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_tabulate"
+| constant array_length' \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_length"
+| constant array_get' \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_get"
+| constant array_set' \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_set"
+| constant array_of_list \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_of'_list"
+| constant array_get_oo' \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_get'_oo"
+| constant array_set_oo' \<rightharpoonup> (SML) "FArray.IsabelleMapping.array'_set'_oo"
+
+
+code_printing code_module "DiffArray" \<rightharpoonup>
+
+code_printing
+  type_constructor array \<rightharpoonup> (Scala) "DiffArray.T[_]"
+| constant Array \<rightharpoonup> (Scala) "DiffArray.array'_of'_list"
+| constant array_new' \<rightharpoonup> (Scala) "DiffArray.array'_new((_).toInt,(_))"
+| constant array_length' \<rightharpoonup> (Scala) "DiffArray.length((_)).toInt"
+| constant array_get' \<rightharpoonup> (Scala) "DiffArray.get((_),(_).toInt)"
+| constant array_set' \<rightharpoonup> (Scala) "DiffArray.set((_),(_).toInt,(_))"
+| constant array_of_list \<rightharpoonup> (Scala) "DiffArray.array'_of'_list"
+| constant array_get_oo' \<rightharpoonup> (Scala) "DiffArray.get'_oo((_),(_),(_).toInt)"
+| constant array_set_oo' \<rightharpoonup> (Scala) "DiffArray.set'_oo((_),(_),(_).toInt,(_))"
+
+context begin
+export_code test_diffarray_setup checking SML OCaml? Haskell?
+end
+
+
+
+
+
+definition "test1 \<equiv> 
+  let a=array_of_list [1,2,3,4,5,6];
+      b=array_tabulate 6 (Suc);
+      a'=array_set a 3 42;
+      b'=array_set b 3 42;
+      c=array_new 6 0
+  in
+    \<forall>i\<in>{0..<6}. 
+      array_get a i = i+1
+    \<and> array_get b i = i+1
+    \<and> array_get a' i = (if i=3 then 42 else i+1)  
+    \<and> array_get b' i = (if i=3 then 42 else i+1)  
+    \<and> array_get c i = (0::nat)
+          "
+
+lemma enum_rangeE:
+  assumes "i\<in>{l..<h}"
+  assumes "P l"
+  assumes "i\<in>{Suc l..<h} \<Longrightarrow> P i"
+  shows "P i"
+  using assms
+  by (metis atLeastLessThan_iff less_eq_Suc_le nat_less_le)          
+          
+          
+lemma "test1"
+  unfolding test1_def Let_def
+  apply (intro ballI conjI)
+  apply (erule enum_rangeE, (simp; fail))+ apply simp
+  apply (erule enum_rangeE, (simp; fail))+ apply simp
+  apply (erule enum_rangeE, (simp; fail))+ apply simp
+  apply (erule enum_rangeE, (simp; fail))+ apply simp
+  apply (erule enum_rangeE, (simp; fail))+ apply simp
+  done  
+  
+
+export_code test1 checking OCaml? Haskell? SML
+
+
+hide_const test1
+hide_fact test1_def
+
+
+experiment
+begin
+
+fun allTrue :: "bool list \<Rightarrow> nat \<Rightarrow> bool list" where
+"allTrue a 0 = a" |
+"allTrue a (Suc i) = (allTrue a i)[i := True]"
+
+lemma length_allTrue: "n \<le> length a  \<Longrightarrow> length(allTrue a n) = length a"
+by(induction n) (auto)
+
+lemma "n \<le> length a \<Longrightarrow> \<forall>i < n. (allTrue a n) ! i"
+by(induction n) (auto simp: nth_list_update length_allTrue)
+
+
+fun allTrue' :: "bool array \<Rightarrow> nat \<Rightarrow> bool array" where
+"allTrue' a 0 = a" |
+"allTrue' a (Suc i) = array_set (allTrue' a i) i True"
+
+
+lemma "array_\<alpha> (allTrue' xs i) = allTrue (array_\<alpha> xs) i"
+  apply (induction xs i rule: allTrue'.induct)
+  apply auto
+  done
+
+
+end
+
+
+
+
+
+end

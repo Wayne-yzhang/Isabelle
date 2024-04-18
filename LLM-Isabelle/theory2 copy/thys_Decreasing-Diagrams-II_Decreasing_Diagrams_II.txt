@@ -1,0 +1,456 @@
+theory Decreasing_Diagrams_II
+imports
+  Decreasing_Diagrams_II_Aux
+  "HOL-Cardinals.Wellorder_Extension"
+  "Abstract-Rewriting.Abstract_Rewriting"
+begin
+
+
+datatype accent = Acute | Grave | Macron
+
+lemma UNIV_accent: "UNIV = { Acute, Grave, Macron }"
+using accent.nchotomy by blast
+
+lemma finite_accent: "finite (UNIV :: accent set)"
+by (simp add: UNIV_accent)
+
+type_synonym 'a letter = "accent \<times> 'a"
+
+definition letter_less :: "('a \<times> 'a) set \<Rightarrow> ('a letter \<times> 'a letter) set" where
+  [simp]: "letter_less R = {(a,b). (snd a, snd b) \<in> R}"
+
+lemma mono_letter_less: "mono letter_less"
+by (auto simp add: mono_def)
+
+
+
+type_synonym 'a greek = "'a letter list"
+
+definition adj_msog :: "'a greek \<Rightarrow> 'a greek \<Rightarrow> ('a letter \<times> 'a greek) \<Rightarrow> ('a letter \<times> 'a greek)"
+where
+  "adj_msog xs zs l \<equiv>
+    case l of (y,ys) \<Rightarrow> (y, case fst y of Acute \<Rightarrow> ys @ zs | Grave \<Rightarrow> xs @ ys | Macron \<Rightarrow> ys)"
+
+definition ms_of_greek :: "'a greek \<Rightarrow> ('a letter \<times> 'a greek) multiset" where
+  "ms_of_greek as = mset
+    (map (\<lambda>(xs, y, zs) \<Rightarrow> adj_msog xs zs (y, [])) (list_splits as))"
+
+lemma adj_msog_adj_msog[simp]:
+  "adj_msog xs zs (adj_msog xs' zs' y) = adj_msog (xs @ xs') (zs' @ zs) y"
+by (auto simp: adj_msog_def split: accent.splits prod.splits)
+
+lemma compose_adj_msog[simp]: "adj_msog xs zs \<circ> adj_msog xs' zs' = adj_msog (xs @ xs') (zs' @ zs)"
+by (simp add: comp_def)
+
+lemma adj_msog_single:
+  "adj_msog xs zs (x,[]) = (x, (case fst x of Grave \<Rightarrow> xs | Acute \<Rightarrow> zs | Macron \<Rightarrow> []))"
+by (simp add: adj_msog_def split: accent.splits)
+
+lemma ms_of_greek_elem:
+  assumes "(x,xs) \<in> set_mset (ms_of_greek ys)"
+  shows "x \<in> set ys"
+using assms by (auto dest: elem_list_splits_elem simp: adj_msog_def ms_of_greek_def)
+
+lemma ms_of_greek_shorter:
+  assumes "(x, t) \<in># ms_of_greek s"
+  shows "length s > length t"
+using assms[unfolded ms_of_greek_def in_multiset_in_set]
+by (auto simp: elem_list_splits_length adj_msog_def split: accent.splits)
+
+lemma msog_append: "ms_of_greek (xs @ ys) = image_mset (adj_msog [] ys) (ms_of_greek xs) +
+  image_mset (adj_msog xs []) (ms_of_greek ys)"
+by (auto simp: ms_of_greek_def list_splits_append multiset.map_comp comp_def prod.case_distrib)
+
+definition nest :: "('a \<times> 'a) set \<Rightarrow> ('a greek \<times> 'a greek) set \<Rightarrow> ('a greek \<times> 'a greek) set" where
+  [simp]: "nest r s = {(a,b). (ms_of_greek a, ms_of_greek b) \<in> mult (letter_less r <*lex*> s)}"
+
+lemma mono_nest: "mono (nest r)"
+unfolding mono_def
+proof (intro allI impI subsetI)
+  fix R S x
+  assume 1: "R \<subseteq> S" and 2: "x \<in> nest r R"
+  from 1 have "mult (letter_less r <*lex*> R) \<subseteq> mult (letter_less r <*lex*> S)"
+  using mono_mult mono_lex2[of "letter_less r"] unfolding mono_def by blast
+  with 2 show "x \<in> nest r S" by auto
+qed
+
+lemma nest_mono[mono_set]: "x \<subseteq> y \<Longrightarrow> (a,b) \<in> nest r x \<longrightarrow> (a,b) \<in> nest r y"
+using mono_nest[unfolded mono_def, rule_format, of x y r] by blast
+
+definition greek_less :: "('a \<times> 'a) set \<Rightarrow> ('a greek \<times> 'a greek) set" where
+  "greek_less r = lfp (nest r)"
+
+lemma greek_less_unfold:
+  "greek_less r = nest r (greek_less r)"
+using mono_nest[of r] lfp_unfold[of "nest r"] by (simp add: greek_less_def)
+
+
+
+lemma strict_order_letter_less:
+  assumes "strict_order r"
+  shows "strict_order (letter_less r)"
+using assms unfolding irrefl_def trans_def letter_less_def by fast
+
+lemma strict_order_nest:
+  assumes r: "strict_order r" and R: "strict_order R"
+  shows "strict_order (nest r R)"
+proof -
+  have "strict_order (mult (letter_less r <*lex*> R))"
+  using strict_order_letter_less[of r] irrefl_lex_prod[of "letter_less r" R]
+    trans_lex_prod[of "letter_less r" R] strict_order_mult[of "letter_less r <*lex*> R"] assms
+  by fast
+  from this show "strict_order (nest r R)" unfolding nest_def trans_def irrefl_def by fast
+qed
+
+lemma strict_order_greek_less:
+  assumes "strict_order r"
+  shows "strict_order (greek_less r)"
+by (simp add: greek_less_def strict_order_lfp[OF mono_nest strict_order_nest[OF assms]])
+
+lemma trans_letter_less:
+  assumes "trans r"
+  shows "trans (letter_less r)"
+using assms unfolding trans_def letter_less_def by fast
+
+lemma trans_order_nest: "trans (nest r R)"
+using trans_mult unfolding nest_def trans_def by fast
+
+lemma trans_greek_less[simp]: "trans (greek_less r)"
+by (subst greek_less_unfold) (rule trans_order_nest)
+
+lemma mono_greek_less: "mono greek_less"
+unfolding greek_less_def mono_def
+proof (intro allI impI lfp_mono)
+  fix r s :: "('a \<times> 'a) set" and R :: "('a greek \<times> 'a greek) set"
+  assume "r \<subseteq> s"
+  then have "letter_less r <*lex*> R \<subseteq> letter_less s <*lex*> R"
+  using mono_letter_less mono_lex1 unfolding mono_def by metis
+  then show "nest r R \<subseteq> nest s R" using mono_mult unfolding nest_def mono_def by blast
+qed
+
+
+
+definition inv_letter :: "'a letter \<Rightarrow> 'a letter" where
+  "inv_letter l \<equiv>
+    case l of (a, x) \<Rightarrow> (case a of Grave \<Rightarrow> Acute | Acute \<Rightarrow> Grave | Macron \<Rightarrow> Macron, x)"
+
+lemma inv_letter_pair[simp]:
+  "inv_letter (a, x) = (case a of Grave \<Rightarrow> Acute | Acute \<Rightarrow> Grave | Macron \<Rightarrow> Macron, x)"
+by (simp add: inv_letter_def)
+
+lemma snd_inv_letter[simp]:
+  "snd (inv_letter x) = snd x"
+by (simp add: inv_letter_def split: prod.splits)
+
+lemma inv_letter_invol[simp]:
+  "inv_letter (inv_letter x) = x"
+by (simp add: inv_letter_def split: prod.splits accent.splits)
+
+lemma inv_letter_mono[simp]:
+  assumes "(x, y) \<in> letter_less r"
+  shows "(inv_letter x, inv_letter y) \<in> letter_less r"
+using assms by simp
+
+definition inv_greek :: "'a greek \<Rightarrow> 'a greek" where
+  "inv_greek s = rev (map inv_letter s)"
+
+lemma inv_greek_invol[simp]:
+  "inv_greek (inv_greek s) = s"
+by (simp add: inv_greek_def rev_map comp_def)
+
+lemma inv_greek_append:
+  "inv_greek (s @ t) = inv_greek t @ inv_greek s"
+by (simp add: inv_greek_def)
+
+definition inv_msog :: "('a letter \<times> 'a greek) multiset \<Rightarrow> ('a letter \<times> 'a greek) multiset" where
+  "inv_msog M = image_mset (\<lambda>(x, t). (inv_letter x, inv_greek t)) M"
+
+lemma inv_msog_invol[simp]:
+  "inv_msog (inv_msog M) = M"
+by (simp add: inv_msog_def multiset.map_comp comp_def prod.case_distrib)
+
+lemma ms_of_greek_inv_greek:
+  "ms_of_greek (inv_greek M) = inv_msog (ms_of_greek M)"
+unfolding inv_msog_def inv_greek_def ms_of_greek_def list_splits_rev list_splits_map mset_map
+  multiset.map_comp mset_rev inv_letter_def adj_msog_def
+by (rule cong[OF cong[OF refl[of "image_mset"]] refl]) (auto split: accent.splits)
+
+lemma inv_greek_mono:
+  assumes "trans r" and "(s, t) \<in> greek_less r"
+  shows "(inv_greek s, inv_greek t) \<in> greek_less r"
+using assms(2)
+proof (induct "length s + length t" arbitrary: s t rule: less_induct)
+  case (less s t)
+  have "(inv_msog (ms_of_greek s), inv_msog (ms_of_greek t)) \<in> mult (letter_less r <*lex*> greek_less r)"
+  unfolding inv_msog_def
+  proof (induct rule: mult_of_image_mset[OF * *])
+    case (1 x y) thus ?case
+    by (auto intro: less(1) split: prod.splits dest!: ms_of_greek_shorter)
+  next
+    case 2 thus ?case using less(2) by (subst(asm) greek_less_unfold) simp
+  qed
+  thus ?case by (subst greek_less_unfold) (auto simp: ms_of_greek_inv_greek)
+qed
+
+
+
+lemma greek_less_rempty[simp]:
+  "(a,[]) \<in> greek_less r \<longleftrightarrow> False"
+by (subst greek_less_unfold) (auto simp: ms_of_greek_def)
+
+lemma greek_less_nonempty:
+  assumes "b \<noteq> []"
+  shows "(a,b) \<in> greek_less r \<longleftrightarrow> (a,b) \<in> nest r (greek_less r)"
+by (subst greek_less_unfold) simp
+
+lemma greek_less_lempty[simp]:
+  "([],b) \<in> greek_less r \<longleftrightarrow> b \<noteq> []"
+proof
+  assume "([],b) \<in> greek_less r"
+  then show "b \<noteq> []" using greek_less_rempty by fast
+next
+  assume "b \<noteq> []"
+  then show "([],b) \<in> greek_less r"
+qed
+
+lemma greek_less_singleton:
+  "(a, b) \<in> letter_less r \<Longrightarrow> ([a], [b]) \<in> greek_less r"
+by (subst greek_less_unfold) (auto split: accent.splits simp: adj_msog_def ms_of_greek_def)
+
+lemma ms_of_greek_cons:
+  "ms_of_greek (x # s) = {# adj_msog [] s (x,[]) #} + image_mset (adj_msog [x] []) (ms_of_greek s)"
+using msog_append[of "[x]" s]
+by (auto simp add: adj_msog_def ms_of_greek_def accent.splits)
+
+lemma greek_less_cons_mono:
+  assumes "trans r"
+  shows "(s, t) \<in> greek_less r \<Longrightarrow> (x # s, x # t) \<in> greek_less r"
+proof (induct "length s + length t" arbitrary: s t rule: less_induct)
+  case (less s t)
+  {
+    fix M have "(M + image_mset (adj_msog [x] []) (ms_of_greek s),
+      M + image_mset (adj_msog [x] []) (ms_of_greek t)) \<in> mult (letter_less r <*lex*> greek_less r)"
+    proof (rule mult_on_union, induct rule: mult_of_image_mset[OF * *])
+      case (1 x y) thus ?case unfolding adj_msog_def
+      by (auto intro: less(1) split: prod.splits accent.splits dest!: ms_of_greek_shorter)
+    next
+      case 2 thus ?case using less(2) by (subst(asm) greek_less_unfold) simp
+    qed
+  }
+  moreover {
+    fix N have "({# adj_msog [] s (x,[]) #} + N,{# adj_msog [] t (x,[]) #} + N) \<in>
+      (mult (letter_less r <*lex*> greek_less r))\<^sup>="
+    by (auto simp: adj_msog_def less split: accent.splits) }
+  ultimately show ?case using transD[OF trans_mult]
+  by (subst greek_less_unfold) (fastforce simp: ms_of_greek_cons)
+qed
+
+lemma greek_less_app_mono2:
+  assumes "trans r" and "(s, t) \<in> greek_less r"
+  shows "(p @ s, p @ t) \<in> greek_less r"
+using assms by (induct p) (auto simp add: greek_less_cons_mono)
+
+lemma greek_less_app_mono1:
+  assumes "trans r" and "(s, t) \<in> greek_less r"
+  shows "(s @ p, t @ p) \<in> greek_less r"
+using inv_greek_mono[of r "inv_greek p @ inv_greek s" "inv_greek p @ inv_greek t"]
+by (simp add: assms inv_greek_append inv_greek_mono greek_less_app_mono2)
+
+
+
+lemma greek_embed:
+  assumes "trans r"
+  shows "list_emb (\<lambda>a b. (a, b): reflcl (letter_less r)) a b \<Longrightarrow> (a, b) \<in> reflcl (greek_less r)"
+proof (induct rule: list_emb.induct)
+  case (list_emb_Cons a b y) thus ?case
+    greek_less_app_mono1[of r "[]" "[y]" a] greek_less_app_mono2[of r a b "[y]"] by auto
+next
+  case (list_emb_Cons2 x y a b) thus ?case
+    greek_less_app_mono1[of r "[x]" "[y]" a] greek_less_app_mono2[of r a b "[y]"] by auto
+qed simp
+
+lemma wqo_letter_less:
+  assumes t: "trans r" and w: "wqo_on (\<lambda>a b. (a, b) \<in> r\<^sup>=) UNIV"
+  shows "wqo_on (\<lambda>a b. (a, b) \<in> (letter_less r)\<^sup>=) UNIV"
+proof (rule wqo_on_hom[of id _ _ "prod_le (=) (\<lambda>a b. (a, b) \<in> r\<^sup>=)", unfolded image_id id_apply])
+  show "wqo_on (prod_le ((=) :: accent \<Rightarrow> accent \<Rightarrow> bool) (\<lambda>a b. (a, b) \<in> r\<^sup>=)) UNIV"
+  by (rule dickson[OF finite_eq_wqo_on[OF finite_accent] w, unfolded UNIV_Times_UNIV])
+qed (insert t, auto simp: transp_on_def trans_def prod_le_def)
+
+lemma wf_greek_less:
+  assumes "wf r" and "trans r"
+  shows "wf (greek_less r)"
+proof -
+  define q' where "q' = q - Id"
+  by (auto simp add: well_order_on_def linear_order_on_def partial_order_on_def preorder_on_def
+      refl_on_def q'_def)
+  unfolding well_order_on_def linear_order_on_def partial_order_on_def preorder_on_def antisym_def
+    trans_def irrefl_def q'_def by blast+
+  have "wqo_on (\<lambda>a b. (a,b) \<in> (greek_less q')\<^sup>=) UNIV"
+  proof (intro wqo_on_hom[of id UNIV "(\<lambda>a b. (a, b) \<in> (greek_less q')\<^sup>=)"
+         "list_emb (\<lambda>a b. (a, b) \<in> (letter_less q')\<^sup>=)", unfolded surj_id])
+    show "transp (\<lambda>a b. (a, b) \<in> (greek_less q')\<^sup>=)"
+    using trans_greek_less[of q'] unfolding trans_def transp_on_def by blast
+  next
+    show "\<forall>x\<in>UNIV. \<forall>y\<in>UNIV. list_emb (\<lambda>a b. (a, b) \<in> (letter_less q')\<^sup>=) x y \<longrightarrow>
+          (id x, id y) \<in> (greek_less q')\<^sup>="
+  next
+    show "wqo_on (list_emb (\<lambda>a b. (a, b) \<in> (letter_less q')\<^sup>=)) UNIV"
+    by (auto simp: well_order_implies_wqo)
+  qed
+  with wqo_on_imp_wfp_on[OF this] strict_order_strict[OF strict_order_greek_less]
+  have "wfp_on (\<lambda>a b. (a, b) \<in> greek_less q') UNIV" by force
+  then show ?thesis
+qed
+
+
+
+lemma pairwise_imp_mult:
+  assumes "N \<noteq> {#}" and "\<forall>x \<in> set_mset M. \<exists>y \<in> set_mset N. (x, y) \<in> r"
+  shows "(M, N) \<in> mult r"
+using assms one_step_implies_mult[of _ _ _ "{#}"] by auto
+
+lemma singleton_greek_less:
+  assumes as: "snd ` set as \<subseteq> under r b"
+  shows "(as, [(a,b)]) \<in> greek_less r"
+proof -
+  {
+    fix e assume "e \<in> set_mset (ms_of_greek as)"
+    with as ms_of_greek_elem[of _ _ as]
+    have "(e, ((a,b),[])) \<in> letter_less r <*lex*> greek_less r"
+    by (cases e) (fastforce simp: adj_msog_def under_def)
+  }
+  moreover have "ms_of_greek [(a,b)] = {# ((a,b),[]) #}"
+  by (auto simp: ms_of_greek_def adj_msog_def split: accent.splits)
+  ultimately show ?thesis
+  by (subst greek_less_unfold) (auto intro!: pairwise_imp_mult)
+qed
+
+lemma peak_greek_less:
+  assumes as: "snd ` set as \<subseteq> under r a" and b': "b' \<in> {[(Grave,b)],[]}"
+  and cs: "snd ` set cs \<subseteq> under r a \<union> under r b" and a': "a' \<in> {[(Acute,a)],[]}"
+  and bs: "snd ` set bs \<subseteq> under r b"
+  shows "(as @ b' @ cs @ a' @ bs, [(Acute,a),(Grave,b)]) \<in> greek_less r"
+proof -
+  let ?A = "(Acute,a)" and ?B = "(Grave,b)"
+  have "(ms_of_greek (as @ b' @ cs @ a' @ bs), ms_of_greek [?A,?B]) \<in> mult (letter_less r <*lex*> greek_less r)"
+  proof (intro pairwise_imp_mult)
+    {
+      fix e assume "e \<in> set_mset (ms_of_greek as)"
+      with as ms_of_greek_elem[of _ _ as]
+      have "(adj_msog [] (b' @ cs @ a' @ bs) e, (?A,[?B])) \<in> letter_less r <*lex*> greek_less r"
+      by (cases e) (fastforce simp: adj_msog_def under_def)
+    }
+    moreover {
+      fix e assume "e \<in> set_mset (ms_of_greek b')"
+      with b' singleton_greek_less[OF as] ms_of_greek_elem[of _ _ b']
+      have "(adj_msog as (cs @ a' @ bs) e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+      by (cases e) (fastforce simp: adj_msog_def ms_of_greek_def)
+    }
+    moreover {
+      fix e assume "e \<in> set_mset (ms_of_greek cs)"
+      with cs ms_of_greek_elem[of _ _ cs]
+      have "(adj_msog (as @ b') (a' @ bs) e, (?A,[?B])) \<in> letter_less r <*lex*> greek_less r \<or>
+            (adj_msog (as @ b') (a' @ bs) e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+      by (cases e) (fastforce simp: adj_msog_def under_def)
+    }
+    moreover {
+      fix e assume "e \<in> set_mset (ms_of_greek a')"
+      with a' singleton_greek_less[OF bs] ms_of_greek_elem[of _ _ a']
+      have "(adj_msog (as @ b' @ cs) bs e, (?A,[?B])) \<in> letter_less r <*lex*> greek_less r"
+      by (cases e) (fastforce simp: adj_msog_def ms_of_greek_def)
+    }
+    moreover {
+      fix e assume "e \<in> set_mset (ms_of_greek bs)"
+      with bs ms_of_greek_elem[of _ _ bs]
+      have "(adj_msog (as @ b' @ cs @ a') [] e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+      by (cases e) (fastforce simp: adj_msog_def under_def)
+    }
+    moreover have "ms_of_greek [?A,?B] = {# (?B,[?A]), (?A,[?B]) #}"
+    by (simp add: adj_msog_def ms_of_greek_def)
+    ultimately show "\<forall>x\<in>set_mset (ms_of_greek (as @ b' @ cs @ a' @ bs)).
+      \<exists>y\<in>set_mset (ms_of_greek [?A,?B]). (x, y) \<in> letter_less r <*lex*> greek_less r"
+    by (auto simp: msog_append) blast
+  qed (auto simp: ms_of_greek_def)
+  then show ?thesis by (subst greek_less_unfold) auto
+qed
+
+lemma rcliff_greek_less1:
+  and as: "snd ` set as \<subseteq> under r a \<inter> under r b" and b': "b' \<in> {[(Grave,b)],[]}"
+  and cs: "snd ` set cs \<subseteq> under r b" and a': "a' = [(Macron,a)]"
+  and bs: "snd ` set bs \<subseteq> under r b"
+  shows "(as @ b' @ cs @ a' @ bs, [(Macron,a),(Grave,b)]) \<in> greek_less r"
+proof -
+  let ?A = "(Macron,a)" and ?B = "(Grave,b)"
+  have *: "ms_of_greek [?A,?B] = {#(?B,[?A]), (?A,[])#}" "ms_of_greek [?A] = {#(?A,[])#}"
+  by (simp_all add: ms_of_greek_def adj_msog_def)
+  then have **: "ms_of_greek [(Macron, a), (Grave, b)] - {#((Macron, a), [])#} \<noteq> {#}"
+  by (auto)
+  {
+    fix e assume "e \<in> set_mset (ms_of_greek as)"
+    with as ms_of_greek_elem[of _ _ as]
+    have "(adj_msog [] (b' @ cs @ a' @ bs) e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+    by (cases e) (force simp: adj_msog_def under_def)
+  }
+  moreover {
+    fix e assume "e \<in> set_mset (ms_of_greek b')"
+    with b' singleton_greek_less as ms_of_greek_elem[of _ _ b']
+    have "(adj_msog as (cs @ a' @ bs) e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+    by (cases e) (fastforce simp: adj_msog_def ms_of_greek_def)
+  }
+  moreover {
+    fix e assume "e \<in> set_mset (ms_of_greek cs)"
+    with cs ms_of_greek_elem[of _ _ cs]
+    have "(adj_msog (as @ b') (a' @ bs) e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+    by (cases e) (fastforce simp: adj_msog_def under_def)
+  }
+  moreover {
+    fix e assume "e \<in> set_mset (ms_of_greek bs)"
+    with bs ms_of_greek_elem[of _ _ bs]
+    have "(adj_msog (as @ b' @ cs @ a') [] e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+    by (cases e) (fastforce simp: adj_msog_def under_def)
+  }
+  moreover have "ms_of_greek [?A,?B] = {# (?B,[?A]), (?A,[]) #}"
+  by (simp add: adj_msog_def ms_of_greek_def)
+  ultimately have "\<forall>x\<in>set_mset (ms_of_greek (as @ b' @ cs @ a' @ bs) - {#(?A,[])#}).
+    \<exists>y\<in>set_mset (ms_of_greek [?A,?B] - {#(?A,[])#}). (x, y) \<in> letter_less r <*lex*> greek_less r"
+  unfolding msog_append by (auto simp: a' msog_append ac_simps * adj_msog_single)
+  from one_step_implies_mult[OF ** this,of "{#(?A,[])#}"]
+  have "(ms_of_greek (as @ b' @ cs @ a' @ bs), ms_of_greek [?A,?B]) \<in> mult (letter_less r <*lex*> greek_less r)"
+  unfolding a' msog_append by (auto simp: a' ac_simps * adj_msog_single)
+  then show ?thesis
+  by (subst greek_less_unfold) auto
+qed
+
+lemma rcliff_greek_less2:
+  and as: "snd ` set as \<subseteq> under r a" and b': "b' \<in> {[(Grave,b)],[]}"
+  and cs: "snd ` set cs \<subseteq> under r a \<union> under r b"
+  shows "(as @ b' @ cs, [(Macron,a),(Grave,b)]) \<in> greek_less r"
+proof -
+  let ?A = "(Macron,a)" and ?B = "(Grave,b)"
+  have "(ms_of_greek (as @ b' @ cs), ms_of_greek [?A,?B]) \<in> mult (letter_less r <*lex*> greek_less r)"
+  proof (intro pairwise_imp_mult)
+    {
+      fix e assume "e \<in> set_mset (ms_of_greek as)"
+      with as ms_of_greek_elem[of _ _ as]
+      have "(adj_msog [] (b' @ cs) e, (?A,[])) \<in> letter_less r <*lex*> greek_less r"
+      by (cases e) (fastforce simp: adj_msog_def under_def)
+    }
+    moreover {
+      fix e assume "e \<in> set_mset (ms_of_greek b')"
+      with b' singleton_greek_less[OF as] ms_of_greek_elem[of _ _ b']
+      have "(adj_msog as (cs) e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+      by (cases e) (fastforce simp: adj_msog_def ms_of_greek_def)
+    }
+    moreover {
+      fix e assume "e \<in> set_mset (ms_of_greek cs)"
+      with cs ms_of_greek_elem[of _ _ cs]
+      have "(adj_msog (as @ b') [] e, (?A,[])) \<in> letter_less r <*lex*> greek_less r \<or>
+            (adj_msog (as @ b') [] e, (?B,[?A])) \<in> letter_less r <*lex*> greek_less r"
+      by (cases e) (fastforce simp: adj_msog_def under_def)
+    }
+    moreover have *: "ms_of_greek [?A,?B] = {# (?B,[?A]), (?A,[]) #}"
+    by (simp add: adj_msog_def ms_of_greek_def)
+    ultimately show "\<forall>x\<in>set_mset (ms_of_greek (as @ b' @ cs)).
+      \<exists>y\<in>set_mset (ms_of_greek [?A,?B]). (x, y) \<in> letter_less r <*lex*> greek_less r"
+    by (auto simp: msog_append adj_msog_single ac_simps *) blast

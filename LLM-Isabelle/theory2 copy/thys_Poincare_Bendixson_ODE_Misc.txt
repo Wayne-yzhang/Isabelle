@@ -1,0 +1,368 @@
+theory ODE_Misc
+  imports
+    Ordinary_Differential_Equations.ODE_Analysis
+    Analysis_Misc
+begin
+
+lemma local_lipschitz_compact_bicomposeE:
+  assumes ll: "local_lipschitz T X f"
+  assumes cf: "\<And>x. x \<in> X \<Longrightarrow> continuous_on I (\<lambda>t. f t x)"
+  assumes cI: "compact I"
+  assumes "I \<subseteq> T"
+  assumes cv: "continuous_on I v"
+  assumes cw: "continuous_on I w"
+  assumes v: "v ` I \<subseteq> X"
+  assumes w: "w ` I \<subseteq> X"
+  obtains L where "L > 0" "\<And>x. x \<in> I \<Longrightarrow> dist (f x (v x)) (f x (w x)) \<le> L * dist (v x) (w x)"
+proof -
+  from v w have "v ` I \<union> w ` I \<subseteq> X" by auto
+    by (rule local_lipschitz_subset)
+  have cvwI: "compact (v ` I \<union> w ` I)"
+    by (auto intro!: compact_continuous_image cv cw cI)    
+
+  obtain L where L: "\<And>t. t \<in> I \<Longrightarrow> L-lipschitz_on (v ` I \<union> w ` I) (f t)"
+    using v w
+    by blast
+  define L' where "L' = max L 1"
+  with L have "L' > 0" "\<And>x. x \<in> I \<Longrightarrow> dist (f x (v x)) (f x (w x)) \<le> L' * dist (v x) (w x)"
+     apply (auto simp: lipschitz_on_def L'_def)
+    by (smt Un_iff image_eqI mult_right_mono zero_le_dist)
+  then show ?thesis ..
+qed
+
+
+lemma comparison_principle_le:
+  fixes f::"real \<Rightarrow> real \<Rightarrow> real"
+    and \<phi> \<psi>::"real \<Rightarrow> real"
+  assumes ll: "local_lipschitz X Y f"
+  assumes cf: "\<And>x. x \<in> Y \<Longrightarrow> continuous_on {a..b} (\<lambda>t. f t x)"
+  assumes abX: "{a .. b} \<subseteq> X"
+  assumes \<phi>': "\<And>x. x \<in> {a .. b} \<Longrightarrow> (\<phi> has_real_derivative \<phi>' x) (at x)"
+  assumes \<psi>': "\<And>x. x \<in> {a .. b} \<Longrightarrow> (\<psi> has_real_derivative \<psi>' x) (at x)"
+  assumes \<phi>_in: "\<phi> ` {a..b} \<subseteq> Y"
+  assumes \<psi>_in: "\<psi> ` {a..b} \<subseteq> Y"
+  assumes init: "\<phi> a \<le> \<psi> a"
+  assumes defect: "\<And>x. x \<in> {a .. b} \<Longrightarrow> \<phi>' x - f x (\<phi> x) \<le> \<psi>' x - f x (\<psi> x)"
+  shows "\<forall>x \<in> {a .. b}. \<phi> x \<le> \<psi> x" (is "?th1")
+  unfolding atomize_conj
+  apply (cases "a \<le> b")
+   defer subgoal by simp
+proof -
+  assume "a \<le> b"
+  note \<phi>_cont = has_real_derivative_imp_continuous_on[OF \<phi>']
+  note \<psi>_cont = has_real_derivative_imp_continuous_on[OF \<psi>']
+  from local_lipschitz_compact_bicomposeE[OF ll cf compact_Icc abX \<phi>_cont \<psi>_cont \<phi>_in \<psi>_in]
+  obtain L where L: "L > 0" "\<And>x. x \<in> {a..b} \<Longrightarrow> dist (f x (\<phi> x)) (f x (\<psi> x)) \<le> L * dist (\<phi> x) (\<psi> x)" by blast
+  define w where "w x = \<psi> x - \<phi> x" for x
+
+  have w'[derivative_intros]: "\<And>x. x \<in> {a .. b} \<Longrightarrow> (w has_real_derivative \<psi>' x - \<phi>' x) (at x)"
+    using \<phi>' \<psi>'
+    by (auto simp: has_vderiv_on_def w_def[abs_def] intro!: derivative_eq_intros)
+  note w_cont[continuous_intros] = has_real_derivative_imp_continuous_on[OF w', THEN continuous_on_compose2]
+  have "w d \<ge> 0" if "d \<in> {a .. b}" for d
+  proof (rule ccontr, unfold not_le)
+    assume "w d < 0"
+    let ?N = "(w -` {..0} \<inter> {a .. d})"
+    then have "?N \<noteq> {}" by auto
+    have "closed ?N"
+      unfolding compact_eq_bounded_closed
+      using that
+      by (intro conjI closed_vimage_Int) (auto intro!: continuous_intros)
+
+    let ?N' = "{a0 \<in> {a .. d}. w ` {a0 .. d} \<subseteq> {..0}}"
+    then have "?N' \<noteq> {}" by auto
+    have "compact ?N'"
+      unfolding compact_eq_bounded_closed
+    proof
+      have "?N' \<subseteq> {a .. d}" using that by auto
+      then show "bounded ?N'"
+        by (rule bounded_subset[rotated]) simp
+      have "w u \<le> 0" if "(\<forall>n. x n \<in> ?N')" "x \<longlonglongrightarrow> l" "l \<le> u" "u \<le> d" for x l u
+      proof cases
+        assume "l = u"
+        have "\<forall>n. x n \<in> ?N" using that(1) by force
+        show ?thesis
+      next
+        assume "l \<noteq> u" with that have "l < u" by auto
+          by (auto dest: eventually_happens)
+          by (auto dest!: spec[where x=n] simp: image_subset_iff)
+      qed
+      then show "closed ?N'"
+        unfolding closed_sequential_limits
+        by (auto simp: Lim_bounded Lim_bounded2)
+    qed
+
+    obtain a0 where a0: "a \<le> a0" "a0 \<le> d" "w ` {a0..d} \<subseteq> {..0}"
+      and a0_least: "\<And>x. a \<le> x \<Longrightarrow> x \<le> d \<Longrightarrow> w ` {x..d} \<subseteq> {..0} \<Longrightarrow> a0 \<le> x"
+      by auto
+    have a0d: "{a0 .. d} \<subseteq> {a .. b}" using that a0
+      by auto
+    have L_w_bound: "L * w x \<le> \<psi>' x - \<phi>' x" if "x \<in> {a0 .. d}" for x
+    proof -
+      from set_mp[OF a0d that] have "x \<in> {a .. b}" .
+      from defect[OF this]
+      have "\<phi>' x - \<psi>' x \<le> dist (f x (\<phi> x)) (f x (\<psi> x))"
+        by (simp add: dist_real_def)
+      also have "\<dots> \<le> L * dist (\<phi> x) (\<psi> x)"
+        by (rule L)
+      also have "\<dots> \<le> -L * w x"
+        by (force simp add: dist_real_def abs_real_def w_def algebra_split_simps )
+      finally show ?thesis
+        by simp
+    qed
+    have mono: "mono_on {a0..d} (\<lambda>x. w x * exp(-L*x))"
+      apply (rule mono_onI)
+      apply (rule DERIV_nonneg_imp_nondecreasing, assumption)
+      using a0d
+      by (auto intro!: exI[where x="(\<psi>' x - \<phi>' x) * exp (- (L * x)) - exp (- (L * x)) * L * w x" for x]
+          derivative_eq_intros L_w_bound simp: )
+    then have "w a0 * exp (-L * a0) \<le> w d * exp (-L * d)"
+      by (rule mono_onD) (use that a0 in auto)
+    finally have "w a0 * exp (- L * a0) < 0" .
+    then have "w a0 < 0" by (simp add: algebra_split_simps)
+    have "a0 \<le> a"
+    proof (rule ccontr, unfold not_le)
+      assume "a < a0"
+      have "continuous_on {a.. a0} w"
+        by (rule continuous_intros, assumption) (use a0 a0d in auto)
+      have "(w \<longlongrightarrow> w a0) (at_left a0)" .
+      moreover have "\<forall>\<^sub>F x in at_left a0. a < x"
+      ultimately have "\<forall>\<^sub>F x in at_left a0. a < x \<and> w x < 0" by eventually_elim auto
+      then obtain a1' where "a1'<a0" and a1_neg: "\<And>y. y > a1' \<Longrightarrow> y < a0 \<Longrightarrow> a < y \<and> w y < 0"
+        unfolding eventually_at_left_field by auto
+      define a1 where "a1 = (a1' + a0)/2"
+      have "a \<le> a1"
+      moreover have "a1 \<le> d"
+      moreover have "w ` {a1..a0} \<subseteq> {..0}"
+        by (auto simp: a1_def) smt
+      moreover have "w ` {a0..d} \<subseteq> {..0}" using a0 by auto
+      ultimately
+      have "a0 \<le> a1"
+        apply (intro a0_least) apply assumption apply assumption
+        by (smt atLeastAtMost_iff image_subset_iff)
+    qed
+    with init show False
+      by (auto simp: w_def)
+  qed
+  then show ?thesis
+    by (auto simp: w_def)
+qed
+
+lemma local_lipschitz_mult:
+  apply (auto intro!: c1_implies_local_lipschitz[where f'="\<lambda>p. blinfun_mult_left (fst p)"])
+   apply (simp add: has_derivative_mult_right mult_commute_abs)
+  by (auto intro!: continuous_intros)
+
+lemma comparison_principle_le_linear:
+  fixes \<phi> :: "real \<Rightarrow> real"
+  assumes "continuous_on {a..b} g"
+  assumes "(\<And>t. t \<in> {a..b} \<Longrightarrow> (\<phi> has_real_derivative \<phi>' t) (at t))"
+  assumes "\<phi> a \<le> 0"
+  assumes "(\<And>t. t \<in> {a..b} \<Longrightarrow> \<phi>' t \<le> g t *\<^sub>R \<phi> t)"
+  shows "\<forall>t\<in>{a..b}. \<phi> t \<le> 0"
+proof -
+  have *: "\<And>x. continuous_on {a..b} (\<lambda>t. g t * x)"
+    using assms(1) continuous_on_mult_right by blast
+    using local_lipschitz_subset[OF local_lipschitz_mult] by blast 
+  from local_lipschitz_compose1[OF this assms(1)]
+  from comparison_principle_le[OF this _ _ assms(2) _ _ _ assms(3), of b "\<lambda>t.0"] * assms(4)
+  show ?thesis by auto
+qed
+
+
+context ll_on_open_it begin
+
+lemma flow_lipschitzE:
+  assumes "{a .. b} \<subseteq> existence_ivl t0 x"
+  obtains L where "L-lipschitz_on {a .. b} (flow t0 x)"
+proof -
+  have f': "(flow t0 x has_derivative (\<lambda>i. i *\<^sub>R f t (flow t0 x t))) (at t within {a .. b})" if "t \<in> {a .. b}" for t
+    using flow_has_derivative[of t x] assms that
+    by (auto simp: has_derivative_at_withinI)
+
+  have "compact ((\<lambda>t. f t (flow t0 x t)) ` {a .. b})"
+    using assms
+    apply (auto intro!: compact_continuous_image continuous_intros)
+    using local.existence_ivl_empty2 apply fastforce
+     apply (meson atLeastAtMost_iff general.existence_ivl_subset in_mono)
+    by (simp add: general.flow_in_domain subset_iff)
+  then obtain C where "t \<in> {a .. b} \<Longrightarrow> norm (f t (flow t0 x t)) \<le> C" for t
+    by (fastforce dest!: compact_imp_bounded simp: bounded_iff intro: that)
+  then have "t \<in> {a..b} \<Longrightarrow> onorm (\<lambda>i. i *\<^sub>R f t (flow t0 x t)) \<le> max 0 C" for t
+    apply (subst onorm_scaleR_left) 
+     apply (auto simp: onorm_id max_def)
+    by (metis diff_0_right diff_mono diff_self norm_ge_zero)
+  from bounded_derivative_imp_lipschitz[OF f' _ this]
+  have "(max 0 C)-lipschitz_on {a..b} (flow t0 x)"
+    by auto
+  then show ?thesis ..
+qed
+
+lemma flow_undefined0: "t \<notin> existence_ivl t0 x \<Longrightarrow> flow t0 x t = 0"
+  unfolding flow_def by auto
+
+lemma csols_undefined: "x \<notin> X \<Longrightarrow> csols t0 x = {}"
+  apply (auto simp: csols_def)
+  using general.existence_ivl_empty2 general.existence_ivl_maximal_segment
+  apply blast
+  done
+
+lemmas existence_ivl_undefined = existence_ivl_empty2
+
+end
+
+
+lemma range_preflect_0[simp]: "range (preflect 0) = UNIV"
+  by (auto simp: preflect_def)
+lemma range_uminus[simp]: "range uminus = (UNIV::'a::ab_group_add set)"
+  by auto
+
+context auto_ll_on_open begin
+
+sublocale rev: auto_ll_on_open "-f" rewrites "-(-f) = f"
+   apply unfold_locales
+  using auto_local_lipschitz auto_open_domain
+  unfolding fun_Compl_def local_lipschitz_minus
+  by auto
+
+lemma existence_ivl_eq_rev0: "existence_ivl0 y = uminus ` rev.existence_ivl0 y" for y
+  by (auto simp: existence_ivl_eq_rev rev.existence_ivl0_def preflect_def)
+
+lemma rev_existence_ivl_eq0: "rev.existence_ivl0 y = uminus ` existence_ivl0 y" for y
+  using uminus_uminus_image[of "rev.existence_ivl0 y"]
+  by (simp add: existence_ivl_eq_rev0)
+
+lemma flow_eq_rev0: "flow0 y t = rev.flow0 y (-t)" for y t
+  apply (cases "t \<in> existence_ivl0 y")
+  subgoal
+    apply (subst flow_eq_rev(2), assumption)
+    apply (subst rev.flow0_def)
+    by (simp add: preflect_def)
+  subgoal
+    apply (frule flow_undefined0)
+    by (auto simp: existence_ivl_eq_rev0 rev.flow_undefined0)
+  done
+
+lemma rev_eq_flow: "rev.flow0 y t = flow0 y (-t)" for y t
+  apply (subst flow_eq_rev0)
+  using uminus_uminus_image[of "rev.existence_ivl0 y"]
+  apply -
+  apply (subst (asm) existence_ivl_eq_rev0[symmetric])
+  by auto
+
+lemma rev_flow_image_eq: "rev.flow0 x ` S = flow0 x ` (uminus ` S)"
+  unfolding rev_eq_flow[abs_def]
+  by force
+
+lemma flow_image_eq_rev: "flow0 x ` S = rev.flow0 x ` (uminus ` S)"
+  unfolding rev_eq_flow[abs_def]
+  by force
+
+end
+
+context c1_on_open begin
+
+sublocale rev: c1_on_open "-f" "-f'" rewrites "-(-f) = f" and "-(-f') = f'"
+  by (rule c1_on_open_rev) auto
+
+end
+
+context c1_on_open_euclidean begin
+
+sublocale rev: c1_on_open_euclidean "-f" "-f'" rewrites "-(-f) = f" and "-(-f') = f'"
+  by unfold_locales auto
+
+end
+
+
+
+lemma bdd_above_is_intervalI: "bdd_above I"
+  if "is_interval I" "a \<le> b" "a \<in> I" "b \<notin> I" for I::"real set"
+  by (meson bdd_above_def is_interval_1 le_cases that) 
+
+lemma bdd_below_is_intervalI: "bdd_below I"
+  if "is_interval I" "a \<le> b" "a \<notin> I" "b \<in> I" for I::"real set"
+  by (meson bdd_below_def is_interval_1 le_cases that) 
+
+context auto_ll_on_open begin
+
+lemma open_existence_ivl0:
+  assumes x : "x \<in> X"
+  shows "\<exists>a b. a < 0 \<and> 0 < b \<and> {a..b} \<subseteq> existence_ivl0 x"
+proof -
+  have a1:"0 \<in> existence_ivl0 x"
+    by (simp add: x)
+  have a2: "open (existence_ivl0 x)"
+    by (simp add: x)
+  from a1 a2 obtain d where "d > 0" "ball 0 d \<subseteq> existence_ivl0 x"
+    using openE by blast
+  have "{-d/2..d/2} \<subseteq> ball 0 d"
+  thus ?thesis
+qed
+
+lemma open_existence_ivl':
+  assumes x : "x \<in> X"
+  obtains a where "a > 0"  "{-a..a} \<subseteq> existence_ivl0 x"
+proof -
+  from open_existence_ivl0[OF assms(1)]
+  obtain a b where ab: "a < 0" "0 < b" "{a..b} \<subseteq> existence_ivl0 x" by auto
+  then have "min (-a) b > 0" by linarith
+  have "{-min (-a) b .. min(-a) b} \<subseteq> {a..b}" by auto
+qed
+
+lemma open_existence_ivl_on_compact:
+  assumes C: "C \<subseteq> X" and "compact C" "C \<noteq> {}"
+  obtains a where "a > 0" "\<And>x. x \<in> C \<Longrightarrow> {-a..a} \<subseteq> existence_ivl0 x"
+proof -
+  from existence_ivl_cballs
+  have "\<forall>x\<in>C. \<exists>e>0. \<exists>t>0. \<forall>y\<in>cball x e. cball 0 t\<subseteq>existence_ivl0 y"
+    by (metis (full_types) C Int_absorb1 Int_iff UNIV_I)
+  then
+  obtain d' t' where *:
+    "\<forall>x\<in>C. 0 < d' x \<and> t' x > 0 \<and> (\<forall>y\<in>cball x (d' x). cball 0 (t' x) \<subseteq> existence_ivl0 y)"
+    by metis
+  obtain C' where "C' \<subseteq> C" and [simp]: "finite C'" and C_subset: "C \<subseteq> (\<Union>c\<in>C'. ball c (d' c))"
+    by force
+  define d where "d = Min (d' ` C')"
+  define t where "t = Min (t' ` C')"
+    by (auto simp: t_def)
+  moreover have "{-t .. t} \<subseteq> existence_ivl0 x" if "x \<in> C" for x
+  proof -
+    obtain c where c: "c \<in> C'" "x \<in> ball c (d' c)" "c \<in> C" by force
+    then have "{-t .. t} \<subseteq> cball 0 (t' c)"
+      by (auto simp: abs_real_def t_def minus_le_iff)
+    also
+    from c have "cball 0 (t' c) \<subseteq> existence_ivl0 x"
+    finally show ?thesis .
+  qed
+  ultimately show ?thesis ..
+qed
+
+definition "trapped_forward x K \<longleftrightarrow> (flow0 x ` (existence_ivl0 x \<inter> {0..}) \<subseteq> K)"
+
+definition "trapped_backward x K \<longleftrightarrow> (flow0 x ` (existence_ivl0 x \<inter> {..0}) \<subseteq> K)"
+
+definition "trapped x K \<longleftrightarrow> trapped_forward x K \<and> trapped_backward x K"
+
+lemma trapped_iff_on_existence_ivl0:
+  "trapped x K \<longleftrightarrow> (flow0 x ` (existence_ivl0 x) \<subseteq> K)"
+  unfolding trapped_def trapped_forward_def trapped_backward_def
+  apply (auto)
+  by (metis IntI atLeast_iff atMost_iff image_subset_iff less_eq_real_def linorder_not_less)
+end
+
+context auto_ll_on_open begin
+
+lemma infinite_rev_existence_ivl0_rewrites:
+  "{0..} \<subseteq> rev.existence_ivl0 x \<longleftrightarrow> {..0} \<subseteq> existence_ivl0 x"
+  "{..0} \<subseteq> rev.existence_ivl0 x \<longleftrightarrow> {0..} \<subseteq> existence_ivl0 x"
+   apply (auto simp add: rev.rev_existence_ivl_eq0 subset_iff)
+  using neg_le_0_iff_le apply fastforce
+  using neg_0_le_iff_le by fastforce
+
+lemma trapped_backward_iff_rev_trapped_forward:
+  "trapped_backward x K  \<longleftrightarrow> rev.trapped_forward x K"
+  unfolding trapped_backward_def rev.trapped_forward_def
+  by (auto simp add: rev_flow_image_eq existence_ivl_eq_rev0 image_subset_iff)
+
+lemma trapped_sol_right:

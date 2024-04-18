@@ -1,0 +1,150 @@
+theory Lambert_Series
+  imports
+  "HOL-Complex_Analysis.Complex_Analysis"
+  "HOL-Real_Asymp.Real_Asymp"
+  "Dirichlet_Series.Dirichlet_Series_Analysis"
+  "Dirichlet_Series.Divisor_Count"
+  Polylog.Polylog
+  Lambert_Series_Library
+  Number_Theoretic_Functions_Extras
+  Summation_Tests_More
+begin
+
+
+no_notation Infinite_Set_Sum.abs_summable_on (infix "abs'_summable'_on" 50)
+
+definition lambert :: "(nat \<Rightarrow> 'a :: {real_normed_field, banach}) \<Rightarrow> 'a \<Rightarrow> 'a" where
+  "lambert a q =
+     (let f = (\<lambda>n. a (Suc n) * q ^ (Suc n) / (1 - q ^ (Suc n))) in
+      if  summable f then \<Sum>n. f n else 0)"
+
+lemma lambert_eqI:
+  assumes "(\<lambda>n. a (Suc n) * q ^ (Suc n) / (1 - q ^ (Suc n))) sums x"
+  shows   "lambert a q = x"
+  using assms unfolding lambert_def Let_def sums_iff by simp
+
+lemma lambert_cong [cong]:
+  "(\<And>n. n > 0 \<Longrightarrow> a n = a' n) \<Longrightarrow> q = q' \<Longrightarrow> lambert a q = lambert a' q'"
+  by (simp add: lambert_def)
+
+lemma lambert_0 [simp]: "lambert a 0 = 0"
+  by (simp add: lambert_def)
+
+lemma lambert_0' [simp]: "lambert (\<lambda>_. 0) q = 0"
+  by (simp add: lambert_def)
+
+lemma lambert_cmult: "lambert (\<lambda>n. c * a n) q = c * lambert a q"
+proof (cases "c = 0")
+  case False
+  define f where "f = (\<lambda>n. a (Suc n) * q ^ (Suc n) / (1 - q ^ (Suc n)))"
+  show ?thesis
+  proof (cases "summable f")
+    case True
+    hence "(\<lambda>n. c * (a (Suc n) * q ^ (Suc n) / (1 - q ^ (Suc n)))) sums (c * (\<Sum>n. f n))"
+      unfolding mult.assoc by (intro sums_mult) (auto simp: f_def)
+    thus ?thesis using True
+      by (intro lambert_eqI) (auto simp: lambert_def f_def algebra_simps)
+  next
+    case False
+    hence "\<not>summable (\<lambda>n. c * f n)"
+    with False show ?thesis
+      by (simp add: lambert_def f_def algebra_simps)
+  qed
+qed auto
+
+lemma lambert_cmult': "lambert (\<lambda>n. a n * c) q = lambert a q * c"
+  using lambert_cmult[of c a q] by (simp add: mult_ac)
+
+lemma lambert_uminus: "lambert (\<lambda>n. -a n) q = -lambert a q"
+  using lambert_cmult[of "-1" a q] by simp
+
+
+definition lambert_conv_radius :: "(nat \<Rightarrow> 'a :: {banach, real_normed_field}) \<Rightarrow> ereal"
+  where "lambert_conv_radius a = (if summable a then \<infinity> else conv_radius a)"
+
+lemma lambert_conv_radius_gt_1_iff: "lambert_conv_radius a > 1 \<longleftrightarrow> summable a"
+proof
+  assume *: "lambert_conv_radius a > 1"
+  {
+    assume "\<not>summable a"
+    hence "conv_radius a > 1"
+      using * by (auto simp: lambert_conv_radius_def)
+    hence "summable (\<lambda>n. a n * 1 ^ n)"
+      by (intro summable_in_conv_radius) (auto simp: one_ereal_def)
+      by simp
+  }
+  thus "summable a"
+    by blast
+qed (auto simp: lambert_conv_radius_def)
+
+
+
+
+context
+  fixes a :: "nat \<Rightarrow> 'a :: {real_normed_field, banach}"
+  fixes f :: "nat \<Rightarrow> 'a \<Rightarrow> 'a" and A :: "'a"
+  defines "f \<equiv> \<lambda>k q. a k * q ^ k / (1 - q ^ k)"
+  defines "A \<equiv> (\<Sum>n. a (Suc n))"
+begin
+
+lemma uniform_limit_lambert1_aux:
+  fixes r :: real
+  assumes "0 < r" "r < min 1 (conv_radius a)"
+  shows   "uniform_limit (ball 0 r) (\<lambda>n q. (\<Sum>k<n. f (Suc k) q)) (\<lambda>q. \<Sum>k. f (Suc k) q) sequentially"
+proof -
+  from assms have r: "r > 0" "r < 1" "r < conv_radius a"
+    by auto
+  show "uniform_limit (ball 0 r) (\<lambda>n q. (\<Sum>k<n. f (Suc k) q)) (\<lambda>q. \<Sum>k. f (Suc k) q) sequentially"
+  proof (rule Weierstrass_m_test_ev)
+    have "eventually (\<lambda>k. 1 - r ^ k \<ge> 1 / 2) at_top"
+      using r by real_asymp
+    hence "eventually (\<lambda>k. \<forall>q\<in>ball 0 r. norm (f k q) \<le> 2 * norm (a k) * r ^ k) at_top"
+      using eventually_gt_at_top[of 0]
+    proof eventually_elim
+      case k: (elim k)
+      show "\<forall>q\<in>ball 0 r. norm (f k q) \<le> 2 * norm (a k) * r ^ k"
+      proof
+        fix q :: 'a assume q: "q \<in> ball 0 r"
+        have "norm (f k q) = norm (a k) * norm q ^ k / norm (1 - q ^ k)"
+          by (simp add: f_def norm_mult norm_divide norm_power)
+        also {
+          have "1 / 2 \<le> 1 - r ^ k"
+            using k by simp
+          also have "\<dots> \<le> norm (1 :: 'a) - norm (q ^ k)"
+            using q by (auto simp: norm_power intro!: power_mono)
+          also have "\<dots> \<le> norm (1 - q ^ k)"
+            by norm
+          finally have "norm (1 - q ^ k) \<ge> 1 / 2" .
+        }
+        hence "norm (a k) * norm q ^ k / norm (1 - q ^ k) \<le> 
+               norm (a k) * r ^ k / (1 / 2)"
+          using q r k
+          by (intro mult_mono power_mono frac_le)
+             (auto intro!: mult_pos_pos simp: power_less_1_iff norm_power dest!: power_eq_1_iff)
+        finally show "norm (f k q) \<le> 2 * norm (a k) * r ^ k"
+          by simp
+      qed
+    qed
+    thus "\<forall>\<^sub>F k in sequentially. \<forall>q\<in>ball 0 r. norm (f (Suc k) q) \<le> 2 * norm (a (Suc k)) * r ^ Suc k"
+      by (rule eventually_compose_filterlim[OF _ filterlim_Suc])
+  next
+    have "summable (\<lambda>k. 2 * (norm (a (Suc k) * of_real r ^ Suc k)))"
+      by (subst summable_Suc_iff, intro summable_mult abs_summable_in_conv_radius) (use r in auto)
+    thus "summable (\<lambda>k. 2 * norm (a (Suc k)) * r ^ Suc k)"
+  qed
+qed
+
+lemma uniform_limit_lambert1:
+  fixes r :: real
+  assumes "0 < r" "r < min 1 (conv_radius a)"
+  shows   "uniform_limit (ball 0 r) (\<lambda>n q. (\<Sum>k<n. f (Suc k) q)) (lambert a) sequentially"
+proof -
+  have lim: "uniform_limit (ball 0 r) (\<lambda>n q. (\<Sum>k<n. f (Suc k) q)) (\<lambda>q. \<Sum>k. f (Suc k) q) sequentially"
+    using assms by (rule uniform_limit_lambert1_aux)
+  also have "?this \<longleftrightarrow> ?thesis"
+  proof (intro uniform_limit_cong ballI allI refl always_eventually)
+    fix q :: 'a assume q: "q \<in> ball 0 r"
+    have *: "(\<lambda>n. a (Suc n) * q ^ Suc n / (1 - q ^ Suc n)) sums (\<Sum>k. f (Suc k) q)"
+      using tendsto_uniform_limitI[OF lim q] unfolding f_def by (simp add: sums_def)
+    show "(\<Sum>k. f (Suc k) q) = lambert a q"
+      by (rule sym, rule lambert_eqI) (fact *)

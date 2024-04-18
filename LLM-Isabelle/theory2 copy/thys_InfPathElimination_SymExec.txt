@@ -1,0 +1,702 @@
+theory SymExec
+imports Conf Labels
+begin
+
+
+
+
+
+
+
+
+
+inductive se ::
+  "('v,'d) conf \<Rightarrow> ('v,'d) label \<Rightarrow> ('v,'d) conf \<Rightarrow> bool"
+where
+  "se c Skip c"
+
+| "se c (Assume e) \<lparr> store = store c, pred = pred c \<union> {adapt_bexp e (store c)} \<rparr>"
+
+| "fst sv = v        \<Longrightarrow>
+   fresh_symvar sv c \<Longrightarrow>
+   se c (Assign v e) \<lparr> store = (store c)(v := snd sv), 
+                       pred  = pred c \<union> {(\<lambda> \<sigma>. \<sigma> sv = (adapt_aexp e (store c)) \<sigma>)} \<rparr>"
+
+
+
+inductive se_star :: "('v,'d) conf \<Rightarrow> ('v,'d) label list \<Rightarrow> ('v,'d) conf \<Rightarrow> bool" where
+  "se_star c [] c"
+| "se c1 l c2 \<Longrightarrow> se_star c2 ls c3 \<Longrightarrow> se_star c1 (l # ls) c3"
+
+
+
+
+
+
+lemma se_sat_imp_sat :
+  assumes "se c l c'"
+  assumes "sat c'"
+  shows   "sat c"
+using assms by cases (auto simp add : sat_def conjunct_def)
+
+
+
+
+lemma unsat_imp_se_unsat :
+  assumes "se c l c'"
+  assumes "\<not> sat c"
+  shows   "\<not> sat c'"
+using assms by cases (simp add : sat_def conjunct_def)+
+
+
+
+
+lemma [simp] :
+  "se c Skip c' = (c' = c)"
+by (simp add : se.simps)
+
+
+lemma se_Assume_eq :
+  "se c (Assume e) c' = (c' = \<lparr> store = store c, pred = pred c \<union> {adapt_bexp e (store c)} \<rparr>)"
+by (simp add : se.simps)
+
+
+lemma se_Assign_eq :
+  "se c (Assign v e) c' = 
+  (\<exists> sv. fresh_symvar sv c 
+       \<and> fst sv = v 
+       \<and> c' = \<lparr> store = (store c)(v := snd sv), 
+                pred  = insert (\<lambda>\<sigma>. \<sigma> sv = adapt_aexp e (store c) \<sigma>) (pred c)\<rparr>)"
+by (simp only : se.simps, blast)
+
+
+
+
+lemma path_pred_of_se_Assume :
+  assumes "se c (Assume e) c'"
+  shows   "conjunct (pred c') = 
+            (\<lambda> \<sigma>. conjunct (pred c) \<sigma> \<and> adapt_bexp e (store c) \<sigma>)"
+using assms se_Assume_eq[of c e c'] 
+by (auto simp add : conjunct_def)
+
+
+lemma path_pred_of_se_Assign :
+  assumes "se c (Assign v e) c'"
+  shows   "\<exists> sv. conjunct (pred c') = 
+            (\<lambda> \<sigma>. conjunct (pred c) \<sigma> \<and> \<sigma> sv = adapt_aexp e (store c) \<sigma>)"
+using assms se_Assign_eq[of c v e c']
+by (fastforce simp add : conjunct_def)
+
+
+
+
+theorem states_of_se_assume :
+  assumes "se c (Assume e) c'"
+  shows   "states c' = {\<sigma> \<in> states c. e \<sigma>}"
+using assms se_Assume_eq[of c e c'] 
+by (auto simp add : adapt_bexp_is_subst states_def conjunct_def)
+
+
+
+
+
+lemma states_of_se_assign1 :
+  assumes "se c (Assign v e) c'"
+  assumes "\<sigma>' \<in> states c'"
+  shows   "\<exists> \<sigma> \<in> states c. \<sigma>' = (\<sigma> (v := e \<sigma>))"
+proof -
+  obtain \<sigma>\<^sub>s\<^sub>y\<^sub>m
+  where 1 : "consistent \<sigma>' \<sigma>\<^sub>s\<^sub>y\<^sub>m (store c')"
+  and   2 : "conjunct (pred c') \<sigma>\<^sub>s\<^sub>y\<^sub>m"
+  using assms(2) unfolding states_def by blast
+
+  then obtain \<sigma> 
+  where 3 : "consistent \<sigma> \<sigma>\<^sub>s\<^sub>y\<^sub>m (store c)" 
+  using consistentI2 by blast
+
+  moreover
+  have "conjunct (pred c) \<sigma>\<^sub>s\<^sub>y\<^sub>m" 
+  using assms(1) 2 by (auto simp add : se_Assign_eq conjunct_def)
+  
+  ultimately
+  have "\<sigma> \<in> states c" by (simp add : states_def) blast
+
+  moreover
+  have "\<sigma>' = \<sigma> (v := e \<sigma>)"
+  proof -
+    have "\<sigma>' v = e \<sigma>" 
+    proof -
+      have "\<sigma>' v = \<sigma>\<^sub>s\<^sub>y\<^sub>m (symvar v (store c'))" 
+      using 1 by (simp add : consistent_def)
+
+      moreover
+      have "\<sigma>\<^sub>s\<^sub>y\<^sub>m (symvar v (store c')) = (adapt_aexp e (store c)) \<sigma>\<^sub>s\<^sub>y\<^sub>m"
+      using assms(1) 2 se_Assign_eq[of c v e c'] 
+      by (force simp add : symvar_def conjunct_def)
+
+      moreover
+      have "(adapt_aexp e (store c)) \<sigma>\<^sub>s\<^sub>y\<^sub>m = e \<sigma>" 
+      using 3 by (rule adapt_aexp_is_subst)
+    
+      ultimately
+      show ?thesis by simp
+    qed
+
+    moreover
+    have "\<forall> x. x \<noteq> v \<longrightarrow> \<sigma>' x = \<sigma> x" 
+    proof (intro allI impI)
+      fix x
+
+      assume "x \<noteq> v"
+
+      moreover
+      hence "\<sigma>' x = \<sigma>\<^sub>s\<^sub>y\<^sub>m (symvar x (store c))"
+      using assms(1) 1 unfolding consistent_def symvar_def
+      by (drule_tac ?x="x" in spec) (auto simp add : se_Assign_eq)
+
+      moreover
+      have "\<sigma>\<^sub>s\<^sub>y\<^sub>m (symvar x (store c)) = \<sigma> x" 
+      using 3 by (auto simp add : consistent_def)
+      
+      ultimately
+      show "\<sigma>' x = \<sigma> x" by simp
+    qed
+
+    ultimately
+    show ?thesis by auto
+  qed
+
+  ultimately
+  show ?thesis by (simp add : states_def) blast
+qed
+
+
+
+
+lemma states_of_se_assign2 :
+  assumes "se c (Assign v e) c'"
+  assumes "\<exists> \<sigma> \<in> states c. \<sigma>' = \<sigma> (v := e \<sigma>)"
+  shows   "\<sigma>' \<in> states c'"
+proof -
+  obtain \<sigma> 
+  where "\<sigma> \<in> states c" 
+  and   "\<sigma>' = \<sigma> (v := e \<sigma>)" 
+  using assms(2) by blast
+
+  then obtain \<sigma>\<^sub>s\<^sub>y\<^sub>m 
+  where 1 : "consistent \<sigma> \<sigma>\<^sub>s\<^sub>y\<^sub>m (store c)"
+  and   2 : "conjunct (pred c) \<sigma>\<^sub>s\<^sub>y\<^sub>m"
+  unfolding states_def by blast
+
+  obtain sv 
+  where 3 : "fresh_symvar sv c"
+  and   4 : "fst sv = v"
+  and   5 : "c' = \<lparr> store = (store c)(v := snd sv), 
+                    pred    = insert (\<lambda>\<sigma>. \<sigma> sv = adapt_aexp e (store c) \<sigma>) (pred c) \<rparr>"
+  using assms(1) se_Assign_eq[of c v e c'] by blast
+
+  define \<sigma>\<^sub>s\<^sub>y\<^sub>m' where "\<sigma>\<^sub>s\<^sub>y\<^sub>m' = \<sigma>\<^sub>s\<^sub>y\<^sub>m (sv := e \<sigma>)"
+  
+  have "consistent \<sigma>' \<sigma>\<^sub>s\<^sub>y\<^sub>m' (store c')"
+  by (auto simp add : symvar_def consistent_def \<sigma>\<^sub>s\<^sub>y\<^sub>m'_def)
+  
+  moreover
+  have "conjunct (pred c') \<sigma>\<^sub>s\<^sub>y\<^sub>m'"
+  proof -
+    have "conjunct (pred c) \<sigma>\<^sub>s\<^sub>y\<^sub>m'" 
+    using 2 3 by (simp add : fresh_symvar_def symvars_def Bexp.vars_def \<sigma>\<^sub>s\<^sub>y\<^sub>m'_def)
+
+    moreover
+    have "\<sigma>\<^sub>s\<^sub>y\<^sub>m' sv = (adapt_aexp e (store c)) \<sigma>\<^sub>s\<^sub>y\<^sub>m'"
+    proof -
+      have "Aexp.fresh sv (adapt_aexp e (store c))" 
+      using 3 symvars_of_adapt_aexp[of e "store c"]
+      by (auto simp add : fresh_symvar_def symvars_def)
+
+      thus ?thesis 
+      using adapt_aexp_is_subst[OF 1, of e] 
+      by (simp add : Aexp.vars_def \<sigma>\<^sub>s\<^sub>y\<^sub>m'_def)
+    qed
+
+    ultimately
+    show ?thesis using 5 by (simp add: conjunct_def)
+  qed
+
+  ultimately
+  show ?thesis unfolding states_def by blast
+qed
+
+
+theorem states_of_se_assign :
+  assumes "se c (Assign v e) c'"
+  shows   "states c' = {\<sigma> (v := e \<sigma>) | \<sigma>. \<sigma> \<in> states c}"
+using assms states_of_se_assign1 states_of_se_assign2 by fast
+
+
+
+
+
+theorem se_mono_for_sub :
+  assumes "se c1 l c1'"
+  assumes "se c2 l c2'"
+  assumes "c2 \<sqsubseteq> c1"
+  shows   "c2' \<sqsubseteq> c1'"
+using assms 
+by ((cases l),
+    (simp add : ),
+    (simp add : states_of_se_assume subsums_def, blast),
+    (simp add : states_of_se_assign subsums_def, blast))
+
+
+
+
+theorem se_mono_for_states_eq :
+  assumes "states c1 = states c2"
+  assumes "se c1 l c1'"
+  assumes "se c2 l c2'"
+  shows   "states c2' = states c1'"
+using assms(1) 
+      se_mono_for_sub[OF assms(2,3)] 
+      se_mono_for_sub[OF assms(3,2)]
+by (simp add : subsums_def)
+
+
+
+
+lemma se_succs_states :
+  assumes "se c l c1"
+  assumes "se c l c2"
+  shows   "states c1 = states c2"
+using assms se_mono_for_states_eq by fast
+
+
+
+
+
+lemma [simp] :
+  "se_star c [] c' = (c' = c)"
+by (subst se_star.simps) auto
+
+
+lemma se_star_Cons :
+  "se_star c1 (l # ls) c2 = (\<exists> c. se c1 l c \<and> se_star c ls c2)"
+by (subst (1) se_star.simps) blast
+
+
+lemma se_star_one :
+  "se_star c1 [l] c2 = se c1 l c2"
+using se_star_Cons by force
+
+
+lemma se_star_append :
+  "se_star c1 (ls1 @ ls2) c2 = (\<exists> c. se_star c1 ls1 c \<and> se_star c ls2 c2)"
+by (induct ls1 arbitrary : c1, simp_all add : se_star_Cons) blast
+
+
+lemma se_star_append_one :
+  "se_star c1 (ls @ [l]) c2 = (\<exists> c. se_star c1 ls c \<and> se c l c2)"
+unfolding se_star_append se_star_one by (rule refl)
+
+
+
+
+lemma unsat_imp_se_star_unsat :
+  assumes "se_star c ls c'"
+  assumes "\<not> sat c"
+  shows   "\<not> sat c'"
+using assms 
+by (induct ls arbitrary : c) 
+   (simp, force simp add : se_star_Cons unsat_imp_se_unsat)
+
+
+
+
+lemma se_star_sat_imp_sat :
+  assumes "se_star c ls c'"
+  assumes "sat c'"
+  shows   "sat c"
+using assms 
+by (induct ls arbitrary : c) 
+   (simp, force simp add : se_star_Cons se_sat_imp_sat)
+
+
+
+
+
+
+theorem se_star_mono_for_sub :
+  assumes "se_star c1 ls c1'"
+  assumes "se_star c2 ls c2'"
+  assumes "c2  \<sqsubseteq> c1"
+  shows   "c2' \<sqsubseteq> c1'"
+using assms 
+by (induct ls arbitrary : c1 c2) 
+   (auto simp add :  se_star_Cons se_mono_for_sub)
+
+
+lemma se_star_mono_for_states_eq : 
+  assumes "states c1 = states c2"
+  assumes "se_star c1 ls c1'"
+  assumes "se_star c2 ls c2'"
+  shows   "states c2' = states c1'"
+using assms(1) 
+      se_star_mono_for_sub[OF assms(2,3)] 
+      se_star_mono_for_sub[OF assms(3,2)]
+by (simp add : subsums_def)
+
+
+lemma se_star_succs_states :
+  assumes "se_star c ls c1"
+  assumes "se_star c ls c2"
+  shows   "states c1 = states c2"
+using assms se_star_mono_for_states_eq by fast
+
+
+
+
+
+definition updatable :: 
+  "('v,'d) conf \<Rightarrow> bool" 
+where
+  "updatable c \<equiv> \<forall> v. \<exists> sv. fst sv = v \<and> fresh_symvar sv c"
+
+
+
+
+lemma updatable_imp_ex_se_suc :
+  assumes "updatable c"
+  shows   "\<exists> c'. se c l c'"
+using assms 
+by (cases l, simp_all add :  se_Assume_eq se_Assign_eq updatable_def)
+
+
+
+
+
+lemma finite_symvars_imp_ex_greatest_symvar :
+  fixes SV :: "'a symvar set"
+  assumes "finite SV"
+  assumes "\<exists> sv \<in> SV. fst sv = v"
+  shows   "\<exists> sv  \<in> {sv \<in> SV. fst sv = v}. 
+           \<forall> sv' \<in> {sv \<in> SV. fst sv = v}. snd sv' \<le> snd sv"
+proof -
+  have "finite (snd ` {sv \<in> SV. fst sv = v})"
+  and  "snd ` {sv \<in> SV. fst sv = v} \<noteq> {}" 
+  using assms by auto
+
+  moreover
+  have "\<forall> (E::nat set). finite E \<and> E \<noteq> {} \<longrightarrow> (\<exists> n \<in> E. \<forall> m \<in> E. m \<le> n)"
+  by (intro allI impI, induct_tac rule : finite_ne_induct) 
+     (simp+, force)
+
+  ultimately
+  obtain n 
+  where "n \<in> snd ` {sv \<in> SV. fst sv = v}"
+  and   "\<forall> m \<in> snd ` {sv \<in> SV. fst sv = v}. m \<le> n"
+  by blast
+
+  moreover
+  then obtain sv 
+  where "sv \<in> {sv \<in> SV. fst sv = v}" and "snd sv = n" 
+  by blast
+
+  ultimately
+  show ?thesis by blast
+qed
+
+
+
+
+lemma finite_pred_imp_se_updatable :
+  assumes "finite (Bexp.vars (conjunct (pred c)))" (is "finite ?V")
+  shows   "updatable c"
+unfolding updatable_def
+proof (intro allI)
+  fix v
+
+  show "\<exists>sv. fst sv = v \<and> fresh_symvar sv c"
+  proof (case_tac "\<exists> sv \<in> ?V. fst sv = v", goal_cases)
+    case 1
+
+    then obtain max_sv 
+    where       "max_sv \<in> ?V"
+    and         "fst max_sv = v"
+    and   max : "\<forall>sv'\<in>{sv \<in> ?V. fst sv = v}. snd sv' \<le> snd max_sv"
+    using assms finite_symvars_imp_ex_greatest_symvar[of ?V v] 
+    by blast
+
+    show ?thesis
+    using max 
+    unfolding fresh_symvar_def symvars_def Store.symvars_def symvar_def
+    proof (case_tac "snd max_sv \<le> store c v", goal_cases)
+      case 1 thus ?case by (rule_tac ?x="(v,Suc (store c v))" in exI) auto
+    next
+      case 2 thus ?case by (rule_tac ?x="(v,Suc (snd max_sv))" in exI) auto
+    qed
+  next
+    case 2 thus ?thesis
+    by (rule_tac ?x="(v, Suc (store c v))" in exI)
+       (auto simp add : fresh_symvar_def symvars_def Store.symvars_def symvar_def)
+  qed
+qed
+
+
+
+
+lemma finite_imp_ex_se_succ :
+  assumes "finite (pred c)"
+  assumes "\<forall> e \<in> pred c. finite (Bexp.vars e)"
+  shows   "\<exists> c'. se c l c'"
+using finite_pred_imp_se_updatable[OF finite_conj[OF assms(1,2)]] 
+by (rule updatable_imp_ex_se_suc)
+
+
+
+
+lemma se_preserves_finiteness1 :
+  assumes "finite_label l"
+  assumes "se c l c'"
+  assumes "\<forall> e \<in> pred c.  finite (Bexp.vars e)"
+  shows   "\<forall> e \<in> pred c'. finite (Bexp.vars e)"
+proof (cases l)
+  case Skip thus ?thesis using assms by (simp add : )
+next
+  case (Assume e) thus ?thesis 
+  using assms finite_vars_imp_finite_adapt_b
+  by (auto simp add : se_Assume_eq finite_label_def)
+next
+  case (Assign v e) 
+
+  then obtain sv 
+  where "fresh_symvar sv c"
+  and   "fst sv = v"
+  and   "c' = \<lparr> store = (store c)(v := snd sv),
+                pred  = insert (\<lambda>\<sigma>. \<sigma> sv = adapt_aexp e (store c) \<sigma>) (pred c)\<rparr>"
+  using assms(2) se_Assign_eq[of c v e c'] by blast
+
+  moreover
+  have "finite (Bexp.vars (\<lambda>\<sigma>. \<sigma> sv = adapt_aexp e (store c) \<sigma>))"
+  proof -
+    have "finite (Aexp.vars (\<lambda>\<sigma>. \<sigma> sv))" 
+    by (auto simp add : Aexp.vars_def)
+
+    moreover
+    have "finite (Aexp.vars (adapt_aexp e (store c)))"
+    using assms(1) Assign finite_vars_imp_finite_adapt_a
+    by (auto simp add : finite_label_def)
+
+    ultimately
+    show ?thesis using finite_vars_of_a_eq by auto
+  qed
+  
+  ultimately
+  show ?thesis using assms by auto
+qed
+
+
+lemma se_preserves_finiteness2 :
+  assumes "se c l c'"
+  assumes "finite (pred c)"
+  shows   "finite (pred c')"
+using assms 
+by (cases l) 
+   (auto simp add :  se_Assume_eq se_Assign_eq)
+
+
+
+
+lemma finite_imp_ex_se_star_succ :
+  assumes "finite (pred c)"
+  assumes "\<forall> e \<in> pred c. finite (Bexp.vars e)"
+  assumes "finite_labels ls"
+  shows   "\<exists> c'. se_star c ls c'"
+using assms
+proof (induct ls arbitrary : c, goal_cases)
+  case 1 show ?case using se_star.simps by blast
+next
+  case (2 l ls c)
+
+  then obtain c1 where "se c l c1" using finite_imp_ex_se_succ by blast
+
+  hence "finite (pred c1)"
+  and   "\<forall> e \<in> pred c1. finite (Bexp.vars e)" 
+  using 2 se_preserves_finiteness1 se_preserves_finiteness2 by fastforce+
+
+  moreover
+  have "finite_labels ls" using 2 by simp
+
+  ultimately
+  obtain c2 where "se_star c1 ls c2" using 2 by blast
+
+qed
+
+
+
+
+
+
+definition feasible :: "('v,'d) conf \<Rightarrow> ('v,'d) label list \<Rightarrow> bool" where
+  "feasible c ls \<equiv> (\<exists> c'. se_star c ls c' \<and> sat c')"
+
+
+
+
+lemma feasible_Cons :
+  "feasible c (l#ls) = (\<exists> c'. se c l c' \<and> sat c' \<and> feasible c' ls)"
+proof (intro iffI, goal_cases)
+  case 1 thus ?case
+  using se_star_sat_imp_sat by (simp add : feasible_def se_star_Cons) blast
+next
+  case 2 thus ?case 
+  unfolding feasible_def se_star_Cons by blast
+qed
+
+
+
+
+lemma subsums_imp_feasible :
+  assumes "finite_labels ls"
+  assumes "finite (pred c1)"
+  assumes "finite (pred c2)"
+  assumes "\<forall> e \<in> pred c1. finite (Bexp.vars e)"
+  assumes "\<forall> e \<in> pred c2. finite (Bexp.vars e)"
+  assumes "c2 \<sqsubseteq> c1"
+  assumes "feasible c2 ls"
+  shows   "feasible c1 ls"
+using assms
+proof (induct ls arbitrary : c1 c2)
+  case Nil thus ?case by (simp add : feasible_def sat_sub_by_sat)
+next
+  case (Cons l ls c1 c2)
+
+  then obtain c2' where "se c2 l c2'"
+                  and   "sat c2'"
+                  and   "feasible c2' ls"
+  using feasible_Cons by blast
+
+  obtain c1' where "se c1 l c1'"
+  using finite_conj[OF Cons(3,5)]
+        finite_pred_imp_se_updatable
+        updatable_imp_ex_se_suc
+  by blast
+
+  moreover
+  hence "sat c1'" 
+  by fast
+
+  moreover
+  have "feasible c1' ls"
+  proof -
+
+    have "finite_label  l" 
+    and  "finite_labels ls" using Cons(2) by simp_all
+
+    have "finite (pred c1')" 
+     
+    moreover
+    have "finite (pred c2')" 
+
+    moreover
+    have "\<forall>e\<in>pred c1'. finite (Bexp.vars e)" 
+
+    moreover
+    have "\<forall>e\<in>pred c2'. finite (Bexp.vars e)"
+    
+    moreover
+    have "c2' \<sqsubseteq> c1'" 
+    
+    ultimately
+  qed
+
+  ultimately
+  show ?case by (auto simp add : feasible_Cons)
+qed
+
+
+
+
+
+inductive ce ::
+  "('v,'d) state \<Rightarrow> ('v,'d) label \<Rightarrow> ('v,'d) state \<Rightarrow> bool"
+where
+  "ce \<sigma> Skip \<sigma>"
+| "e \<sigma> \<Longrightarrow> ce \<sigma> (Assume e) \<sigma>"
+| "ce \<sigma> (Assign v e) (\<sigma>(v := e \<sigma>))"
+
+inductive ce_star :: "('v,'d) state \<Rightarrow> ('v,'d) label list \<Rightarrow> ('v,'d) state \<Rightarrow> bool" where
+  "ce_star c [] c"
+| "ce c1 l c2 \<Longrightarrow> ce_star c2 ls c3 \<Longrightarrow> ce_star c1 (l # ls) c3"
+
+lemma [simp] :
+  "ce \<sigma> Skip \<sigma>' = (\<sigma>' = \<sigma>)"
+by (auto simp add : ce.simps)
+
+lemma [simp] :
+  "ce \<sigma> (Assume e) \<sigma>' = (\<sigma>' = \<sigma> \<and> e \<sigma>)"
+by (auto simp add : ce.simps)
+
+lemma [simp] :
+  "ce \<sigma> (Assign v e) \<sigma>' = (\<sigma>' = \<sigma>(v := e \<sigma>))"
+by (auto simp add : ce.simps)
+
+lemma se_as_ce :
+  assumes "se c l c'"
+  shows   "states c' = {\<sigma>'. \<exists> \<sigma> \<in> states c. ce \<sigma> l \<sigma>'} "
+using assms
+by (cases l)
+   (auto simp add: states_of_se_assume states_of_se_assign)
+
+
+lemma [simp] :
+  "ce_star \<sigma> [] \<sigma>' = (\<sigma>' = \<sigma>)"
+by (subst ce_star.simps) simp
+
+lemma ce_star_Cons :
+  "ce_star \<sigma>1 (l # ls) \<sigma>2 = (\<exists> \<sigma>. ce \<sigma>1 l \<sigma> \<and> ce_star \<sigma> ls \<sigma>2)"
+by (subst (1) ce_star.simps) blast
+
+lemma se_star_as_ce_star :
+  assumes "se_star c ls c'"
+  shows   "states c' = {\<sigma>'. \<exists> \<sigma> \<in> states c. ce_star \<sigma> ls \<sigma>'}"
+using assms
+proof (induct ls arbitrary : c)
+  case Nil thus ?case by simp
+next
+  case (Cons l ls c)
+
+  then obtain c'' where "se c l c''"
+                  and   "se_star c'' ls c'"
+  using se_star_Cons by blast
+
+  show ?case
+  unfolding set_eq_iff Bex_def mem_Collect_eq
+  proof (intro allI iffI, goal_cases)
+    case (1 \<sigma>')
+
+    then obtain \<sigma>'' where "\<sigma>'' \<in> states c''"
+                    and   "ce_star \<sigma>'' ls \<sigma>'"
+
+    moreover
+    then obtain \<sigma> where "\<sigma> \<in> states c"
+                  and   "ce \<sigma> l \<sigma>''"
+
+    ultimately
+    show ?case by (simp add: ce_star_Cons) blast
+  next
+    case (2 \<sigma>')
+
+    then obtain \<sigma> where "\<sigma> \<in> states c"
+                  and   "ce_star \<sigma> (l#ls) \<sigma>'"
+    by blast
+    
+    moreover
+    then obtain \<sigma>'' where "ce \<sigma> l \<sigma>''"
+                    and   "ce_star \<sigma>'' ls \<sigma>'"
+    using ce_star_Cons by blast
+
+    ultimately
+    show ?case
+  qed
+qed
+
+end
