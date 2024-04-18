@@ -1,0 +1,123 @@
+theory IO
+  imports
+    Main
+    "HOL-Library.Monad_Syntax"
+begin
+
+
+
+
+
+
+typedef '\<alpha> io = "UNIV :: (\<^url> \<Rightarrow> '\<alpha> \<times> \<^url>) set"
+proof -
+  show "\<exists>x. x \<in> UNIV" by simp
+qed
+
+
+
+
+definition bind :: "'\<alpha> io \<Rightarrow> ('\<alpha> \<Rightarrow> '\<beta> io) \<Rightarrow> '\<beta> io" where [code del]:
+  "bind action\<^sub>1 action\<^sub>2 = Abs_io (\<lambda>world\<^sub>0.
+                                  let (a, world\<^sub>1) = (Rep_io action\<^sub>1) world\<^sub>0;
+                                      (b, world\<^sub>2) = (Rep_io (action\<^sub>2 a)) world\<^sub>1
+                                  in (b, world\<^sub>2))"
+
+
+hide_const (open) bind
+adhoc_overloading bind IO.bind
+
+lemma "bind (foo :: '\<alpha> io) (\<lambda>a. bar a) = foo \<bind> (\<lambda>a. bar a)"
+  by simp
+
+
+definition return :: "'\<alpha> \<Rightarrow> '\<alpha> io" where [code del]:
+  "return a \<equiv> Abs_io (\<lambda>world. (a, world))"
+
+hide_const (open) return
+
+
+
+lemma left_id:
+  shows "(IO.return a \<bind> f) = f a"
+  by(simp add: return_def IO.bind_def Abs_io_inverse Rep_io_inverse)
+
+lemma right_id:
+  shows "(m \<bind> IO.return) = m"
+  by(simp add: return_def IO.bind_def Abs_io_inverse Rep_io_inverse)
+    
+lemma bind_assoc:
+  shows "((m \<bind> f) \<bind> g) = (m \<bind> (\<lambda>x. f x \<bind> g))"
+  by(simp add: IO.bind_def Abs_io_inverse Abs_io_inject fun_eq_iff split: prod.splits)
+
+
+code_printing constant IO.bind \<rightharpoonup> (Haskell) "_ >>= _"
+                                  and (SML) "bind"
+            | constant IO.return \<rightharpoonup> (Haskell) "return"
+                                    and (SML) "(() => _)"
+
+code_reserved SML bind return
+  
+code_printing type_constructor io \<rightharpoonup> (Haskell) "Prelude.IO _"
+                                     and (SML) "unit -> _"
+
+
+
+axiomatization
+  println :: "String.literal \<Rightarrow> unit io" and
+  getLine :: "String.literal io"
+
+
+code_reserved Haskell StdIO println getLine
+code_reserved SML println print getLine TextIO
+
+code_printing constant println \<rightharpoonup> (Haskell) "StdIO.println"
+                              and (SML) "println"
+            | constant getLine \<rightharpoonup> (Haskell) "StdIO.getLine"
+                              and (SML) "getLine"
+
+
+lemma "bind (println (STR ''foo''))
+            (\<lambda>_.  println (STR ''bar'')) =
+       println (STR ''foo'') \<bind> (\<lambda>_. println (STR ''bar''))"
+  by simp 
+lemma "do { _ \<leftarrow> println (STR ''foo'');
+            println (STR ''bar'')} =
+      println (STR ''foo'') \<then> (println (STR ''bar''))"
+  by simp
+
+
+
+definition exec :: "'\<alpha> io \<Rightarrow> \<^url> \<Rightarrow> \<^url>" where
+  "exec iofun world = snd (Rep_io iofun world)"
+
+definition eval :: "'\<alpha> io \<Rightarrow> \<^url> \<Rightarrow> '\<alpha>" where
+  "eval iofun world = fst (Rep_io iofun world)"
+
+lemma "Abs_io (\<lambda>world. (eval iofun world, exec iofun world)) = iofun"
+  by(simp add: exec_def eval_def Rep_io_inverse)
+
+lemma exec_Abs_io: "exec (Abs_io f) world = snd (f world)"
+  by(simp add: exec_def Abs_io_inverse)
+
+
+lemma exec_then:
+    "exec (io\<^sub>1 \<then> io\<^sub>2) world = exec io\<^sub>2 (exec io\<^sub>1 world)"
+  and eval_then:
+    "eval (io\<^sub>1 \<then> io\<^sub>2) world = eval io\<^sub>2 (exec io\<^sub>1 world)"
+  by (simp_all add: exec_def eval_def bind_def Abs_io_inverse split_beta)
+
+lemma exec_bind:
+    "exec (io\<^sub>1 \<bind> io\<^sub>2) world = exec (io\<^sub>2 (eval io\<^sub>1 world)) (exec io\<^sub>1 world)"
+  and eval_bind:
+    "eval (io\<^sub>1 \<bind> io\<^sub>2) world = eval (io\<^sub>2 (eval io\<^sub>1 world)) (exec io\<^sub>1 world)"
+  by(simp_all add: exec_def eval_def bind_def Abs_io_inverse split_beta)
+
+lemma exec_return:
+    "exec (IO.return a) world = world"
+  and
+    "eval (IO.return a) world = a"
+  by (simp_all add: exec_def eval_def Abs_io_inverse return_def)
+
+
+end

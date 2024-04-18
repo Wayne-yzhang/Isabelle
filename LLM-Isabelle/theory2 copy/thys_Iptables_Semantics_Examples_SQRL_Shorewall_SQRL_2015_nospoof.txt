@@ -1,0 +1,100 @@
+theory SQRL_2015_nospoof
+imports 
+  Iptables_Semantics.Parser
+begin
+
+
+  
+  definition "everything_but_private_ips = all_but_those_ips [
+    (ipv4addr_of_dotdecimal (192,168,0,0), 16),
+    (ipv4addr_of_dotdecimal (172,16,0,0), 12),
+    (ipv4addr_of_dotdecimal (10,0,0,0), 8)
+    ]"
+  
+  definition "ipassmt = [(Iface ''ldit'', [(ipv4addr_of_dotdecimal (10,13,42,136), 29)]),
+  (Iface ''lmd'', [(ipv4addr_of_dotdecimal (10,13,42,128), 29)]),
+  (Iface ''loben'', [(ipv4addr_of_dotdecimal (10,13,42,144), 28)]),
+  (Iface ''wg'', [(ipv4addr_of_dotdecimal (10,13,42,176), 28)]),
+  (Iface ''wt'', [(ipv4addr_of_dotdecimal (10,13,42,160), 28)]),
+  (Iface ''lo'', [(0,0)]),
+  (Iface ''vpriv'', [(0,0)]),
+  (Iface ''vshit'', [(0,0)]),
+  (Iface ''vocb'', [(0,0)]),
+  (Iface ''lua'', [(0,0)])
+  ]"
+  
+  lemma "ipassmt_sanity_nowildcards (map_of ipassmt)" by eval
+
+  
+  
+  definition "interfaces = (map (iface_sel \<circ> fst) ipassmt)"
+  
+  lemma "interfaces = [''ldit'', ''lmd'', ''loben'', ''wg'', ''wt'', ''lup'', ''lo'', ''vpriv'', ''vshit'', ''vocb'', ''lua'']" by eval
+  
+  definition "spoofing_protection fw \<equiv> map (\<lambda>ifce. (ifce, no_spoofing_iface (Iface ifce) (map_of_ipassmt ipassmt) fw)) interfaces"
+  
+  definition "preprocess default_policy fw \<equiv> (upper_closure (ctstate_assume_new (unfold_ruleset_CHAIN ''PREROUTING'' default_policy (map_of_string_ipv4 fw))))"
+
+  thm raw_fw1_def
+  thm raw_fw1_PREROUTING_default_policy_def
+
+  lemma "ipassmt_sanity_defined (preprocess raw_fw1_PREROUTING_default_policy raw_fw1) (map_of_ipassmt ipassmt)" by eval
+
+  value[code] "debug_ipassmt_ipv4 ipassmt (preprocess raw_fw1_PREROUTING_default_policy raw_fw1)"
+
+
+  parse_iptables_save filter_fw1="2015_aug_iptables-save-spoofing-protection"
+  thm filter_fw1_def
+
+
+
+  value[code] "remdups (collect_ifaces (unfold_ruleset_INPUT filter_fw1_INPUT_default_policy (map_of_string_ipv4 filter_fw1)))"
+
+  lemma "ipassmt_sanity_defined (unfold_ruleset_INPUT filter_fw1_INPUT_default_policy (map_of_string_ipv4 filter_fw1)) (map_of_ipassmt ipassmt)" by eval
+  lemma "ipassmt_sanity_defined (unfold_ruleset_FORWARD filter_fw1_FORWARD_default_policy (map_of_string_ipv4 filter_fw1)) (map_of_ipassmt ipassmt)" by eval
+  lemma "ipassmt_sanity_defined (unfold_ruleset_OUTPUT filter_fw1_OUTPUT_default_policy (map_of_string_ipv4 filter_fw1)) (map_of_ipassmt ipassmt)" by eval
+
+
+  value[code] "map (\<lambda>(c,rs). (c, map (quote_rewrite \<circ> common_primitive_rule_toString) rs)) raw_fw1"
+
+  value[code] "let x = to_simple_firewall (upper_closure
+                       (unfold_ruleset_CHAIN ''PREROUTING'' raw_fw1_PREROUTING_default_policy (map_of raw_fw1)))
+               in map simple_rule_ipv4_toString x"
+
+
+  definition "ssh_packet_new = \<lparr>p_iiface = ''lup'', p_oiface = ''anything'',
+     p_src = ipv4addr_of_dotdecimal (123,123,123,123), p_dst = ipv4addr_of_dotdecimal (131,159,14,9),
+     p_proto = TCP, p_sport = 12345, p_dport = 22, p_tcp_flags = {TCP_SYN},
+     p_payload='''', p_tag_ctstate = CT_New\<rparr>"
+
+  definition "ssh_packet_established = ssh_packet_new\<lparr>p_tag_ctstate := CT_Established\<rparr>"
+
+  lemma "approximating_bigstep_fun (common_matcher, in_doubt_deny) ssh_packet_new
+     (unfold_ruleset_CHAIN ''PREROUTING'' raw_fw1_PREROUTING_default_policy (map_of_string_ipv4 raw_fw1)) Undecided
+     = Decision FinalAllow" by eval
+  lemma "approximating_bigstep_fun (common_matcher, in_doubt_deny) ssh_packet_established
+     (unfold_ruleset_CHAIN ''PREROUTING'' raw_fw1_PREROUTING_default_policy (map_of_string_ipv4 raw_fw1)) Undecided
+     = Decision FinalAllow" by eval
+
+  lemma "approximating_bigstep_fun (common_matcher, in_doubt_deny) ssh_packet_new
+     (unfold_ruleset_INPUT filter_fw1_INPUT_default_policy (map_of_string_ipv4 filter_fw1)) Undecided
+     = Decision FinalAllow" by eval
+  lemma "approximating_bigstep_fun (common_matcher, in_doubt_deny) ssh_packet_established
+     (unfold_ruleset_INPUT filter_fw1_INPUT_default_policy (map_of_string_ipv4 filter_fw1)) Undecided
+     = Decision FinalAllow" by eval
+
+  
+  lemma "spoofing_protection (preprocess raw_fw1_PREROUTING_default_policy raw_fw1) =
+       [(''ldit'', True),
+        (''lmd'', True),
+        (''loben'', True),
+        (''wg'', True),
+        (''wt'', True),
+        (''lup'', True),
+        (''lo'', True),
+        (''vpriv'', True),
+        (''vshit'', True),
+        (''vocb'', True),
+        (''lua'', True)]" by eval
+
+end

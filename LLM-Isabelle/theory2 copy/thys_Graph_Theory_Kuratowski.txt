@@ -1,0 +1,804 @@
+theory Kuratowski
+imports
+  Arc_Walk
+  Digraph_Component
+  Subdivision
+  "HOL-Library.Rewrite"
+begin
+
+
+
+
+definition complete_digraph :: "nat \<Rightarrow> ('a,'b) pre_digraph \<Rightarrow> bool" ("K\<^bsub>_\<^esub>") where
+  "complete_digraph n G \<equiv> graph G \<and> card (verts G) = n \<and> arcs_ends G = {(u,v). (u,v) \<in> verts G \<times> verts G \<and> u \<noteq> v}"
+
+definition complete_bipartite_digraph :: "nat \<Rightarrow> nat \<Rightarrow> ('a, 'b) pre_digraph \<Rightarrow> bool" ("K\<^bsub>_,_\<^esub>") where
+  "complete_bipartite_digraph m n G \<equiv> graph G \<and> (\<exists>U V. verts G = U \<union> V \<and> U \<inter> V = {}
+    \<and> card U = m \<and> card V = n \<and> arcs_ends G = U \<times> V \<union> V \<times> U)"
+
+definition kuratowski_planar :: "('a,'b) pre_digraph \<Rightarrow> bool" where
+  "kuratowski_planar G \<equiv> \<not>(\<exists>H. subgraph H G \<and> (\<exists>K rev_K rev_H. subdivision (K, rev_K) (H, rev_H) \<and> (K\<^bsub>3,3\<^esub> K \<or> K\<^bsub>5\<^esub> K)))"
+
+lemma complete_digraph_pair_def: "K\<^bsub>n\<^esub> (with_proj G)
+  \<longleftrightarrow> finite (pverts G) \<and> card (pverts G) = n \<and> parcs G = {(u,v). (u,v) \<in> (pverts G \<times> pverts G) \<and> u \<noteq> v}" (is "_ = ?R")
+proof
+  assume A: "K\<^bsub>n\<^esub> G"
+  then interpret graph "with_proj G" by (simp add: complete_digraph_def)
+  show ?R using A finite_verts by (auto simp: complete_digraph_def)
+next
+  assume A: ?R
+  moreover
+  then have "finite (pverts G \<times> pverts G)" "parcs G \<subseteq> pverts G \<times> pverts G"
+    by auto
+  then have "finite (parcs G)" by (rule rev_finite_subset)
+  ultimately interpret pair_graph G
+    by unfold_locales (auto simp:  symmetric_def split: prod.splits intro: symI)
+  show "K\<^bsub>n\<^esub> G" using A finite_verts by (auto simp: complete_digraph_def)
+qed
+
+lemma complete_bipartite_digraph_pair_def: "K\<^bsub>m,n\<^esub> (with_proj G) \<longleftrightarrow> finite (pverts G)
+    \<and> (\<exists>U V. pverts G = U \<union> V \<and> U \<inter> V = {} \<and> card U = m \<and> card V = n \<and> parcs G = U \<times> V \<union> V \<times> U)" (is "_ = ?R")
+proof
+  assume A: "K\<^bsub>m,n\<^esub> G"
+  then interpret graph G by (simp add: complete_bipartite_digraph_def)
+  show ?R using A finite_verts by (auto simp: complete_bipartite_digraph_def)
+next
+  assume A: ?R
+  then interpret pair_graph G
+    by unfold_locales (fastforce simp: complete_bipartite_digraph_def symmetric_def split: prod.splits intro: symI)+
+  show "K\<^bsub>m,n\<^esub> G" using A by (auto simp: complete_bipartite_digraph_def)
+qed
+
+lemma pair_graphI_complete:
+  assumes "K\<^bsub>n\<^esub> (with_proj G)"
+  shows "pair_graph G"
+proof -
+  from assms interpret graph "with_proj G" by (simp add: complete_digraph_def)
+  show "pair_graph G"
+    using finite_arcs finite_verts sym_arcs wellformed no_loops by unfold_locales simp_all
+qed
+
+lemma pair_graphI_complete_bipartite:
+  assumes "K\<^bsub>m,n\<^esub> (with_proj G)"
+  shows "pair_graph G"
+proof -
+  from assms interpret graph "with_proj G" by (simp add: complete_bipartite_digraph_def)
+  show "pair_graph G"
+    using finite_arcs finite_verts sym_arcs wellformed no_loops by unfold_locales simp_all
+qed
+
+
+
+
+context pre_digraph begin
+
+definition (in pre_digraph) inner_verts :: "'b awalk \<Rightarrow> 'a list" where
+  "inner_verts p \<equiv> tl (map (tail G) p)"
+
+lemma inner_verts_Nil[simp]: "inner_verts [] = []" by (auto simp: inner_verts_def)
+
+lemma inner_verts_singleton[simp]: "inner_verts [x] = []" by (auto simp: inner_verts_def)
+
+lemma (in wf_digraph) inner_verts_Cons:
+  assumes "awalk u (e # es) v"
+  shows "inner_verts (e # es) = (if es \<noteq> [] then head G e # inner_verts es else [])"
+  using assms by (induct es) (auto simp: inner_verts_def)
+
+lemma (in - ) inner_verts_with_proj_def:
+  "pre_digraph.inner_verts (with_proj G) p = tl (map fst p)"
+  unfolding pre_digraph.inner_verts_def by simp
+
+lemma inner_verts_conv: "inner_verts p = butlast (tl (awalk_verts u p))"
+  unfolding inner_verts_def awalk_verts_conv by simp
+
+lemma (in pre_digraph) inner_verts_empty[simp]:
+  assumes "length p < 2" shows "inner_verts p = []"
+  using assms by (cases p) (auto simp: inner_verts_def)
+
+lemma (in wf_digraph) set_inner_verts:
+  assumes "apath u p v"
+  shows "set (inner_verts p) = set (awalk_verts u p) - {u,v}"
+proof (cases "length p < 2")
+  case True with assms show ?thesis
+    by (cases p) (auto simp: inner_verts_conv[of _ u] apath_def)
+next
+  case False
+  have "awalk_verts u p = u # inner_verts p @ [v]"
+    using assms False length_awalk_verts[of u p] inner_verts_conv[of p u]
+    by (cases "awalk_verts u p") (auto simp: apath_def awalk_conv)
+  then show ?thesis using assms by (auto simp: apath_def)
+qed
+
+lemma in_set_inner_verts_appendI_l:
+  assumes "u \<in> set (inner_verts p)"
+  shows "u \<in> set (inner_verts (p @ q))"
+  using assms
+by (induct p) (auto simp: inner_verts_def)
+
+lemma in_set_inner_verts_appendI_r:
+  assumes "u \<in> set (inner_verts q)"
+  shows "u \<in> set (inner_verts (p @ q))"
+  using assms
+by (induct p) (auto simp: inner_verts_def dest: list_set_tl)
+
+end
+
+
+
+
+definition progressing :: "('a \<times> 'a) awalk \<Rightarrow> bool" where
+  "progressing p \<equiv> \<forall>xs x y ys. p \<noteq> xs @ (x,y) # (y,x) # ys"
+
+lemma progressing_Nil: "progressing []"
+  by (auto simp: progressing_def)
+
+lemma progressing_single: "progressing [e]"
+  by (auto simp: progressing_def)
+
+lemma progressing_ConsD:
+  assumes "progressing (e # es)" shows "progressing es"
+  using assms unfolding progressing_def by (metis (no_types) append_eq_Cons_conv)
+
+lemma progressing_Cons:
+  "progressing (x # xs) \<longleftrightarrow> (xs = [] \<or> (xs \<noteq> [] \<and> \<not>(fst x = snd (hd xs) \<and> snd x = fst (hd xs)) \<and> progressing xs))" (is "?L = ?R")
+proof
+  assume ?L
+  show ?R
+  proof (cases xs)
+    case Nil then show ?thesis by auto
+  next
+    case (Cons x' xs')
+    then have "\<not>(fst x = snd x' \<and> snd x = fst x')" by (cases x) (cases x', auto)
+  qed
+next
+  assume ?R then show ?L unfolding progressing_def
+    by (auto simp add: Cons_eq_append_conv)
+qed
+
+lemma progressing_Cons_Cons:
+  "progressing ((u,v) # (v,w) # es) \<longleftrightarrow> u \<noteq> w \<and> progressing ((v,w) # es)" (is "?L \<longleftrightarrow> ?R")
+  by (auto simp: progressing_Cons)
+
+lemma progressing_appendD1:
+  assumes "progressing (p @ q)" shows "progressing p"
+  using assms unfolding progressing_def by (metis append_Cons append_assoc)
+
+lemma progressing_appendD2:
+  assumes "progressing (p @ q)" shows "progressing q"
+  using assms unfolding progressing_def by (metis append_assoc)
+
+lemma progressing_rev_path:
+  "progressing (rev_path p) = progressing p" (is "?L = ?R")
+proof
+  assume ?L
+  show ?R unfolding progressing_def
+  proof (intro allI notI)
+    fix xs x y ys l1 l2 assume "p = xs @ (x,y) # (y,x) # ys"
+    then have "rev_path p = rev_path ys @ (x,y) # (y,x) # rev_path xs"
+      by simp
+  qed
+next
+  assume ?R
+  show ?L unfolding progressing_def
+  proof (intro allI notI)
+    fix xs x y ys l1 l2 assume "rev_path p = xs @ (x,y) # (y,x) # ys"
+    then have "rev_path (rev_path p) = rev_path ys @ (x,y) # (y,x) # rev_path xs"
+      by simp
+  qed
+qed
+
+lemma progressing_append_iff:
+  shows "progressing (xs @ ys) \<longleftrightarrow> progressing xs \<and> progressing ys
+      \<and> (xs \<noteq> [] \<and> ys \<noteq> [] \<longrightarrow> (fst (last xs) \<noteq> snd (hd ys) \<or> snd (last xs) \<noteq> fst (hd ys)))"
+proof (induct ys arbitrary: xs)
+  case Nil then show ?case by (auto simp: progressing_Nil)
+next
+  case (Cons y' ys')
+  let "_ = ?R" = ?case
+  have *: "xs \<noteq> [] \<Longrightarrow> hd (rev_path xs) = prod.swap (last xs)" by (induct xs) auto
+
+  have "progressing (xs @ y' # ys') \<longleftrightarrow> progressing ((xs @ [y']) @ ys')"
+    by simp
+  also have "\<dots> \<longleftrightarrow> progressing (xs @ [y']) \<and> progressing ys' \<and> (ys' \<noteq> [] \<longrightarrow> (fst y' \<noteq> snd (hd ys') \<or> snd y' \<noteq> fst (hd ys')))"
+    by (subst Cons) simp
+  also have "\<dots> \<longleftrightarrow> ?R"
+    by (auto simp: progressing_Cons progressing_Nil progressing_rev_path[where p="xs @ _",symmetric] * progressing_rev_path prod.swap_def)
+  finally show ?case .
+qed
+
+
+
+
+definition verts3 :: "('a, 'b) pre_digraph \<Rightarrow> 'a set" where
+  "verts3 G \<equiv> {v \<in> verts G. 2 < in_degree G v}"
+
+
+definition (in pre_digraph) gen_iapath :: "'a set \<Rightarrow> 'a \<Rightarrow> 'b awalk \<Rightarrow> 'a \<Rightarrow> bool" where
+  "gen_iapath V u p v \<equiv> u \<in> V \<and> v \<in> V \<and> apath u p v \<and> set (inner_verts p) \<inter> V = {} \<and> p \<noteq> []"
+
+abbreviation (in pre_digraph) (input) iapath :: "'a \<Rightarrow> 'b awalk \<Rightarrow> 'a \<Rightarrow> bool" where
+  "iapath u p v \<equiv> gen_iapath (verts3 G) u p v"
+
+definition gen_contr_graph :: "('a,'b) pre_digraph \<Rightarrow> 'a set \<Rightarrow> 'a pair_pre_digraph" where
+  "gen_contr_graph G V \<equiv> \<lparr>
+     pverts = V,
+     parcs = {(u,v). \<exists>p. pre_digraph.gen_iapath G V u p v}
+     \<rparr>"
+
+abbreviation (input) contr_graph :: "'a pair_pre_digraph \<Rightarrow> 'a pair_pre_digraph" where
+  "contr_graph G \<equiv> gen_contr_graph G (verts3 G)"
+
+
+
+
+lemma (in pair_sym_digraph) verts3_subdivide:
+  assumes "e \<in> parcs G" "w \<notin> pverts G"
+  shows"verts3 (subdivide G e w) = verts3 G"
+proof -
+  let ?sG = "subdivide G e w" 
+  obtain u v where e_conv[simp]: "e = (u,v)" by (cases e) auto
+
+  have w_arcs: "(u,w) \<notin> parcs G" "(v,w) \<notin> parcs G" "(w,u) \<notin> parcs G" "(w,v) \<notin> parcs G"
+    by (auto dest: wellformed)
+  have G_arcs: "(u,v) \<in> parcs G" "(v,u) \<in> parcs G"
+
+  have "{v \<in> pverts G. 2 < in_degree G v} = {v \<in> pverts G. 2 < in_degree ?sG v}"
+  proof -
+    { fix x assume "x \<in> pverts G"
+      define card_eq where "card_eq x \<longleftrightarrow> in_degree ?sG x = in_degree G x" for x
+
+      have "in_arcs ?sG u = (in_arcs G u - {(v,u)}) \<union> {(w,u)}"
+           "in_arcs ?sG v = (in_arcs G v - {(u,v)}) \<union> {(w,v)}"
+        using w_arcs G_arcs by auto
+      then have "card_eq u" "card_eq v"
+        unfolding card_eq_def in_degree_def using w_arcs G_arcs
+        apply -
+        apply (cases "finite (in_arcs G u)"; simp add: card_Suc_Diff1 del: card_Diff_insert)
+        apply (cases "finite (in_arcs G v)"; simp add: card_Suc_Diff1 del: card_Diff_insert)
+        done
+      moreover
+      have "x \<notin> {u,v} \<Longrightarrow> in_arcs ?sG x = in_arcs G x"
+      then have "x \<notin> {u,v} \<Longrightarrow> card_eq x" by (simp add: in_degree_def card_eq_def)
+      ultimately have "card_eq x" by fast
+      then have "in_degree G x = in_degree ?sG x"
+        unfolding card_eq_def by simp }
+    then show ?thesis by auto
+  qed
+  also have "\<dots> = {v\<in>pverts ?sG. 2 < in_degree ?sG v}"
+  proof -
+    have "in_degree ?sG w \<le> 2"
+    proof -
+      have "in_arcs ?sG w = {(u,w), (v,w)}"
+      then show ?thesis
+        unfolding in_degree_def by (auto simp: card_insert_if)
+    qed
+    then show ?thesis using G_arcs assms by auto
+  qed
+  finally show ?thesis by (simp add: verts3_def)
+qed
+
+lemma sd_path_Nil_iff:
+  "sd_path e w p = [] \<longleftrightarrow> p = []"
+  by (cases "(e,w,p)" rule: sd_path.cases) auto
+
+lemma (in pair_sym_digraph) gen_iapath_sd_path:
+  fixes e :: "'a \<times> 'a" and w :: 'a
+  assumes elems: "e \<in> parcs G" "w \<notin> pverts G"
+  assumes V: "V \<subseteq> pverts G"
+  assumes path: "gen_iapath V u p v"
+  shows "pre_digraph.gen_iapath (subdivide G e w) V u (sd_path e w p) v"
+proof -
+  obtain x y where e_conv: "e = (x,y)" by (cases e) auto
+  interpret S: pair_sym_digraph "subdivide G e w"
+    using elems by (auto intro: pair_sym_digraph_subdivide)
+
+  from path have "apath u p v" by (auto simp: gen_iapath_def)
+  then have apath_sd: "S.apath u (sd_path e w p) v" and
+    set_ev_sd: "set (S.awalk_verts u (sd_path e w p)) \<subseteq> set (awalk_verts u p) \<union> {w}"
+    using elems by (rule apath_sd_path set_awalk_verts_sd_path)+
+    by (auto simp: apath_def awalk_hd_in_verts awalk_last_in_verts)
+
+  have "set (S.inner_verts (sd_path e w p)) = set (S.awalk_verts u (sd_path e w p)) - {u,v}"
+    using apath_sd by (rule S.set_inner_verts)
+  also have "\<dots> \<subseteq> set (awalk_verts u p) \<union> {w} - {u,v}"
+    using set_ev_sd by auto
+  also have "\<dots> = set (inner_verts p) \<union> {w}"
+  finally have "set (S.inner_verts (sd_path e w p)) \<inter> V \<subseteq> (set (inner_verts p) \<union> {w}) \<inter> V"
+    using V by blast
+  also have "\<dots> \<subseteq> {}"
+    using path elems V unfolding gen_iapath_def by auto
+  finally show ?thesis
+    using apath_sd elems path by (auto simp: gen_iapath_def S.gen_iapath_def sd_path_Nil_iff)
+qed
+
+lemma (in pair_sym_digraph)
+  assumes elems: "e \<in> parcs G" "w \<notin> pverts G"
+  assumes V: "V \<subseteq> pverts G"
+  assumes path: "pre_digraph.gen_iapath (subdivide G e w) V u p v"
+  shows gen_iapath_co_path: "gen_iapath V u (co_path e w p) v" (is ?thesis_path)
+    and set_awalk_verts_co_path': "set (awalk_verts u (co_path e w p)) = set (awalk_verts u p) - {w}" (is ?thesis_set)
+proof -
+  interpret S: pair_sym_digraph "subdivide G e w"
+    using elems by (rule pair_sym_digraph_subdivide)
+
+  have uv: "u \<in> pverts G" "v \<in> pverts G" "S.apath u p v" using V path by (auto simp: S.gen_iapath_def)
+  note co = apath_co_path[OF elems uv] set_awalk_verts_co_path[OF elems uv]
+
+  show ?thesis_set by (fact co)
+  show ?thesis_path using co path unfolding gen_iapath_def S.gen_iapath_def using elems
+    by (clarsimp simp add: set_inner_verts[of u] S.set_inner_verts[of u]) blast
+qed
+
+
+
+
+context pair_sym_digraph begin
+
+lemma gen_iapath_rev_path:
+  "gen_iapath V v (rev_path p) u = gen_iapath V u p v" (is "?L = ?R")
+proof -
+  { fix u p v assume "gen_iapath V u p v"
+    then have "butlast (tl (awalk_verts v (rev_path p))) = rev (butlast (tl (awalk_verts u p)))"
+      by (auto simp: tl_rev butlast_rev butlast_tl awalk_verts_rev_path gen_iapath_def apath_def)
+      by (auto simp: gen_iapath_def apath_def inner_verts_conv[symmetric] awalk_verts_rev_path) }
+  note RL = this
+  show ?thesis by (auto dest: RL intro: RL)
+qed
+
+lemma inner_verts_rev_path:
+  assumes "awalk u p v"
+  shows "inner_verts (rev_path p) = rev (inner_verts p)"
+by (metis assms butlast_rev butlast_tl awalk_verts_rev_path inner_verts_conv tl_rev)
+
+end
+
+context pair_pseudo_graph begin
+
+lemma apath_imp_progressing:
+  assumes "apath u p v" shows "progressing p"
+proof (rule ccontr)
+  assume "\<not>?thesis"
+  then obtain xs x y ys where *: "p = xs @ (x,y) # (y,x) # ys"
+    unfolding progressing_def by auto
+  then  have "\<not>apath u p v"
+    by (simp add: apath_append_iff apath_simps hd_in_awalk_verts)
+  then show False using assms by auto
+qed
+
+lemma awalk_Cons_deg2_unique:
+  assumes "awalk u p v" "p \<noteq> []"
+  assumes "in_degree G u \<le> 2"
+  assumes "awalk u1 (e1 # p) v" "awalk u2 (e2 # p) v"
+  assumes "progressing (e1 # p)" "progressing (e2 # p)"
+  shows "e1 = e2"
+proof (cases p)
+  case (Cons e es)
+  show ?thesis
+  proof (rule ccontr)
+    assume "e1 \<noteq> e2"
+    define x where "x = snd e"
+    then have ei_unf: "e1 = (u1, u)" "e2 = (u2, u)"
+      using Cons assms by (auto simp: apath_simps prod_eqI)
+      by (auto simp: progressing_Cons_Cons)
+    moreover have "{(u1, u), (u2, u), (x,u)} \<subseteq> parcs G"
+      using e_unf ei_unf Cons assms by (auto simp: awalk_simps intro: arcs_symmetric)
+    then have "finite (in_arcs G u)"
+      and "{(u1, u), (u2, u), (x,u)} \<subseteq> in_arcs G u" by auto
+    then have "card ({(u1, u), (u2, u), (x,u)}) \<le> in_degree G u"
+      unfolding in_degree_def by (rule card_mono) 
+  qed
+
+lemma same_awalk_by_same_end:
+  assumes V: "verts3 G \<subseteq> V" "V \<subseteq> pverts G"
+    and walk: "awalk u p v" "awalk u q w" "hd p = hd q" "p \<noteq> []" "q \<noteq> []"
+    and progress: "progressing p" "progressing q"
+    and tail: "v \<in> V" "w \<in> V"
+    and inner_verts: "set (inner_verts p) \<inter> V = {}"
+      "set (inner_verts q) \<inter> V = {}"
+  shows "p = q"
+  using walk progress inner_verts
+proof (induct p q arbitrary: u rule: list_induct2'[case_names Nil_Nil Cons_Nil Nil_Cons Cons_Cons])
+  case (Cons_Cons a as b bs)
+
+  { fix a as v b bs w
+    assume A: "awalk u (a # as) v" "awalk u (b # bs) w"
+        "set (inner_verts (b # bs)) \<inter> V = {}" "v \<in> V" "a = b" "as = []"
+    then have "bs = []" by - (rule ccontr, auto simp: inner_verts_Cons awalk_simps)
+  } note Nil_imp_Nil = this
+
+  show ?case
+  proof (cases "as = []")
+    case True
+  next
+    case False
+
+
+    let ?arcs = "{(fst a, snd a), (snd a', snd a), (snd b', snd a)}"
+
+    have "card {fst a, snd a', snd b'} = card (fst ` ?arcs)" by auto
+    also have "\<dots> = card ?arcs" by (rule card_image) (cases a, auto)
+    also have "\<dots> \<le> in_degree G (snd a)"
+    proof -
+      have "?arcs \<subseteq> in_arcs G (snd a)"
+        by (cases b; cases a') (auto simp: progressing_Cons_Cons awalk_simps intro: arcs_symmetric) 
+      with _show ?thesis unfolding in_degree_def by (rule card_mono) auto
+    qed
+    also have "\<dots> \<le> 2"
+    proof -
+      have "snd a \<notin> V" "snd a \<in> pverts G"
+      then show ?thesis using V by (auto simp: verts3_def)
+    qed
+    finally have "fst a = snd a' \<or> fst a = snd b' \<or> snd a' = snd b'"
+      by (auto simp: card_insert_if split: if_splits)
+    then have "hd as = hd bs"
+      by (cases b, cases a', cases b') (auto simp: progressing_Cons_Cons awalk_simps)
+    then show ?thesis
+      by (auto dest: progressing_ConsD simp: awalk_simps inner_verts_Cons intro!: Cons_Cons)
+  qed
+qed simp_all
+
+lemma same_awalk_by_common_arc:
+  assumes V: "verts3 G \<subseteq> V" "V \<subseteq> pverts G"
+  assumes walk: "awalk u p v" "awalk w q x"
+  assumes progress: "progressing p" "progressing q"
+  assumes iv_not_in_V: "set (inner_verts p) \<inter> V = {}" "set (inner_verts q) \<inter> V = {}"
+  assumes ends_in_V: "{u,v,w,x} \<subseteq> V"
+  assumes arcs: "e \<in> set p" "e \<in> set q"
+  shows "p = q"
+proof -
+  from arcs obtain p1 p2 where p_decomp: "p = p1 @ e # p2" by (metis in_set_conv_decomp_first)
+  from arcs obtain q1 q2 where q_decomp: "q = q1 @ e # q2" by (metis in_set_conv_decomp_first)
+
+  { define p1' q1' where "p1' = rev_path (p1 @ [e])" and "q1' = rev_path (q1 @ [e])"
+    then have decomp: "p = rev_path p1' @ p2" "q = rev_path q1' @ q2"
+      and "awlast u (rev_path p1') = snd e" "awlast w (rev_path q1') = snd e"
+      using p_decomp q_decomp walk by (auto simp: awlast_append awalk_verts_rev_path)
+    then have walk': "awalk (snd e) p1' u" "awalk (snd e) q1' w"
+      using walk by auto
+    moreover have "hd p1' = hd q1'" "p1' \<noteq> []" "q1' \<noteq> []" by (auto simp: p1'_def q1'_def)
+    moreover have "progressing p1'" "progressing q1'"
+      using progress unfolding decomp by (auto dest: progressing_appendD1 simp: progressing_rev_path)
+    moreover
+    have "set (inner_verts (rev_path p1')) \<inter> V = {}" "set (inner_verts (rev_path q1')) \<inter> V = {}"
+      using iv_not_in_V unfolding decomp
+      by (auto intro: in_set_inner_verts_appendI_l in_set_inner_verts_appendI_r)
+    then have "u \<in> V" "w \<in> V" "set (inner_verts p1') \<inter> V = {}" "set (inner_verts q1') \<inter> V = {}"
+      using ends_in_V iv_not_in_V walk unfolding decomp
+      by (auto simp: inner_verts_rev_path)
+    ultimately have "p1' = q1'" by (rule same_awalk_by_same_end[OF V]) }
+  moreover
+  { define p2' q2' where "p2' = e # p2" and "q2' = e # q2"
+    then have decomp: "p = p1 @ p2'" "q = q1 @ q2'"
+      using p_decomp q_decomp by (auto simp: awlast_append)
+    moreover
+    have "awlast u p1 = fst e" "awlast w q1 = fst e"
+      using p_decomp q_decomp walk by auto
+    ultimately
+    have *: "awalk (fst e) p2' v" "awalk (fst e) q2' x"
+      using walk by auto
+    moreover have "hd p2' = hd q2'" "p2' \<noteq> []" "q2' \<noteq> []" by (auto simp: p2'_def q2'_def)
+    moreover have "progressing p2'" "progressing q2'"
+      using progress unfolding decomp by (auto dest: progressing_appendD2)
+    moreover
+    have "v \<in> V" "x \<in> V" "set (inner_verts p2') \<inter> V = {}" "set (inner_verts q2') \<inter> V = {}"
+      using ends_in_V iv_not_in_V unfolding decomp
+      by (auto intro: in_set_inner_verts_appendI_l in_set_inner_verts_appendI_r)
+    ultimately have "p2' = q2'" by (rule same_awalk_by_same_end[OF V]) }
+  ultimately
+  show "p = q" using p_decomp q_decomp by (auto simp: rev_path_eq)
+qed
+
+lemma same_gen_iapath_by_common_arc:
+  assumes V: "verts3 G \<subseteq> V" "V \<subseteq> pverts G"
+  assumes path: "gen_iapath V u p v" "gen_iapath V w q x"
+  assumes arcs: "e \<in> set p" "e \<in> set q"
+  shows "p = q"
+proof -
+  from path have awalk: "awalk u p v" "awalk w q x" "progressing p" "progressing q"
+      and in_V: "set (inner_verts p) \<inter> V = {}" "set (inner_verts q) \<inter> V = {}" "{u,v,w,x} \<subseteq> V"
+    by (auto simp: gen_iapath_def apath_imp_progressing apath_def)
+  from V awalk in_V arcs show ?thesis by (rule same_awalk_by_common_arc)
+qed
+
+
+end
+
+
+
+
+
+context pair_pre_digraph begin
+
+definition (in pair_pre_digraph) is_slim :: "'a set \<Rightarrow> bool" where
+  "is_slim V \<equiv>
+    (\<forall>v \<in> pverts G. v \<in> V \<or>
+      in_degree G v \<le> 2 \<and> (\<exists>x p y. gen_iapath V x p y \<and> v \<in> set (awalk_verts x p))) \<and>
+    (\<forall>e \<in> parcs G. fst e \<noteq> snd e \<and> (\<exists>x p y. gen_iapath V x p y \<and> e \<in> set p)) \<and>
+    (\<forall>u v p q. (gen_iapath V u p v \<and> gen_iapath V u q v) \<longrightarrow> p = q) \<and>
+    V \<subseteq> pverts G"
+
+definition direct_arc :: "'a \<times> 'a \<Rightarrow> 'a \<times> 'a" where
+  "direct_arc uv \<equiv> SOME e. {fst uv , snd uv} = {fst e, snd e}"
+
+definition choose_iapath :: "'a \<Rightarrow> 'a \<Rightarrow> ('a \<times> 'a) awalk" where
+  "choose_iapath u v \<equiv> (let
+      chosen_path = (\<lambda>u v. SOME p. iapath u p v)
+    in if direct_arc (u,v) = (u,v) then chosen_path u v else rev_path (chosen_path v u))"
+
+definition slim_paths :: "('a \<times> ('a \<times> 'a) awalk \<times> 'a) set" where
+  "slim_paths \<equiv> (\<lambda>e. (fst e, choose_iapath (fst e) (snd e), snd e)) ` parcs (contr_graph G)"
+
+definition slim_verts :: "'a set" where
+  "slim_verts \<equiv> verts3 G \<union> (\<Union>(u,p,_) \<in> slim_paths. set (awalk_verts u p))"
+
+definition slim_arcs :: "'a rel" where
+  "slim_arcs \<equiv> \<Union>(_,p,_) \<in> slim_paths. set p"
+
+definition slim :: "'a pair_pre_digraph" where
+  "slim \<equiv> \<lparr> pverts = slim_verts, parcs = slim_arcs \<rparr>" 
+
+end
+
+lemma (in wf_digraph) iapath_dist_ends: "\<And>u p v. iapath u p v \<Longrightarrow> u \<noteq> v"
+  unfolding pre_digraph.gen_iapath_def by (metis apath_ends)
+
+
+context pair_sym_digraph begin
+
+lemma choose_iapath:
+  assumes "\<exists>p. iapath u p v"
+  shows "iapath u (choose_iapath u v) v"
+proof (cases "direct_arc (u,v) = (u,v)")
+  define chosen where "chosen u v = (SOME p. iapath u p v)" for u v
+  { case True
+    have "iapath u (chosen u v) v"
+      unfolding chosen_def by (rule someI_ex) (rule assms)
+    then show ?thesis using True by (simp add: choose_iapath_def chosen_def) }
+
+  { case False
+    from assms obtain p where "iapath u p v" by auto
+    then have "iapath v (rev_path p) u"
+      by (simp add: gen_iapath_rev_path)
+    then have "iapath v (chosen v u) u"
+      unfolding chosen_def by (rule someI)
+    then show ?thesis using False
+      by (simp add: choose_iapath_def chosen_def gen_iapath_rev_path) }
+qed
+
+lemma slim_simps: "pverts slim = slim_verts" "parcs slim = slim_arcs"
+  by (auto simp: slim_def)
+
+lemma slim_paths_in_G_E:
+  assumes "(u,p,v) \<in> slim_paths" obtains "iapath u p v" "u \<noteq> v"
+  using assms choose_iapath
+  by (fastforce simp: gen_contr_graph_def slim_paths_def dest: iapath_dist_ends)
+
+lemma verts_slim_in_G: "pverts slim \<subseteq> pverts G"
+  by (auto simp: slim_simps slim_verts_def verts3_def gen_iapath_def apath_def
+    elim!: slim_paths_in_G_E elim!: awalkE)
+
+lemma verts3_in_slim_G[simp]:
+  assumes "x \<in> verts3 G" shows "x \<in> pverts slim"
+using assms by (auto simp: slim_simps slim_verts_def)
+
+lemma arcs_slim_in_G: "parcs slim \<subseteq> parcs G"
+  by (auto simp: slim_simps slim_arcs_def gen_iapath_def apath_def
+      elim!: slim_paths_in_G_E elim!: awalkE)
+
+lemma slim_paths_in_slimG:
+  assumes "(u,p,v) \<in> slim_paths"
+  shows "pre_digraph.gen_iapath slim (verts3 G) u p v \<and> p \<noteq> []"
+proof -
+  from assms have arcs: "\<And>e. e \<in> set p \<Longrightarrow> e \<in> parcs slim"
+    by (auto simp: slim_simps slim_arcs_def)
+  moreover
+  from assms have "gen_iapath (verts3 G) u p v" and "p \<noteq> []"
+    by (auto simp: gen_iapath_def elim!: slim_paths_in_G_E)
+  ultimately show ?thesis
+    by (auto simp: pre_digraph.gen_iapath_def pre_digraph.apath_def pre_digraph.awalk_def
+      inner_verts_with_proj_def)
+qed
+
+lemma direct_arc_swapped:
+  "direct_arc (u,v) = direct_arc (v,u)"
+by (simp add: direct_arc_def insert_commute)
+
+lemma direct_arc_chooses:
+  fixes u v :: 'a shows "direct_arc (u,v) = (u,v) \<or> direct_arc (u,v) = (v,u)"
+proof -
+  define f :: "'a set \<Rightarrow> 'a \<times> 'a"
+    where "f X = (SOME e. X = {fst e,snd e})" for X
+
+  have "\<exists>p::'a \<times> 'a. {u,v} = {fst p, snd p}" by (rule exI[where x="(u,v)"]) auto
+  then have "{u,v} = {fst (f {u,v}), snd (f {u,v})}"
+    unfolding f_def by (rule someI_ex)
+  then have "f {u,v} = (u,v) \<or> f {u,v} = (v,u)"
+    by (auto simp: doubleton_eq_iff prod_eq_iff)
+  then show ?thesis by (auto simp: direct_arc_def f_def)
+qed
+
+lemma rev_path_choose_iapath:
+  assumes "u \<noteq> v"
+  shows "rev_path (choose_iapath u v) = choose_iapath v u"
+  using assms direct_arc_chooses[of u v]
+  by (auto simp: choose_iapath_def direct_arc_swapped)
+
+lemma no_loops_in_iapath: "gen_iapath V u p v \<Longrightarrow> a \<in> set p \<Longrightarrow> fst a \<noteq> snd a"
+  by (auto simp: gen_iapath_def no_loops_in_apath)
+
+lemma pair_bidirected_digraph_slim: "pair_bidirected_digraph slim"
+proof
+  fix e assume A: "e \<in> parcs slim"
+  then obtain u p v where "(u,p,v) \<in> slim_paths" "e \<in> set p" by (auto simp: slim_simps slim_arcs_def)
+  with A have "iapath u p v" by (auto elim: slim_paths_in_G_E)
+    by (auto simp: set_awalk_verts gen_iapath_def apath_def)
+  moreover  
+    by (auto simp: slim_simps slim_verts_def)
+  ultimately
+  show "fst e \<in> pverts slim" "snd e \<in> pverts slim" by auto
+
+  show "fst e \<noteq> snd e"
+next
+  { fix e assume "e \<in> parcs slim"
+    then obtain u p v where "(u,p,v) \<in> slim_paths" and "e \<in> set p"
+      by (auto simp: slim_simps slim_arcs_def)
+    moreover
+    then have "iapath u p v" and "p \<noteq> []" and "u \<noteq> v" by (auto elim: slim_paths_in_G_E)
+    then have "iapath v (rev_path p) u" and "rev_path p \<noteq> []" and "v \<noteq> u"
+      by (auto simp: gen_iapath_rev_path)
+    then have "(v,u) \<in> parcs (contr_graph G)"
+      by (auto simp: gen_contr_graph_def)
+    moreover
+      by (auto simp: gen_iapath_def dest: apath_nonempty_ends)
+    ultimately
+    have "(v, rev_path p, u) \<in> slim_paths"
+      by (auto simp: slim_paths_def rev_path_choose_iapath intro: rev_image_eqI)
+    moreover
+      by (induct p) auto
+    ultimately have "(snd e, fst e) \<in> parcs slim"
+     by (auto simp: slim_simps slim_arcs_def) }
+  then show "symmetric slim"
+    unfolding symmetric_conv by simp (metis fst_conv snd_conv)
+qed
+
+
+lemma (in pair_pseudo_graph) pair_graph_slim: "pair_graph slim"
+proof -
+  interpret slim: pair_bidirected_digraph slim by (rule pair_bidirected_digraph_slim)
+  show ?thesis
+  proof
+    show "finite (pverts slim)"
+      using verts_slim_in_G finite_verts by (rule finite_subset)
+    show "finite (parcs slim)"
+      using arcs_slim_in_G finite_arcs by (rule finite_subset)
+  qed
+qed
+
+lemma subgraph_slim: "subgraph slim G"
+proof (rule subgraphI)
+  interpret H: pair_bidirected_digraph "slim"
+    by (rule pair_bidirected_digraph_slim) intro_locales
+
+  show "verts slim \<subseteq> verts G" "arcs slim \<subseteq> arcs G"
+    by (auto simp: verts_slim_in_G arcs_slim_in_G)
+  show "compatible G slim" ..
+  show "wf_digraph slim" "wf_digraph G"
+    by unfold_locales
+qed
+
+lemma giapath_if_slim_giapath:
+  assumes "pre_digraph.gen_iapath slim (verts3 G) u p v"
+  shows "gen_iapath (verts3 G) u p v"
+using assms verts_slim_in_G arcs_slim_in_G
+by (auto simp: pre_digraph.gen_iapath_def pre_digraph.apath_def pre_digraph.awalk_def
+  inner_verts_with_proj_def)
+
+lemma slim_giapath_if_giapath:
+assumes "gen_iapath (verts3 G) u p v"
+  shows "\<exists>p. pre_digraph.gen_iapath slim (verts3 G) u p v" (is "\<exists>p. ?P p")
+proof
+  from assms have choose_arcs: "\<And>e. e \<in> set (choose_iapath u v) \<Longrightarrow> e \<in> parcs slim"
+    by (fastforce simp: slim_simps slim_arcs_def slim_paths_def gen_contr_graph_def)
+  moreover
+  from assms have choose: "iapath u (choose_iapath u v) v"
+    by (intro choose_iapath) (auto simp: gen_iapath_def)
+  ultimately show "?P (choose_iapath u v)"
+    by (auto simp: pre_digraph.gen_iapath_def pre_digraph.apath_def pre_digraph.awalk_def
+      inner_verts_with_proj_def)
+qed
+
+lemma contr_graph_slim_eq:
+   "gen_contr_graph slim (verts3 G) = contr_graph G"
+  using giapath_if_slim_giapath slim_giapath_if_giapath by (fastforce simp: gen_contr_graph_def)
+
+end
+
+context pair_pseudo_graph begin
+
+lemma verts3_slim_in_verts3:
+  assumes "v \<in> verts3 slim" shows "v \<in> verts3 G"
+proof -
+  from assms have "2 < in_degree slim v" by (auto simp: verts3_def)
+  also have "\<dots> \<le> in_degree G v" using subgraph_slim by (rule subgraph_in_degree)
+  finally show ?thesis using assms subgraph_slim by (fastforce simp: verts3_def)
+qed
+
+lemma slim_is_slim:
+  "pair_pre_digraph.is_slim slim (verts3 G)"
+proof (unfold pair_pre_digraph.is_slim_def, safe)
+  interpret S: pair_graph slim by (rule pair_graph_slim)
+  { fix v assume "v \<in> pverts slim" "v \<notin> verts3 G"
+    then have "in_degree G v \<le> 2"
+      using verts_slim_in_G by (auto simp: verts3_def)
+    then show "in_degree slim v \<le> 2"
+      using subgraph_in_degree[OF subgraph_slim, of v] by fastforce
+  next
+    fix w assume "w \<in> pverts slim" "w \<notin> verts3 G"
+    then obtain u p v where upv: "(u, p, v) \<in> slim_paths" "w \<in> set (awalk_verts u p)"
+      by (auto simp: slim_simps slim_verts_def)
+    moreover
+    then have "S.gen_iapath (verts3 G) u p v"
+      using slim_paths_in_slimG by auto
+    ultimately
+    show "\<exists>x q y. S.gen_iapath (verts3 G) x q y
+      \<and> w \<in> set (awalk_verts x q)"
+      by auto
+  next
+    fix u v assume "(u,v) \<in> parcs slim"
+    then obtain x p y where "(x, p, y) \<in> slim_paths" "(u,v) \<in> set p"
+      by (auto simp: slim_simps slim_arcs_def)
+    then have "S.gen_iapath (verts3 G) x p y \<and> (u,v) \<in> set p"
+      using slim_paths_in_slimG by auto
+    then show "\<exists>x p y. S.gen_iapath (verts3 G) x p y \<and> (u,v) \<in> set p"
+      by blast
+  next
+    fix u v assume "(u,v) \<in> parcs slim" "fst (u,v) = snd (u,v)"
+    then show False by (auto simp: S.no_loops')
+  next
+    fix u v p q
+    assume paths: "S.gen_iapath (verts3 G) u p v"
+          "S.gen_iapath (verts3 G) u q v"
+
+    have V: "verts3 slim \<subseteq> verts3 G" "verts3 G \<subseteq> pverts slim"
+      by (auto simp: verts3_slim_in_verts3)
+  
+    have "p = [] \<or> q = [] \<Longrightarrow> p = q" using paths
+      by (auto simp: S.gen_iapath_def dest: S.apath_ends)
+    moreover
+    { assume "p \<noteq> []" "q \<noteq> []"
+      { fix u p v assume "p \<noteq> []" and path: "S.gen_iapath (verts3 G) u p v"
+        then obtain e where "e \<in> set p" by (metis last_in_set)
+        then have "e \<in> parcs slim" using path by (auto simp: S.gen_iapath_def S.apath_def)
+        then obtain x r y where "(x,r,y) \<in> slim_paths" "e \<in> set r"
+          by (auto simp: slim_simps slim_arcs_def)
+        then have "S.gen_iapath (verts3 G) x r y" by (metis slim_paths_in_slimG)
+          by (auto intro: S.same_gen_iapath_by_common_arc[OF V])
+          by (auto simp: S.gen_iapath_def S.apath_def dest: S.awalk_ends)
+      note obt = this
+        by (auto intro: obt)
+      then have "p = q" by (auto simp: slim_paths_def)
+    }
+    ultimately show "p = q" by metis
+  }
+qed auto
+
+end
+
+context pair_sym_digraph begin
+
+lemma
+  assumes p: "gen_iapath (pverts G) u p v"
+  shows gen_iapath_triv_path: "p = [(u,v)]"
+    and gen_iapath_triv_arc: "(u,v) \<in> parcs G"
+proof -
+  have "set (inner_verts p) = {}"
+  proof -
+    have *: "\<And>A B :: 'a set. \<lbrakk>A \<subseteq> B; A \<inter> B = {}\<rbrakk> \<Longrightarrow> A = {}" by blast
+    have "set (inner_verts p) = set (awalk_verts u p) - {u, v}"
+      using p by (simp add: set_inner_verts gen_iapath_def)
+    also have "\<dots> \<subseteq> pverts G"
+      using p unfolding gen_iapath_def apath_def awalk_conv by auto
+    finally show ?thesis
+      using p by (rule_tac *) (auto simp: gen_iapath_def)
+(* could be generalized *)
+(* could be generalized *)

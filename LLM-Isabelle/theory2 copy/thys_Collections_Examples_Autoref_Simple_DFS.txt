@@ -1,0 +1,220 @@
+theory Simple_DFS
+imports 
+  Collections.Refine_Dflt 
+begin
+
+
+
+definition "E_of_succ succ \<equiv> {(u,v). v\<in>succ u}"
+definition [to_relAPP]: "succg_rel R \<equiv> (R \<rightarrow> \<langle>R\<rangle>list_set_rel) O br E_of_succ (\<lambda>_. True)"
+
+
+consts i_graph :: "interface \<Rightarrow> interface"
+
+lemmas [autoref_rel_intf] = REL_INTFI[of "succg_rel" i_graph]
+
+
+lemma in_id_succg_rel_iff: "(s,E)\<in>\<langle>Id\<rangle>succg_rel \<longleftrightarrow> (\<forall>v. distinct (s v) \<and> set (s v) = E``{v})"  
+  unfolding succg_rel_def br_def E_of_succ_def list_set_rel_def
+  by (auto; force dest: fun_relD)
+  
+  
+definition [simp]: "op_succ E u \<equiv> E``{u}"
+
+context begin interpretation autoref_syn .
+  lemma [autoref_op_pat]: "E``{v} \<equiv> op_succ$E$v" by simp
+end
+
+lemma refine_succg_succs[autoref_rules]: 
+  "(\<lambda>succs v. succs v,op_succ)\<in>\<langle>R\<rangle>succg_rel\<rightarrow>R\<rightarrow>\<langle>R\<rangle>list_set_rel"
+  apply (intro fun_relI)
+  apply (auto simp add: succg_rel_def br_def E_of_succ_def dest: fun_relD)
+  done
+
+
+
+  
+schematic_goal dfs_impl_refine_aux:
+  fixes succi and E :: "('a::linorder \<times> 'a) set" and tgt src :: 'a
+  assumes [autoref_rules]: "(succi,E)\<in>\<langle>Id\<rangle>succg_rel"
+  notes [autoref_rules] = IdI[of src] IdI[of tgt]
+  shows "RETURN (?f::?'c) \<le> \<Down>?R (dfs E src tgt)"
+  unfolding dfs_def by autoref_monadic 
+
+concrete_definition dfs_impl for succi src tgt uses dfs_impl_refine_aux
+prepare_code_thms dfs_impl_def
+export_code dfs_impl in Haskell
+export_code dfs_impl checking SML OCaml? Haskell? Scala
+
+
+
+lemma succ_ran_fin:
+  assumes R: "(succi,E) \<in> \<langle>Rv\<rangle>succg_rel"
+  assumes "v\<in>Range Rv"
+  shows "finite (E``{v})"
+  using assms
+  unfolding succg_rel_def br_def E_of_succ_def
+  apply clarsimp
+  apply (drule (1) fun_relD)
+  using list_set_rel_range[of Rv]
+  by auto
+
+lemma run_ran_aux:
+  assumes R: "(succi,E) \<in> \<langle>Rv\<rangle>succg_rel"
+  assumes REACH: "(src,v)\<in>E\<^sup>*"
+  assumes R0: "(v0i,src) \<in> Rv"
+  shows "v \<in> Range Rv"
+  using REACH R0
+proof (induction arbitrary: v0i rule: converse_rtrancl_induct)
+  case base thus ?case by auto
+next
+  case (step src v')  
+    apply (clarsimp simp: succg_rel_def br_def E_of_succ_def)
+    by auto
+  with step.IH show ?thesis by blast
+qed
+
+lemma run_ran_fin: 
+  assumes R: "(succi,E) \<in> \<langle>Rv\<rangle>succg_rel"
+  assumes R0: "(v0i,src) \<in> Rv"
+  shows "\<forall>v. (src,v)\<in>E\<^sup>* \<longrightarrow> finite (E``{v})"
+  using succ_ran_fin run_ran_aux assms by metis
+
+theorem dfs_code_correct: 
+  assumes SUCCI: "(succi,E)\<in>\<langle>Id\<rangle>succg_rel"
+  assumes FIN: "finite (E\<^sup>*``{src})"  
+  shows "dfs_impl succi src tgt \<longleftrightarrow> (src,tgt)\<in>E\<^sup>*"
+proof -
+  note dfs_impl.refine[OF SUCCI, of src tgt]
+  also note dfs_correct[OF FIN]
+  finally show ?thesis by (auto simp: split: dres.split)
+qed
+
+
+schematic_goal 
+  fixes succi and E :: "('a::linorder \<times> 'a) set" and tgt src :: 'a
+  assumes [autoref_rules]: "(succi,E)\<in>\<langle>Id\<rangle>succg_rel"
+  notes [autoref_rules] = IdI[of src] IdI[of tgt]
+  shows "(?f::?'c, dfs E src tgt) \<in> ?R"
+  unfolding dfs_def[abs_def] 
+  apply (autoref (trace))
+  done
+
+schematic_goal dfs_impl_refine_aux2:
+  fixes succi and E :: "(('a::hashable) \<times> 'a) set" and tgt src :: 'a
+  assumes [autoref_rules]: "(succi,E)\<in>\<langle>Id\<rangle>succg_rel"
+  notes [autoref_rules] = IdI[of src] IdI[of tgt]
+  notes [autoref_tyrel] = ty_REL[where 'a="'a set" and R="\<langle>Id\<rangle>dflt_ahs_rel"] 
+  shows "(?f::?'c, dfs E src tgt) \<in> ?R"
+  unfolding dfs_def[abs_def] 
+  apply autoref_monadic
+  done
+  
+
+  
+schematic_goal dfs_impl_refine_aux3:
+  fixes succi and E :: "('a::linorder \<times> 'a) set" 
+    and Rv :: "('ai\<times>'a) set"
+  assumes [autoref_rules_raw]: "(cmpk, dflt_cmp (\<le>) (<))\<in>(Rv\<rightarrow>Rv\<rightarrow>Id)"
+  notes [autoref_tyrel] = ty_REL[where 'a="'a set" and R="\<langle>Rv\<rangle>dflt_rs_rel"]
+  assumes P_REF[autoref_rules]: 
+    "(succi,E)\<in>\<langle>Rv\<rangle>succg_rel"
+    "(vdi,tgt::'a)\<in>Rv"
+    "(v0i,src)\<in>Rv"
+  shows "(RETURN (?f::?'c), dfs E src tgt)\<in>?R"
+  unfolding dfs_def[abs_def]
+  by autoref_monadic
+
+schematic_goal dfs_impl_refine_aux3':
+  fixes succi and E :: "('a \<times> 'a) set" 
+    and Rv :: "('ai\<times>'a) set"
+  assumes [autoref_ga_rules]: "eq_linorder cmpk'"
+  assumes [autoref_rules_raw]: "(cmpk, cmpk')\<in>(Rv\<rightarrow>Rv\<rightarrow>comp_res_rel)"
+  notes [autoref_tyrel] = ty_REL[where 'a="'a set" and R="\<langle>Rv\<rangle>map2set_rel (rbt_map_rel (comp2lt cmpk'))"]
+  assumes P_REF[autoref_rules]: 
+    "(succi,E)\<in>\<langle>Rv\<rangle>succg_rel"
+    "(vdi,tgt::'a)\<in>Rv"
+    "(v0i,src)\<in>Rv"
+  shows "(RETURN (?f::?'c), dfs E src tgt)\<in>?R"
+  unfolding dfs_def[abs_def]
+  by autoref_monadic
+  
+  
+concrete_definition dfs_impl2 for succi src tgt uses dfs_impl_refine_aux2
+concrete_definition dfs_impl3 for cmpk succi v0i vdi uses dfs_impl_refine_aux3
+concrete_definition dfs_impl3' for cmpk succi v0i vdi uses dfs_impl_refine_aux3'
+
+prepare_code_thms dfs_impl2_def
+prepare_code_thms dfs_impl3_def
+prepare_code_thms dfs_impl3'_def
+
+export_code dfs_impl dfs_impl2 dfs_impl3 dfs_impl3' checking SML OCaml? Haskell? Scala
+
+
+theorem dfs_code2_correct: 
+  assumes SUCCI: "(succi,E)\<in>\<langle>Id\<rangle>succg_rel"
+  assumes FIN: "finite (E\<^sup>*``{src})"  
+  shows "dfs_impl2 succi src tgt \<longleftrightarrow> (src,tgt)\<in>E\<^sup>*"
+proof -
+  note dfs_impl2.refine[OF SUCCI, of src tgt, THEN nres_relD]
+  also note dfs_correct[OF FIN]
+  finally show ?thesis by (auto simp: split: dres.split)
+qed
+  
+theorem dfs_code3_correct: 
+  fixes succi and succ :: "'a::linorder \<Rightarrow> 'a set" 
+    and Rv :: "('ai\<times>'a) set"
+  assumes V0: "(v0i,src)\<in>Rv"
+  assumes VD: "(vdi,tgt)\<in>Rv"
+  assumes SUCCI: "(succi,E)\<in>\<langle>Rv\<rangle>succg_rel"
+  assumes CMP: "(cmpk, dflt_cmp (\<le>) (<))\<in>(Rv\<rightarrow>Rv\<rightarrow>Id)"
+  assumes FIN: "finite (E\<^sup>*``{src})"  
+  shows "dfs_impl3 cmpk succi v0i vdi \<longleftrightarrow> (src,tgt)\<in>E\<^sup>*"
+proof -
+  note dfs_impl3.refine[OF CMP SUCCI VD V0, THEN nres_relD]
+  also note dfs_correct[OF FIN]
+  finally show ?thesis by (auto simp: split: dres.split)
+qed
+
+theorem dfs_code3'_correct: 
+  fixes succi and succ :: "'a::linorder \<Rightarrow> 'a set" 
+    and Rv :: "('ai\<times>'a) set"
+  assumes V0: "(v0i,src)\<in>Rv"
+  assumes VD: "(vdi,tgt)\<in>Rv"
+  assumes SUCCI: "(succi,E)\<in>\<langle>Rv\<rangle>succg_rel"
+  assumes CGA: "eq_linorder cmpk'"
+  assumes CMP: "(cmpk, cmpk') \<in> Rv\<rightarrow>Rv\<rightarrow>comp_res_rel"
+  assumes FIN: "finite (E\<^sup>*``{src})"  
+  shows "dfs_impl3' cmpk succi v0i vdi \<longleftrightarrow> (src,tgt)\<in>E\<^sup>*"
+proof -
+  note dfs_impl3'.refine[OF CGA CMP SUCCI VD V0, THEN nres_relD]
+  also note dfs_correct[OF FIN]
+  finally show ?thesis by (auto simp: split: dres.split)
+qed
+
+
+
+definition [simp]: "op_reachable E u v \<equiv> (u,v)\<in>E\<^sup>*"
+context begin interpretation autoref_syn .
+  lemma [autoref_op_pat]: "(u,v)\<in>E\<^sup>* \<equiv> op_reachable$E$u$v" by simp
+
+
+  theorem dfs_code3_correct_rl[autoref_rules]: 
+    fixes succi and succ :: "'a::linorder \<Rightarrow> 'a set" 
+      and Rv :: "('ai\<times>'a) set"
+    assumes V0: "(v0i,src)\<in>Rv"
+    assumes VD: "(vdi,tgt)\<in>Rv"
+    assumes SUCCI: "(succi,E)\<in>\<langle>Rv\<rangle>succg_rel"
+    assumes CGA: "SIDE_GEN_ALGO (eq_linorder cmpk')"
+    assumes CMP: "GEN_OP cmpk cmpk' (Rv\<rightarrow>Rv\<rightarrow>comp_res_rel)"
+    assumes FIN: "SIDE_PRECOND (finite (E\<^sup>*``{src}))"  
+    shows "(dfs_impl3' cmpk succi v0i vdi, 
+          (OP op_reachable ::: \<langle>Rv\<rangle>succg_rel \<rightarrow> Rv \<rightarrow> Rv \<rightarrow> bool_rel)$E$src$tgt)
+          \<in> bool_rel"
+    using dfs_code3'_correct[OF V0 VD SUCCI, of cmpk' cmpk] CGA CMP FIN
+    unfolding autoref_tag_defs by simp
+    
+end
+
+
+end

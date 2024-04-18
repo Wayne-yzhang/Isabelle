@@ -1,0 +1,120 @@
+theory Argmax
+imports Main
+
+begin
+
+lemma structInduct: assumes "P []" and "\<forall>x xs. P (xs) \<longrightarrow> P (x#xs)" 
+                    shows "P l" 
+      using assms list_nonempty_induct by (metis)
+
+fun argmax :: "('a \<Rightarrow> 'b::linorder) \<Rightarrow> 'a set \<Rightarrow> 'a set"
+    where "argmax f A = { x \<in> A . f x = Max (f ` A) }"
+
+lemma argmaxLemma: "argmax f A = { x \<in> A . f x = Max (f ` A) }" 
+  by simp
+
+lemma maxLemma: 
+  assumes "x \<in> X" "finite X" 
+  shows "Max (f`X) >= f x" 
+  (is "?L >= ?R") using assms 
+  by (metis (opaque_lifting, no_types) Max.coboundedI finite_imageI image_eqI)
+
+lemma lm01: 
+  "argmax f A = A \<inter> f -` {Max (f ` A)}" 
+  by force
+
+lemma lm02: 
+  assumes "y \<in> f`A" 
+  shows "A \<inter> f -` {y} \<noteq> {}" 
+  using assms by blast
+
+lemma argmaxEquivalence: 
+  assumes "\<forall>x\<in>X. f x = g x" 
+  shows "argmax f X = argmax g X" 
+  using assms argmaxLemma Collect_cong image_cong 
+  by (metis(no_types,lifting))
+
+corollary argmax_non_empty_iff: assumes "finite X" "X \<noteq> {}" 
+                                shows "argmax f X \<noteq>{}"
+                                using assms Max_in finite_imageI image_is_empty lm01 lm02 
+                                by (metis(no_types))
+
+
+definition filterpositions :: "('a => bool) => 'a list => nat list"
+           where "filterpositions P l = map snd (filter (P o fst) (zip l (upt 0 (size l))))"
+
+
+           where "filterpositions2 P l = [n. n \<leftarrow> [0..<size l], P (l!n)]"
+
+           where "maxpositions l = filterpositions2 (%x . x \<ge> Max (set l)) l"
+
+lemma lm03: "maxpositions l = [n. n\<leftarrow>[0..<size l], l!n \<ge> Max(set l)]" 
+      unfolding maxpositions_def filterpositions2_def by fastforce
+
+           where "argmaxList f l = map (nth l) (maxpositions (map f l))"
+
+lemma lm04: "[n . n <- l, P n] = [n . n <- l, n \<in> set l, P n]" 
+proof - 
+  have "map (\<lambda>uu. if P uu then [uu] else []) l = 
+    map (\<lambda>uu. if uu \<in> set l then if P uu then [uu] else [] else []) l" by simp
+  thus "concat (map (\<lambda>n. if P n then [n] else []) l) = 
+    concat (map (\<lambda>n. if n \<in> set l then if P n then [n] else [] else []) l)" by presburger
+qed
+
+lemma lm05: "[n . n <- [0..<m], P n] = [n . n <- [0..<m], n \<in> set [0..<m], P n]" 
+      using lm04 by fast
+
+lemma lm06: fixes f m P 
+            shows "(map f [n . n <- [0..<m], P n]) = [ f n . n <- [0..<m], P n]" 
+      by (induct m) auto
+
+lemma map_commutes_a: "[f n . n <- [], Q (f n)] = [x <- (map f []). Q x]" 
+      by simp
+
+lemma map_commutes_b: "\<forall> x xs. ([f n . n <- xs,     Q (f n)] = [x <- (map f xs).     Q x] \<longrightarrow> 
+                                [f n . n <- (x#xs), Q (f n)] = [x <- (map f (x#xs)). Q x])" 
+      by simp
+
+lemma map_commutes: fixes f::"'a => 'b" fixes Q::"'b => bool" fixes xs::"'a list" 
+                    shows "[f n . n <- xs, Q (f n)] = [x <- (map f xs). Q x]"
+      using map_commutes_a map_commutes_b structInduct by fast
+
+lemma lm07: fixes f l 
+            shows "maxpositions (map f l) = 
+                   [n . n <- [0..<size l], f (l!n) \<ge> Max (f`(set l))]" 
+proof -
+  have "maxpositions ?fl = 
+  [n. n <- [0..<size ?fl], n\<in> set[0..<size ?fl], ?fl!n \<ge> Max (set ?fl)]"
+  using lm04 unfolding filterpositions2_def maxpositions_def .
+  also have "... = 
+  [n . n <- [0..<size l], (n<size l), (?fl!n  \<ge> Max (set ?fl))]" by simp
+  also have "... = 
+  [n . n <- [0..<size l], (n<size l) \<and> (f (l!n)  \<ge> Max (set ?fl))]" 
+  using nth_map by (metis (poly_guards_query, opaque_lifting)) also have "... = 
+  [n . n <- [0..<size l], (n\<in> set [0..<size l]),(f (l!n)  \<ge> Max (set ?fl))]" 
+  using atLeastLessThan_iff le0 set_upt by (metis(no_types))
+  also have "... =  
+  [n . n <- [0..<size l], f (l!n) \<ge> Max (set ?fl)]" using lm05 by presburger 
+  finally show ?thesis by auto
+qed
+
+lemma lm08: fixes f l 
+            shows "argmaxList f l = 
+                   [ l!n . n <- [0..<size l], f (l!n) \<ge> Max (f`(set l))]"
+      unfolding lm07 argmaxList_def by (metis lm06)
+
+
+theorem argmaxadequacy: fixes f::"'a => ('b::linorder)" fixes l::"'a list" 
+                        shows "argmaxList f l = [ x <- l. f x \<ge> Max (f`(set l))]"
+proof -
+  let ?P="% y::('b::linorder) . y \<ge> Max (f`(set l))"
+  let ?mh="[nth l n . n <- [0..<size l], ?P (f (nth l n))]"
+  let ?rh="[ x <- (map (nth l) [0..<size l]). ?P (f x)]"
+  have "?lh = ?mh" using lm08 by fast
+  also have "... = ?rh" using map_commutes by fast
+  also have "...= [x <- l. ?P (f x)]" using map_nth by metis
+  finally show ?thesis by force
+qed
+
+end
+

@@ -1,0 +1,145 @@
+theory Chord_Segments
+imports Triangle.Triangle
+begin
+
+
+lemma betweenE_if_dist_leq:
+  fixes A B X :: "'a::euclidean_space"
+  assumes "between (A, B) X"
+  assumes "dist A X \<le> dist B X"
+  obtains u where "1 / 2 \<le> u" "u \<le> 1" and "X = u *\<^sub>R A + (1 - u) *\<^sub>R B"
+proof (cases "A = B")
+  assume "A \<noteq> B"
+    by (metis add.commute betweenE between_commute)
+  from X have "X = B + u *\<^sub>R (A - B)" and "X = A + (u - 1) *\<^sub>R (A - B)"
+    by (simp add: scaleR_diff_left real_vector.scale_right_diff_distrib)+
+    by (auto simp add: dist_norm)
+    by (auto simp add: dist_norm)
+    using dist_A dist_B by simp
+next
+  assume "A = B"
+  define u :: real where "u = 1"
+    unfolding u_def by auto
+  with that show thesis by blast
+qed
+
+lemma dist_geq_iff_midpoint_in_between:
+  fixes A B X :: "'a::euclidean_space"
+  assumes "between (A, B) X"
+  shows "dist A X \<le> dist B X \<longleftrightarrow> between (X, B) (midpoint A B)"
+proof
+  assume "dist A X \<le> dist B X"
+    where u: "1 / 2 \<le> u" "u \<le> 1" and X: "X = u *\<^sub>R A + (1 - u) *\<^sub>R B"
+    using betweenE_if_dist_leq by blast
+  have M: "midpoint A B = (1 / 2) *\<^sub>R A + (1 / 2) *\<^sub>R B"
+    unfolding midpoint_def by (simp add: scaleR_add_right)
+  proof -
+    have "(2 - u * 2) / (2 * u) = 1 / u - u / u"
+      using u(1) by (simp add: diff_divide_distrib)
+    also have "\<dots> = 1 / u - 1" using u(1) by auto
+    finally have "(2 - u * 2) / (2 * u) = 1 / u - 1" .
+      using X M by (simp add: scaleR_add_right scaleR_add_left[symmetric])
+  qed
+  moreover from u have 2: "(1 / (2 * u)) \<ge> 0" "(1 / (2 * u)) \<le> 1" by auto
+  ultimately show "between (X, B) (midpoint A B)"
+    using betweenI [of concl: B X]  by (metis add.commute between_commute)
+next
+  assume "between (X, B) (midpoint A B)"
+  then have "between (A, midpoint A B) X"
+  then have "dist A X \<le> dist A (midpoint A B)"
+    using between zero_le_dist by force
+  also have "dist A (midpoint A B) \<le> dist B (midpoint A B)"
+    by (simp add: dist_midpoint)
+    using between zero_le_dist by (metis add.commute dist_commute le_add_same_cancel1)
+  finally show "dist A X \<le> dist B X" .
+qed
+
+
+lemma chord_property:
+  fixes S C :: "'a :: euclidean_space"
+  assumes "dist C S = dist C T"
+  assumes "between (S, T) X"
+  shows "dist S X * dist X T = (dist C S) ^ 2 - (dist C X) ^ 2"
+proof -
+  define M where "M = midpoint S T"
+  have "between (S, T) M"
+    unfolding M_def by (simp add: between_midpoint(1))
+  have "dist T M = dist S M"
+    unfolding M_def by (simp add: dist_midpoint)
+
+  have distances: "max (dist S X) (dist X T) = (dist S M) + (dist X M) \<and>
+    min (dist S X) (dist X T) = (dist S M) - (dist X M)"
+  proof cases
+    assume "dist S X \<le> dist X T"
+    then have "between (X, T) M"
+      by (simp add: dist_geq_iff_midpoint_in_between dist_commute)
+    then have "between (S, M) X"
+      using between by auto
+      using between dist_commute by force
+    ultimately show ?thesis
+      by (simp add: add.commute dist_commute max_def min_def)
+  next
+    assume "\<not> (dist S X \<le> dist X T)"
+    then have "dist T X \<le> dist S X" by (simp add: dist_commute)
+    then have "between (S, X) M"
+      by (simp add: dist_geq_iff_midpoint_in_between midpoint_sym between_commute)
+    then have "between (T, M) X"
+      using between by auto
+      using between dist_commute by force
+    ultimately show ?thesis
+      by (metis dist_commute max_def min_def)
+  qed
+
+  have "orthogonal (C - M) (S - M)"
+    by (auto simp add: isosceles_triangle_orthogonal_on_midpoint)
+  have "orthogonal (C - M) (X - M)"
+  proof -
+    have "between (S, T) M"
+      using M_def between_midpoint(1) by blast
+    obtain c where "(X - M) = c *\<^sub>R (S - M)"
+    proof (cases "S = M")
+      assume "S \<noteq> M"
+      then obtain c where "(X - M) = c *\<^sub>R (S - M)"
+      from this that show thesis by blast
+    next
+      assume "S = M"
+        by (simp add: midpoint_between M_def)
+      from this that show thesis by blast
+    qed
+      by (auto intro: orthogonal_clauses(2))
+  qed
+    "(dist S M) ^ 2 + (dist M C) ^ 2 = (dist C S) ^ 2"
+    "(dist X M) ^ 2 + (dist M C) ^ 2 = (dist C X) ^ 2"
+    by (auto simp only: Pythagoras)
+  then have geometric_observation:
+    "(dist S M) ^ 2 = (dist C S) ^ 2 - (dist M C) ^ 2"
+    "(dist X M) ^ 2 = (dist C X) ^ 2 - (dist M C) ^ 2"
+    by auto
+
+  have "dist S X * dist X T = max (dist S X) (dist X T) * min (dist S X) (dist X T)"
+    by (auto split: split_max)
+  also have "\<dots> = ((dist S M) + (dist X M)) * ((dist S M) - (dist X M))"
+    using distances by simp
+  also have "\<dots> = (dist S M) ^ 2 - (dist X M) ^ 2"
+    by (simp add: field_simps power2_eq_square)
+  also have "\<dots> = ((dist C S) ^ 2 - (dist M C) ^ 2) - ((dist C X) ^ 2 - (dist M C) ^ 2)"
+    using geometric_observation by simp
+  also have "\<dots> = (dist C S) ^ 2 - (dist C X) ^ 2" by simp
+  finally show ?thesis .
+qed
+
+theorem product_of_chord_segments:
+  fixes S\<^sub>1 T\<^sub>1 S\<^sub>2 T\<^sub>2 X C :: "'a :: euclidean_space"
+  assumes "between (S\<^sub>1, T\<^sub>1) X" "between (S\<^sub>2, T\<^sub>2) X"
+  assumes "dist C S\<^sub>1 = r" "dist C T\<^sub>1 = r"
+  assumes "dist C S\<^sub>2 = r" "dist C T\<^sub>2 = r"
+  shows "dist S\<^sub>1 X * dist X T\<^sub>1 = dist S\<^sub>2 X * dist X T\<^sub>2"
+proof -
+  have "dist S\<^sub>1 X * dist X T\<^sub>1 = r ^ 2 - (dist C X) ^ 2"
+    by (subst chord_property) auto
+  have "\<dots> = dist S\<^sub>2 X * dist X T\<^sub>2"
+    by (subst chord_property) auto
+  finally show ?thesis .
+qed
+
+end

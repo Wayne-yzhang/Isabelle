@@ -1,0 +1,109 @@
+theory One_Time_Pad imports
+  System_Construction
+begin
+
+definition key :: "security \<Rightarrow> bool list spmf" where
+  "key \<eta> \<equiv> spmf_of_set (nlists UNIV \<eta>)"
+
+definition enc :: "security \<Rightarrow> bool list \<Rightarrow> bool list \<Rightarrow> bool list spmf" where
+  "enc \<eta> k m \<equiv> return_spmf (k [\<oplus>] m)"
+
+definition dec :: "security \<Rightarrow> bool list \<Rightarrow> bool list \<Rightarrow> bool list option" where
+  "dec \<eta> k c \<equiv> Some (k [\<oplus>] c)"
+
+definition sim :: "'b list option \<Rightarrow> 'a \<Rightarrow> ('b list option \<times> 'b list option, 'a, nat option) gpv" where
+  "sim c q \<equiv> (do {
+    lo \<leftarrow> Pause q Done;
+    (case lo of 
+      Some n \<Rightarrow> if c = None 
+        then do { 
+          x \<leftarrow> lift_spmf (spmf_of_set (nlists UNIV n));
+          Done (Some x, Some x)} 
+        else Done (c, c)
+    | None   \<Rightarrow> Done (None, c))})"
+
+context
+  fixes \<eta> :: "security"
+begin
+
+private definition key_channel_send :: "bool list option \<times> bool list  cstate
+  \<Rightarrow> bool list \<Rightarrow> (unit \<times> bool list option \<times> bool list cstate) spmf" where
+  "key_channel_send s m \<equiv> do {
+    (k, s) \<leftarrow> (key.key_oracle (key \<eta>))\<dagger> s ();
+    c \<leftarrow> enc \<eta> k m;
+    (_, s) \<leftarrow> \<dagger>channel.send_oracle s c;
+    return_spmf ((), s)}"
+
+private definition key_channel_recv :: "bool list option \<times> bool list cstate
+  \<Rightarrow> 'a \<Rightarrow> (bool list option \<times> bool list option \<times> bool list cstate) spmf" where 
+  "key_channel_recv s m \<equiv>do {
+    (c, s) \<leftarrow> \<dagger>channel.recv_oracle s ();
+    (case c of None \<Rightarrow> return_spmf (None, s)
+    | Some c' \<Rightarrow> do {
+      (k, s) \<leftarrow> (key.key_oracle (key \<eta>))\<dagger> s ();
+      return_spmf (dec \<eta> k c', s)})}"
+
+private abbreviation callee_sec_channel where
+  "callee_sec_channel callee \<equiv> lift_state_oracle extend_state_oracle (attach_callee callee sec_channel.sec_oracle)"
+
+private inductive S :: "(bool list option \<times> unit \<times> bool list cstate) spmf \<Rightarrow> 
+  (bool list option \<times> bool list cstate) spmf \<Rightarrow> bool" where
+  "S (return_spmf (None, (), Void)) 
+     (return_spmf (None, Void))"
+| "S (return_spmf (None, (), Store plain)) 
+     (map_spmf (\<lambda>key. (Some key, Store (key [\<oplus>] plain))) (spmf_of_set (nlists UNIV \<eta>)))"
+if "length plain = id' \<eta>"
+| "S (return_spmf (None, (), Collect plain)) 
+     (map_spmf (\<lambda>key. (Some key, Collect (key [\<oplus>] plain))) (spmf_of_set (nlists UNIV \<eta>)))"
+if "length plain = id' \<eta>"
+| "S (return_spmf (Some (key [\<oplus>] plain), (), Store plain)) 
+     (return_spmf (Some key, Store (key [\<oplus>] plain)))"
+if "length plain = id' \<eta>" "length key = id' \<eta>" for key
+| "S (return_spmf (Some (key [\<oplus>] plain), (), Collect plain)) 
+     (return_spmf (Some key, Collect (key [\<oplus>] plain)))"
+if "length plain = id' \<eta>" "length key = id' \<eta>" for key
+| "S (return_spmf (None, (), Fail)) 
+     (map_spmf (\<lambda>x. (Some x, Fail)) (spmf_of_set (nlists UNIV \<eta>)))"
+| "S (return_spmf (Some (key [\<oplus>] plain), (), Fail)) 
+     (return_spmf (Some key, Fail))"
+if "length plain = id' \<eta>" "length key = id' \<eta>" for key plain
+
+
+lemma resources_indistinguishable: 
+  shows "(UNIV <+> nlists UNIV (id' \<eta>) <+> UNIV) \<turnstile>\<^sub>R 
+    RES (callee_sec_channel sim \<oplus>\<^sub>O \<dagger>\<dagger>channel.send_oracle \<oplus>\<^sub>O \<dagger>\<dagger>channel.recv_oracle) (None :: bool list option, (), Void) 
+    \<approx> 
+    RES (\<dagger>auth_channel.auth_oracle \<oplus>\<^sub>O key_channel_send \<oplus>\<^sub>O key_channel_recv) (None :: bool list option, Void)" 
+    (is "?A \<turnstile>\<^sub>R RES (?L1 \<oplus>\<^sub>O ?L2 \<oplus>\<^sub>O ?L3) ?SL \<approx> RES (?R1 \<oplus>\<^sub>O ?R2 \<oplus>\<^sub>O ?R3) ?SR")
+proof -
+  note [simp] = 
+    exec_gpv_bind spmf.map_comp o_def map_bind_spmf bind_map_spmf bind_spmf_const
+    sec_channel.sec_oracle.simps auth_channel.auth_oracle.simps
+    channel.send_oracle.simps key_channel_send_def
+    channel.recv_oracle.simps key_channel_recv_def
+    key.key_oracle.simps dec_def key_def enc_def
+
+  have *: "?A \<turnstile>\<^sub>C ?L1 \<oplus>\<^sub>O ?L2 \<oplus>\<^sub>O ?L3(?SL) \<approx> ?R1 \<oplus>\<^sub>O ?R2 \<oplus>\<^sub>O ?R3(?SR)"
+  proof(rule trace'_eqI_sim[where S=S], goal_cases Init_OK Output_OK State_OK)
+    case Init_OK
+    show ?case by (simp add: S.simps)
+  next
+    case (Output_OK p q query)
+    show ?case 
+    proof (cases query)
+      case (Inl adv_query)
+      with Output_OK show ?thesis
+      proof (cases adv_query)
+        case Look
+        with Output_OK Inl show ?thesis 
+        proof cases
+          case Store_State_Channel: (2 plain)
+
+          have*: "length plain = id' \<eta> \<Longrightarrow> 
+            map_spmf (\<lambda>x. Inl (Some x)) (spmf_of_set (nlists UNIV (id' \<eta>))) =
+            map_spmf (\<lambda>x. Inl (Some x)) (map_spmf (\<lambda>x. x [\<oplus>] plain) (spmf_of_set (nlists UNIV \<eta>)))" for \<eta> 
+            unfolding id'_def by (subst xor_list_commute, subst one_time_pad[where xs=plain, symmetric]) simp_all
+
+          from Store_State_Channel show ?thesis using Output_OK(2-) Inl Look
+            by(simp add: sim_def, simp add: map_spmf_conv_bind_spmf[symmetric])
+              (subst (2) spmf.map_comp[where f="\<lambda>x. Inl (Some x)", symmetric, unfolded o_def], simp only: *)

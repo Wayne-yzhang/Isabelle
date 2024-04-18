@@ -1,0 +1,428 @@
+theory Measure_Preserving_Transformations
+  imports SG_Library_Complement
+begin
+
+
+
+definition quasi_measure_preserving::"'a measure \<Rightarrow> 'b measure \<Rightarrow> ('a \<Rightarrow> 'b) set"
+  where "quasi_measure_preserving M N
+    = {f \<in> measurable M N. \<forall> A \<in> sets N. (f -` A \<inter> space M \<in> null_sets M) = (A \<in> null_sets N)}"
+
+lemma quasi_measure_preservingI [intro]:
+  assumes "f \<in> measurable M N"
+          "\<And>A. A \<in> sets N \<Longrightarrow> (f -` A \<inter> space M \<in> null_sets M) = (A \<in> null_sets N)"
+  shows "f \<in> quasi_measure_preserving M N"
+using assms unfolding quasi_measure_preserving_def by auto
+
+lemma quasi_measure_preservingE:
+  assumes "f \<in> quasi_measure_preserving M N"
+  shows "f \<in> measurable M N"
+        "\<And>A. A \<in> sets N \<Longrightarrow> (f -` A \<inter> space M \<in> null_sets M) = (A \<in> null_sets N)"
+using assms unfolding quasi_measure_preserving_def by auto
+
+lemma id_quasi_measure_preserving:
+  "(\<lambda>x. x) \<in> quasi_measure_preserving M M"
+unfolding quasi_measure_preserving_def by auto
+
+lemma quasi_measure_preserving_composition:
+  assumes "f \<in> quasi_measure_preserving M N"
+          "g \<in> quasi_measure_preserving N P"
+  shows "(\<lambda>x. g(f x)) \<in> quasi_measure_preserving M P"
+proof (rule quasi_measure_preservingI)
+  have f_meas [measurable]: "f \<in> measurable M N" by (rule quasi_measure_preservingE(1)[OF assms(1)])
+  have g_meas [measurable]: "g \<in> measurable N P" by (rule quasi_measure_preservingE(1)[OF assms(2)])
+  then show [measurable]: "(\<lambda>x. g (f x)) \<in> measurable M P" by auto
+
+  fix C assume [measurable]: "C \<in> sets P"
+  define B where "B = g-`C \<inter> space N"
+  have [measurable]: "B \<in> sets N" unfolding B_def by simp
+  have *: "B \<in> null_sets N \<longleftrightarrow> C \<in> null_sets P"
+    unfolding B_def using quasi_measure_preservingE(2)[OF assms(2)] by simp
+
+  define A where "A = f-`B \<inter> space M"
+  have [measurable]: "A \<in> sets M" unfolding A_def by simp
+  have "A \<in> null_sets M \<longleftrightarrow> B \<in> null_sets N"
+    unfolding A_def using quasi_measure_preservingE(2)[OF assms(1)] by simp
+
+  then have "A \<in> null_sets M \<longleftrightarrow> C \<in> null_sets P" using * by simp
+  moreover have "A = (\<lambda>x. g (f x)) -` C \<inter> space M"
+    by (auto simp add: A_def B_def) (meson f_meas measurable_space)
+  ultimately show "((\<lambda>x. g (f x)) -` C \<inter> space M \<in> null_sets M) \<longleftrightarrow> C \<in> null_sets P" by simp
+qed
+
+lemma quasi_measure_preserving_comp:
+  assumes "f \<in> quasi_measure_preserving M N"
+          "g \<in> quasi_measure_preserving N P"
+  shows "g o f \<in> quasi_measure_preserving M P"
+unfolding comp_def using assms quasi_measure_preserving_composition by blast
+
+lemma quasi_measure_preserving_AE:
+  assumes "f \<in> quasi_measure_preserving M N"
+          "AE x in N. P x"
+  shows "AE x in M. P (f x)"
+proof -
+  obtain A where "\<And>x. x \<in> space N - A \<Longrightarrow> P x" "A \<in> null_sets N"
+    using AE_E3[OF assms(2)] by blast
+  define B where "B = f-`A \<inter> space M"
+  have "B \<in> null_sets M"
+  moreover have "x \<in> space M - B \<Longrightarrow> P (f x)" for x
+    unfolding B_def by (metis (no_types, lifting) Diff_iff IntI measurable_space vimage_eq)
+  ultimately show ?thesis using AE_not_in AE_space by force
+qed
+
+lemma quasi_measure_preserving_AE':
+  assumes "f \<in> quasi_measure_preserving M N"
+          "AE x in M. P (f x)"
+          "{x \<in> space N. P x} \<in> sets N"
+  shows "AE x in N. P x"
+proof -
+  have [measurable]: "f \<in> measurable M N" using quasi_measure_preservingE(1)[OF assms(1)] by simp
+  define U where "U = {x \<in> space N. \<not>(P x)}"
+  have [measurable]: "U \<in> sets N" unfolding U_def using assms(3) by auto
+  have "f-`U \<inter> space M = {x \<in> space M. \<not>(P (f x))}"
+  also have "... \<in> null_sets M"
+    apply (subst AE_iff_null[symmetric]) using assms by auto
+  finally have "U \<in> null_sets N"
+  then show ?thesis unfolding U_def using AE_iff_null by blast
+qed
+
+lemma quasi_measure_preserving_absolutely_continuous:
+  assumes "f \<in> quasi_measure_preserving M N"
+          "u \<in> borel_measurable M"
+  shows "absolutely_continuous N (distr (density M u) N f)"
+proof -
+  have [measurable]: "f \<in> measurable M N" using quasi_measure_preservingE[OF assms(1)] by auto
+  have "S \<in> null_sets (distr (density M u) N f)" if [measurable]: "S \<in> null_sets N" for S
+  proof -
+    have [measurable]: "S \<in> sets N" using null_setsD2[OF that] by auto
+    have *: "AE x in N. x \<notin> S"
+      by (metis AE_not_in that)
+    have "AE x in M. f x \<notin> S"
+      by (rule quasi_measure_preserving_AE[OF _ *], simp add: assms)
+    then have *: "AE x in M. indicator S (f x) * u x = 0"
+      by force
+
+    have "emeasure (distr (density M u) N f) S = (\<integral>\<^sup>+x. indicator S x \<partial>(distr (density M u) N f))"
+      by auto
+    also have "... = (\<integral>\<^sup>+x. indicator S (f x) \<partial>(density M u))"
+      by (rule nn_integral_distr, auto)
+    also have "... = (\<integral>\<^sup>+x. indicator S (f x) * u x \<partial>M)"
+      by (rule nn_integral_densityR[symmetric], auto simp add: assms)
+    also have "... = (\<integral>\<^sup>+x. 0 \<partial>M)"
+      using * by (rule nn_integral_cong_AE)
+    finally have "emeasure (distr (density M u) N f) S = 0" by auto
+    then show ?thesis by auto
+  qed
+  then show ?thesis unfolding absolutely_continuous_def by auto
+qed
+
+definition measure_preserving::"'a measure \<Rightarrow> 'b measure \<Rightarrow> ('a \<Rightarrow> 'b) set"
+  where "measure_preserving M N
+          = {f \<in> measurable M N. (\<forall> A \<in> sets N. emeasure M (f-`A \<inter> space M) = emeasure N A)}"
+
+lemma measure_preservingE:
+  assumes "f \<in> measure_preserving M N"
+  shows "f \<in> measurable M N"
+        "\<And>A. A \<in> sets N \<Longrightarrow> emeasure M (f-`A \<inter> space M) = emeasure N A"
+using assms unfolding measure_preserving_def by auto
+
+lemma measure_preservingI [intro]:
+  assumes "f \<in> measurable M N"
+          "\<And>A. A \<in> sets N \<Longrightarrow> emeasure M (f-`A \<inter> space M) = emeasure N A"
+  shows "f \<in> measure_preserving M N"
+using assms unfolding measure_preserving_def by auto
+
+lemma measure_preserving_distr:
+  assumes "f \<in> measure_preserving M N"
+  shows "distr M N f = N"
+proof -
+  let ?N2 = "distr M N f"
+  have "sets ?N2 = sets N" by simp
+  moreover have "emeasure ?N2 A = emeasure N A" if "A \<in> sets N" for A
+  proof -
+    have "emeasure ?N2 A = emeasure M (f-`A \<inter> space M)"
+    then show "emeasure ?N2 A = emeasure N A"
+  qed
+  ultimately show ?thesis by (metis measure_eqI)
+qed
+
+lemma measure_preserving_distr':
+  assumes "f \<in> measurable M N"
+  shows "f \<in> measure_preserving M (distr M N f)"
+proof (rule measure_preservingI)
+  show "f \<in> measurable M (distr M N f)" using assms(1) by auto
+  show "emeasure M (f-`A \<inter> space M) = emeasure (distr M N f) A" if "A \<in> sets (distr M N f)" for A
+    using that emeasure_distr[OF assms] by auto
+qed
+
+lemma measure_preserving_preserves_nn_integral:
+  assumes "T \<in> measure_preserving M N"
+          "f \<in> borel_measurable N"
+  shows "(\<integral>\<^sup>+x. f x \<partial>N) = (\<integral>\<^sup>+x. f (T x) \<partial>M)"
+proof -
+  have "(\<integral>\<^sup>+x. f (T x) \<partial>M) = (\<integral>\<^sup>+y. f y \<partial>distr M N T)"
+    using assms nn_integral_distr[of T M N f, OF measure_preservingE(1)[OF assms(1)]] by simp
+  also have "... = (\<integral>\<^sup>+y. f y \<partial>N)"
+    using measure_preserving_distr[OF assms(1)] by simp
+  finally show ?thesis by simp
+qed
+
+lemma measure_preserving_preserves_integral:
+  fixes f :: "'a \<Rightarrow> 'b::{banach, second_countable_topology}"
+  assumes "T \<in> measure_preserving M N"
+      and [measurable]: "integrable N f"
+  shows "integrable M (\<lambda>x. f(T x))" "(\<integral>x. f x \<partial>N) = (\<integral>x. f (T x) \<partial>M)"
+proof -
+  have a [measurable]: "T \<in> measurable M N" by (rule measure_preservingE(1)[OF assms(1)])
+  have b [measurable]: "f \<in> borel_measurable N" by simp
+  have "distr M N T = N" using measure_preserving_distr[OF assms(1)] by simp
+  then have "integrable (distr M N T) f" using assms(2) by simp
+  then show "integrable M (\<lambda>x. f(T x))" using integrable_distr_eq[OF a b] by simp
+
+  have "(\<integral>x. f (T x) \<partial>M) = (\<integral>y. f y \<partial>distr M N T)" using integral_distr[OF a b] by simp
+qed
+
+lemma measure_preserving_preserves_integral':
+  fixes f :: "'a \<Rightarrow> 'b::{banach, second_countable_topology}"
+  assumes "T \<in> measure_preserving M N"
+      and [measurable]: "integrable M (\<lambda>x. f (T x))" "f \<in> borel_measurable N"
+  shows "integrable N f" "(\<integral>x. f x \<partial>N) = (\<integral>x. f (T x) \<partial>M)"
+proof -
+  have a [measurable]: "T \<in> measurable M N" by (rule measure_preservingE(1)[OF assms(1)])
+  have "integrable M (\<lambda>x. f(T x))" using assms(2) unfolding comp_def by auto
+  then have "integrable (distr M N T) f"
+    using integrable_distr_eq[OF a assms(3)] by simp
+  then show *: "integrable N f" using measure_preserving_distr[OF assms(1)] by simp
+
+  then show "(\<integral>x. f x \<partial>N) = (\<integral>x. f (T x) \<partial>M)"
+    using measure_preserving_preserves_integral[OF assms(1) *] by simp
+qed
+
+lemma id_measure_preserving:
+  "(\<lambda>x. x) \<in> measure_preserving M M"
+unfolding measure_preserving_def by auto
+
+lemma measure_preserving_is_quasi_measure_preserving:
+  assumes "f \<in> measure_preserving M N"
+  shows "f \<in> quasi_measure_preserving M N"
+using assms unfolding measure_preserving_def quasi_measure_preserving_def apply auto
+by (metis null_setsD1 null_setsI, metis measurable_sets null_setsD1 null_setsI)
+
+lemma measure_preserving_composition:
+  assumes "f \<in> measure_preserving M N"
+          "g \<in> measure_preserving N P"
+  shows "(\<lambda>x. g(f x)) \<in> measure_preserving M P"
+proof (rule measure_preservingI)
+  have f [measurable]: "f \<in> measurable M N" by (rule measure_preservingE(1)[OF assms(1)])
+  have g [measurable]: "g \<in> measurable N P" by (rule measure_preservingE(1)[OF assms(2)])
+  show [measurable]: "(\<lambda>x. g (f x)) \<in> measurable M P" by auto
+
+  fix C assume [measurable]: "C \<in> sets P"
+  define B where "B = g-`C \<inter> space N"
+  have [measurable]: "B \<in> sets N" unfolding B_def by simp
+  have *: "emeasure N B = emeasure P C"
+    unfolding B_def using measure_preservingE(2)[OF assms(2)] by simp
+
+  define A where "A = f-`B \<inter> space M"
+  have [measurable]: "A \<in> sets M" unfolding A_def by simp
+  have "emeasure M A = emeasure N B"
+    unfolding A_def using measure_preservingE(2)[OF assms(1)] by simp
+
+  then have "emeasure M A = emeasure P C" using * by simp
+  moreover have "A = (\<lambda>x. g(f x))-`C \<inter> space M"
+    by (auto simp add: A_def B_def) (meson f measurable_space)
+  ultimately show "emeasure M ((\<lambda>x. g(f x))-`C \<inter> space M) = emeasure P C" by simp
+qed
+
+lemma measure_preserving_comp:
+  assumes "f \<in> measure_preserving M N"
+          "g \<in> measure_preserving N P"
+  shows "g o f \<in> measure_preserving M P"
+unfolding o_def using measure_preserving_composition assms by blast
+
+lemma measure_preserving_total_measure:
+  assumes "f \<in> measure_preserving M N"
+  shows "emeasure M (space M) = emeasure N (space N)"
+proof -
+  have "f \<in> measurable M N" by (rule measure_preservingE(1)[OF assms(1)])
+  then have "f-`(space N) \<inter> space M = space M" by (meson Int_absorb1 measurable_space subsetI vimageI)
+  then show "emeasure M (space M) = emeasure N (space N)"
+    by (metis (mono_tags, lifting) measure_preservingE(2)[OF assms(1)] sets.top)
+qed
+
+lemma measure_preserving_finite_measure:
+  assumes "f \<in> measure_preserving M N"
+  shows "finite_measure M \<longleftrightarrow> finite_measure N"
+using measure_preserving_total_measure[OF assms]
+by (metis finite_measure.emeasure_finite finite_measureI infinity_ennreal_def)
+
+lemma measure_preserving_prob_space:
+  assumes "f \<in> measure_preserving M N"
+  shows "prob_space M \<longleftrightarrow> prob_space N"
+using measure_preserving_total_measure[OF assms] by (metis prob_space.emeasure_space_1 prob_spaceI)
+
+locale qmpt = sigma_finite_measure +
+  fixes T
+  assumes Tqm: "T \<in> quasi_measure_preserving M M"
+
+locale mpt = qmpt +
+  assumes Tm: "T \<in> measure_preserving M M"
+
+locale fmpt = mpt + finite_measure
+
+locale pmpt = fmpt + prob_space
+
+lemma qmpt_I:
+  assumes "sigma_finite_measure M"
+          "T \<in> measurable M M"
+          "\<And>A. A \<in> sets M \<Longrightarrow> ((T-`A \<inter> space M) \<in> null_sets M) \<longleftrightarrow> (A \<in> null_sets M)"
+  shows "qmpt M T"
+unfolding qmpt_def qmpt_axioms_def quasi_measure_preserving_def
+by (auto simp add: assms)
+
+lemma mpt_I:
+  assumes "sigma_finite_measure M"
+          "T \<in> measurable M M"
+          "\<And>A. A \<in> sets M \<Longrightarrow> emeasure M (T-`A \<inter> space M) = emeasure M A"
+  shows "mpt M T"
+proof -
+  have *: "T \<in> measure_preserving M M"
+    by (rule measure_preservingI[OF assms(2) assms(3)])
+  then have **: "T \<in> quasi_measure_preserving M M"
+    using measure_preserving_is_quasi_measure_preserving by auto
+  show "mpt M T"
+    unfolding mpt_def qmpt_def qmpt_axioms_def mpt_axioms_def using * ** assms(1) by auto
+qed
+
+lemma fmpt_I:
+  assumes "finite_measure M"
+          "T \<in> measurable M M"
+          "\<And>A. A \<in> sets M \<Longrightarrow> emeasure M (T-`A \<inter> space M) = emeasure M A"
+  shows "fmpt M T"
+proof -
+  have *: "T \<in> measure_preserving M M"
+    by (rule measure_preservingI[OF assms(2) assms(3)])
+  then have **: "T \<in> quasi_measure_preserving M M"
+    using measure_preserving_is_quasi_measure_preserving by auto
+  show "fmpt M T"
+    unfolding fmpt_def mpt_def qmpt_def mpt_axioms_def qmpt_axioms_def
+    using * ** assms(1) finite_measure_def by auto
+qed
+
+lemma pmpt_I:
+  assumes "prob_space M"
+          "T \<in> measurable M M"
+          "\<And>A. A \<in> sets M \<Longrightarrow> emeasure M (T-`A \<inter> space M) = emeasure M A"
+  shows "pmpt M T"
+proof -
+  have *: "T \<in> measure_preserving M M"
+    by (rule measure_preservingI[OF assms(2) assms(3)])
+  then have **: "T \<in> quasi_measure_preserving M M"
+    using measure_preserving_is_quasi_measure_preserving by auto
+  show "pmpt M T"
+    unfolding pmpt_def fmpt_def mpt_def qmpt_def mpt_axioms_def qmpt_axioms_def
+    using * ** assms(1) prob_space_imp_sigma_finite prob_space.finite_measure by auto
+qed
+
+
+lemma fmpt_null_space:
+  assumes "emeasure M (space M) = 0"
+          "T \<in> measurable M M"
+  shows "fmpt M T"
+apply (rule fmpt_I)
+apply (auto simp add: assms finite_measureI)
+apply (metis assms emeasure_eq_0 measurable_sets sets.sets_into_space sets.top)
+done
+
+lemma fmpt_empty_space:
+  assumes "space M = {}"
+  shows "fmpt M T"
+by (rule fmpt_null_space, auto simp add: assms measurable_empty_iff)
+
+
+lemma mpt_translation:
+  fixes c :: "'a::euclidean_space"
+  shows "mpt lborel (\<lambda>x. x + c)"
+proof (rule mpt_I, auto simp add: lborel.sigma_finite_measure_axioms)
+  fix A::"'a set" assume [measurable]: "A \<in> sets borel"
+  have "emeasure lborel ((\<lambda>x. x + c) -` A) = emeasure lborel ((((+))c)-`A)" by (meson add.commute)
+  also have "... = emeasure lborel ((((+))c)-`A \<inter> space lborel)" by simp
+  also have "... = emeasure (distr lborel borel ((+) c)) A" by (rule emeasure_distr[symmetric], auto)
+  also have "... = emeasure lborel A" using lborel_distr_plus[of c] by simp
+  finally show "emeasure lborel ((\<lambda>x. x + c) -` A) = emeasure lborel A" by simp
+qed
+
+
+lemma pair_measure_null_product:
+  assumes "emeasure M (space M) = 0"
+  shows "emeasure (M \<Otimes>\<^sub>M N) (space (M \<Otimes>\<^sub>M N)) = 0"
+proof -
+  have "(\<integral>\<^sup>+x. (\<integral>\<^sup>+y. indicator X (x,y) \<partial>N) \<partial>M) = 0" for X
+  proof -
+    have "(\<integral>\<^sup>+x. (\<integral>\<^sup>+y. indicator X (x,y) \<partial>N) \<partial>M) = (\<integral>\<^sup>+x. 0 \<partial>M)"
+      by (intro nn_integral_cong_AE emeasure_0_AE[OF assms])
+    then show ?thesis by auto
+  qed
+  then have "M \<Otimes>\<^sub>M N = measure_of (space M \<times> space N)
+      {a \<times> b | a b. a \<in> sets M \<and> b \<in> sets N}
+      (\<lambda>X. 0)"
+    unfolding pair_measure_def by auto
+  then show ?thesis by (simp add: emeasure_sigma)
+qed
+
+lemma mpt_skew_product:
+  assumes "mpt M T"
+          "AE x in M. mpt N (U x)"
+    and [measurable]: "(\<lambda>(x,y). U x y) \<in> measurable (M \<Otimes>\<^sub>M N) N"
+  shows "mpt (M \<Otimes>\<^sub>M N) (\<lambda>(x,y). (T x, U x y))"
+proof (cases)
+  assume H: "emeasure M (space M) = 0"
+  then have *: "emeasure (M \<Otimes>\<^sub>M N) (space (M \<Otimes>\<^sub>M N)) = 0"
+    using pair_measure_null_product by auto
+  have [measurable]: "T \<in> measurable M M"
+    using assms(1) unfolding mpt_def qmpt_def qmpt_axioms_def quasi_measure_preserving_def by auto
+  then have [measurable]: "(\<lambda>(x, y). (T x, U x y)) \<in> measurable (M \<Otimes>\<^sub>M N) (M \<Otimes>\<^sub>M N)" by auto
+  with fmpt_null_space[OF *] show ?thesis by (simp add: fmpt.axioms(1))
+next
+  assume "\<not>(emeasure M (space M) = 0)"
+  show ?thesis
+  proof (rule mpt_I)
+    have "sigma_finite_measure M" using assms(1) unfolding mpt_def qmpt_def by auto
+    then interpret M: sigma_finite_measure M .
+
+    have "\<exists>p. \<not> almost_everywhere M p"
+    then have "sigma_finite_measure N" unfolding mpt_def qmpt_def by auto
+    then interpret N: sigma_finite_measure N .
+    show "sigma_finite_measure (M \<Otimes>\<^sub>M N)"
+      by (rule sigma_finite_pair_measure) standard+
+
+    have [measurable]: "T \<in> measurable M M"
+      using assms(1) unfolding mpt_def qmpt_def qmpt_axioms_def quasi_measure_preserving_def by auto
+    show [measurable]: "(\<lambda>(x, y). (T x, U x y)) \<in> measurable (M \<Otimes>\<^sub>M N) (M \<Otimes>\<^sub>M N)" by auto
+    have "T \<in> measure_preserving M M" using assms(1) by (simp add: mpt.Tm)
+
+    fix A assume [measurable]: "A \<in> sets (M \<Otimes>\<^sub>M N)"
+    then have [measurable]: "(\<lambda> (x,y). (indicator A (x,y))::ennreal) \<in> borel_measurable (M \<Otimes>\<^sub>M N)" by auto
+    then have [measurable]: "(\<lambda>x. \<integral>\<^sup>+ y. indicator A (x, y) \<partial>N) \<in> borel_measurable M"
+      by simp
+
+    define B where "B = (\<lambda>(x, y). (T x, U x y)) -` A \<inter> space (M \<Otimes>\<^sub>M N)"
+    then have [measurable]: "B \<in> sets (M \<Otimes>\<^sub>M N)" by auto
+
+    have "(\<integral>\<^sup>+y. indicator B (x,y) \<partial>N) = (\<integral>\<^sup>+y. indicator A (T x, y) \<partial>N)" if "x \<in> space M" "mpt N (U x)" for x
+    proof -
+      have 2: "\<And>y. ((indicator B (x, y))::ennreal) = indicator A (T x, U x y) * indicator (space M) x * indicator (space N) y"
+        unfolding B_def by (simp add: indicator_def space_pair_measure)
+      have 3: "U x \<in> measure_preserving N N" using assms(2) that(2) by (simp add: mpt.Tm)
+
+      have "(\<integral>\<^sup>+y. indicator B (x,y) \<partial>N) = (\<integral>\<^sup>+y. indicator A (T x, U x y) \<partial>N)"
+      also have "... = (\<integral>\<^sup>+y. indicator A (T x, y) \<partial>N)"
+        by (rule measure_preserving_preserves_nn_integral[OF 3, symmetric], metis 1)
+      finally show ?thesis by simp
+    qed
+    then have *: "AE x in M. (\<integral>\<^sup>+y. indicator B (x,y) \<partial>N) = (\<integral>\<^sup>+y. indicator A (T x, y) \<partial>N)"
+      using assms(2) by auto
+
+    have "emeasure (M \<Otimes>\<^sub>M N) B = (\<integral>\<^sup>+ x. (\<integral>\<^sup>+y. indicator B (x,y) \<partial>N) \<partial>M)"
+    also have "... = (\<integral>\<^sup>+ x. (\<integral>\<^sup>+y. indicator A (T x, y) \<partial>N) \<partial>M)"
+      by (intro nn_integral_cong_AE *)

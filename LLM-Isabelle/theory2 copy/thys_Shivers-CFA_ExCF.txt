@@ -1,0 +1,208 @@
+theory ExCF
+  imports HOLCF HOLCFUtils CPSScheme Utils
+begin
+
+
+
+definition "contour = (UNIV::label list set)"
+
+typedef contour = contour
+  unfolding contour_def by auto
+
+definition initial_contour ("\<binit>")
+  where "\<binit> = Abs_contour []"
+
+definition nb 
+  where "nb b c = Abs_contour (c # Rep_contour b)"
+
+instantiation contour :: preorder
+begin
+definition le_contour_def: "b \<le> b' \<longleftrightarrow> length (Rep_contour b) \<le> length (Rep_contour b')"
+definition less_contour_def: "b < b' \<longleftrightarrow> length (Rep_contour b) < length (Rep_contour b')"
+instance proof
+qed(auto simp add:le_contour_def less_contour_def Rep_contour_inverse Abs_contour_inverse contour_def)
+end
+
+
+lemma nb_le_less[iff]: "nb b c \<le> b' \<longleftrightarrow> b < b'"
+  unfolding nb_def
+  by (auto simp add:le_contour_def less_contour_def Rep_contour_inverse Abs_contour_inverse contour_def)
+
+lemma nb_less[iff]: "b' < nb b c \<longleftrightarrow> b' \<le> b"
+  unfolding nb_def
+  by (auto simp add:le_contour_def less_contour_def Rep_contour_inverse Abs_contour_inverse contour_def)
+
+declare less_imp_le[where 'a = contour, intro]
+
+
+
+type_synonym benv = "label \<rightharpoonup> contour"
+type_synonym closure = "lambda \<times> benv"
+
+datatype d = DI int
+           | DC closure
+           | DP prim
+           | Stop
+
+type_synonym venv = "var \<times> contour \<rightharpoonup> d"
+
+
+primrec isProc 
+  where "isProc (DI _) = False"
+      | "isProc (DC _) = True"
+      | "isProc (DP _) = True"
+      | "isProc Stop   = True"
+
+
+instantiation contour :: discrete_cpo
+begin
+definition [simp]: "(x::contour) \<sqsubseteq> y \<longleftrightarrow> x = y"
+instance by standard simp
+end
+instantiation d :: discrete_cpo begin
+definition  [simp]: "(x::d) \<sqsubseteq> y \<longleftrightarrow> x = y"
+instance by standard simp
+end
+
+instantiation call :: discrete_cpo begin
+definition  [simp]: "(x::call) \<sqsubseteq> y \<longleftrightarrow> x = y"
+instance by standard simp
+end
+
+
+
+fun evalV :: "val \<Rightarrow> benv \<Rightarrow> venv \<Rightarrow> d" ("\<A>")
+  where "\<A> (C _ i) \<beta> ve = DI i"
+  |     "\<A> (P prim) \<beta> ve = DP prim"
+  |     "\<A> (R _ var) \<beta> ve =
+           (case \<beta> (binder var) of
+              Some l \<Rightarrow> (case ve (var,l) of Some d \<Rightarrow> d | None \<Rightarrow> DI 0)
+             | None \<Rightarrow> DI 0)"
+  |     "\<A> (L lam) \<beta> ve = DC (lam, \<beta>)"
+
+
+
+lemma cont2cont_case_lambda [simp, cont2cont]:
+  assumes "\<And>a b c. cont (\<lambda>x. f x a b c)"
+  shows "cont (\<lambda>x. case_lambda (f x) l)"
+using assms
+by (cases l) auto
+
+lemma cont2cont_case_d [simp, cont2cont]:
+  assumes "\<And>y. cont (\<lambda>x. f1 x y)"
+     and  "\<And>y. cont (\<lambda>x. f2 x y)"
+     and  "\<And>y. cont (\<lambda>x. f3 x y)"
+    and   "cont (\<lambda>x. f4 x)"
+  shows "cont (\<lambda>x. case_d (f1 x) (f2 x) (f3 x) (f4 x) d)"
+using assms
+by (cases d) auto
+
+lemma cont2cont_case_call [simp, cont2cont]:
+  assumes "\<And>a b c. cont (\<lambda>x. f1 x a b c)"
+     and  "\<And>a b c. cont (\<lambda>x. f2 x a b c)"
+  shows "cont (\<lambda>x. case_call (f1 x) (f2 x) c)"
+using assms
+by (cases c) auto
+
+lemma cont2cont_case_prim [simp, cont2cont]:
+  assumes "\<And>y. cont (\<lambda>x. f1 x y)"
+     and  "\<And>y z. cont (\<lambda>x. f2 x y z)"
+  shows "cont (\<lambda>x. case_prim (f1 x) (f2 x) p)"
+using assms
+by (cases p) auto
+
+
+type_synonym ccache = "((label \<times> benv) \<times> d) set"
+type_synonym ans = ccache
+
+type_synonym fstate = "(d \<times> d list \<times> venv \<times> contour)"
+type_synonym cstate = "(call \<times> benv \<times> venv \<times> contour)"
+
+
+fixrec   evalF :: "fstate discr \<rightarrow> ans" ("\<F>")
+     and evalC :: "cstate discr \<rightarrow> ans" ("\<C>")
+  where "\<F>\<cdot>fstate = (case undiscr fstate of
+             (DC (Lambda lab vs c, \<beta>), as, ve, b) \<Rightarrow>
+               (if length vs = length as
+                then let \<beta>' = \<beta> (lab \<mapsto> b);
+                         ve' = map_upds ve (map (\<lambda>v.(v,b)) vs) as
+                     in \<C>\<cdot>(Discr (c,\<beta>',ve',b))
+                else \<bottom>)
+            | (DP (Plus c),[DI a1, DI a2, cnt],ve,b) \<Rightarrow>
+                (if isProc cnt
+                 then let b' = nb b c;
+                          \<beta>  = [c \<mapsto> b]
+                      in \<F>\<cdot>(Discr (cnt,[DI (a1 + a2)],ve,b'))
+                        \<union> {((c, \<beta>),cnt)}
+                 else \<bottom>)
+            | (DP (prim.If ct cf),[DI v, contt, contf],ve,b) \<Rightarrow>
+                (if isProc contt \<and> isProc contf
+                 then
+                  (if v \<noteq> 0
+                   then let b' = nb b ct;
+                            \<beta> = [ct \<mapsto> b]
+                        in (\<F>\<cdot>(Discr (contt,[],ve,b'))
+                            \<union> {((ct, \<beta>),contt)})
+                   else let b' = nb b cf;
+                            \<beta> = [cf \<mapsto> b]
+                        in (\<F>\<cdot>(Discr (contf,[],ve,b')))
+                            \<union> {((cf, \<beta>),contf)})
+                 else \<bottom>)
+            | (Stop,[DI i],_,_) \<Rightarrow> {}
+            | _ \<Rightarrow> \<bottom>
+        )"
+      | "\<C>\<cdot>cstate = (case undiscr cstate of
+             (App lab f vs,\<beta>,ve,b) \<Rightarrow>
+                 let f' = \<A> f \<beta> ve;
+                     as = map (\<lambda>v. \<A> v \<beta> ve) vs;
+                     b' = nb b lab
+                  in if isProc f'
+                     then \<F>\<cdot>(Discr (f',as,ve,b')) \<union> {((lab, \<beta>),f')}
+                     else \<bottom>
+            | (Let lab ls c',\<beta>,ve,b) \<Rightarrow>
+                 let b' = nb b lab;
+                     \<beta>' = \<beta> (lab \<mapsto> b');
+                    ve' = ve ++ map_of (map (\<lambda>(v,l). ((v,b'), \<A> (L l) \<beta>' ve)) ls)
+                 in \<C>\<cdot>(Discr (c',\<beta>',ve',b'))
+        )"
+
+
+lemmas evalF_evalC_induct = evalF_evalC.induct[case_names Admissibility Bottom Next]
+
+lemmas cl_cases = prod.exhaust[OF lambda.exhaust, of _ "\<lambda> a _ . a"]
+lemmas ds_cases_plus = list.exhaust[
+  OF _ d.exhaust, of _ _ "\<lambda>a _. a",
+  OF _ list.exhaust, of _ _ "\<lambda>_ x _. x",
+  OF _ _ d.exhaust, of _ _ "\<lambda>_ _ _ a _. a",
+  OF _ _ list.exhaust,of _ _ "\<lambda>_ _ _ _ x _. x",
+  OF _ _ _ list.exhaust,of _ _ "\<lambda>_ _ _ _ _ _ _ x. x"
+  ]
+lemmas ds_cases_if = list.exhaust[OF _ d.exhaust, of _ _ "\<lambda>a _. a",
+  OF _ list.exhaust[OF _ list.exhaust[OF _ list.exhaust, of _ _ "\<lambda>_ x. x"], of _ _ "\<lambda>_ x. x"], of _ _ "\<lambda>_ x _. x"]
+lemmas ds_cases_stop = list.exhaust[OF _ d.exhaust, of _ _ "\<lambda>a _. a",
+  OF _ list.exhaust, of _ _ "\<lambda>_ x _. x"]
+lemmas fstate_case = prod_cases4[OF d.exhaust, of _ "\<lambda>x _ _ _ . x",
+  OF _ cl_cases prim.exhaust, of _ _ "\<lambda> _ _ _ _ a . a" "\<lambda> _ _ _ _ a. a",
+  OF _ case_split ds_cases_plus ds_cases_if ds_cases_stop,
+  of _ _ "\<lambda>_ as _ _ _ _ _ _ vs _ . length vs = length as" "\<lambda> _ ds _ _ _ _ . ds" "\<lambda> _ ds _ _ _ _ _. ds" "\<lambda> _ ds _ _. ds",
+  case_names "x" "Closure" "x" "x"  "x" "x" "Plus" "x" "x" "x" "x" "x" "x" "x" "x"   "x" "x" "If_True" "If_False" "x" "x" "x" "x" "x" "Stop"  "x" "x" "x" "x" "x"]
+
+
+
+definition evalCPS :: "prog \<Rightarrow> ans" ("\<PR>")
+  where "\<PR> l = (let ve = Map.empty;
+                          \<beta> = Map.empty;
+                          f = \<A> (L l) \<beta> ve
+                      in  \<F>\<cdot>(Discr (f,[Stop],ve,\<binit>)))"
+
+lemma correct_ex1: "\<PR> ex1 = {((2,[1 \<mapsto> \<binit>]), Stop)}"
+unfolding evalCPS_def
+by simp
+
+lemma correct_ex2: "\<PR> ex2 = {((2, [1 \<mapsto> \<binit>]), DP (Plus 3)),
+                                   ((3, [3 \<mapsto> nb \<binit> 2]),  Stop)}"
+unfolding evalCPS_def
+by simp
+
+
+end

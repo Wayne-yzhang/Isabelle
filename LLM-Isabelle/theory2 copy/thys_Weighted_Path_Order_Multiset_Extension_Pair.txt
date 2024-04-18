@@ -1,0 +1,203 @@
+theory Multiset_Extension_Pair
+  imports 
+    "HOL-Library.Multiset" 
+    "Regular-Sets.Regexp_Method"
+    "Abstract-Rewriting.Abstract_Rewriting" 
+    Relations
+begin
+
+
+lemma mult_locally_cancel:
+  assumes "trans s " and "locally_irrefl s (X + Z)" and "locally_irrefl s (Y + Z)"
+  shows "(X + Z, Y + Z) \<in> mult s \<longleftrightarrow> (X, Y) \<in> mult s" (is "?L \<longleftrightarrow> ?R")
+proof
+  assume ?L thus ?R using assms(2, 3)
+  proof (induct Z arbitrary: X Y)
+    case (add z Z)
+    obtain X' Y' Z' where *: "add_mset z X + Z = Z' + X'" "add_mset z Y + Z = Z' + Y'" "Y' \<noteq> {#}"
+      "\<forall>x \<in> set_mset X'. \<exists>y \<in> set_mset Y'. (x, y) \<in> s"
+    consider Z2 where "Z' = add_mset z Z2" | X2 Y2 where "X' = add_mset z X2" "Y' = add_mset z Y2"
+      using *(1,2) by (metis add_mset_remove_trivial_If insert_iff set_mset_add_mset_insert union_iff)
+    thus ?case
+    proof (cases)
+      case 1 thus ?thesis using * one_step_implies_mult[of Y' X' s Z2] 
+        by (auto simp: add.commute[of _ "{#_#}"] add.assoc intro: add(1))
+          (metis add.hyps add.prems(2) add.prems(3) add_mset_add_single li_trans_l union_mset_add_mset_right) 
+    next
+      case 2 then obtain y where "y \<in> set_mset Y2" "(z, y) \<in> s" using *(4) add(3, 4)
+        by (auto simp: locally_irrefl_def)
+      have "x' \<in> set_mset X2 \<Longrightarrow> \<exists>y \<in> set_mset Y2. (x', y) \<in> s" for x'
+        using 2 *(4)[rule_format, of x'] by auto
+      ultimately show ?thesis using  * one_step_implies_mult[of Y2 X2 s Z'] 2 add(3, 4)
+        by (force simp: locally_irrefl_def add.commute[of "{#_#}"] add.assoc[symmetric] intro: add(1))
+    qed
+  qed auto
+next
+  assume ?R then obtain I J K
+    where "Y = I + J" "X = I + K" "J \<noteq> {#}" "\<forall>k \<in> set_mset K. \<exists>j \<in> set_mset J. (k, j) \<in> s"
+  thus ?L using one_step_implies_mult[of J K s "I + Z"] by (auto simp: ac_simps)
+qed
+
+lemma mult_locally_cancelL:
+  assumes "trans s" "locally_irrefl s (X + Z)" "locally_irrefl s (Y + Z)"
+  shows "(Z + X, Z + Y) \<in> mult s \<longleftrightarrow> (X, Y) \<in> mult s"
+  using mult_locally_cancel[OF assms] by (simp only: union_commute)
+
+lemma mult_cancelL:
+  assumes "trans s" "irrefl s" shows "(Z + X, Z + Y) \<in> mult s \<longleftrightarrow> (X, Y) \<in> mult s"
+  using assms
+  by (auto simp: union_commute intro!: mult_cancel elim: irrefl_on_subset) 
+
+lemma wf_trancl_conv:
+  shows "wf (r\<^sup>+) \<longleftrightarrow> wf r"
+  using wf_subset[of "r\<^sup>+" r] by (force simp: wf_trancl)
+
+
+inductive_set multpw :: "'a rel \<Rightarrow> 'a multiset rel" for ns :: "'a rel" where
+  empty: "({#}, {#}) \<in> multpw ns"
+| add: "(x, y) \<in> ns \<Longrightarrow> (X, Y) \<in> multpw ns \<Longrightarrow> (add_mset x X, add_mset y Y) \<in> multpw ns"
+
+lemma multpw_emptyL [simp]:
+  "({#}, X) \<in> multpw ns \<longleftrightarrow> X = {#}"
+  by (cases X) (auto elim: multpw.cases intro: multpw.intros)
+
+lemma multpw_emptyR [simp]:
+  "(X, {#}) \<in> multpw ns \<longleftrightarrow> X = {#}"
+  by (cases X) (auto elim: multpw.cases intro: multpw.intros)
+
+lemma refl_multpw:
+  assumes "refl ns" shows "refl (multpw ns)"
+proof -
+  have "(X, X) \<in> multpw ns" for X using assms
+    by (induct X) (auto intro: multpw.intros simp: refl_on_def)
+  then show ?thesis by (auto simp: refl_on_def)
+qed
+
+lemma multpw_Id_Id [simp]:
+  "multpw Id = Id"
+proof -
+  have "(X, Y) \<in> multpw (Id :: 'a rel) \<Longrightarrow> X = Y" for X Y by (induct X Y rule: multpw.induct) auto
+  then show ?thesis using refl_multpw[of Id] by (auto simp: refl_on_def)
+qed
+
+lemma mono_multpw:
+  assumes "ns \<subseteq> ns'" shows "multpw ns \<subseteq> multpw ns'"
+proof -
+  have "(X, Y) \<in> multpw ns \<Longrightarrow> (X, Y) \<in> multpw ns'" for X Y
+    by (induct X Y rule: multpw.induct) (insert assms, auto intro: multpw.intros)
+  then show ?thesis by auto
+qed
+
+lemma multpw_converse:
+  "multpw (ns\<inverse>) = (multpw ns)\<inverse>"
+proof -
+  have "(X, Y) \<in> multpw (ns\<inverse>) \<Longrightarrow> (X, Y) \<in> (multpw ns)\<inverse>" for X Y and ns :: "'a rel"
+    by (induct X Y rule: multpw.induct) (auto intro: multpw.intros)
+  then show ?thesis by auto
+qed
+
+lemma multpw_local:
+  "(X, Y) \<in> multpw ns \<Longrightarrow> (X, Y) \<in> multpw (ns \<inter> set_mset X \<times> set_mset Y)"
+proof (induct X Y rule: multpw.induct)
+  case (add x y X Y) then show ?case
+    using mono_multpw[of "ns \<inter> set_mset X \<times> set_mset Y" "ns \<inter> insert x (set_mset X) \<times> insert y (set_mset Y)"]
+    by (auto intro: multpw.intros)
+qed auto
+
+lemma multpw_split1R:
+  assumes "(add_mset x X, Y) \<in> multpw ns"
+  obtains z Z where "Y = add_mset z Z" and "(x, z) \<in> ns" and "(X, Z) \<in> multpw ns"
+  using assms
+proof (induct  "add_mset x X" Y arbitrary: X thesis rule: multpw.induct)
+  case (add x' y' X' Y') then show ?case
+  proof (cases "x = x'")
+    case False
+    obtain X'' where [simp]: "X = add_mset x' X''"
+      using add(4) False
+      by (metis add_eq_conv_diff)
+    have "X' = add_mset x X''" using add(4) by (auto simp: add_eq_conv_ex)
+    with add(2) obtain Y'' y where "Y' = add_mset y Y''" "(x,y) \<in> ns" "(X'', Y'') \<in> multpw ns"
+      by (auto intro: add(3))
+    then show ?thesis using add(1) add(5)[of y "add_mset y' Y''"]
+      by (auto simp: ac_simps intro: multpw.intros)
+  qed auto
+qed auto
+
+lemma multpw_splitR:
+  assumes "(X1 + X2, Y) \<in> multpw ns"
+  obtains Y1 Y2 where "Y = Y1 + Y2" and "(X1, Y1) \<in> multpw ns" and "(X2, Y2) \<in> multpw ns"
+  using assms
+proof (induct X2 arbitrary: Y thesis)
+  case (add x2 X2)
+  from add(3) obtain Y' y2 where "(X1 + X2, Y') \<in> multpw ns" "(x2, y2) \<in> ns" "Y = add_mset y2 Y'"
+    by (auto elim: multpw_split1R simp: union_assoc[symmetric])
+  moreover then obtain Y1 Y2 where "(X1, Y1) \<in> multpw ns" "(X2, Y2) \<in> multpw ns" "Y' = Y1 + Y2"
+    by (auto elim: add(1)[rotated])
+  ultimately show ?case by (intro add(2)) (auto simp: union_assoc intro: multpw.intros)
+qed auto
+
+lemma multpw_split1L:
+  assumes "(X, add_mset y Y) \<in> multpw ns"
+  obtains z Z where "X = add_mset z Z" and "(z, y) \<in> ns" and "(Z, Y) \<in> multpw ns"
+  using assms multpw_split1R[of y Y X "ns\<inverse>" thesis] by (auto simp: multpw_converse)
+
+lemma multpw_splitL:
+  assumes "(X, Y1 + Y2) \<in> multpw ns"
+  obtains X1 X2 where "X = X1 + X2" and "(X1, Y1) \<in> multpw ns" and "(X2, Y2) \<in> multpw ns"
+  using assms multpw_splitR[of Y1 Y2 X "ns\<inverse>" thesis] by (auto simp: multpw_converse)
+
+lemma locally_trans_multpw:
+  assumes "locally_trans ns S T U"
+    and "(S, T) \<in> multpw ns"
+    and "(T, U) \<in> multpw ns"
+  shows "(S, U) \<in> multpw ns"
+  using assms(2,3,1)
+proof (induct S T arbitrary: U rule: multpw.induct)
+  case (add x y X Y)
+  then show ?case unfolding locally_trans_def
+    by (auto 0 3 intro: multpw.intros elim: multpw_split1R)
+qed blast
+
+lemma trans_multpw:
+  assumes "trans ns" shows "trans (multpw ns)"
+  using locally_trans_multpw unfolding locally_trans_def trans_def
+  by (meson assms locally_trans_multpw tr_ltr)
+
+lemma multpw_add:
+  assumes "(X1, Y1) \<in> multpw ns" "(X2, Y2) \<in> multpw ns" shows "(X1 + X2, Y1 + Y2) \<in> multpw ns"
+  using assms(2,1)
+  by (induct X2 Y2 rule: multpw.induct) (auto intro: multpw.intros simp: add.assoc[symmetric])
+
+lemma multpw_single:
+  "(x, y) \<in> ns \<Longrightarrow> ({#x#}, {#y#}) \<in> multpw ns"
+  using multpw.intros(2)[OF _ multpw.intros(1)] .
+
+lemma multpw_mult1_commute:
+  assumes compat: "s O ns \<subseteq> s" and reflns: "refl ns"
+  shows "mult1 s O multpw ns \<subseteq> multpw ns O mult1 s"
+proof -
+  { fix X Y Z assume 1: "(X, Y) \<in> mult1 s" "(Y, Z) \<in> multpw ns"
+    then obtain X' Y' y where 2: "X = Y' + X'" "Y = add_mset y Y'" "\<forall>x. x \<in># X' \<longrightarrow> (x, y) \<in> s"
+      by (auto simp: mult1_def)
+    moreover obtain Z' z where 3: "Z = add_mset z Z'" "(y, z) \<in> ns" "(Y', Z') \<in> multpw ns"
+      using 1(2) 2(2) by (auto elim: multpw_split1R)
+    moreover have "\<forall>x. x \<in># X' \<longrightarrow> (x, z) \<in> s" using 2(3) 3(2) compat by blast
+    ultimately have "\<exists>Y'. (X, Y') \<in> multpw ns \<and> (Y', Z) \<in> mult1 s" unfolding mult1_def
+      using refl_multpw[OF reflns]
+      by (intro exI[of _ "Z' + X'"]) (auto intro: multpw_add simp: refl_on_def)
+  }
+  then show ?thesis by fast
+qed
+
+lemma multpw_mult_commute:
+  assumes "s O ns \<subseteq> s" "refl ns" shows "mult s O multpw ns \<subseteq> multpw ns O mult s"
+proof -
+  { fix X Y Z assume 1: "(X, Y) \<in> mult s" "(Y, Z) \<in> multpw ns"
+    then have "\<exists>Y'. (X, Y') \<in> multpw ns \<and> (Y', Z) \<in> mult s" unfolding mult_def
+      using multpw_mult1_commute[OF assms] by (induct rule: converse_trancl_induct) (auto 0 3)
+  }
+  then show ?thesis by fast
+qed
+
+lemma wf_mult_rel_multpw:
+  assumes "wf s" "s O ns \<subseteq> s" "refl ns" shows "wf ((multpw ns)\<^sup>* O mult s O (multpw ns)\<^sup>*)"

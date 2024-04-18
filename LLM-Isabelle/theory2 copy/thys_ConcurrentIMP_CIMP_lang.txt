@@ -1,0 +1,92 @@
+theory CIMP_lang
+imports
+  CIMP_pred
+  LTL
+begin
+
+
+
+
+
+
+type_synonym 's bexp = "'s \<Rightarrow> bool"
+
+datatype ('answer, 'location, 'question, 'state) com
+  = Request  "'location" "'state \<Rightarrow> 'question" "'answer \<Rightarrow> 'state \<Rightarrow> 'state set"        ("\<lbrace>_\<rbrace> Request _ _"  [0, 70, 70] 71)
+  | Response "'location" "'question \<Rightarrow> 'state \<Rightarrow> ('state \<times> 'answer) set"               ("\<lbrace>_\<rbrace> Response _"  [0, 70] 71)
+  | LocalOp  "'location" "'state \<Rightarrow> 'state set"                                       ("\<lbrace>_\<rbrace> LocalOp _" [0, 70] 71)
+  | Cond1    "'location" "'state bexp" "('answer, 'location, 'question, 'state) com" ("\<lbrace>_\<rbrace> IF _ THEN _ FI" [0, 0, 0] 71)
+  | Cond2    "'location" "'state bexp" "('answer, 'location, 'question, 'state) com"
+                           "('answer, 'location, 'question, 'state) com"             ("\<lbrace>_\<rbrace> IF _/ THEN _/ ELSE _/ FI"  [0, 0, 0, 0] 71)
+  | Loop     "('answer, 'location, 'question, 'state) com"                           ("LOOP DO _/ OD"  [0] 71)
+  | While    "'location" "'state bexp" "('answer, 'location, 'question, 'state) com" ("\<lbrace>_\<rbrace> WHILE _/ DO _/ OD"  [0, 0, 0] 71)
+  | Seq      "('answer, 'location, 'question, 'state) com"
+              "('answer, 'location, 'question, 'state) com"                           (infixr ";;" 69)
+  | Choose   "('answer, 'location, 'question, 'state) com"
+              "('answer, 'location, 'question, 'state) com"                           (infixl "\<oplus>" 68)
+
+"'answer"}. The @{typ "'question"} is a deterministic function of the
+requester's local state, whereas responses can be
+non-deterministic. Note that CIMP does not provide a notion of
+channel; these can be modelled by a judicious choice of @{typ
+"'question"}.
+
+Internal choice can be recovered in combination with local operations
+
+operation that does nothing, and the floor brackets simplify
+distribution.
+
+\<close>
+parse_translation \<open>
+  let
+    fun antiquote_tr i (Const (@{syntax_const "_antiquote"}, _) $
+          (t as Const (@{syntax_const "_antiquote"}, _) $ _)) = skip_antiquote_tr i t
+      | antiquote_tr i (Const (@{syntax_const "_antiquote"}, _) $ t) =
+          antiquote_tr i t $ Bound i
+      | antiquote_tr i (t $ u) = antiquote_tr i t $ antiquote_tr i u
+      | antiquote_tr i (Abs (x, T, t)) = Abs (x, T, antiquote_tr (i + 1) t)
+      | antiquote_tr _ a = a
+    and skip_antiquote_tr i ((c as Const (@{syntax_const "_antiquote"}, _)) $ t) =
+          c $ skip_antiquote_tr i t
+      | skip_antiquote_tr i t = antiquote_tr i t;
+
+    fun quote_tr [t] = Abs ("s", dummyT, antiquote_tr 0 (Term.incr_boundvars 1 t))
+      | quote_tr ts = raise TERM ("quote_tr", ts);
+  in [(@{syntax_const "_quote"}, K quote_tr)] end
+\<close>
+subsection\<open>Process semantics \label{sec:cimp-semantics} \<close>
+text\<open>
+
+Here we define the semantics of a single process's program. We begin
+by defining the type of externally-visible behaviour:
+
+\<close>
+text\<open>
+
+We define a \emph{labelled transition system} (an LTS) using an
+execution-stack style of semantics that avoids special treatment of
+"Winskel:1993"\<close>) when a basic command is executed. This was suggested
+by Thomas Sewell; \<^citet>\<open>"PittsAM:opespe"\<close> gave a
+\<^citet>\<open>"DBLP:journals/entcs/SchirmerW09"\<close>.
+\<open>\<tau>\<close> steps, which aids nested parallel composition
+and the restriction operation \<^citep>\<open>\<open>\S2.2\<close> in "Milner:1980"\<close>. As CIMP does not provide either
+The \<open>LST\<close> operator (written as a postfix \<open>\<down>\<close>) projects
+the local states of the processes from a \<^typ>\<open>('answer, 'location, 'proc, 'question, 'state) system_state\<close>, i.e. it
+Conversely the \<open>LSTP\<close> operator lifts predicates over
+local states into predicates over \<^typ>\<open>('answer, 'location, 'proc, 'question, 'state) system_state\<close>.
+\<open>universal assertions\<close>} by \<^citet>\<open>\<open>\S3.6\<close> in "DBLP:journals/acta/LevinG81"\<close>.
+Following \<^citet>\<open>"DBLP:journals/acta/Lamport80"\<close>\footnote{\<^citet>\<open>"MannaPnueli:1995"\<close> also develop a theory of locations. I think
+(under Gries). I did not find a treatment of procedures. \<^citet>\<open>"MannaPnueli:1991"\<close> observe that a notation for
+significantly.}, we define the \<open>at\<close> predicate, which
+non-determinism processes can be \<open>at\<close> a set of locations;
+\<open>AT\<close> maps process names to a predicate that is true of
+locations where control for that process resides, and the abbreviation \<open>at\<close> provides a conventional
+way to use it. The constant \<open>atS\<close> specifies that control for process \<open>p\<close> resides at one of
+the given locations. This stands in for, and generalises, the \<open>in\<close> predicate of \<^citet>\<open>"DBLP:journals/acta/Lamport80"\<close>.
+The constant \<open>taken\<close> provides a way of identifying which transition was taken. It is somewhat like
+Lamport's \<open>after\<close>, but not quite due to the presence of non-determinism here. This does not work well
+following \<^citet>\<open>\<open>Chapter~8\<close> in"Lamport:2002"\<close>, by taking the reflexive
+Some accounts define stuttering as the @{emph \<open>finite\<close>} repetition of states. With or without this constraint
+\<open>prerun\<close> contains @{emph \<open>junk\<close>} in the form of unfair runs, where particular processes do not progress.
+A \<open>run\<close> of a system is a @{const \<open>prerun\<close>} that satisfies the \<open>FAIR\<close> requirement.
+Typically this would include @{emph \<open>weak fairness\<close>} for every transition of every process.

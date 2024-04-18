@@ -1,0 +1,86 @@
+theory LoopExamples imports "../pGCL" begin
+
+
+
+
+definition countdown :: "int prog"
+where
+  "countdown = do (\<lambda>x. 0 < x) \<longrightarrow> Apply (\<lambda>s. s - 1) od"
+
+
+definition inv_count :: "int \<Rightarrow> bool"
+where
+  "inv_count = (\<lambda>x. 0 \<le> x)"
+
+
+lemma wp_inv_count:
+  "wp_inv (\<lambda>x. 0 < x) (Apply (\<lambda>s. s - 1)) \<guillemotleft>inv_count\<guillemotright>"
+  unfolding wp_inv_def inv_count_def wp_eval o_def
+proof(clarify, cases)
+  fix x::int
+  assume "0 \<le> x"
+  then show "\<guillemotleft>\<lambda>x. 0 < x\<guillemotright> x * \<guillemotleft>\<lambda>x. 0 \<le> x\<guillemotright> x \<le> \<guillemotleft>\<lambda>x. 0 \<le> x\<guillemotright> (x - 1)"
+    by(simp add:embed_bool_def)
+next
+  fix x::int
+  assume "\<not> 0 \<le> x"
+  then show "\<guillemotleft>\<lambda>x. 0 < x\<guillemotright> x * \<guillemotleft>\<lambda>x. 0 \<le> x\<guillemotright> x \<le> \<guillemotleft>\<lambda>x. 0 \<le> x\<guillemotright> (x - 1)"
+    by(simp add:embed_bool_def)
+qed
+
+
+lemma term_countdown:
+  "\<guillemotleft>inv_count\<guillemotright> \<tturnstile> wp countdown (\<lambda>s. 1)"
+  unfolding countdown_def
+proof(intro loop_term_nat_measure[where m="\<lambda>x. nat (max x 0)"] wp_inv_count)
+  let ?p = "Apply (\<lambda>x. x - 1::int)"
+
+  show "well_def ?p"
+    by(rule wd_intros)
+
+  show "\<And>x. nat (max x 0) = 0 \<longrightarrow> \<not> 0 < x"
+    by(auto)
+
+  show "\<And>n. \<guillemotleft>\<lambda>x. nat (max x 0) = Suc n\<guillemotright> && \<guillemotleft>inv_count\<guillemotright> \<tturnstile>
+         wp ?p \<guillemotleft>\<lambda>x. nat (max x 0) = n\<guillemotright>"
+    unfolding inv_count_def
+    by(pvcg,
+       auto simp:  o_def exp_conj_std_split[symmetric]
+            intro: implies_entails)
+qed
+
+
+
+type_synonym coin = bool
+definition "Heads = True"
+definition "Tails = False"
+
+definition
+  flip :: "coin prog"
+where
+  "flip = Apply (\<lambda>_. Heads) \<^bsub>(\<lambda>s. 1/2)\<^esub>\<oplus> Apply (\<lambda>_. Tails)"
+
+definition
+  wait_for_heads :: "coin prog"
+where
+  "wait_for_heads = do ((\<noteq>) Heads) \<longrightarrow> flip od"
+
+lemma wait_for_heads_term:
+  "\<lambda>s. 1 \<tturnstile> wp wait_for_heads (\<lambda>s. 1)"
+  unfolding wait_for_heads_def
+proof(rule termination_0_1)
+  show "well_def flip"
+    unfolding flip_def
+    by(auto intro:wd_intros)
+
+  show "maximal (wp flip)"
+    unfolding flip_def by(auto intro:max_intros)
+
+  show "\<lambda>s. 1/2 \<tturnstile> wp flip \<guillemotleft>\<N> ((\<noteq>) Heads)\<guillemotright>"
+    unfolding flip_def
+    by(pvcg, simp add:o_def Heads_def Tails_def)
+
+  show "(0::real) < 1/2" by(simp)
+qed
+
+end

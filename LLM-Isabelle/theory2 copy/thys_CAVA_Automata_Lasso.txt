@@ -1,0 +1,194 @@
+theory Lasso
+imports Automata
+begin
+
+  record 'v lasso = 
+    lasso_reach :: "'v list"
+    lasso_va :: "'v"
+    lasso_cysfx :: "'v list"
+  
+  definition "lasso_v0 L \<equiv> case lasso_reach L of [] \<Rightarrow> lasso_va L | (v0#_) \<Rightarrow> v0"
+  definition lasso_cycle where "lasso_cycle L = lasso_va L # lasso_cysfx L"
+
+
+  definition "lasso_of_prpl prpl \<equiv> case prpl of (pr,pl) \<Rightarrow> \<lparr>
+    lasso_reach = pr,
+    lasso_va = hd pl,
+    lasso_cysfx = tl pl \<rparr>"
+
+  definition "prpl_of_lasso L \<equiv> (lasso_reach L, lasso_va L # lasso_cysfx L)"
+
+  lemma prpl_of_lasso_simps[simp]: 
+    "fst (prpl_of_lasso L) = lasso_reach L"
+    "snd (prpl_of_lasso L) = lasso_va L # lasso_cysfx L"
+    unfolding prpl_of_lasso_def by auto
+
+  lemma lasso_of_prpl_simps[simp]:
+    "lasso_reach (lasso_of_prpl prpl) = fst prpl"
+    "snd prpl \<noteq> [] \<Longrightarrow> lasso_cycle (lasso_of_prpl prpl) = snd prpl"
+    unfolding lasso_of_prpl_def lasso_cycle_def by (auto split: prod.split)
+
+
+  definition run_of_lasso :: "'q lasso \<Rightarrow> 'q word"
+    where "run_of_lasso L \<equiv> lasso_reach L \<frown> (lasso_cycle L)\<^sup>\<omega>"
+
+  lemma run_of_lasso_of_prpl: 
+    "pl \<noteq> [] \<Longrightarrow> run_of_lasso (lasso_of_prpl (pr, pl)) = pr \<frown> pl\<^sup>\<omega>"
+    unfolding run_of_lasso_def lasso_of_prpl_def lasso_cycle_def
+    by auto
+
+
+  definition "map_lasso f L \<equiv> \<lparr>
+    lasso_reach = map f (lasso_reach L),
+    lasso_va = f (lasso_va L),
+    lasso_cysfx = map f (lasso_cysfx L)
+  \<rparr>"
+
+  lemma map_lasso_simps[simp]:
+    "lasso_reach (map_lasso f L) = map f (lasso_reach L)"
+    "lasso_va (map_lasso f L) = f (lasso_va L)"
+    "lasso_cysfx (map_lasso f L) = map f (lasso_cysfx L)"
+    "lasso_v0 (map_lasso f L) = f (lasso_v0 L)"
+    "lasso_cycle (map_lasso f L) = map f (lasso_cycle L)"
+    unfolding map_lasso_def lasso_v0_def lasso_cycle_def
+    by (auto split: list.split)
+  
+  lemma map_lasso_run[simp]:
+    shows "run_of_lasso (map_lasso f L) = f o (run_of_lasso L)"
+    by (auto simp add: map_lasso_def run_of_lasso_def conc_def iter_def
+      lasso_cycle_def lasso_v0_def fun_eq_iff not_less nth_Cons'
+      nz_le_conv_less)
+
+
+  context graph begin
+    definition is_lasso_pre :: "'v lasso \<Rightarrow> bool" 
+      where "is_lasso_pre L \<equiv> 
+        lasso_v0 L \<in> V0
+      \<and> path E (lasso_v0 L) (lasso_reach L) (lasso_va L) 
+      \<and> path E (lasso_va L) (lasso_cycle L) (lasso_va L)"
+    
+    definition "is_lasso_prpl_pre prpl \<equiv> case prpl of (pr, pl) \<Rightarrow> \<exists>v0 va.
+      v0\<in>V0 
+      \<and> pl \<noteq> []
+      \<and> path E v0 pr va
+      \<and> path E va pl va"
+
+    lemma is_lasso_pre_prpl_of_lasso[simp]: 
+      "is_lasso_prpl_pre (prpl_of_lasso L) \<longleftrightarrow> is_lasso_pre L"
+      unfolding is_lasso_pre_def prpl_of_lasso_def is_lasso_prpl_pre_def
+      unfolding lasso_v0_def lasso_cycle_def
+      by (auto simp: path_simps split: list.split)
+  
+    lemma is_lasso_prpl_pre_conv: 
+      "is_lasso_prpl_pre prpl 
+      \<longleftrightarrow> (snd prpl\<noteq>[] \<and> is_lasso_pre (lasso_of_prpl prpl))"
+      unfolding is_lasso_pre_def lasso_of_prpl_def is_lasso_prpl_pre_def
+      unfolding lasso_v0_def lasso_cycle_def
+      apply (cases prpl)
+      apply (rename_tac a b)
+      apply (case_tac b)
+      apply (auto simp: path_simps split: list.splits)
+      done
+
+    lemma is_lasso_pre_empty[simp]: "V0 = {} \<Longrightarrow> \<not>is_lasso_pre L"
+      unfolding is_lasso_pre_def by auto
+
+
+    lemma run_of_lasso_pre: 
+      assumes "is_lasso_pre L"  
+      shows "is_run (run_of_lasso L)"
+      and "run_of_lasso L 0 \<in> V0"
+      using assms
+      unfolding is_lasso_pre_def is_run_def run_of_lasso_def 
+        lasso_cycle_def lasso_v0_def
+      by (auto simp: ipath_conc_conv ipath_iter_conv path_cons_conv conc_fst 
+        split: list.splits)
+
+  end
+
+  context gb_graph begin
+    definition is_lasso
+      :: "'Q lasso \<Rightarrow> bool" 
+      where "is_lasso L \<equiv> 
+        is_lasso_pre L
+      \<and> (\<forall>A\<in>F. (set (lasso_cycle L)) \<inter> A \<noteq> {})"
+
+    definition "is_lasso_prpl prpl \<equiv> 
+      is_lasso_prpl_pre prpl
+      \<and> (\<forall>A\<in>F. set (snd prpl) \<inter> A \<noteq> {})"
+  
+
+    lemma is_lasso_prpl_of_lasso[simp]: 
+      "is_lasso_prpl (prpl_of_lasso L) \<longleftrightarrow> is_lasso L"
+      unfolding is_lasso_def is_lasso_prpl_def
+      unfolding lasso_v0_def lasso_cycle_def
+      by auto
+  
+    lemma is_lasso_prpl_conv: 
+      "is_lasso_prpl prpl \<longleftrightarrow> (snd prpl\<noteq>[] \<and> is_lasso (lasso_of_prpl prpl))"
+      unfolding is_lasso_def is_lasso_prpl_def is_lasso_prpl_pre_conv
+      apply safe
+      apply simp_all
+      done
+    
+    lemma is_lasso_empty[simp]: "V0 = {} \<Longrightarrow> \<not>is_lasso L"
+      unfolding is_lasso_def by auto
+
+    lemma lasso_accepted:
+      assumes L: "is_lasso L"
+      shows "is_acc_run (run_of_lasso L)"
+    proof -
+      obtain "pr" va pls where 
+        [simp]: "L = \<lparr>lasso_reach = pr,lasso_va = va,lasso_cysfx = pls\<rparr>" 
+        by (cases L)
+
+      from L have "is_run (run_of_lasso L)" 
+        unfolding is_lasso_def by (auto simp: run_of_lasso_pre)
+      moreover from L have "(\<forall>A\<in>F. set (va#pls) \<inter> A \<noteq> {})"
+        by (auto simp: is_lasso_def lasso_cycle_def)
+      moreover from L have "(run_of_lasso L) 0 \<in> V0" 
+        unfolding is_lasso_def by (auto simp: run_of_lasso_pre)
+      ultimately show "is_acc_run (run_of_lasso L)"
+        unfolding is_acc_run_def is_acc_def run_of_lasso_def 
+          lasso_cycle_def lasso_v0_def
+        by (fastforce intro: limit_inter_INF)
+    qed
+
+    lemma lasso_prpl_acc_run:
+      "is_lasso_prpl (pr, pl) \<Longrightarrow> is_acc_run (pr \<frown> iter pl)"
+      apply (clarsimp simp: is_lasso_prpl_conv)
+      apply (drule lasso_accepted)
+      apply (simp add: run_of_lasso_of_prpl)
+      done
+
+  end
+  
+  context gb_graph
+  begin
+    lemma accepted_lasso:
+      assumes [simp, intro]: "finite (E\<^sup>* `` V0)"
+      assumes A: "is_acc_run r"
+      shows "\<exists>L. is_lasso L"
+    proof -
+      from A have 
+        RUN: "is_run r" 
+        and ACC: "\<forall>A\<in>F. limit r \<inter> A \<noteq> {}" 
+        by (auto simp: is_acc_run_limit_alt)
+      from RUN have [simp]: "r 0 \<in> V0" and RUN': "ipath E r" 
+        by (simp_all add: is_run_def)
+
+      from RUN have RAN_REACH: "range r \<subseteq> E\<^sup>*``V0"
+        by (auto simp: is_run_def dest: ipath_to_rtrancl)
+      hence "finite (range r)" by (auto intro: finite_subset)
+      then obtain u where "u\<in>limit r" using limit_nonempty by blast
+      hence U_REACH: "u\<in>E\<^sup>*``V0" using RAN_REACH limit_in_range by force
+      then obtain v0 "pr" where PR: "v0\<in>V0" "path E v0 pr u" 
+        by (auto intro: rtrancl_is_path)
+      moreover
+        each acceptance set\<close>
+        from run_limit_two_connectedI[OF RUN' \<open>u\<in>limit r\<close> \<open>u\<in>limit r\<close>] 
+        from run_limit_two_connectedI[OF RUN' \<open>u\<in>limit r\<close> \<open>v\<in>limit r\<close>] 
+        from run_limit_two_connectedI[OF RUN' \<open>v\<in>limit r\<close> \<open>u\<in>limit r\<close>] 
+            using PS \<open>i\<in>acc q\<close> \<open>Suc i < num_acc\<close>
+            using \<open>Suc i < num_acc\<close>
+  subsection \<open>Implementing runs by lassos\<close>

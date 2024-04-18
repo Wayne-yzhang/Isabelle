@@ -1,0 +1,524 @@
+theory Minkowski
+imports TernaryOrdering
+begin
+
+
+
+
+
+section "MinkowskiPrimitive: I1-I3"
+
+
+
+locale MinkowskiPrimitive =
+  fixes \<E> :: "'a set"
+    and \<P> :: "('a set) set"
+  assumes in_path_event [simp]: "\<lbrakk>Q \<in> \<P>; a \<in> Q\<rbrakk> \<Longrightarrow> a \<in> \<E>"
+      and nonempty_events [simp]: "\<E> \<noteq> {}"
+      and events_paths: "\<lbrakk>a \<in> \<E>; b \<in> \<E>; a \<noteq> b\<rbrakk> \<Longrightarrow> \<exists>R\<in>\<P>. \<exists>S\<in>\<P>. a \<in> R \<and> b \<in> S \<and> R \<inter> S \<noteq> {}"
+      and eq_paths [intro]: "\<lbrakk>P \<in> \<P>; Q \<in> \<P>; a \<in> P; b \<in> P; a \<in> Q; b \<in> Q; a \<noteq> b\<rbrakk> \<Longrightarrow> P = Q"
+begin
+
+
+lemma path_sub_events:
+  "Q \<in> \<P> \<Longrightarrow> Q \<subseteq> \<E>"
+by (simp add: subsetI)
+
+lemma paths_sub_power:
+  "\<P> \<subseteq> Pow \<E>"
+by (simp add: path_sub_events subsetI)
+
+
+abbreviation path :: "'a set \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> bool" where
+  "path ab a b \<equiv> ab \<in> \<P> \<and> a \<in> ab \<and> b \<in> ab \<and> a \<noteq> b"
+
+abbreviation path_ex :: "'a \<Rightarrow> 'a \<Rightarrow> bool" where
+  "path_ex a b \<equiv> \<exists>Q. path Q a b"
+
+lemma path_permute:
+  "path ab a b = path ab b a"
+  by auto
+
+abbreviation path_of :: "'a \<Rightarrow> 'a \<Rightarrow> 'a set" where
+  "path_of a b \<equiv> THE ab. path ab a b"
+
+lemma path_of_ex: "path (path_of a b) a b \<longleftrightarrow> path_ex a b"
+  using theI' [where P="\<lambda>x. path x a b"] eq_paths by blast
+
+lemma path_unique:
+  assumes "path ab a b" and "path ab' a b"
+    shows "ab = ab'"
+  using eq_paths assms by blast
+
+lemma paths_cross_once:
+  assumes path_Q: "Q \<in> \<P>"
+      and path_R: "R \<in> \<P>"
+      and Q_neq_R: "Q \<noteq> R"
+      and QR_nonempty: "Q\<inter>R \<noteq> {}"
+  shows "\<exists>!a\<in>\<E>. Q\<inter>R = {a}"
+proof -
+  have ab_inQR: "\<exists>a\<in>\<E>. a\<in>Q\<inter>R" using QR_nonempty in_path_event path_Q by auto
+  then obtain a where a_event: "a \<in> \<E>" and a_inQR: "a \<in> Q\<inter>R" by auto
+  have "Q\<inter>R = {a}"
+  proof (rule ccontr)
+    assume "Q\<inter>R \<noteq> {a}"
+    then have "\<exists>b\<in>Q\<inter>R. b \<noteq> a" using a_inQR by blast
+    then have "Q = R" using eq_paths a_inQR path_Q path_R by auto
+    thus False using Q_neq_R by simp
+  qed
+  thus ?thesis using a_event by blast
+qed
+
+
+section "Primitives: Unreachable Subset (from an Event)"
+
+
+definition unreachable_subset :: "'a set \<Rightarrow> 'a \<Rightarrow> 'a set" ("unreach-on _ from _" [100, 100]) where
+  "unreach-on Q from b \<equiv> {x\<in>Q. Q \<in> \<P> \<and> b \<in> \<E> \<and> b \<notin> Q \<and> \<not>(path_ex b x)}"
+
+
+section "Primitives: Kinematic Triangle"
+
+definition kinematic_triangle :: "'a \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> bool" ("\<triangle> _ _ _" [100, 100, 100] 100) where
+    "kinematic_triangle a b c \<equiv>
+       a \<in> \<E> \<and> b \<in> \<E> \<and> c \<in> \<E> \<and> a \<noteq> b \<and> a \<noteq> c \<and> b \<noteq> c
+       \<and> (\<exists>Q\<in>\<P>. \<exists>R\<in>\<P>. Q \<noteq> R \<and> (\<exists>S\<in>\<P>. Q \<noteq> S \<and> R \<noteq> S
+                                       \<and> a \<in> Q \<and> b \<in> Q
+                                       \<and> a \<in> R \<and> c \<in> R
+                                       \<and> b \<in> S \<and> c \<in> S))"
+
+lemma tri_full:
+  "\<triangle> a b c = (a \<in> \<E> \<and> b \<in> \<E> \<and> c \<in> \<E> \<and> a \<noteq> b \<and> a \<noteq> c \<and> b \<noteq> c
+              \<and> (\<exists>Q\<in>\<P>. \<exists>R\<in>\<P>. Q \<noteq> R \<and> (\<exists>S\<in>\<P>. Q \<noteq> S \<and> R \<noteq> S
+                                              \<and> a \<in> Q \<and> b \<in> Q \<and> c \<notin> Q
+                                              \<and> a \<in> R \<and> c \<in> R \<and> b \<notin> R
+                                              \<and> b \<in> S \<and> c \<in> S \<and> a \<notin> S)))"
+unfolding kinematic_triangle_def by (meson path_unique)
+
+
+section "Primitives: SPRAY"
+
+definition SPRAY :: "'a \<Rightarrow> ('a set) set" where
+  "SPRAY x \<equiv> {R\<in>\<P>. x \<in> R}"
+
+definition spray :: "'a \<Rightarrow> 'a set" where
+  "spray x \<equiv> {y. \<exists>R\<in>SPRAY x. y \<in> R}"
+
+definition is_SPRAY :: "('a set) set \<Rightarrow> bool" where
+  "is_SPRAY S \<equiv> \<exists>x\<in>\<E>. S = SPRAY x"
+
+definition is_spray :: "'a set \<Rightarrow> bool" where
+  "is_spray S \<equiv> \<exists>x\<in>\<E>. S = spray x"
+
+
+lemma SPRAY_event:
+  "SPRAY x \<noteq> {} \<Longrightarrow> x \<in> \<E>"
+proof (unfold SPRAY_def)
+  assume nonempty_SPRAY: "{R \<in> \<P>. x \<in> R} \<noteq> {}"
+  then have x_in_path_R: "\<exists>R \<in> \<P>. x \<in> R" by blast
+  thus "x \<in> \<E>" using in_path_event by blast
+qed
+
+lemma SPRAY_nonevent:
+  "x \<notin> \<E> \<Longrightarrow> SPRAY x = {}"
+using SPRAY_event by auto
+
+lemma SPRAY_path:
+  "P \<in> SPRAY x \<Longrightarrow> P \<in> \<P>"
+by (simp add: SPRAY_def)
+
+lemma in_SPRAY_path:
+  "P \<in> SPRAY x \<Longrightarrow> x \<in> P"
+by (simp add: SPRAY_def)
+
+lemma source_in_SPRAY:
+  "SPRAY x \<noteq> {} \<Longrightarrow> \<exists>P \<in> SPRAY x. x \<in> P"
+using in_SPRAY_path by auto
+
+lemma spray_event:
+  "spray x \<noteq> {} \<Longrightarrow> x \<in> \<E>"
+proof (unfold spray_def)
+  assume "{y. \<exists>R \<in> SPRAY x. y \<in> R} \<noteq> {}"
+  then have "\<exists>y. \<exists>R \<in> SPRAY x. y \<in> R" by simp
+  then have "SPRAY x \<noteq> {}" by blast
+  thus "x \<in> \<E>" using SPRAY_event by simp
+qed
+
+lemma spray_nonevent:
+  "x \<notin> \<E> \<Longrightarrow> spray x = {}"
+using spray_event by auto
+
+lemma in_spray_event:
+  "y \<in> spray x \<Longrightarrow> y \<in> \<E>"
+proof (unfold spray_def)
+  assume "y \<in> {y. \<exists>R\<in>SPRAY x. y \<in> R}"
+  then have "\<exists>R\<in>SPRAY x. y \<in> R" by (rule CollectD)
+  then obtain R where path_R: "R \<in> \<P>"
+                  and y_inR: "y \<in> R" using SPRAY_path by auto
+  thus "y \<in> \<E>" using in_path_event by simp
+qed
+
+lemma source_in_spray:
+  "spray x \<noteq> {} \<Longrightarrow> x \<in> spray x"
+proof -
+  assume nonempty_spray: "spray x \<noteq> {}"
+  have spray_eq: "spray x = {y. \<exists>R\<in>SPRAY x. y \<in> R}" using spray_def by simp
+  then have ex_in_SPRAY_path: "\<exists>y. \<exists>R\<in>SPRAY x. y \<in> R" using nonempty_spray by simp
+  show "x \<in> spray x" using ex_in_SPRAY_path spray_eq source_in_SPRAY by auto
+qed
+
+
+section "Primitives: Path (In)dependence"
+
+
+definition "dep3_event Q R S x
+  \<equiv> card {Q,R,S} = 3 \<and> {Q,R,S} \<subseteq> SPRAY x
+  \<and> (\<exists>T\<in>\<P>. T \<notin> SPRAY x \<and> Q\<inter>T\<noteq>{} \<and> R\<inter>T\<noteq>{} \<and> S\<inter>T\<noteq>{})"
+
+definition "dep3_spray Q R S SPR \<equiv> \<exists>x. SPRAY x = SPR \<and> dep3_event Q R S x"
+
+definition "dep3 Q R S \<equiv> \<exists>x. dep3_event Q R S x"
+
+
+lemma dep3_nonspray:
+  assumes "dep3_event Q R S x"
+    shows "\<exists>P\<in>\<P>. P \<notin> SPRAY x"
+  by (metis assms dep3_event_def)
+
+lemma dep3_path:
+  assumes dep3_QRSx: "dep3 Q R S"
+  shows "Q \<in> \<P>" "R \<in> \<P>" "S \<in> \<P>"
+  using assms dep3_event_def dep3_def SPRAY_path insert_subset by auto
+
+lemma dep3_distinct:
+  assumes dep3_QRSx: "dep3 Q R S"
+  shows "Q \<noteq> R" "Q \<noteq> S" "R \<noteq> S"
+  using assms dep3_def dep3_event_def by (simp_all add: card_3_dist)
+
+lemma dep3_is_event:
+  "dep3_event Q R S x \<Longrightarrow> x \<in> \<E>"
+using SPRAY_event dep3_event_def by auto
+
+lemma dep3_event_old:
+  "dep3_event Q R S x \<longleftrightarrow> Q \<noteq> R \<and> Q \<noteq> S \<and> R \<noteq> S \<and> Q \<in> SPRAY x \<and> R \<in> SPRAY x \<and> S \<in> SPRAY x
+                       \<and> (\<exists>T\<in>\<P>. T \<notin> SPRAY x \<and> (\<exists>y\<in>Q. y \<in> T) \<and> (\<exists>y\<in>R. y \<in> T) \<and> (\<exists>y\<in>S. y \<in> T))"
+  by (rule iffI; unfold dep3_event_def, (simp add: card_3_dist), blast)
+
+lemma dep3_event_permute [no_atp]:
+  assumes "dep3_event Q R S x"
+    shows "dep3_event Q S R x" "dep3_event R Q S x" "dep3_event R S Q x"
+     "dep3_event S Q R x" "dep3_event S R Q x"
+using dep3_event_old assms by auto
+
+lemma dep3_permute [no_atp]:
+  assumes "dep3 Q R S"
+  shows "dep3 Q S R" "dep3 R Q S" "dep3 R S Q"
+    and "dep3 S Q R" "dep3 S R Q"
+  using dep3_event_permute dep3_def assms by meson+
+
+
+inductive dep_path :: "'a set \<Rightarrow> ('a set) set \<Rightarrow> bool" where
+  dep_3: "dep3 T A B \<Longrightarrow> dep_path T {A, B}"
+| dep_n: "\<lbrakk>dep3 T S1 S2; dep_path S1 S'; dep_path S2 S''; S \<subseteq> SPRAY x;
+           S' \<subseteq> S; S'' \<subseteq> S; Suc (card S') = card S; Suc (card S'') = card S\<rbrakk> \<Longrightarrow> dep_path T S"
+
+lemma card_Suc_ex:
+  assumes "card A = Suc (card B)" "B \<subseteq> A"
+  shows "\<exists>b. A = insert b B \<and> b\<notin>B"
+proof -
+  have "finite A" using assms(1) card_ge_0_finite card.infinite by fastforce
+  obtain b where "b\<in>A-B"
+    by (metis Diff_eq_empty_iff all_not_in_conv assms n_not_Suc_n subset_antisym)
+  show "\<exists>b. A = insert b B \<and> b\<notin>B"
+  proof
+    show "A = insert b B \<and> b\<notin>B"
+      by (metis DiffD1 DiffD2 Diff_insert_absorb Diff_single_insert card_insert_disjoint
+        card_subset_eq insert_absorb rev_finite_subset)
+  qed
+qed
+
+lemma union_of_subsets_by_singleton:
+  assumes "Suc (card S') = card S" "Suc (card S'') = card S"
+    and "S' \<noteq> S''" "S' \<subseteq> S" "S'' \<subseteq> S"
+  shows "S' \<union> S'' = S"
+proof -
+  obtain x y where x: "insert x S' = S" "x\<notin>S'" and y: "insert y S'' = S" "y\<notin>S''"
+    using assms(1,2,4,5) by (metis card_Suc_ex)
+  have "x\<noteq>y" using x y assms(3) by (metis insert_eq_iff)
+  thus ?thesis using x(1) y(1) by blast
+qed
+
+lemma dep_path_card_2: "dep_path T S \<Longrightarrow> card S \<ge> 2"
+  by (induct rule: dep_path.induct, simp add: dep3_def dep3_event_old, linarith)
+
+
+definition dep_set :: "('a set) set \<Rightarrow> bool" where
+  "dep_set S \<equiv> \<exists>S'\<subseteq>S. \<exists>P\<in>(S-S'). dep_path P S'"
+
+
+lemma dep_path_imp_dep_set:
+  assumes "dep_path P S" "P\<notin>S"
+  shows "dep_set (insert P S)"
+  using assms dep_set_def by auto
+
+lemma dep_path_for_set_members:
+  assumes "P\<in>S"
+  shows "dep_set S = dep_set (insert P S)"
+  by (simp add: assms(1) insert_absorb)
+
+lemma dependent_superset:
+  assumes "dep_set A" and "A\<subseteq>B"
+  shows "dep_set B"
+  using assms dep_set_def
+  by (meson Diff_mono dual_order.trans in_mono order_refl)
+
+lemma path_in_dep_set:
+  assumes "dep3 P Q R"
+  shows "dep_set {P,Q,R}"
+  using dep_3 assms dep3_def dep_set_def dep3_event_old
+  by (metis DiffI insert_iff singletonD subset_insertI)
+
+lemma path_in_dep_set2a:
+  assumes "dep3 P Q R"
+  shows "dep_path P {P,Q,R}"
+proof
+  let ?S' = "{P,R}"
+  let ?S'' = "{P,Q}"
+  have all_neq: "P\<noteq>Q" "P\<noteq>R" "R\<noteq>Q" using assms dep3_def dep3_event_old by auto
+  show "dep3 P Q R" using assms dep3_event_def by (simp add: dep_3)
+  show "dep_path Q ?S'" using assms dep3_event_permute(2) dep_3 dep3_def by meson
+  show "dep_path R ?S''" using assms dep3_event_permute(4) dep_3 dep3_def by meson
+  show "?S' \<subseteq> {P, Q, R}" by simp
+  show "?S'' \<subseteq> {P, Q, R}" by simp
+  show "Suc (card ?S') = card {P, Q, R}" "Suc (card ?S'') = card {P, Q, R}"
+    using all_neq card_insert_disjoint by auto
+  show "{P, Q, R} \<subseteq> SPRAY (SOME x. dep3_event P Q R x)"
+    using assms dep3_def dep3_event_def by (metis some_eq_ex)
+qed
+
+definition indep_set :: "('a set) set \<Rightarrow> bool" where
+  "indep_set S \<equiv> \<not> dep_set S"
+
+lemma no_dep_in_indep: "indep_set S \<Longrightarrow> \<not>(\<exists>T \<subseteq> S. dep_set T)"
+  using indep_set_def dependent_superset by blast
+
+lemma indep_set_alt_intro: "\<not>(\<exists>T \<subseteq> S. dep_set T) \<Longrightarrow> indep_set S"
+  using indep_set_def by blast
+
+lemma indep_set_alt: "indep_set S \<longleftrightarrow> \<not>(\<exists>S' \<subseteq> S. dep_set S')"
+  using no_dep_in_indep indep_set_alt_intro by blast
+
+lemma "dep_set S \<or> indep_set S"
+  by (simp add: indep_set_def)
+
+section "Primitives: 3-SPRAY"
+
+
+definition n_SPRAY_basis :: "nat \<Rightarrow> 'a set set \<Rightarrow> 'a \<Rightarrow> bool"  where
+  "n_SPRAY_basis n S x \<equiv> S\<subseteq>SPRAY x \<and> card S = (Suc n) \<and> indep_set S \<and> (\<forall>P\<in>SPRAY x. dep_path P S)"
+
+definition n_SPRAY ("_-SPRAY _" [100,100]) where
+  "n-SPRAY x \<equiv> \<exists>S\<subseteq>SPRAY x. card S = (Suc n) \<and> indep_set S \<and> (\<forall>P\<in>SPRAY x. dep_path P S)"
+
+abbreviation "three_SPRAY x \<equiv> 3-SPRAY x"
+
+lemma n_SPRAY_intro:
+  assumes "S\<subseteq>SPRAY x" "card S = (Suc n)" "indep_set S" "\<forall>P\<in>SPRAY x. dep_path P S"
+  shows "n-SPRAY x"
+  using assms n_SPRAY_def by blast
+
+lemma three_SPRAY_alt:
+  "three_SPRAY x = (\<exists>S1 S2 S3 S4.
+    S1 \<noteq> S2 \<and> S1 \<noteq> S3 \<and> S1 \<noteq> S4 \<and> S2 \<noteq> S3 \<and> S2 \<noteq> S4 \<and> S3 \<noteq> S4
+    \<and> S1 \<in> SPRAY x \<and> S2 \<in> SPRAY x \<and> S3 \<in> SPRAY x \<and> S4 \<in> SPRAY x
+    \<and> (indep_set {S1, S2, S3, S4})
+    \<and> (\<forall>S\<in>SPRAY x. dep_path S {S1,S2,S3,S4}))"
+  (is "three_SPRAY x \<longleftrightarrow> ?three_SPRAY' x")
+proof
+  assume "three_SPRAY x"
+  then obtain S where ns: "S\<subseteq>SPRAY x" "card S = 4" "indep_set S" "\<forall>P\<in>SPRAY x. dep_path P S"
+    using n_SPRAY_def by auto
+  then obtain S\<^sub>1 S\<^sub>2 S\<^sub>3 S\<^sub>4 where
+    "S = {S\<^sub>1, S\<^sub>2, S\<^sub>3, S\<^sub>4}" and
+    "S\<^sub>1 \<noteq> S\<^sub>2 \<and> S\<^sub>1 \<noteq> S\<^sub>3 \<and> S\<^sub>1 \<noteq> S\<^sub>4 \<and> S\<^sub>2 \<noteq> S\<^sub>3 \<and> S\<^sub>2 \<noteq> S\<^sub>4 \<and> S\<^sub>3 \<noteq> S\<^sub>4" and
+    "S\<^sub>1 \<in> SPRAY x \<and> S\<^sub>2 \<in> SPRAY x \<and> S\<^sub>3 \<in> SPRAY x \<and> S\<^sub>4 \<in> SPRAY x"
+    using card_4_eq by (smt (verit) insert_subset ns)
+  thus "?three_SPRAY' x"
+    by (metis ns(3,4))
+next
+  assume "?three_SPRAY' x"
+  then obtain S\<^sub>1 S\<^sub>2 S\<^sub>3 S\<^sub>4 where ns:
+    "S\<^sub>1 \<noteq> S\<^sub>2 \<and> S\<^sub>1 \<noteq> S\<^sub>3 \<and> S\<^sub>1 \<noteq> S\<^sub>4 \<and> S\<^sub>2 \<noteq> S\<^sub>3 \<and> S\<^sub>2 \<noteq> S\<^sub>4 \<and> S\<^sub>3 \<noteq> S\<^sub>4"
+    "S\<^sub>1 \<in> SPRAY x \<and> S\<^sub>2 \<in> SPRAY x \<and> S\<^sub>3 \<in> SPRAY x \<and> S\<^sub>4 \<in> SPRAY x"
+    "indep_set {S\<^sub>1, S\<^sub>2, S\<^sub>3, S\<^sub>4}"
+    "\<forall>S\<in>SPRAY x. dep_path S {S\<^sub>1,S\<^sub>2,S\<^sub>3,S\<^sub>4}"
+    by metis
+  show "three_SPRAY x"
+    apply (intro n_SPRAY_intro[of "{S\<^sub>1, S\<^sub>2, S\<^sub>3, S\<^sub>4}"])
+    by (simp add: ns)+
+qed
+
+lemma three_SPRAY_intro:
+  assumes "S1 \<noteq> S2 \<and> S1 \<noteq> S3 \<and> S1 \<noteq> S4 \<and> S2 \<noteq> S3 \<and> S2 \<noteq> S4 \<and> S3 \<noteq> S4"
+    and "S1 \<in> SPRAY x \<and> S2 \<in> SPRAY x \<and> S3 \<in> SPRAY x \<and> S4 \<in> SPRAY x"
+    and "indep_set {S1, S2, S3, S4}"
+    and "\<forall>S\<in>SPRAY x. dep_path S {S1,S2,S3,S4}"
+  shows "three_SPRAY x"
+  unfolding three_SPRAY_alt by (metis assms)
+
+
+definition is_three_SPRAY :: "('a set) set \<Rightarrow> bool" where
+  "is_three_SPRAY S \<equiv> \<exists> x. S = SPRAY x \<and> 3-SPRAY x"
+
+lemma three_SPRAY_ge4:
+  assumes "three_SPRAY x"
+  shows "\<exists>Q1\<in>\<P>. \<exists>Q2\<in>\<P>. \<exists>Q3\<in>\<P>. \<exists>Q4\<in>\<P>. Q1 \<noteq> Q2 \<and> Q1 \<noteq> Q3 \<and> Q1 \<noteq> Q4 \<and> Q2 \<noteq> Q3 \<and> Q2 \<noteq> Q4 \<and> Q3 \<noteq> Q4"
+using assms three_SPRAY_alt SPRAY_path by meson
+
+
+section "MinkowskiBetweenness: O1-O5"
+
+
+locale MinkowskiBetweenness = MinkowskiPrimitive +
+  fixes betw :: "'a \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> bool" ("[_;_;_]")
+  assumes abc_ex_path: "[a;b;c] \<Longrightarrow> \<exists>Q\<in>\<P>. a \<in> Q \<and> b \<in> Q \<and> c \<in> Q"
+      and abc_sym: "[a;b;c] \<Longrightarrow> [c;b;a]"
+      and abc_ac_neq: "[a;b;c] \<Longrightarrow> a \<noteq> c"
+      and abc_bcd_abd [intro]: "\<lbrakk>[a;b;c]; [b;c;d]\<rbrakk> \<Longrightarrow> [a;b;d]"
+      and some_betw: "\<lbrakk>Q \<in> \<P>; a \<in> Q; b \<in> Q; c \<in> Q; a \<noteq> b; a \<noteq> c; b \<noteq> c\<rbrakk>
+               \<Longrightarrow> [a;b;c] \<or> [b;c;a] \<or> [c;a;b]"
+begin
+
+
+lemma betw_events:
+  assumes abc: "[a;b;c]"
+  shows "a \<in> \<E> \<and> b \<in> \<E> \<and> c \<in> \<E>"
+proof -
+  have "\<exists>Q\<in>\<P>. a \<in> Q \<and> b \<in> Q \<and> c \<in> Q" using abc_ex_path abc by simp
+  thus ?thesis using in_path_event by auto
+qed
+
+
+lemma O5_still_O5 [no_atp]:
+  "((Q \<in> \<P> \<and> {a,b,c} \<subseteq> Q \<and> a \<in> \<E> \<and> b \<in> \<E> \<and> c \<in> \<E> \<and> a \<noteq> b \<and> a \<noteq> c \<and> b \<noteq> c)
+     \<longrightarrow> [a;b;c] \<or> [b;c;a] \<or> [c;a;b])
+   =
+   ((Q \<in> \<P> \<and> {a,b,c} \<subseteq> Q \<and> a \<in> \<E> \<and> b \<in> \<E> \<and> c \<in> \<E> \<and> a \<noteq> b \<and> a \<noteq> c \<and> b \<noteq> c)
+     \<longrightarrow> [a;b;c] \<or> [b;c;a] \<or> [c;a;b] \<or> [c;b;a] \<or> [a;c;b] \<or> [b;a;c])"
+by (auto simp add: abc_sym)
+
+lemma some_betw_xor:
+   "\<lbrakk>Q \<in> \<P>; a \<in> Q; b \<in> Q; c \<in> Q; a \<noteq> b; a \<noteq> c; b \<noteq> c\<rbrakk>
+               \<Longrightarrow> ([a;b;c] \<and> \<not> [b;c;a] \<and> \<not> [c;a;b])
+                 \<or> ([b;c;a] \<and> \<not> [a;b;c] \<and> \<not> [c;a;b])
+                 \<or> ([c;a;b] \<and> \<not> [a;b;c] \<and> \<not> [b;c;a])"
+by (meson abc_ac_neq abc_bcd_abd some_betw)
+
+lemma abc_abc_neq:
+  assumes abc: "[a;b;c]"
+  shows "a \<noteq> b \<and> a \<noteq> c \<and> b \<noteq> c"
+using abc_sym abc_ac_neq assms abc_bcd_abd by blast
+
+
+lemma abc_bcd_acd:
+  assumes abc: "[a;b;c]"
+      and bcd: "[b;c;d]"
+  shows "[a;c;d]"
+proof -
+  have cba: "[c;b;a]" using abc_sym abc by simp
+  have dcb: "[d;c;b]" using abc_sym bcd by simp
+  have "[d;c;a]" using abc_bcd_abd dcb cba by blast
+  thus ?thesis using abc_sym by simp
+qed
+
+lemma abc_only_cba:
+  assumes "[a;b;c]"
+    shows "\<not> [b;a;c]" "\<not> [a;c;b]" "\<not> [b;c;a]" "\<not> [c;a;b]"
+using abc_sym abc_abc_neq abc_bcd_abd assms by blast+
+
+
+section "Betweenness: Unreachable Subset Via a Path"
+
+definition unreachable_subset_via :: "'a set \<Rightarrow> 'a \<Rightarrow> 'a set \<Rightarrow> 'a \<Rightarrow> 'a set" where
+  "unreachable_subset_via Q Qa R x \<equiv> {Qy. [x;Qy;Qa] \<and> (\<exists>Rw\<in>R. Qa \<in> unreach-on Q from Rw \<and> Qy \<in> unreach-on Q from Rw)}"
+
+definition unreachable_subset_via_notation ("unreach-via _ on _ from _ to _" [100, 100, 100, 100] 100)
+  where "unreach-via P on Q from a to x \<equiv> unreachable_subset_via Q a P x"
+
+
+
+section "Betweenness: Chains"
+named_theorems chain_defs
+named_theorems chain_alts
+
+subsection "Locally ordered chains with indexing"
+
+
+definition short_ch :: "'a set \<Rightarrow> bool" where
+  "short_ch X \<equiv> card X = 2 \<and> (\<exists>P\<in>\<P>. X \<subseteq> P)"
+
+lemma short_ch_alt[chain_alts]:
+  "short_ch X = (\<exists>x\<in>X. \<exists>y\<in>X. path_ex x y \<and> \<not>(\<exists>z\<in>X. z\<noteq>x \<and> z\<noteq>y))"
+  "short_ch X = (\<exists>x y. X = {x,y} \<and> path_ex x y)"
+  unfolding short_ch_def
+  apply (simp add: card_2_iff', smt (verit, ccfv_SIG) in_mono subsetI)
+  by (metis card_2_iff empty_subsetI insert_subset)
+
+lemma short_ch_intros:
+  "\<lbrakk>x\<in>X; y\<in>X; path_ex x y; \<not>(\<exists>z\<in>X. z\<noteq>x \<and> z\<noteq>y)\<rbrakk> \<Longrightarrow> short_ch X"
+  "\<lbrakk>X = {x,y}; path_ex x y\<rbrakk> \<Longrightarrow> short_ch X"
+  by (auto simp: short_ch_alt)
+
+lemma short_ch_path: "short_ch {x,y} \<longleftrightarrow> path_ex x y"
+  unfolding short_ch_def by force
+
+
+definition local_long_ch_by_ord :: "(nat \<Rightarrow> 'a) \<Rightarrow> 'a set \<Rightarrow> bool" where
+  "local_long_ch_by_ord f X \<equiv> (infinite X \<or> card X \<ge> 3) \<and> local_ordering f betw X"
+
+lemma local_long_ch_by_ord_alt [chain_alts]:
+  "local_long_ch_by_ord f X =
+    (\<exists>x\<in>X. \<exists>y\<in>X. \<exists>z\<in>X. x\<noteq>y \<and> y\<noteq>z \<and> x\<noteq>z \<and> local_ordering f betw X)"
+  (is "_ = ?ch f X")
+proof
+  assume asm: "local_long_ch_by_ord f X"
+  {
+    assume "card X \<ge> 3"
+    then have "\<exists>x y z. x\<noteq>y \<and> y\<noteq>z \<and> x\<noteq>z \<and> {x,y,z}\<subseteq>X"
+      apply (simp add: eval_nat_numeral)
+      by (auto simp add: card_le_Suc_iff)
+  } moreover {
+    assume "infinite X"
+    then have "\<exists>x y z. x\<noteq>y \<and> y\<noteq>z \<and> x\<noteq>z \<and> {x,y,z}\<subseteq>X"
+      using inf_3_elms bot.extremum by fastforce
+  }
+  ultimately show "?ch f X" using asm unfolding local_long_ch_by_ord_def by auto
+next
+  assume asm: "?ch f X"
+  then obtain x y z where xyz: "{x,y,z}\<subseteq>X \<and> x \<noteq> y \<and> y \<noteq> z \<and> x \<noteq> z"
+    apply (simp add: eval_nat_numeral) by auto
+  hence "card X \<ge> 3 \<or> infinite X"
+    apply (simp add: eval_nat_numeral)
+    by (smt (z3) xyz card.empty card_insert_if card_subset finite.emptyI finite_insert insertE
+      insert_absorb insert_not_empty)
+  thus "local_long_ch_by_ord f X" unfolding local_long_ch_by_ord_def using asm by auto
+qed
+
+lemma short_xor_long:
+  shows "short_ch Q \<Longrightarrow> \<nexists>f. local_long_ch_by_ord f Q"
+    and "local_long_ch_by_ord f Q \<Longrightarrow> \<not> short_ch Q"
+  unfolding chain_alts by (metis)+
+
+  that is used for triplets of elements, but merely an indexing function that fixes the
+  We define this in order to be able to unify chain definitions with those for long chains.
+  on a long chain in many regards: e.g. it implies that $f({0 \dots |Q|-1}) \subseteq Q$.
+\<close>
+text \<open>Does this restrict chains to lie on paths? Proven in \<open>TemporalOrderingOnPath\<close>'s Interlude!\<close>
+text \<open>We include alternative definitions in the \<open>chain_defs\<close> set, because we do not want
+  is explicitly written down by the user, we shouldn't introduce a \<open>short_ch_by_ord\<close>
+  Notice we require both \<open>infinite X\<close> and \<open>long_ch_by_ord\<close>, thus circumventing infinite
+  Our version is a little different, because it is defined for any $a,b$ of type \<open>'a\<close>.
+  Notice that \<open>b \<in> ray a b\<close> for any $a$, always. Cf the comment on \<open>segment_def\<close>.
+  Thus \<open>\<exists>ray a b \<noteq> {}\<close> is no guarantee that a path $ab$ exists.
+  There exists an event by \<open>nonempty_events\<close>, and by \<open>ex_3SPRAY\<close> there is a three-$\spray$, which by
+  \<open>three_SPRAY_ge4\<close> means that there are at least four paths.

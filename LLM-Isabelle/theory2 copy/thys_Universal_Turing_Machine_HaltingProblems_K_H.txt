@@ -1,0 +1,219 @@
+theory HaltingProblems_K_H
+  imports
+    SimpleGoedelEncoding
+    SemiIdTM
+    TuringReducible
+
+begin
+
+
+
+
+
+locale hpk = 
+  fixes t2c :: "tprog0 \<Rightarrow> nat"
+  assumes
+    t2c_inj: "inj t2c"
+
+begin
+
+
+interpretation tm_to_nat: hpk "tm_to_nat :: tprog0 \<Rightarrow> nat"
+proof unfold_locales
+  show "inj tm_to_nat" by (rule inj_tm_to_nat)
+qed
+
+
+
+
+definition c2t :: "nat \<Rightarrow> instr list"
+  where
+    "c2t = (\<lambda>n. if (\<exists>p. t2c p = n)
+                 then (THE  p. t2c p = n)
+                 else (SOME p. True) )"
+
+lemma t2c_inj': "inj_on t2c {x. True}"
+  by (auto simp add: t2c_inj )
+
+lemma c2t_comp_t2c_eq: "c2t (t2c p) = p"
+proof -
+  have "\<forall>p\<in>{x. True}. c2t (t2c p) = p"
+  proof (rule encode_decode_A_eq[OF t2c_inj'])
+    show "c2t = (\<lambda>w. if \<exists>t\<in>{x. True}. t2c t = w then THE t. t \<in> {x. True} \<and> t2c t = w else SOME t. t \<in> {x. True})"
+      by (auto simp add: c2t_def)
+  qed
+  then show ?thesis by auto
+qed
+
+
+
+definition K1 :: "(nat list) set"
+  where
+     "K1 \<equiv> {nl. (\<exists>n. nl = [n] \<and> TMC_has_num_res (c2t n) [n]) }"
+
+
+
+lemma mk_composable_decider_K1D1:
+  assumes "\<exists>K1D1'. (\<forall>nl.
+          (nl \<in> K1 \<longrightarrow>TMC_yields_num_res K1D1' nl (1::nat))
+       \<and>  (nl \<notin> K1 \<longrightarrow>TMC_yields_num_res K1D1' nl (0::nat) ))"
+
+  shows  "\<exists>K1D1'. (\<forall>nl. composable_tm0 K1D1' \<and>
+          (nl \<in> K1 \<longrightarrow>TMC_yields_num_res K1D1' nl (1::nat))
+       \<and>  (nl \<notin> K1 \<longrightarrow>TMC_yields_num_res K1D1' nl (0::nat) ))"
+proof -
+  from assms have
+    "\<exists>K1D1'. (\<forall>nl.
+          (nl \<in> K1 \<longrightarrow>\<lbrace>\<lambda>tap. tap = ([], <nl>)\<rbrace> K1D1' \<lbrace>\<lambda>tap. \<exists>k l. tap = (Bk \<up> k, [Oc,Oc] @ Bk \<up> l)\<rbrace>)
+       \<and>  (nl \<notin> K1 \<longrightarrow>\<lbrace>\<lambda>tap. tap = ([], <nl>)\<rbrace> K1D1' \<lbrace>\<lambda>tap. \<exists>k l. tap = (Bk \<up> k, [Oc] @ Bk \<up> l)\<rbrace>) )"
+    unfolding TMC_yields_num_res_unfolded_into_Hoare_halt
+    by (simp add: tape_of_nat_def)
+
+
+  then obtain K1D1' where
+    "(\<forall>nl.
+          (nl \<in> K1 \<longrightarrow> \<lbrace>\<lambda>tap. tap = ([], <nl>)\<rbrace> K1D1' \<lbrace>\<lambda>tap. \<exists>k l. tap = (Bk \<up> k, [Oc, Oc] @ Bk \<up> l)\<rbrace>)
+       \<and>  (nl \<notin> K1 \<longrightarrow> \<lbrace>\<lambda>tap. tap = ([], <nl>)\<rbrace> K1D1' \<lbrace>\<lambda>tap. \<exists>k l. tap = (Bk \<up> k, [Oc] @ Bk \<up> l)\<rbrace>))"
+    by blast
+
+  then have "composable_tm0 (mk_composable0 K1D1') \<and> (\<forall>nl.
+          (nl \<in> K1 \<longrightarrow> \<lbrace>\<lambda>tap. tap = ([], <nl>)\<rbrace> mk_composable0 K1D1' \<lbrace>\<lambda>tap. \<exists>k l. tap = (Bk \<up> k, [Oc, Oc] @ Bk \<up> l)\<rbrace>)
+       \<and>  (nl \<notin> K1 \<longrightarrow> \<lbrace>\<lambda>tap. tap = ([], <nl>)\<rbrace> mk_composable0 K1D1' \<lbrace>\<lambda>tap. \<exists>k l. tap = (Bk \<up> k, [Oc] @ Bk \<up> l)\<rbrace>))"
+    using Hoare_halt_tm_impl_Hoare_halt_mk_composable0 composable_tm0_mk_composable0 by blast 
+
+  then have "composable_tm0 (mk_composable0 K1D1') \<and> (\<forall>nl.
+          (nl \<in> K1 \<longrightarrow> TMC_yields_num_res (mk_composable0 K1D1') nl (1::nat) )
+       \<and>  (nl \<notin> K1 \<longrightarrow> TMC_yields_num_res (mk_composable0 K1D1') nl (0::nat) ))"
+    unfolding TMC_yields_num_res_unfolded_into_Hoare_halt
+    by (simp add: tape_of_nat_def)
+
+  then show ?thesis by auto
+qed
+
+lemma res_1_fed_into_tm_semi_id_eq0_loops:
+  assumes "composable_tm0 D"
+    and   "TMC_yields_num_res D nl (1::nat)"
+  shows   "TMC_loops (D |+| tm_semi_id_eq0) nl"
+  unfolding TMC_loops_def
+proof 
+  fix stp
+  show "\<not> is_final (steps0 (1, [], <nl::nat list>) (D |+| tm_semi_id_eq0) stp)"
+    using assms tm_semi_id_eq0_loops''        
+      Hoare_plus_unhalt Hoare_unhalt_def 
+      tape_of_nat_def tape_of_list_def
+      TMC_yields_num_res_unfolded_into_Hoare_halt
+    by simp
+qed
+
+lemma loops_imp_has_no_res: "TMC_loops tm [n] \<Longrightarrow> \<not> TMC_has_num_res tm [n]"
+proof -
+  assume "TMC_loops tm [n]"
+  then show "\<not> TMC_has_num_res tm [n]"
+    using TMC_has_num_res_iff TMC_loops_def
+    by blast
+qed
+
+lemma yields_res_imp_has_res: "TMC_yields_num_res tm [n] (m::nat) \<Longrightarrow> TMC_has_num_res tm [n]"
+proof -
+  assume "TMC_yields_num_res tm [n] (m::nat)"
+  then show "TMC_has_num_res tm [n]"
+    by (metis TMC_has_num_res_iff TMC_yields_num_res_def is_finalI)
+qed
+
+lemma res_0_fed_into_tm_semi_id_eq0_yields_0:
+  assumes "composable_tm0 D"
+    and   "TMC_yields_num_res D nl (0::nat)"
+  shows   "TMC_yields_num_res (D |+| tm_semi_id_eq0) nl 0"
+  unfolding TMC_yields_num_res_unfolded_into_Hoare_halt
+  using assms Hoare_plus_halt tm_semi_id_eq0_halts''
+    tape_of_nat_def tape_of_list_def
+    TMC_yields_num_res_unfolded_into_Hoare_halt
+  by simp
+  
+
+lemma existence_of_decider_K1D1_for_K1_imp_False:
+  assumes major: "\<exists>K1D1'. (\<forall>nl.
+            (nl \<in> K1 \<longrightarrow>TMC_yields_num_res K1D1' nl (1::nat))
+         \<and>  (nl \<notin> K1 \<longrightarrow>TMC_yields_num_res K1D1' nl (0::nat) ))"
+  shows False
+proof -
+
+  from major have
+    "\<exists>K1D1'. (\<forall>nl. composable_tm0 K1D1' \<and>
+            (nl \<in> K1 \<longrightarrow> TMC_yields_num_res K1D1' nl (1::nat))
+         \<and>  (nl \<notin> K1 \<longrightarrow> TMC_yields_num_res K1D1' nl (0::nat) ))"
+    by (rule mk_composable_decider_K1D1)
+
+  then obtain K1D1 where
+    w_K1D1: "\<forall>nl. composable_tm0 K1D1 \<and>
+            (nl \<in> K1 \<longrightarrow> TMC_yields_num_res K1D1 nl (1::nat))
+         \<and>  (nl \<notin> K1 \<longrightarrow> TMC_yields_num_res K1D1 nl (0::nat) )"
+    by blast
+
+
+  define tm_contra where "tm_contra = K1D1 |+| tm_semi_id_eq0"
+
+  have c2t_comp_t2c_eq_for_tm_contra: "c2t (t2c tm_contra) = tm_contra"
+    by (auto simp add: c2t_comp_t2c_eq)
+
+  show False
+
+  proof (cases "[t2c tm_contra] \<in> K1")
+    case True
+    have "TMC_yields_num_res K1D1 [t2c tm_contra] (1::nat)"
+      by auto
+
+    then have "TMC_loops tm_contra [t2c tm_contra]"
+      using res_1_fed_into_tm_semi_id_eq0_loops w_K1D1 tm_contra_def
+      by blast
+
+    then have "\<not>(TMC_has_num_res tm_contra [t2c tm_contra])"
+      using loops_imp_has_no_res by blast
+
+    then have "\<not>(TMC_has_num_res (c2t (t2c tm_contra))) [t2c tm_contra]"
+      by (auto simp add: c2t_comp_t2c_eq_for_tm_contra)
+
+    then have "[t2c tm_contra] \<notin> K1"
+      by (auto simp add: K1_def)
+
+
+  next
+    case False
+    have "TMC_yields_num_res K1D1 [t2c tm_contra] (0::nat)"
+      by auto
+
+    then have "TMC_yields_num_res tm_contra [t2c tm_contra] (0::nat)"
+      using res_0_fed_into_tm_semi_id_eq0_yields_0 w_K1D1 tm_contra_def
+      by auto
+
+    then have "TMC_has_num_res tm_contra [t2c tm_contra]"
+      using yields_res_imp_has_res by blast
+
+    then have "TMC_has_num_res (c2t (t2c tm_contra)) [t2c tm_contra]"
+      by (auto simp add: c2t_comp_t2c_eq_for_tm_contra)
+
+    then have "[t2c tm_contra] \<in> K1"
+      by (auto simp add: K1_def)
+
+  qed
+qed
+
+
+
+\<close>
+    by (metis One_nat_def Suc_1 \<open>length nl = 0\<close>
+      by (smt F1 Hoare_haltE \<open>(l, r) = ([], <nl>)\<close> holds_for.elims(2) holds_for.simps)
+        using NilNotIn_H1 NilNotIn_K1 \<open>length nl = 0\<close> length_0_conv by blast
+          using H1_def K1_def \<open>1 < length nl\<close> by auto
+          by (smt CollectD Cons_eq_append_conv H1_def K1_def One_nat_def \<open>length nl = 1\<close>
+subsubsection \<open>Corollaries about the undecidable sets K1 and H1\<close>
+subsubsection \<open>Proof variant: The special Halting Problem K1 is not Turing Decidable\<close>
+text\<open>Assuming the existence of a Turing Machine K1D0, which is able to decide the set K1,
+ we derive a contradiction using the machine @{term "tm_semi_id_gt0"}.
+ Thus, we show that the {\em Special Halting Problem K1} is not Turing decidable.
+ The proof uses a diagonal argument.
+\label{sec_K1_v}\<close>
+    from \<open>[t2c tm_contra] \<in> K1\<close> and w_K1D0 have
+    with  \<open>[t2c tm_contra] \<in> K1\<close> show False by auto
+    from \<open>[t2c tm_contra] \<notin> K1\<close> and w_K1D0 have
+    with \<open>[t2c tm_contra] \<notin> K1\<close> show False by auto

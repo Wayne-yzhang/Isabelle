@@ -1,0 +1,108 @@
+theory Uint_Userguide imports
+  Uint32
+  Uint16
+  Code_Target_Int_Bit
+begin
+
+
+
+
+
+  "gen_sum_squares accum n =
+   (if n = 0 then accum else gen_sum_squares (accum + n * n) (n - 1))"
+
+definition sum_squares :: "16 word \<Rightarrow> 16 word" where
+   "sum_squares = gen_sum_squares 0"
+
+definition sum_squares_int :: "int \<Rightarrow> 16 word" where
+  "sum_squares_int n = sum_squares (word_of_int n)"
+
+lift_definition gen_sum_squares_uint :: "uint16 \<Rightarrow> uint16 \<Rightarrow> uint16" 
+  is gen_sum_squares .
+lift_definition sum_squares_uint :: "uint16 \<Rightarrow> uint16" is sum_squares .
+lift_definition sum_squares_int_uint :: "int \<Rightarrow> uint16" is sum_squares_int .
+
+
+lemmas [Transfer.transferred, code] =
+  gen_sum_squares.simps
+  sum_squares_def
+  sum_squares_int_def
+
+export_code sum_squares_int_uint in SML_word
+
+
+value "sum_squares_int_uint 40"
+
+
+
+
+
+datatype val = Bool bool | Word "32 word"
+datatype expr = Lit val | LT expr expr | IF expr expr expr
+
+abbreviation (input) word :: "32 word \<Rightarrow> expr" where "word i \<equiv> Lit (Word i)"
+abbreviation (input) bool :: "bool \<Rightarrow> expr" where "bool i \<equiv> Lit (Bool i)"
+
+fun eval :: "expr \<Rightarrow> val option" where
+  "eval (Lit v) = Some v"
+| "eval (LT e\<^sub>1 e\<^sub>2) = 
+  (case (eval e\<^sub>1, eval e\<^sub>2) 
+   of (Some (Word i\<^sub>1), Some (Word i\<^sub>2)) \<Rightarrow> Some (Bool (i\<^sub>1 < i\<^sub>2))
+   | _ \<Rightarrow> None)"
+| "eval (IF e\<^sub>1 e\<^sub>2 e\<^sub>3) =
+  (case eval e\<^sub>1 of Some (Bool b) \<Rightarrow> if b then eval e\<^sub>2 else eval e\<^sub>3
+   | _ \<Rightarrow> None)"
+
+inductive step :: "expr \<Rightarrow> expr \<Rightarrow> bool" ("_ \<rightarrow> _" [50, 50] 60) where
+  "e \<rightarrow> e' \<Longrightarrow> LT e e\<^sub>2 \<rightarrow> LT e' e\<^sub>2"
+| "e \<rightarrow> e' \<Longrightarrow> LT (word i) e \<rightarrow> LT (word i) e'"
+| "LT (word i\<^sub>1) (word i\<^sub>2) \<rightarrow> bool (i\<^sub>1 < i\<^sub>2)"
+| "e \<rightarrow> e' \<Longrightarrow> IF e e\<^sub>1 e\<^sub>2 \<rightarrow> IF e' e\<^sub>1 e\<^sub>2"
+| "IF (bool True) e\<^sub>1 e\<^sub>2 \<rightarrow> e\<^sub>1"
+| "IF (bool False) e\<^sub>1 e\<^sub>2 \<rightarrow> e\<^sub>2"
+
+code_pred (modes: i \<Rightarrow> o \<Rightarrow> bool as reduce, i \<Rightarrow> i \<Rightarrow> bool as step') step .
+
+
+
+lift_definition Word' :: "uint32 \<Rightarrow> val" is Word .
+
+code_datatype Bool Word'
+
+lift_definition case_val' :: "(bool \<Rightarrow> 'a) \<Rightarrow> (uint32 \<Rightarrow> 'a) \<Rightarrow> val \<Rightarrow> 'a" is case_val .
+
+lemmas [code, simp] = val.case [Transfer.transferred]
+
+lemma case_val'_cert:
+  fixes bool word' b w
+  assumes "CASE \<equiv> case_val' bool word'"
+  shows "(CASE (Bool b) \<equiv> bool b) &&& (CASE (Word' w) \<equiv> word' w)"
+  by (simp_all add: assms)
+
+
+declare [[code drop: case_val Word]]
+
+
+
+
+lemmas [code] = 
+  val.eq.simps[THEN meta_eq_to_obj_eq, Transfer.transferred, THEN eq_reflection]
+  eval.simps[Transfer.transferred]
+  step.equation[Transfer.transferred]
+
+export_code reduce step' eval checking SML
+
+
+
+
+
+lift_definition double :: "uint32 \<Rightarrow> uint32" is "\<lambda>x. x + x" .
+
+
+lemma double_code [code]: "double n = n + n"
+by transfer simp
+
+
+
+
+

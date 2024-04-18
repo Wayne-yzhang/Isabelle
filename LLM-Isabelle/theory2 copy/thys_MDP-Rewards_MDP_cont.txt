@@ -1,0 +1,240 @@
+theory MDP_cont
+  imports "HOL-Probability.Probability"
+begin
+
+lemma Ionescu_Tulcea_C_eq:
+  assumes "\<And>i h. h \<in> space (PiM {0..<i} N) \<Longrightarrow> P i h = P' i h"
+  assumes h: "Ionescu_Tulcea P N" "Ionescu_Tulcea P' N"
+  shows "Ionescu_Tulcea.C P N 0 n (\<lambda>x. undefined) = Ionescu_Tulcea.C P' N 0 n (\<lambda>x. undefined)"
+proof (induction n)
+  case 0
+  then show ?case using h by (auto simp: Ionescu_Tulcea.C_def)
+next
+  case (Suc n)
+  have aux: "space (PiM {0..<0 + n} N) = space (rec_nat (\<lambda>n. return (Pi\<^sub>M {0..<n} N)) 
+    (\<lambda>m ma n \<omega>. ma n \<omega> \<bind> Ionescu_Tulcea.eP P' N (n + m)) n 0 (\<lambda>x. undefined))"
+    using h 
+    by (subst Ionescu_Tulcea.space_C[symmetric, where P = P', where x = "(\<lambda>x. undefined)"]) 
+      (auto simp add: Ionescu_Tulcea.C_def)  
+  have "\<And>i h. h \<in> space (PiM {0..<i} N) \<Longrightarrow> Ionescu_Tulcea.eP P N i h = Ionescu_Tulcea.eP P' N i h"
+    by (auto simp add: Ionescu_Tulcea.eP_def assms)
+  then show ?case 
+    using Suc.IH h
+    using aux[symmetric]
+    by (auto intro!: bind_cong simp: Ionescu_Tulcea.C_def)
+qed
+
+lemma Ionescu_Tulcea_CI_eq:
+  assumes "\<And>i h. h \<in> space (PiM {0..<i} N) \<Longrightarrow> P i h = P' i h"
+  assumes h: "Ionescu_Tulcea P N" "Ionescu_Tulcea P' N"
+  shows "Ionescu_Tulcea.CI P N = Ionescu_Tulcea.CI P' N"
+proof -
+  have "\<And>J. Ionescu_Tulcea.CI P N J = Ionescu_Tulcea.CI P' N J"
+    unfolding Ionescu_Tulcea.CI_def[OF h(1)] Ionescu_Tulcea.CI_def[OF h(2)]
+    using assms 
+    by (auto intro!: distr_cong Ionescu_Tulcea_C_eq)
+  thus ?thesis by auto
+qed
+
+lemma measure_eqI_PiM_sequence:
+  fixes M :: "nat \<Rightarrow> 'a measure"
+  assumes *[simp]: "sets P = PiM UNIV M" "sets Q = PiM UNIV M"
+  assumes eq: "\<And>A n. (\<And>i. A i \<in> sets (M i)) \<Longrightarrow>
+    P (prod_emb UNIV M {..n} (Pi\<^sub>E {..n} A)) = Q (prod_emb UNIV M {..n} (Pi\<^sub>E {..n} A))"
+  assumes A: "finite_measure P"
+  shows "P = Q"
+proof (rule measure_eqI_PiM_infinite[OF * _ A])
+  fix J :: "nat set" and F'
+  assume J: "finite J" "\<And>i. i \<in> J \<Longrightarrow> F' i \<in> sets (M i)"
+
+  define n where "n = (if J = {} then 0 else Max J)"
+  define F where "F i = (if i \<in> J then F' i else space (M i))" for i
+  then have F[simp, measurable]: "F i \<in> sets (M i)" for i
+    using J by auto
+  have emb_eq: "prod_emb UNIV M J (Pi\<^sub>E J F') = prod_emb UNIV M {..n} (Pi\<^sub>E {..n} F)"
+  proof cases
+    assume "J = {}" then show ?thesis
+      by (auto simp add: n_def F_def[abs_def] prod_emb_def PiE_def)
+  next
+    assume "J \<noteq> {}" then show ?thesis
+  qed
+
+  show "emeasure P (prod_emb UNIV M J (Pi\<^sub>E J F')) = emeasure Q (prod_emb UNIV M J (Pi\<^sub>E J F'))"
+    unfolding emb_eq by (rule eq) fact
+qed
+
+lemma distr_cong_simp:
+  "M = K \<Longrightarrow> sets N = sets L \<Longrightarrow> (\<And>x. x \<in> space M =simp=> f x = g x) \<Longrightarrow> distr M N f = distr K L g"
+  unfolding simp_implies_def by (rule distr_cong)
+
+
+locale discrete_MDP =
+  fixes Ms :: "'s measure"
+    and Ma :: "'a measure"
+    and A :: "'s \<Rightarrow> 'a set"
+    and K :: "'s \<times> 'a \<Rightarrow> 's measure"
+  assumes A_s: "\<And>s. A s \<in> sets Ma"
+  assumes A_ne: "\<And>s. A s \<noteq> {}"
+  assumes ex_pol: "\<exists>\<delta> \<in> Ms \<rightarrow>\<^sub>M Ma. \<forall>s. \<delta> s \<in> A s"
+  assumes K[measurable]: "K \<in> Ms \<Otimes>\<^sub>M Ma \<rightarrow>\<^sub>M prob_algebra Ms"
+begin
+
+lemma space_prodI[intro]: "x \<in> space A' \<Longrightarrow> y \<in> space B \<Longrightarrow> (x,y) \<in> space (A' \<Otimes>\<^sub>M B)"
+  by (auto simp add: space_pair_measure)
+
+abbreviation "M \<equiv> Ms \<Otimes>\<^sub>M Ma"
+abbreviation "Ma_A s \<equiv> restrict_space Ma (A s)"
+
+lemma space_ma[intro]: "s \<in> space Ms \<Longrightarrow> a \<in> space Ma \<Longrightarrow> (s,a) \<in> space M"
+  by (simp add: space_pair_measure)
+
+lemma space_x0[simp]: "x0 \<in> space (prob_algebra Ms) \<Longrightarrow> space x0 = space Ms"
+  by (metis (mono_tags, lifting) space_prob_algebra mem_Collect_eq sets_eq_imp_space_eq)
+
+lemma A_subs_Ma: "A s \<subseteq> space Ma"
+  by (simp add: A_s sets.sets_into_space)
+
+lemma space_Ma_A_subset: "s \<in> space Ms \<Longrightarrow> space (Ma_A s) \<subseteq> A s"
+  by (simp add: space_restrict_space)
+
+lemma K_restrict [measurable]: "K \<in> (Ms \<Otimes>\<^sub>M Ma_A s) \<rightarrow>\<^sub>M prob_algebra Ms"
+  by measurable (metis measurable_id measurable_pair_iff measurable_restrict_space2_iff)
+
+lemma measurable_K_act[measurable, intro]: "s \<in> space Ms \<Longrightarrow> (\<lambda>a. K (s, a)) \<in> Ma \<rightarrow>\<^sub>M prob_algebra Ms"
+  by measurable
+
+lemma measurable_K_st[measurable, intro]: "a \<in> space Ma \<Longrightarrow> (\<lambda>s. K (s, a)) \<in> Ms \<rightarrow>\<^sub>M prob_algebra Ms"
+  by measurable
+
+lemma space_K[simp]: "sa \<in> space M \<Longrightarrow> space (K sa) = space Ms"
+  using K unfolding prob_algebra_def measurable_restrict_space2_iff
+  by (auto dest: subprob_measurableD)
+
+lemma space_K2[simp]: "s \<in> space Ms \<Longrightarrow> a \<in> space Ma \<Longrightarrow> space (K (s, a)) = space Ms"
+  by (simp add: space_pair_measure)
+
+lemma space_K_E: "s' \<in> space (K (s,a)) \<Longrightarrow> s \<in> space Ms \<Longrightarrow> a \<in> space Ma \<Longrightarrow> s' \<in> space Ms"
+  by auto
+
+lemma sets_K: "sa \<in> space M \<Longrightarrow> sets (K sa) = sets Ms"
+  using K unfolding prob_algebra_def unfolding measurable_restrict_space2_iff
+  by (auto dest: subprob_measurableD)
+
+lemma sets_K'[measurable_cong]: "s \<in> space Ms \<Longrightarrow> a \<in> space Ma \<Longrightarrow> sets (K (s,a)) = sets Ms"
+  by (simp add: sets_K space_pair_measure)
+
+lemma prob_space_K[intro]: "sa \<in> space M \<Longrightarrow> prob_space (K sa)"
+  using measurable_space[OF K] by (simp add: space_prob_algebra)
+
+lemma prob_space_K2[intro]: "s \<in> space Ms \<Longrightarrow> a \<in> space Ma \<Longrightarrow> prob_space (K (s,a))"
+  using prob_space_K by (simp add: space_pair_measure)
+
+lemma K_in_space [intro]: "m \<in> space M \<Longrightarrow> K m \<in> space (prob_algebra Ms)"
+  by (meson K measurable_space)
+
+
+type_synonym ('c, 'd) pol = "nat \<Rightarrow> ((nat \<Rightarrow> 'c \<times> 'd) \<times> 'c) \<Rightarrow> 'd measure"
+
+abbreviation "H i \<equiv> Pi\<^sub>M {0..<i} (\<lambda>_. M)"
+abbreviation "Hs i \<equiv>  H i \<Otimes>\<^sub>M Ms"
+
+lemma space_H1: "j < (i :: nat)  \<Longrightarrow> \<omega> \<in> space (H i) \<Longrightarrow> \<omega> j \<in> space M"
+  using PiE_def 
+  by (auto simp: space_PiM)
+
+lemma space_case_nat[intro]: 
+  assumes "\<omega> \<in> space (H i)" "s \<in> space Ms"  
+  shows "case_nat s (fst \<circ> \<omega>) i \<in> space Ms"
+  using assms 
+  by (cases i) (auto intro!: space_H1 measurable_space[OF measurable_fst])
+
+lemma undefined_in_H0: "(\<lambda>_. undefined) \<in> space (H (0 :: nat))"
+  by auto
+
+lemma sets_K_Suc[measurable_cong]: "h \<in> space (H (Suc n)) \<Longrightarrow> sets (K (h n)) = sets Ms"
+  using sets_K space_H1 by blast
+
+definition "is_dec0 d \<equiv> d \<in> Ms \<rightarrow>\<^sub>M prob_algebra Ma "
+
+definition "is_dec (t :: nat) d \<equiv> (d \<in> Hs t \<rightarrow>\<^sub>M prob_algebra Ma) "
+
+lemma "is_dec0 d \<Longrightarrow> is_dec t (\<lambda>(_,s). d s)"
+  unfolding is_dec0_def is_dec_def by auto
+
+definition is_policy :: "('s, 'a) pol \<Rightarrow> bool" where
+  "is_policy p \<equiv> \<forall>i. is_dec i (p i)"
+
+abbreviation p0 :: "('s, 'a) pol \<Rightarrow> 's \<Rightarrow> 'a measure" where
+  "p0 p s \<equiv> p (0 ::nat) (\<lambda>_. undefined, s)"
+
+context
+  fixes p assumes p[simp]: "is_policy p"
+begin
+
+lemma is_policyD[measurable]: "p i \<in> Hs i \<rightarrow>\<^sub>M prob_algebra Ma"
+  using p unfolding is_policy_def is_dec_def by auto
+
+lemma space_policy[simp]: "hs \<in> space (Hs i) \<Longrightarrow> space (p i hs) = space Ma"
+  using K is_policyD unfolding prob_algebra_def measurable_restrict_space2_iff
+  by (auto dest: subprob_measurableD)
+
+lemma space_policy'[simp]: "h \<in> space (H i) \<Longrightarrow> s \<in> space Ms \<Longrightarrow> space (p i (h,s)) = space Ma"
+  using space_policy 
+  by (simp add: space_pair_measure)
+
+lemma space_policyI[intro]: 
+  assumes "s \<in> space Ms" "h \<in> space (H i)" "a \<in> space Ma"
+  shows "a \<in> space (p i (h,s))"
+  using space_policy assms 
+  by (auto simp: space_pair_measure)
+
+lemma sets_policy[simp]: "hs \<in> space (Hs i) \<Longrightarrow> sets (p i hs) = sets Ma"
+  using p K is_policyD
+  unfolding prob_algebra_def measurable_restrict_space2_iff
+  by (auto dest: subprob_measurableD)
+
+lemma sets_policy'[measurable_cong, simp]: 
+  "h \<in> space (H i) \<Longrightarrow> s \<in> space Ms \<Longrightarrow> sets (p i (h,s)) = sets Ma"
+  using sets_policy 
+  by (auto simp: space_pair_measure)
+
+lemma sets_policy''[measurable_cong, simp]: 
+  "h \<in> space ((Pi\<^sub>M {} (\<lambda>_. M))) \<Longrightarrow> s \<in> space Ms \<Longrightarrow> sets (p 0 (h,s)) = sets Ma"
+  using sets_policy 
+  by (auto simp: space_pair_measure)
+
+lemma policy_prob_space: "hs \<in> space (Hs i) \<Longrightarrow> prob_space (p i hs)"
+proof -
+  assume h: "hs \<in> space (Hs i)"
+  hence "p i hs \<in> space (prob_algebra Ma)" 
+    using p by (auto intro: measurable_space)
+  thus "prob_space (p i hs)"
+    unfolding prob_algebra_def by (simp add: space_restrict_space)
+qed
+
+lemma policy_prob_space': "h \<in> space (H i) \<Longrightarrow> s \<in> space Ms \<Longrightarrow> prob_space (p i (h,s))"
+  using policy_prob_space by (simp add: space_pair_measure)
+
+lemma prob_space_p0: "x \<in> space Ms \<Longrightarrow> prob_space (p0 p x)"
+  by (simp add: policy_prob_space')
+
+lemma p0_sets[measurable_cong]: "x \<in> space Ms \<Longrightarrow> sets (p 0 (\<lambda>_. undefined,x)) = sets Ma"
+  using subprob_measurableD(2) measurable_prob_algebraD by simp
+
+lemma space_p0[simp]: "s \<in> space Ms \<Longrightarrow> space (p0 p s) = space Ma"
+  by auto
+
+lemma return_policy_prob_algebra [measurable]: 
+  "h \<in> space (H n) \<Longrightarrow> x \<in> space Ms \<Longrightarrow> (\<lambda>a. return M (x, a)) \<in> p n (h, x) \<rightarrow>\<^sub>M prob_algebra M"
+  by measurable
+end
+
+definition "Suc_policy p sa = (\<lambda>i (h, s). p (Suc i) (\<lambda>i'. case_nat sa h i', s))"
+
+lemma p_as_Suc_policy: "p (Suc i) (h, s) = Suc_policy p ((h 0)) i (\<lambda>i. h (Suc i), s)"
+proof -
+  have *: "case_nat (f 0) (\<lambda>i. f (Suc i)) = f" for f
+    by (auto split: nat.splits)
+  show ?thesis
+    unfolding Suc_policy_def
+    by (auto simp: *)

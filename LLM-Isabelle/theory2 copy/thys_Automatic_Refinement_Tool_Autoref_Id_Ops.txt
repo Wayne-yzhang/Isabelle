@@ -1,0 +1,148 @@
+theory Autoref_Id_Ops
+imports 
+  "../Lib/Refine_Lib" 
+  Autoref_Phases
+  Autoref_Data
+  Autoref_Tagging
+  "../Parametricity/Parametricity"
+begin
+
+
+typedecl interface
+
+definition intfAPP 
+  :: "(interface \<Rightarrow> _) \<Rightarrow> interface \<Rightarrow> _" 
+  where "intfAPP f x \<equiv> f x"
+
+syntax "_intf_APP" :: "args \<Rightarrow> 'a \<Rightarrow> 'b" ("\<langle>_\<rangle>\<^sub>i_" [0,900] 900)
+
+translations
+  "\<langle>x,xs\<rangle>\<^sub>iR" == "\<langle>xs\<rangle>\<^sub>i(CONST intfAPP R x)"
+  "\<langle>x\<rangle>\<^sub>iR" == "CONST intfAPP R x"
+
+consts
+  i_fun :: "interface \<Rightarrow> interface \<Rightarrow> interface" 
+
+abbreviation i_fun_app (infixr "\<rightarrow>\<^sub>i" 60) where "i1\<rightarrow>\<^sub>ii2 \<equiv> \<langle>i1,i2\<rangle>\<^sub>ii_fun"
+
+consts 
+  i_annot :: "interface \<Rightarrow> annot"
+
+abbreviation i_ANNOT :: "'a \<Rightarrow> interface \<Rightarrow> 'a" (infixr ":::\<^sub>i" 10) where
+  "t:::\<^sub>iI \<equiv> ANNOT t (i_annot I)"
+
+definition CONST_INTF :: "'a \<Rightarrow> interface \<Rightarrow> bool" (infixr "::\<^sub>i" 10)
+  where [simp]: "c::\<^sub>i I \<equiv> True"
+
+
+definition ID_OP :: "'a \<Rightarrow> 'a \<Rightarrow> interface \<Rightarrow> bool" 
+  where [simp]: "ID_OP t t' I \<equiv> t=t'"
+
+  "\<lbrakk> \<And>x. ID_OP x x I1 \<Longrightarrow> ID_OP (f x) (f' x) I2 \<rbrakk> 
+  \<Longrightarrow> ID_OP (\<lambda>'x. f x) (\<lambda>'x. f' x) (I1\<rightarrow>\<^sub>iI2)"
+  by simp
+
+  "\<lbrakk> INDEP I1; ID_OP x x' I1; ID_OP f f' (I1\<rightarrow>\<^sub>iI2) \<rbrakk> 
+  \<Longrightarrow> ID_OP (f$x) (f'$x') I2" by simp
+
+  "\<lbrakk> c ::\<^sub>i I \<rbrakk> \<Longrightarrow> ID_OP c (OP c :::\<^sub>i I) I"
+  by simp
+
+definition [simp]: "ID_TAG x \<equiv> x"
+  "ID_OP c (OP (ID_TAG c) :::\<^sub>i I) I" 
+  by simp
+
+lemma ID_const_check_known: 
+  "\<lbrakk> c ::\<^sub>i I' \<rbrakk> \<Longrightarrow> ID_OP c c I" by simp
+
+  "ID_OP (OP f :::\<^sub>i I) (OP f :::\<^sub>i I) I"
+  by simp
+
+lemma ID_is_tagged_OP: "ID_OP (OP c) t' I \<Longrightarrow> ID_OP (OP c) t' I" .
+
+lemma ID_tagged_OP_no_annot:
+  "c ::\<^sub>i I \<Longrightarrow> ID_OP (OP c) (OP c :::\<^sub>i I) I" by simp
+
+lemmas ID_tagged = ID_tagged_OP ID_abs ID_app
+
+  "ID_OP t t' I \<Longrightarrow> ID_OP (t :::\<^sub>i I) t' I"
+  "ID_OP t t' I \<Longrightarrow> ID_OP (ANNOT t A) (ANNOT t' A) I"
+  by simp_all
+
+
+lemma ID_init:
+  assumes "ID_OP a a' I"
+  assumes "(c,a')\<in>R"
+  shows "(c,a)\<in>R"
+  using assms by auto
+
+lemma itypeI: "(c::'t) ::\<^sub>i I" by simp
+
+consts depth_limit_dummy :: 'a
+notation (output) depth_limit_dummy ("\<dots>")
+
+
+
+
+
+
+setup Autoref_Id_Ops.setup
+
+
+definition IND_FACT :: "rel_name \<Rightarrow> ('c \<times> 'a) set \<Rightarrow> bool" ("#_=_" 10)
+  where [simp]: "#name=R \<equiv> True"
+
+lemma REL_INDIRECT: "#name=R" by simp
+
+
+definition CNV_ANNOT :: "'a \<Rightarrow> 'a \<Rightarrow> (_\<times>'a) set \<Rightarrow> bool"
+  where [simp]: "CNV_ANNOT t t' R \<equiv> t=t'"
+
+definition REL_OF_INTF :: "interface \<Rightarrow> ('c\<times>'a) set \<Rightarrow> bool" 
+  where [simp]: "REL_OF_INTF I R \<equiv> True"
+
+definition 
+
+lemma CNV_ANNOT:
+  "\<And>f f' a a'. \<lbrakk> CNV_ANNOT a a' Ra; CNV_ANNOT f f' (Ra\<rightarrow>Rr) \<rbrakk> 
+    \<Longrightarrow> CNV_ANNOT (f$a) (f'$a') (Rr)"
+  "\<And>f f'. \<lbrakk> \<And>x. CNV_ANNOT x x Ra \<Longrightarrow> CNV_ANNOT (f x) (f' x) Rr \<rbrakk> 
+    \<Longrightarrow> CNV_ANNOT (\<lambda>'x. f x) (\<lambda>'x. f' x) (Ra\<rightarrow>Rr)"
+  "\<And>f f I R. \<lbrakk>undefined (''Id tag not yet supported'',f)\<rbrakk> 
+    \<Longrightarrow> CNV_ANNOT (OP (ID_TAG f) :::\<^sub>i I) f R"
+  "\<And>f I R. \<lbrakk> INDEP R; REL_OF_INTF I R \<rbrakk> 
+    \<Longrightarrow> CNV_ANNOT (OP f :::\<^sub>i I) (OP f ::: R) R"
+  "\<And>t t' R. CNV_ANNOT t t' R \<Longrightarrow> CNV_ANNOT (t ::: R) t' R"
+  "\<And>t t' name R. \<lbrakk> #name=R; CNV_ANNOT t t' R \<rbrakk> \<Longrightarrow> CNV_ANNOT (t ::#name) t' R"
+  by simp_all
+
+consts i_of_rel :: "'a \<Rightarrow> 'b"
+
+  "REL_OF_INTF_P I R \<Longrightarrow> REL_OF_INTF I R"
+  by auto
+
+  "\<lbrakk> REL_OF_INTF I R; REL_OF_INTF_P J S \<rbrakk> \<Longrightarrow> REL_OF_INTF_P (\<langle>I\<rangle>\<^sub>iJ) (\<langle>R\<rangle>S)"
+  by auto
+
+lemma ROI_i_of_rel:
+  "REL_OF_INTF_P (i_of_rel S) S"
+  "REL_OF_INTF (i_of_rel R) R"
+  by auto
+
+lemma ROI_const:
+  "REL_OF_INTF_P J S"
+  "REL_OF_INTF I R"
+  by auto
+
+lemma ROI_init:
+  assumes "CNV_ANNOT a a' R"
+  assumes "(c,a')\<in>R"
+  shows "(c,a)\<in>R"
+  using assms by simp
+
+lemma REL_OF_INTF_I: "REL_OF_INTF I R" by simp
+
+
+setup Autoref_Rel_Inf.setup
+
+end

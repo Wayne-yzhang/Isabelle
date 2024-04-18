@@ -1,0 +1,163 @@
+theory Interpretation imports WellFormProgs "../StaticInter/CFGExit" begin
+
+
+abbreviation sourcenode :: "edge \<Rightarrow> node"
+  where "sourcenode e \<equiv> fst e"
+
+abbreviation targetnode :: "edge \<Rightarrow> node"
+  where "targetnode e \<equiv> snd(snd e)"
+
+abbreviation kind :: "edge \<Rightarrow> (vname,val,node,pname) edge_kind"
+  where "kind e \<equiv> fst(snd e)"
+
+
+definition valid_edge :: "wf_prog \<Rightarrow> edge \<Rightarrow> bool"
+  where "valid_edge wfp a \<equiv> let (prog,procs) = Rep_wf_prog wfp in
+  prog,procs \<turnstile> sourcenode a -kind a\<rightarrow> targetnode a"
+
+
+definition get_return_edges :: "wf_prog \<Rightarrow> edge \<Rightarrow> edge set"
+  where "get_return_edges wfp a \<equiv> 
+  case kind a of Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs \<Rightarrow> {a'. valid_edge wfp a' \<and> (\<exists>Q' f'. kind a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f') \<and>
+                                 targetnode a' = r}
+                     | _ \<Rightarrow> {}"
+
+
+lemma get_return_edges_non_call_empty:
+  "\<forall>Q r p fs. kind a \<noteq> Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs \<Longrightarrow> get_return_edges wfp a = {}"
+  by(cases "kind a",auto simp:get_return_edges_def)
+
+
+lemma call_has_return_edge:
+  assumes "valid_edge wfp a" and "kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+  obtains a' where "valid_edge wfp a'" and "\<exists>Q' f'. kind a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+  and "targetnode a' = r"
+proof(atomize_elim)
+  obtain prog procs where "Rep_wf_prog wfp = (prog,procs)"
+    and "prog,procs \<turnstile> sourcenode a -Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs\<rightarrow> targetnode a"
+    by(fastforce simp:valid_edge_def)
+  show "\<exists>a'. valid_edge wfp a' \<and> (\<exists>Q' f'. kind a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f') \<and> targetnode a' = r"
+  proof(induct "sourcenode a" "Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs" "targetnode a" rule:PCFG.induct)
+    case (MainCall l es rets n' ins outs c)
+      where [simp]:"n' = Label l'"
+      by(fastforce dest:Proc_CFG_Call_Labels)
+    from MainCall
+    have "prog,procs \<turnstile> (p,Exit) -(\<lambda>cf. snd cf = (Main,Label l'))\<hookleftarrow>\<^bsub>p\<^esub>
+      (\<lambda>cf cf'. cf'(rets [:=] map cf outs))\<rightarrow> (Main,Label l')"
+      by(fastforce intro:MainReturn)
+      by(fastforce simp:valid_edge_def)
+  next
+    case (ProcCall px ins outs c l es' rets' l' ins' outs' c' ps)
+    from ProcCall have "prog,procs \<turnstile> (p,Exit) -(\<lambda>cf. snd cf = (px,Label l'))\<hookleftarrow>\<^bsub>p\<^esub>
+      (\<lambda>cf cf'. cf'(rets' [:=] map cf outs'))\<rightarrow> (px,Label l')"
+      by(fastforce intro:ProcReturn)
+      by(fastforce simp:valid_edge_def)
+  qed auto
+qed
+
+
+lemma get_return_edges_call_nonempty:
+  "\<lbrakk>valid_edge wfp a; kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs\<rbrakk> \<Longrightarrow> get_return_edges wfp a \<noteq> {}"
+by -(erule call_has_return_edge,(fastforce simp:get_return_edges_def)+)
+
+
+lemma only_return_edges_in_get_return_edges:
+  "\<lbrakk>valid_edge wfp a; kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs; a' \<in> get_return_edges wfp a\<rbrakk>
+  \<Longrightarrow> \<exists>Q' f'. kind a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+by(cases "kind a",auto simp:get_return_edges_def)
+
+
+abbreviation lift_procs :: "wf_prog \<Rightarrow> (pname \<times> vname list \<times> vname list) list"
+  where "lift_procs wfp \<equiv> let (prog,procs) = Rep_wf_prog wfp in
+  map (\<lambda>x. (fst x,fst(snd x),fst(snd(snd x)))) procs"
+
+
+
+
+interpretation ProcCFG:
+  CFG sourcenode targetnode kind "valid_edge wfp" "(Main,Entry)"
+  get_proc "get_return_edges wfp" "lift_procs wfp" Main
+  for wfp
+proof -
+  from Rep_wf_prog[of wfp]
+  obtain prog procs where [simp]:"Rep_wf_prog wfp = (prog,procs)" 
+    by(fastforce simp:wf_prog_def)
+  hence wf:"well_formed procs" by(fastforce intro:wf_wf_prog)
+  show "CFG sourcenode targetnode kind (valid_edge wfp) (Main, Entry)
+    get_proc (get_return_edges wfp) (lift_procs wfp) Main"
+  proof
+    fix a assume "valid_edge wfp a" and "targetnode a = (Main, Entry)"
+    from this wf show False by(auto elim:PCFG.cases simp:valid_edge_def) 
+  next
+    show "get_proc (Main, Entry) = Main" by simp
+  next
+    fix a Q r p fs 
+    assume "valid_edge wfp a" and "kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+      and "sourcenode a = (Main, Entry)"
+    thus False by(auto elim:PCFG.cases simp:valid_edge_def)
+  next
+    fix a a' 
+    assume "valid_edge wfp a" and "valid_edge wfp a'"
+      and "sourcenode a = sourcenode a'" and "targetnode a = targetnode a'"
+    with wf show "a = a'"
+      by(cases a,cases a',auto dest:Proc_CFG_edge_det simp:valid_edge_def)
+  next
+    fix a Q r f
+    assume "valid_edge wfp a" and "kind a = Q:r\<hookrightarrow>\<^bsub>Main\<^esub>f"
+    from this wf show False by(auto elim:PCFG.cases simp:valid_edge_def)
+  next
+    fix a Q' f'
+    assume "valid_edge wfp a" and "kind a = Q'\<hookleftarrow>\<^bsub>Main\<^esub>f'"
+    from this wf show False by(auto elim:PCFG.cases simp:valid_edge_def)
+  next
+    fix a Q r p fs
+    assume "valid_edge wfp a" and "kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    thus "\<exists>ins outs. (p, ins, outs) \<in> set (lift_procs wfp)"
+      apply(auto simp:valid_edge_def) apply(erule PCFG.cases) apply auto
+         apply(fastforce dest:Proc_CFG_IEdge_intra_kind simp:intra_kind_def)
+        apply(fastforce dest:Proc_CFG_IEdge_intra_kind simp:intra_kind_def)
+       apply(rule_tac x="ins" in exI) apply(rule_tac x="outs" in exI)
+       apply(rule_tac x="(p,ins,outs,c)" in image_eqI) apply auto
+      apply(rule_tac x="ins'" in exI) apply(rule_tac x="outs'" in exI)
+      apply(rule_tac x="(p,ins',outs',c')" in image_eqI) by(auto simp:set_conv_nth)
+  next
+    fix a assume "valid_edge wfp a" and "intra_kind (kind a)"
+    thus "get_proc (sourcenode a) = get_proc (targetnode a)"
+      by(auto elim:PCFG.cases simp:valid_edge_def intra_kind_def)
+  next
+    fix a Q r p fs
+    assume "valid_edge wfp a" and "kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    thus "get_proc (targetnode a) = p" by(auto elim:PCFG.cases simp:valid_edge_def) 
+  next
+    fix a Q' p f'
+    assume "valid_edge wfp a" and "kind a = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+    thus "get_proc (sourcenode a) = p" by(auto elim:PCFG.cases simp:valid_edge_def) 
+  next
+    fix a Q r p fs
+    assume "valid_edge wfp a" and "kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    hence "prog,procs \<turnstile> sourcenode a -kind a\<rightarrow> targetnode a"
+      by(simp add:valid_edge_def)
+    show "\<forall>a'. valid_edge wfp a' \<and> targetnode a' = targetnode a \<longrightarrow>
+      (\<exists>Qx rx fsx. kind a' = Qx:rx\<hookrightarrow>\<^bsub>p\<^esub>fsx)"
+    proof(induct "sourcenode a" "kind a" "targetnode a" rule:PCFG.induct)
+      case (MainCall l p' es rets n' ins outs c)
+      have [simp]:"p' = p" by simp
+      { fix a' assume "valid_edge wfp a'" and "targetnode a' = (p', Entry)"
+        hence "\<exists>Qx rx fsx. kind a' = Qx:rx\<hookrightarrow>\<^bsub>p\<^esub>fsx"
+          by(auto elim:PCFG.cases simp:valid_edge_def) }
+    next
+      case (ProcCall px ins outs c l p' es rets l' ins' outs' c' ps)
+      have [simp]:"p' = p" by simp
+      { fix a' assume "valid_edge wfp a'" and "targetnode a' = (p', Entry)"
+        hence "\<exists>Qx rx fsx. kind a' = Qx:rx\<hookrightarrow>\<^bsub>p\<^esub>fsx" 
+          by(auto elim:PCFG.cases simp:valid_edge_def) }
+    qed auto
+  next
+    fix a Q' p f'
+    assume "valid_edge wfp a" and "kind a = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+    hence "prog,procs \<turnstile> sourcenode a -kind a\<rightarrow> targetnode a"
+      by(simp add:valid_edge_def)
+    show "\<forall>a'. valid_edge wfp a' \<and> sourcenode a' = sourcenode a \<longrightarrow>
+      (\<exists>Qx fx. kind a' = Qx\<hookleftarrow>\<^bsub>p\<^esub>fx)"
+    proof(induct "sourcenode a" "kind a" "targetnode a" rule:PCFG.induct)
+      case (MainReturn l p' es rets l' ins outs c)

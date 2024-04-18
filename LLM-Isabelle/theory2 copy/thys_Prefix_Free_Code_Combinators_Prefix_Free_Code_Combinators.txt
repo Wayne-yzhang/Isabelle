@@ -1,0 +1,334 @@
+theory Prefix_Free_Code_Combinators
+  imports
+    "HOL-Library.Extended_Real"
+    "HOL-Library.Float"
+    "HOL-Library.FuncSet"
+    "HOL-Library.List_Lexorder"
+    "HOL-Library.Log_Nat"
+    "HOL-Library.Sublist"
+begin
+
+
+
+fun opt_prefix where
+  "opt_prefix (Some x) (Some y) = prefix x y" |
+  "opt_prefix _ _ = False"
+
+definition "opt_comp x y = (opt_prefix x y \<or> opt_prefix y x)"
+
+fun opt_append :: "bool list option \<Rightarrow> bool list option \<Rightarrow> bool list option"
+  where
+    "opt_append (Some x) (Some y) = Some (x@y)" |
+    "opt_append _ _ = None"
+
+lemma opt_comp_sym: "opt_comp x y = opt_comp y x"
+  by (simp add:opt_comp_def, blast)
+
+lemma opt_comp_append:
+  assumes "opt_comp (opt_append x y) z"
+  shows "opt_comp x z"
+proof -
+  obtain x' y' z' where a: "x = Some x'" "y = Some y'" "z = Some z'"
+    using assms
+    by (cases x, case_tac[!] y, case_tac[!] z, auto simp: opt_comp_def)
+  have "prefix (x'@y') z' \<or> prefix z' (x'@y')"
+    using a assms by (simp add:opt_comp_def)
+  hence "prefix x' z' \<or> prefix z' x'"
+    using prefix_same_cases append_prefixD by blast
+  thus ?thesis
+    using a by (simp add:opt_comp_def)
+qed
+
+lemma opt_comp_append_2:
+  assumes "opt_comp x (opt_append y z)"
+  shows "opt_comp x y"
+  using opt_comp_append opt_comp_sym assms by blast
+
+lemma opt_comp_append_3:
+  assumes "opt_comp (opt_append x y) (opt_append x z)"
+  shows "opt_comp y z"
+  using assms
+  by (cases x, case_tac[!] y, case_tac[!] z, auto simp: opt_comp_def)
+
+type_synonym 'a encoding = "'a \<rightharpoonup> bool list"
+
+definition is_encoding :: "'a encoding \<Rightarrow> bool"
+  where "is_encoding f = (\<forall>x y. opt_prefix (f x) (f y) \<longrightarrow> x = y)"
+
+
+lemma is_encodingI:
+  assumes "\<And>x x' y y'. e x = Some x' \<Longrightarrow> e y = Some y' \<Longrightarrow>
+    prefix x' y' \<Longrightarrow> x = y"
+  shows "is_encoding e"
+proof -
+  have "opt_prefix (e x) (e y) \<Longrightarrow> x = y" for x y
+    using assms by (cases "e x", case_tac[!] "e y", auto)
+  thus ?thesis by (simp add:is_encoding_def)
+qed
+
+lemma is_encodingI_2:
+  assumes "\<And>x y . opt_comp (e x) (e y) \<Longrightarrow> x = y"
+  shows "is_encoding e"
+  using assms by (simp add:opt_comp_def is_encoding_def)
+
+lemma encoding_triv: "is_encoding Map.empty"
+  by (rule is_encodingI_2, simp add:opt_comp_def)
+
+lemma is_encodingD:
+  assumes "is_encoding e"
+  assumes "opt_comp (e x) (e y)"
+  shows "x = y"
+  using assms by (auto simp add:opt_comp_def is_encoding_def)
+
+lemma encoding_imp_inj:
+  assumes "is_encoding f"
+  shows "inj_on f (dom f)"
+  using assms
+  by (intro inj_onI, simp add:is_encoding_def, force)
+
+fun bit_count :: "bool list option \<Rightarrow> ereal" where
+  "bit_count None = \<infinity>" |
+  "bit_count (Some x) = ereal (length x)"
+
+lemma bit_count_finite_imp_dom:
+  "bit_count (f x) < \<infinity> \<Longrightarrow> x \<in> dom f"
+  by (cases "f x", auto)
+
+lemma bit_count_append:
+  "bit_count (opt_append x y) = bit_count x + bit_count y"
+  by (cases x, case_tac[!] "y", simp_all)
+
+
+definition encode_dependent_prod ::
+  "'a encoding \<Rightarrow> ('a \<Rightarrow> 'b encoding) \<Rightarrow> ('a \<times> 'b) encoding"
+  (infixr "\<Join>\<^sub>e" 65)
+  where
+    "encode_dependent_prod e f x =
+      opt_append (e (fst x)) (f (fst x) (snd x))"
+
+lemma dependent_encoding:
+  assumes "is_encoding e1"
+  assumes "\<And>x. x \<in> dom e1 \<Longrightarrow> is_encoding (e2 x)"
+  shows "is_encoding (e1 \<Join>\<^sub>e e2)"
+proof (rule is_encodingI_2)
+  fix x y
+  assume a:"opt_comp ((e1 \<Join>\<^sub>e e2) x) ((e1 \<Join>\<^sub>e e2) y)"
+  have d:"opt_comp (e1 (fst x)) (e1 (fst y))"
+    using a unfolding encode_dependent_prod_def
+    by (metis opt_comp_append opt_comp_append_2)
+  hence b:"fst x = fst y"
+    using is_encodingD[OF assms(1)] by simp
+  hence "opt_comp (e2 (fst x) (snd x)) (e2 (fst x) (snd y))"
+    using a unfolding encode_dependent_prod_def by (metis opt_comp_append_3)
+  moreover have "fst x \<in> dom e1" using d b
+    by (cases "e1 (fst x)", simp_all add:opt_comp_def dom_def)
+  ultimately have c:"snd x = snd y"
+    using is_encodingD[OF assms(2)] by simp
+  show "x = y"
+    using b c by (simp add: prod_eq_iff)
+qed
+
+lemma dependent_bit_count:
+  "bit_count ((e\<^sub>1 \<Join>\<^sub>e e\<^sub>2) (x\<^sub>1,x\<^sub>2)) =
+    bit_count (e\<^sub>1 x\<^sub>1) + bit_count (e\<^sub>2 x\<^sub>1 x\<^sub>2)"
+  by (simp add: encode_dependent_prod_def bit_count_append)
+
+lemma dependent_bit_count_2:
+  "bit_count ((e\<^sub>1 \<Join>\<^sub>e e\<^sub>2) x) =
+    bit_count (e\<^sub>1 (fst x)) + bit_count (e\<^sub>2 (fst x) (snd x))"
+  by (simp add: encode_dependent_prod_def bit_count_append)
+
+
+abbreviation encode_prod ::
+  "'a encoding \<Rightarrow> 'b encoding \<Rightarrow> ('a \<times> 'b) encoding"
+  (infixr "\<times>\<^sub>e" 65)
+  where
+    "encode_prod e1 e2 \<equiv> e1 \<Join>\<^sub>e (\<lambda>_. e2)"
+
+
+lemma encoding_compose:
+  assumes "is_encoding f"
+  assumes "inj_on g {x. p x}"
+  shows "is_encoding (\<lambda>x. if p x then f (g x) else None)"
+  using assms by (simp add:comp_def is_encoding_def inj_onD)
+
+lemma encoding_compose_2:
+  assumes "is_encoding f"
+  assumes "inj g"
+  shows "is_encoding (\<lambda>x. f (g x))"
+  using assms by (simp add:comp_def is_encoding_def inj_onD)
+
+
+fun encode_bounded_nat :: "nat \<Rightarrow> nat \<Rightarrow> bool list" where
+  "encode_bounded_nat (Suc l) n =
+    (let r = n \<ge> (2^l) in r#encode_bounded_nat l (n-of_bool r*2^l))" |
+  "encode_bounded_nat 0 _ = []"
+
+lemma encode_bounded_nat_prefix_free:
+  fixes u v l :: nat
+  assumes "u < 2^l"
+  assumes "v < 2^l"
+  assumes "prefix (encode_bounded_nat l u) (encode_bounded_nat l v)"
+  shows "u = v"
+  using assms
+proof (induction l arbitrary: u v)
+  case 0
+  then show ?case by simp
+next
+  case (Suc l)
+  have "prefix (encode_bounded_nat l (u - of_bool (u \<ge> 2^l)*2^l))
+    (encode_bounded_nat l (v - of_bool (v \<ge> 2^l)*2^l))"
+    and a:"(u \<ge> 2^l) = (v \<ge> 2^l)"
+    using Suc(4) by (simp_all add: Let_def split: split_of_bool_asm)
+  moreover have "u - of_bool (u \<ge> 2^l)*2^l < 2^l"
+    using Suc(2) by (cases "u < 2^l", auto simp add:of_bool_def)
+  moreover have "v - of_bool (v \<ge> 2^l)*2^l < 2^l"
+    using Suc(3) by (cases "v < 2^l", auto simp add:of_bool_def)
+  ultimately have
+    "u - of_bool (u \<ge> 2^l)*2^l = v - of_bool (v \<ge> 2^l)*2^l"
+    by (intro Suc(1), simp_all)
+  thus "u = v" using a by (simp split: split_of_bool_asm)
+qed
+
+definition Nb\<^sub>e :: "nat \<Rightarrow> nat encoding"
+  where "Nb\<^sub>e l n = (
+    if n < l
+      then Some (encode_bounded_nat (floorlog 2 (l-1)) n)
+      else None)"
+
+
+lemma bounded_nat_bit_count:
+  "bit_count (Nb\<^sub>e l y) = (if y < l then floorlog 2 (l-1) else \<infinity>)"
+proof -
+  have a:"length (encode_bounded_nat h m) = h" for h m
+    by (induction h arbitrary: m, simp, simp add:Let_def)
+  show ?thesis
+    using a by (simp add:Nb\<^sub>e_def)
+qed
+
+lemma bounded_nat_bit_count_2:
+  assumes "y < l"
+  shows "bit_count (Nb\<^sub>e l y) = floorlog 2 (l-1)"
+  using assms bounded_nat_bit_count by simp
+
+lemma "dom (Nb\<^sub>e l) = {..<l}"
+  by (simp add:Nb\<^sub>e_def dom_def lessThan_def)
+
+lemma bounded_nat_encoding: "is_encoding (Nb\<^sub>e l)"
+proof -
+  have "x < l \<Longrightarrow> x < 2 ^ floorlog 2 (l-1)" for x :: nat
+    by (intro floorlog_leD floorlog_mono, auto)
+  thus ?thesis
+    using encode_bounded_nat_prefix_free
+    by (intro is_encodingI, simp add:Nb\<^sub>e_def split:if_splits, blast)
+qed
+
+fun encode_unary_nat :: "nat \<Rightarrow> bool list" where
+  "encode_unary_nat (Suc l) = False#(encode_unary_nat l)" |
+  "encode_unary_nat 0 = [True]"
+
+lemma encode_unary_nat_prefix_free:
+  fixes u v :: nat
+  assumes "prefix (encode_unary_nat u) (encode_unary_nat v)"
+  shows "u = v"
+  using assms
+proof (induction u arbitrary: v)
+  case 0
+  then show ?case by (cases v, simp_all)
+next
+  case (Suc u)
+  then show ?case by (cases v, simp_all)
+qed
+
+definition Nu\<^sub>e :: "nat encoding"
+  where "Nu\<^sub>e n = Some (encode_unary_nat n)"
+
+
+lemma unary_nat_bit_count:
+  "bit_count (Nu\<^sub>e n) = Suc n"
+  unfolding Nu\<^sub>e_def by (induction n, auto)
+
+lemma unary_encoding: "is_encoding Nu\<^sub>e"
+    using encode_unary_nat_prefix_free
+    by (intro is_encodingI, simp add:Nu\<^sub>e_def)
+
+
+definition Ng\<^sub>e :: "nat encoding" where
+  "Ng\<^sub>e n =
+    (if n > 0
+      then (Nu\<^sub>e \<Join>\<^sub>e (\<lambda>r. Nb\<^sub>e (2^r)))
+        (let r = floorlog 2 n - 1 in (r, n - 2^r))
+      else None)"
+
+
+lemma elias_gamma_bit_count:
+  "bit_count (Ng\<^sub>e n) = (if n > 0 then 2 * \<lfloor>log 2 n\<rfloor> + 1 else (\<infinity>::ereal))"
+proof (cases "n > 0")
+  case True
+  define r where "r = floorlog 2 n - Suc 0"
+  have "floorlog 2 n \<noteq> 0"
+    using True
+    by (simp add:floorlog_eq_zero_iff)
+  hence a:"floorlog 2 n > 0" by simp
+
+  have "n < 2^(floorlog 2 n)"
+    using True floorlog_bounds by simp
+  also have "... = 2^(r+1)"
+    using a by (simp add:r_def)
+  finally have "n < 2^(r+1)" by simp
+  hence b:"n - 2^r < 2^r" by simp
+  have "floorlog 2 (2 ^ r - Suc 0) \<le> r"
+    by (rule floorlog_leI, auto)
+  moreover have "r \<le> floorlog 2 (2 ^ r - Suc 0)"
+    by (cases r, simp, auto intro: floorlog_geI)
+  ultimately have c:"floorlog 2 (2 ^ r - Suc 0) = r"
+    using order_antisym by blast
+
+  have "bit_count (Ng\<^sub>e n) = bit_count (Nu\<^sub>e r) +
+    bit_count (Nb\<^sub>e (2 ^ r) (n - 2 ^ r))"
+    using True by (simp add:Ng\<^sub>e_def r_def[symmetric] dependent_bit_count)
+  also have "... = ereal (r + 1) + ereal (r)"
+    using b c
+    by (simp add: unary_nat_bit_count bounded_nat_bit_count)
+  also have "... = 2 * r + 1" by simp
+  also have "... = 2 * \<lfloor>log 2 n\<rfloor> + 1"
+    using True by (simp add:floorlog_def r_def)
+  finally show ?thesis using True by simp
+next
+  case False
+  then show ?thesis by (simp add:Ng\<^sub>e_def)
+qed
+
+lemma elias_gamma_encoding: "is_encoding Ng\<^sub>e"
+proof -
+  have a: "inj_on (\<lambda>x. let r = floorlog 2 x - 1 in (r, x - 2 ^ r))
+    {n. 0 < n}"
+  proof (rule inj_onI)
+    fix x y :: nat
+    assume "x \<in> {n. 0 < n}"
+    hence x_pos: "0 < x" by simp
+    assume "y \<in> {n. 0 < n}"
+    hence y_pos: "0 < y" by simp
+    define r where "r = floorlog 2 x - Suc 0"
+    assume b:"(let r = floorlog 2 x - 1 in (r, x - 2 ^ r)) =
+      (let r = floorlog 2 y - 1 in (r, y - 2 ^ r))"
+    hence c:"r = floorlog 2 y - Suc 0"
+      by (simp_all add:Let_def r_def)
+    have "x - 2^r = y - 2^r" using b
+      by (simp add:Let_def r_def[symmetric] c[symmetric]  prod_eq_iff)
+    moreover have "x \<ge> 2^r"
+      using r_def x_pos floorlog_bounds by simp
+    moreover have "y \<ge> 2^r"
+      using c floorlog_bounds y_pos by simp
+    ultimately show "x = y" using eq_diff_iff by blast
+  qed
+
+  have "is_encoding (\<lambda>n. Ng\<^sub>e n)"
+    unfolding Ng\<^sub>e_def using a
+    by (intro encoding_compose[where f="Nu\<^sub>e \<Join>\<^sub>e (\<lambda>r. Nb\<^sub>e (2^r))"]
+        dependent_encoding unary_encoding bounded_nat_encoding) auto
+  thus ?thesis by simp
+qed
+
+definition N\<^sub>e :: "nat encoding" where "N\<^sub>e x = Ng\<^sub>e (x+1)"
+

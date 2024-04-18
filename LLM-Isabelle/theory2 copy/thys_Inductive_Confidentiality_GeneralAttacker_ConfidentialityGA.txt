@@ -1,0 +1,177 @@
+theory  ConfidentialityGA imports NS_Public_Bad_GA begin
+
+
+lemma parts_initState: "parts(initState C) = initState C"
+by (cases C, simp)
+
+lemma analz_initState: "analz(initState C) = initState C"
+by (cases C, force dest: analz_into_parts)
+
+
+
+definition staticSecret :: "agent \<Rightarrow> msg set" where
+ [simp]: "staticSecret A == {Key (priEK A), Key (priSK A), Key (shrK A)}"
+
+
+
+lemma staticSecret_in_initState [simp]:
+"staticSecret A \<subseteq> initState A"
+by (cases A, simp)
+thm parts_insert
+
+lemma staticSecretA_notin_initStateB:
+"m \<in> staticSecret A \<Longrightarrow> m \<in> initState B = (A=B)"
+by (cases B, auto)
+
+lemma staticSecretA_notin_parts_initStateB:
+"m \<in> staticSecret A \<Longrightarrow> m \<in> parts(initState B) = (A=B)"
+by (cases B, auto)
+
+lemma staticSecretA_notin_analz_initStateB:
+"m \<in> staticSecret A \<Longrightarrow> m \<in> analz(initState B) = (A=B)"
+by (cases B, force dest: analz_into_parts)
+
+lemma staticSecret_synth_eq: 
+"m \<in> staticSecret A \<Longrightarrow> (m \<in> synth H) = (m \<in> H)"
+apply force
+done
+
+declare staticSecret_def [simp del]
+
+lemma nonce_notin_analz_initState:
+  "Nonce N \<notin> analz(initState A)" 
+by(cases A, auto dest: analz_into_parts)
+
+
+
+lemma staticSecret_parts_agent:
+ "\<lbrakk>m \<in> parts (knows C evs); m \<in> staticSecret A\<rbrakk> \<Longrightarrow>  
+   A=C \<or> 
+  (\<exists>D E X. Says D E X \<in> set evs \<and> m \<in> parts{X}) \<or>
+  (\<exists>Y. Notes C Y \<in> set evs \<and> m \<in> parts{Y})"
+apply (erule rev_mp)
+apply (induct_tac evs)
+apply (simp add: staticSecretA_notin_parts_initStateB)
+apply (induct_tac a)
+apply (rule impI) 
+apply simp
+apply (drule parts_insert [THEN equalityD1, THEN subsetD])
+apply blast
+apply simp
+apply simp
+apply clarify 
+apply (drule parts_insert [THEN equalityD1, THEN subsetD])
+apply blast
+done
+
+lemma staticSecret_analz_agent:
+ "\<lbrakk>m \<in> analz (knows C evs); m \<in> staticSecret A\<rbrakk> \<Longrightarrow>  
+   A=C \<or> 
+  (\<exists>D E X. Says D E X \<in> set evs \<and> m \<in> parts{X}) \<or>
+  (\<exists>Y. Notes C Y \<in> set evs \<and> m \<in> parts{Y})"
+by (drule analz_into_parts [THEN staticSecret_parts_agent])
+
+lemma secret_parts_agent:
+ "m \<in> parts (knows C evs)  \<Longrightarrow> m \<in> initState C \<or>
+ (\<exists>A B X. Says A B X \<in> set evs \<and> m \<in> parts{X}) \<or>
+ (\<exists>Y. Notes C Y \<in> set evs \<and> m \<in> parts{Y})"
+apply (erule rev_mp)
+apply (induct_tac "evs")
+apply (simp add: parts_initState)
+apply (induct_tac "a")
+apply (rule impI)
+apply simp
+apply (drule parts_insert [THEN equalityD1, THEN subsetD])
+apply blast
+apply simp
+apply simp 
+apply clarify
+apply (drule parts_insert [THEN equalityD1, THEN subsetD])
+apply blast
+done
+
+
+
+lemma NS_staticSecret_parts_agent_weak:
+ "\<lbrakk>m \<in> parts (knows C evs); m \<in> staticSecret A; 
+   evs \<in> ns_public\<rbrakk> \<Longrightarrow>
+  A=C \<or> (\<exists>D E X. Says D E X \<in> set evs \<and> m \<in> parts{X})"
+apply (blast dest: NS_no_Notes staticSecret_parts_agent)
+done
+
+
+lemma NS_staticSecret_parts_agent_parts:
+"\<lbrakk>m \<in> parts (knows C evs); m \<in> staticSecret A; A\<noteq>C; evs \<in> ns_public\<rbrakk> \<Longrightarrow>
+  m \<in> parts(knows D evs)"
+apply (blast dest: NS_staticSecret_parts_agent_weak Says_imp_knows [THEN parts.Inj] parts_trans)
+done
+
+
+lemma NS_staticSecret_parts_agent:
+ "\<lbrakk>m \<in> parts (knows C evs); m \<in> staticSecret A; 
+   C\<noteq>A; evs \<in> ns_public\<rbrakk>
+ \<Longrightarrow> \<exists> B X. Says A B X \<in> set evs \<and> m \<in> parts {X}"
+apply (erule rev_mp, erule ns_public.induct)
+apply (simp add: staticSecretA_notin_parts_initStateB)
+apply simp
+apply clarify
+apply (case_tac "Aa=A") 
+apply clarify
+apply blast
+apply simp
+apply (simp add: staticSecret_synth_eq) 
+apply (blast dest: NS_staticSecret_parts_agent_parts)
+apply (force simp add: staticSecret_def)+
+done
+
+
+lemma NS_agent_see_staticSecret:
+ "\<lbrakk>m \<in> staticSecret A; C\<noteq>A; evs \<in> ns_public\<rbrakk>
+ \<Longrightarrow> m \<in> parts (knows C evs) = (\<exists> B X. Says A B X \<in> set evs \<and> m \<in> parts {X})"
+apply (force dest: NS_staticSecret_parts_agent Says_imp_knows [THEN parts.Inj] intro: parts_trans)
+done
+
+
+declare analz.Decrypt [rule del]
+
+lemma analz_insert_analz: "
+\<lbrakk> c \<notin> parts{Z}; \<forall>K. Key K \<notin> parts{Z}; c \<in> analz(insert Z H)\<rbrakk> \<Longrightarrow> c \<in> analz H"
+apply (erule rev_mp, erule rev_mp)
+apply (erule analz.induct)
+prefer 4
+apply clarify
+apply (blast dest: parts.Body analz.Decrypt)
+apply blast+
+done
+
+lemma Agent_not_see_NA:
+     "\<lbrakk> Key (priEK B) \<notin> analz(knows C evs); 
+        Key (priEK A) \<notin> analz(knows C evs);
+        \<forall>S R Y. Says S R Y \<in> set evs \<longrightarrow> 
+         Y = Crypt (pubEK B) \<lbrace>Nonce NA, Agent A\<rbrace> \<or>
+         Y = Crypt (pubEK A) \<lbrace>Nonce NA, Nonce NB\<rbrace> \<or>
+         Nonce NA \<notin> parts{Y} \<and> (\<forall>K. Key K \<notin> parts{Y});
+        C\<noteq>A; C\<noteq>B;  evs \<in> ns_public\<rbrakk>                     
+       \<Longrightarrow> Nonce NA \<notin> analz (knows C evs)"
+apply (erule rev_mp, erule rev_mp, erule rev_mp, erule ns_public.induct) 
+apply (simp add: nonce_notin_analz_initState)
+apply clarify
+apply simp
+apply (drule subset_insertI [THEN analz_mono, THEN contra_subsetD])+
+apply (subgoal_tac "
+        \<forall>S R Y.
+           (S = Aa \<and> R = Ba \<and> Y = X \<longrightarrow>
+            X = Crypt (pubK B) \<lbrace>Nonce NA, Agent A\<rbrace> \<or>
+            X = Crypt (pubK A) \<lbrace>Nonce NA, Nonce NB\<rbrace> \<or>
+            Nonce NA \<notin> parts {X} \<and> (\<forall>K. Key K \<notin> parts {X}))")
+prefer 2 
+apply blast 
+apply simp
+apply (force dest!: analz_insert_analz)
+apply auto
+done
+
+
+
+end
+

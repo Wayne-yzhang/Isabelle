@@ -1,0 +1,144 @@
+theory Assertions
+imports 
+  "../Imperative_HOL_Time/Imperative_HOL_Time"
+  "Tools/Syntax_Match" 
+  Automatic_Refinement.Misc
+begin
+
+type_synonym pheap = "heap \<times> addr set"
+
+fun in_range :: "(heap \<times> addr set) \<Rightarrow> bool" 
+  where "in_range (h,as) \<longleftrightarrow> (\<forall>a\<in>as. a < lim h)"
+
+declare in_range.simps[simp del]
+
+lemma in_range_empty[simp, intro!]: "in_range (h,{})"
+  by (auto simp: in_range.simps)
+
+lemma in_range_dist_union[simp]: 
+  "in_range (h,as \<union> as') \<longleftrightarrow> in_range (h,as) \<and> in_range (h,as')"
+  by (auto simp: in_range.simps)
+
+lemma in_range_subset: 
+  "\<lbrakk>as \<subseteq> as'; in_range (h,as')\<rbrakk> \<Longrightarrow> in_range (h,as)"
+  by (auto simp: in_range.simps)
+
+definition relH :: "addr set \<Rightarrow> heap \<Rightarrow> heap \<Rightarrow> bool" 
+  where "relH as h h' \<equiv> 
+  in_range (h,as) 
+  \<and> in_range (h',as) 
+  \<and> (\<forall>t. \<forall>a \<in> as. 
+        refs h t a = refs h' t a 
+      \<and> arrays h t a = arrays h' t a
+    )"
+
+lemma relH_in_rangeI:
+  assumes "relH as h h'"
+  shows "in_range (h,as)" and "in_range (h',as)"
+  using assms unfolding relH_def by auto
+
+text "Reflexivity"
+lemma relH_refl: "in_range (h,as) \<Longrightarrow> relH as h h"
+  unfolding relH_def by simp
+
+text "Symmetry"
+lemma relH_sym: "relH as h h' \<Longrightarrow> relH as h' h"
+  unfolding relH_def
+  by auto
+
+text "Transitivity"
+lemma relH_trans[trans]: "\<lbrakk>relH as h1 h2; relH as h2 h3\<rbrakk> \<Longrightarrow> relH as h1 h3"
+  unfolding relH_def
+  by auto
+
+lemma relH_dist_union[simp]: 
+  "relH (as\<union>as') h h' \<longleftrightarrow> relH as h h' \<and> relH as' h h'"
+  unfolding relH_def
+  by auto
+
+lemma relH_subset:
+  assumes "relH bs h h'"
+  assumes "as \<subseteq> bs"
+  shows "relH as h h'"
+  using assms unfolding relH_def by (auto intro: in_range_subset)
+
+lemma relH_ref:
+  assumes "relH as h h'"
+  assumes "addr_of_ref r \<in> as"
+  shows "Ref_Time.get h r = Ref_Time.get h' r"
+  using assms unfolding relH_def Ref_Time.get_def by auto
+
+lemma relH_array:
+  assumes "relH as h h'"
+  assumes "addr_of_array r \<in> as"
+  shows "Array_Time.get h r = Array_Time.get h' r"
+  using assms unfolding relH_def Array_Time.get_def by auto
+
+lemma relH_set_ref: "\<lbrakk> addr_of_ref r \<notin> as; in_range (h,as)\<rbrakk> 
+  \<Longrightarrow> relH as h (Ref_Time.set r x h)"
+  unfolding relH_def Ref_Time.set_def 
+  by (auto simp: in_range.simps)
+
+lemma relH_set_array: "\<lbrakk>addr_of_array r \<notin> as; in_range (h,as)\<rbrakk> 
+  \<Longrightarrow> relH as h (Array_Time.set r x h)"
+  unfolding relH_def Array_Time.set_def 
+  by (auto simp: in_range.simps)
+
+type_synonym assn_raw = "pheap \<Rightarrow> bool"
+
+definition proper :: "assn_raw \<Rightarrow> bool" where
+  "proper P \<equiv> \<forall>h h' as. (P (h,as) \<longrightarrow> in_range (h,as)) 
+    \<and> (P (h,as) \<and> relH as h h' \<and> in_range (h',as) \<longrightarrow> P (h',as))"
+
+lemma properI[intro?]: 
+  assumes "\<And>as h. P (h,as) \<Longrightarrow> in_range (h,as)"
+  assumes "\<And>as h h'. 
+    \<lbrakk>P (h,as); relH as h h'; in_range (h',as)\<rbrakk> \<Longrightarrow> P (h',as)"
+  shows "proper P"
+  unfolding proper_def using assms by blast
+
+lemma properD1:
+  assumes "proper P"
+  assumes "P (h,as)"
+  shows "in_range (h,as)"
+  using assms unfolding proper_def by blast
+
+lemma properD2:
+  assumes "proper P"
+  assumes "P (h,as)"
+  assumes "relH as h h'"
+  assumes "in_range (h',as)"
+  shows "P (h',as)"
+  using assms unfolding proper_def by blast
+
+lemmas properD = properD1 properD2
+
+lemma proper_iff:
+  assumes "proper P"
+  assumes "relH as h h'"
+  assumes "in_range (h',as)"
+  shows "P (h,as) \<longleftrightarrow> P (h',as)"
+  using assms
+  by (metis properD2 relH_in_rangeI(1) relH_sym) 
+
+typedef assn = "Collect proper" 
+  apply simp
+  unfolding proper_def 
+  by fastforce
+
+lemmas [simp] = Rep_assn_inverse Rep_assn_inject 
+lemmas [simp, intro!] = Rep_assn[unfolded mem_Collect_eq]
+
+lemma Abs_assn_eqI[intro?]: 
+  "(\<And>h. P h = Rep_assn Pr h) \<Longrightarrow> Abs_assn P = Pr"
+  "(\<And>h. P h = Rep_assn Pr h) \<Longrightarrow> Pr = Abs_assn P"
+  by (metis Rep_assn_inverse predicate1I xt1(5))+
+
+abbreviation models :: "pheap \<Rightarrow> assn \<Rightarrow> bool" (infix "\<Turnstile>" 50) 
+  where "h\<Turnstile>P \<equiv> Rep_assn P h"
+
+
+lemma models_in_range: "h\<Turnstile>P \<Longrightarrow> in_range h"
+  apply (cases h)
+  by (metis mem_Collect_eq Rep_assn properD1)
+    

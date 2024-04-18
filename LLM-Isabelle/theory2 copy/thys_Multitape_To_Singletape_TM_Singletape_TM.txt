@@ -1,0 +1,73 @@
+theory Singletape_TM
+  imports
+    TM_Common 
+begin
+
+
+datatype ('q,'a)tm = TM 
+
+datatype ('a, 'q) st_config = Config\<^sub>S
+
+locale singletape_tm =
+  fixes 
+    Q :: "'q set" and
+    \<Sigma> :: "'a set" and
+    \<Gamma> :: "'a set" and
+    blank :: 'a and
+    LE :: 'a and
+    \<delta> :: "('q \<times> 'a \<times> 'q \<times> 'a \<times> dir) set" and
+    s :: 'q and
+    t :: 'q and
+    r :: 'q 
+  assumes
+    fin_Q: "finite Q" and
+    fin_\<Gamma>: "finite \<Gamma>" and
+    \<Sigma>_sub_\<Gamma>: "\<Sigma> \<subseteq> \<Gamma>" and
+    sQ: "s \<in> Q" and
+    tQ: "t \<in> Q" and
+    rQ: "r \<in> Q" and
+    blank: "blank \<in> \<Gamma>" "blank \<notin> \<Sigma>" and
+    LE: "LE \<in> \<Gamma>" "LE \<notin> \<Sigma>" and
+    tr: "t \<noteq> r" and
+    \<delta>_set: "\<delta> \<subseteq> (Q - {t,r}) \<times> \<Gamma> \<times> Q \<times> \<Gamma> \<times> UNIV" and
+    \<delta>LE: "(q, LE, q', a', d) \<in> \<delta> \<Longrightarrow> a' = LE \<and> d \<in> {dir.N,dir.R}"
+begin
+
+lemma \<delta>: assumes "(q,a,q',b,d) \<in> \<delta>" 
+  shows "q \<in> Q" "a \<in> \<Gamma>" "q' \<in> Q" "b \<in> \<Gamma>" 
+  using assms \<delta>_set by auto
+
+lemma fin\<Sigma>: "finite \<Sigma>" 
+  using fin_\<Gamma> \<Sigma>_sub_\<Gamma> by (metis finite_subset)
+
+lemmas tm = sQ \<Sigma>_sub_\<Gamma> blank(1) LE(1)
+
+fun valid_config :: "('a, 'q) st_config \<Rightarrow> bool" where
+  "valid_config (Config\<^sub>S q w n) = (q \<in> Q \<and> range w \<subseteq> \<Gamma>)"
+
+definition init_config :: "'a list  \<Rightarrow> ('a,'q)st_config" where
+  "init_config w = (Config\<^sub>S s (\<lambda> n. if n = 0 then LE else if n \<le> length w then w ! (n-1) else blank) 0)" 
+
+lemma valid_init_config: "set w \<subseteq> \<Sigma> \<Longrightarrow> valid_config (init_config w)" 
+  unfolding init_config_def valid_config.simps using tm by (force simp: set_conv_nth)
+
+inductive_set step :: "('a, 'q) st_config rel" where
+  step: "(q, ts n, q', a, dir) \<in> \<delta> \<Longrightarrow>
+  (Config\<^sub>S q ts n, Config\<^sub>S q' (ts(n := a)) (go_dir dir n)) \<in> step"
+
+lemma stepI: "(q, a, q', b, dir) \<in> \<delta> \<Longrightarrow> ts n = a \<Longrightarrow> ts' = ts(n := b) \<Longrightarrow> n' = go_dir dir n \<Longrightarrow> q1 = q \<Longrightarrow> q2 = q'
+  \<Longrightarrow> (Config\<^sub>S q1 ts n, Config\<^sub>S q2 ts' n') \<in> step" 
+  using step[of q ts n q' b dir] by auto
+
+lemma valid_step: assumes step: "(\<alpha>,\<beta>) \<in> step" 
+  and val: "valid_config \<alpha>"  
+shows "valid_config \<beta>"
+  using step
+proof (cases rule: step.cases)
+  case (step q ts n q' a dir)
+  from \<delta>[OF step(3)] val
+  show ?thesis unfolding step(1-2) by auto
+qed
+
+definition Lang :: "'a list set" where
+  "Lang = {w . set w \<subseteq> \<Sigma> \<and> (\<exists> w' n. (init_config w, Config\<^sub>S t w' n) \<in> step^*)}"

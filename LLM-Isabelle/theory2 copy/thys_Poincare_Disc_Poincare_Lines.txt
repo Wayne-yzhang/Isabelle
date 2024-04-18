@@ -1,0 +1,543 @@
+theory Poincare_Lines
+  imports Complex_Geometry.Unit_Circle_Preserving_Moebius Complex_Geometry.Circlines_Angle
+begin
+
+
+
+
+definition is_poincare_line_cmat :: "complex_mat \<Rightarrow> bool" where
+  [simp]: "is_poincare_line_cmat H \<longleftrightarrow>
+             (let (A, B, C, D) = H
+               in hermitean (A, B, C, D) \<and> A = D \<and> (cmod B)\<^sup>2 > (cmod A)\<^sup>2)"
+
+lift_definition is_poincare_line_clmat :: "circline_mat \<Rightarrow> bool" is is_poincare_line_cmat
+  done
+
+
+lift_definition is_poincare_line :: "circline \<Rightarrow> bool" is is_poincare_line_clmat
+proof (transfer, transfer)
+  fix H1 H2 :: complex_mat
+  assume hh: "hermitean H1 \<and> H1 \<noteq> mat_zero" "hermitean H2 \<and> H2 \<noteq> mat_zero"
+  assume "circline_eq_cmat H1 H2"
+  thus "is_poincare_line_cmat H1 \<longleftrightarrow> is_poincare_line_cmat H2"
+    using hh
+    by (cases H1, cases H2) (auto simp: norm_mult power_mult_distrib)
+qed
+
+lemma is_poincare_line_mk_circline:
+  assumes "(A, B, C, D) \<in> hermitean_nonzero"
+  shows "is_poincare_line (mk_circline A B C D) \<longleftrightarrow> (cmod B)\<^sup>2 > (cmod A)\<^sup>2 \<and> A = D"
+  using assms
+  by (transfer, transfer, auto simp add: Let_def)
+
+
+
+lemma is_poincare_line_iff:
+  shows "is_poincare_line H \<longleftrightarrow> circline_type H = -1 \<and> perpendicular H unit_circle"
+  unfolding perpendicular_def
+proof (simp, transfer, transfer)
+  fix H
+  assume hh: "hermitean H \<and> H \<noteq> mat_zero"
+  obtain A B C D where *: "H = (A, B, C, D)"
+    by (cases H, auto)
+  have **: "is_real A" "is_real D" "C = cnj B"
+    using hh * hermitean_elems
+    by auto
+  hence "(Re A = Re D \<and> cmod A * cmod A < cmod B * cmod B) =
+         (Re A * Re D < Re B * Re B + Im B * Im B \<and> (Re D = Re A \<or> Re A * Re D = Re B * Re B + Im B * Im B))"
+    using *
+    by (smt cmod_power2 power2_eq_square zero_power2)+
+  thus "is_poincare_line_cmat H \<longleftrightarrow>
+         circline_type_cmat H = - 1 \<and> cos_angle_cmat (of_circline_cmat H) unit_circle_cmat = 0"
+    using * **
+    by (auto simp add: sgn_1_neg complex_eq_if_Re_eq cmod_square power2_eq_square simp del: pos_oriented_cmat_def)
+qed
+
+lemma is_poincare_line_x_axis [simp]:
+  shows "is_poincare_line x_axis"
+  by (transfer, transfer) (auto simp add: hermitean_def mat_adj_def mat_cnj_def)
+
+lemma not_is_poincare_line_unit_circle [simp]:
+  shows "\<not> is_poincare_line unit_circle"
+  by (transfer, transfer, simp)
+
+
+definition poincare_collinear :: "complex_homo set \<Rightarrow> bool" where
+  "poincare_collinear S \<longleftrightarrow> (\<exists> p. is_poincare_line p \<and> S \<subseteq> circline_set p)"
+
+
+lemma is_poincare_line_inverse_point:
+  assumes "is_poincare_line H" "u \<in> circline_set H"
+  shows "inversion u \<in> circline_set H"
+  using assms
+  unfolding is_poincare_line_iff circline_set_def perpendicular_def inversion_def
+  apply simp
+proof (transfer, transfer)
+  fix u H
+  assume hh: "hermitean H \<and> H \<noteq> mat_zero" "u \<noteq> vec_zero" and
+         aa: "circline_type_cmat H = - 1 \<and> cos_angle_cmat (of_circline_cmat H) unit_circle_cmat = 0" "on_circline_cmat_cvec H u"
+  obtain A B C D u1 u2 where *: "H = (A, B, C, D)" "u = (u1, u2)"
+    by (cases H, cases u, auto)
+  have "is_real A" "is_real D" "C = cnj B"
+    using * hh hermitean_elems
+    by auto
+  moreover
+  have "A = D"
+    by (auto simp del: pos_oriented_cmat_def simp add: complex.expand split: if_split_asm)
+  thus "on_circline_cmat_cvec H (conjugate_cvec (reciprocal_cvec u))"
+    using aa(2) *
+    by (simp add: vec_cnj_def field_simps)
+qed
+
+
+lemma circline_inversion_poincare_line:
+  assumes "is_poincare_line H"
+  shows "circline_inversion H = H"
+proof-
+  obtain u v w where *: "u \<noteq> v" "v \<noteq> w" "u \<noteq> w" "{u, v, w} \<subseteq> circline_set H"
+    using assms is_poincare_line_iff[of H]
+    using circline_type_neg_card_gt3[of H]
+    by auto
+  hence "{inversion u, inversion v, inversion w} \<subseteq> circline_set (circline_inversion H)"
+        "{inversion u, inversion v, inversion w} \<subseteq> circline_set H"
+    using is_poincare_line_inverse_point[OF assms]
+    by auto
+  thus ?thesis
+    using * unique_circline_set[of "inversion u" "inversion v" "inversion w"]
+    by (metis insert_subset inversion_involution)
+qed
+
+
+lemma is_poincare_line_trough_zero_trough_infty [simp]:
+  assumes "is_poincare_line l" and "0\<^sub>h \<in> circline_set l"
+  shows "\<infinity>\<^sub>h \<in> circline_set l"
+  using is_poincare_line_inverse_point[OF assms]
+  by simp
+
+lemma is_poincare_line_trough_zero_is_line:
+  assumes "is_poincare_line l" and "0\<^sub>h \<in> circline_set l"
+  shows "is_line l"
+  using assms
+  using inf_in_circline_set is_poincare_line_trough_zero_trough_infty
+  by blast
+
+lemma is_poincare_line_not_trough_zero_not_trough_infty [simp]:
+  assumes "is_poincare_line l"
+  assumes "0\<^sub>h \<notin> circline_set l"
+  shows "\<infinity>\<^sub>h \<notin> circline_set l"
+  using assms
+  using is_poincare_line_inverse_point[OF assms(1), of "\<infinity>\<^sub>h"]
+  by auto
+
+lemma is_poincare_line_not_trough_zero_is_circle:
+  assumes "is_poincare_line l" "0\<^sub>h \<notin> circline_set l"
+  shows "is_circle l"
+  using assms
+  using inf_in_circline_set is_poincare_line_not_trough_zero_not_trough_infty
+  by auto
+
+
+
+lemma ex_is_poincare_line_points':
+  assumes i12: "i1 \<in> circline_set H \<inter> unit_circle_set"
+               "i2 \<in> circline_set H \<inter> unit_circle_set"
+               "i1 \<noteq> i2"
+  assumes a: "a \<in> circline_set H" "a \<notin> unit_circle_set"
+  shows "\<exists> b. b \<noteq> i1 \<and> b \<noteq> i2 \<and> b \<noteq> a \<and> b \<noteq> inversion a \<and> b \<in> circline_set H"
+proof-
+  have "inversion a \<notin> unit_circle_set"
+    unfolding unit_circle_set_def circline_set_def
+    by (metis inversion_id_iff_on_unit_circle inversion_involution mem_Collect_eq)
+
+  have "a \<noteq> inversion a"
+    unfolding unit_circle_set_def circline_set_def
+    by auto
+
+  have "a \<noteq> i1" "a \<noteq> i2" "inversion a \<noteq> i1" "inversion a \<noteq> i2"
+    by auto
+
+  then obtain b where cr2: "cross_ratio b i1 a i2 = of_complex 2"
+    using ex_cross_ratio[of i1 a i2]
+    by blast
+
+  have distinct_b: "b \<noteq> i1" "b \<noteq> i2" "b \<noteq> a"
+    using ex1_cross_ratio[of i1 a i2]
+    using cross_ratio_0[of i1 a i2] cross_ratio_1[of i1 a i2] cross_ratio_inf[of i1 i2 a]
+    using cr2
+    by auto
+
+  hence "b \<in> circline_set H" 
+    using assms four_points_on_circline_iff_cross_ratio_real[of b i1 a i2] cr2
+    using unique_circline_set[of i1 i2 a]
+    by auto
+
+  moreover
+
+  have "b \<noteq> inversion a"
+  proof (rule ccontr)
+    assume *: "\<not> ?thesis"
+    have "inversion i1 = i1" "inversion i2 = i2"
+      using i12
+      unfolding unit_circle_set_def
+      by auto
+    hence "cross_ratio (inversion a) i1 a i2 = cross_ratio a i1 (inversion a) i2"
+      using four_points_on_circline_iff_cross_ratio_real[of b i1 a i2]
+      using i12 distinct_b conjugate_id_iff[of "cross_ratio b i1 a i2"]
+      by auto
+    hence "cross_ratio (inversion a) i1 a i2 \<noteq> of_complex 2"
+      using cross_ratio_commute_13[of "inversion a" i1 a i2]
+      using reciprocal_id_iff
+      using of_complex_inj
+      by force
+    thus False
+      using * cr2
+      by simp
+  qed
+
+  ultimately
+  show ?thesis
+    by auto
+qed
+
+lemma ex_is_poincare_line_points:
+  assumes "is_poincare_line H"
+  shows "\<exists> u v. u \<in> unit_disc \<and> v \<in> unit_disc \<and> u \<noteq> v \<and> {u, v} \<subseteq> circline_set H"
+proof-
+  obtain u v w where *: "u \<noteq> v" "v \<noteq> w" "u \<noteq> w" "{u, v, w} \<subseteq> circline_set H"
+    using assms is_poincare_line_iff[of H]
+    using circline_type_neg_card_gt3[of H]
+    by auto
+
+  have "\<not> {u, v, w} \<subseteq> unit_circle_set"
+    using unique_circline_set[of u v w] *
+    by (metis assms insert_subset not_is_poincare_line_unit_circle unit_circle_set_def)
+
+  hence "H \<noteq> unit_circle"
+    unfolding unit_circle_set_def
+    using *
+    by auto
+
+  show ?thesis
+  proof (cases "(u \<in> unit_disc \<and> v \<in> unit_disc) \<or>
+                (u \<in> unit_disc \<and> w \<in> unit_disc) \<or>
+                (v \<in> unit_disc \<and> w \<in> unit_disc)")
+    case True
+    thus ?thesis
+      using *
+      by auto
+  next
+    case False
+
+    have "\<exists> a b. a \<noteq> b \<and> a \<noteq> inversion b \<and> a \<in> circline_set H \<and> b \<in> circline_set H \<and> a \<notin> unit_circle_set \<and> b \<notin> unit_circle_set"
+    proof (cases "(u \<in> unit_circle_set \<and> v \<in> unit_circle_set) \<or>
+                  (u \<in> unit_circle_set \<and> w \<in> unit_circle_set) \<or>
+                  (v \<in> unit_circle_set \<and> w \<in> unit_circle_set)")
+      case True
+      then obtain i1 i2 a where *:
+        "i1 \<in> unit_circle_set \<inter> circline_set H" "i2 \<in> unit_circle_set \<inter> circline_set H" 
+        "a \<in> circline_set H" "a \<notin> unit_circle_set"
+        "i1 \<noteq> i2" "i1 \<noteq> a" "i2 \<noteq> a"
+        by auto
+      then obtain b where "b \<in> circline_set H" "b \<noteq> i1" "b \<noteq> i2" "b \<noteq> a" "b \<noteq> inversion a"
+        using ex_is_poincare_line_points'[of i1 H i2 a]
+        by blast
+
+      hence "b \<notin> unit_circle_set"
+        unfolding unit_circle_set_def
+        by auto
+        
+      thus ?thesis
+        by auto
+    next
+      case False  
+      then obtain f g h where
+        *: "f \<noteq> g" "f \<in> circline_set H" "f \<notin> unit_circle_set"  
+                    "g \<in> circline_set H" "g \<notin> unit_circle_set"
+                    "h \<in> circline_set H" "h \<noteq> f" "h \<noteq> g"
+        using *
+        by auto
+      show ?thesis
+      proof (cases "f = inversion g")   
+        case False
+        thus ?thesis
+          using *
+          by auto
+      next
+        case True
+        show ?thesis
+        proof (cases "h \<in> unit_circle_set")
+          case False
+          thus ?thesis
+            by auto
+        next
+          case True
+          obtain m where cr2: "cross_ratio m h f g = of_complex 2"
+            by auto
+          hence "m \<noteq> h" "m \<noteq> f" "m \<noteq> g"
+            using ex1_cross_ratio[of h f g]
+            using cross_ratio_0[of h f g] cross_ratio_1[of h f g] cross_ratio_inf[of h g f]
+            using cr2
+            by auto
+          hence "m \<in> circline_set H" 
+            using four_points_on_circline_iff_cross_ratio_real[of m h f g] cr2
+            using unique_circline_set[of h f g]
+            by auto
+
+          show ?thesis
+          proof (cases "m \<in> unit_circle_set")
+            case False
+            thus ?thesis
+              by auto
+          next
+            case True
+            then obtain n where "n \<noteq> h" "n \<noteq> m" "n \<noteq> f" "n \<noteq> inversion f" "n \<in> circline_set H"
+              by auto
+            hence "n \<notin> unit_circle_set"
+              unfolding unit_circle_set_def
+              by auto
+        
+            thus ?thesis
+              by auto
+          qed
+        qed
+      qed
+    qed
+    then obtain a b where ab: "a \<noteq> b" "a \<noteq> inversion b" "a \<in> circline_set H" "b \<in> circline_set H" "a \<notin> unit_circle_set" "b \<notin> unit_circle_set"
+      by blast
+    have "\<forall> x. x \<in> circline_set H \<and> x \<notin> unit_circle_set \<longrightarrow> (\<exists> x'. x' \<in> circline_set H \<inter> unit_disc \<and> (x' = x \<or> x' = inversion x))"
+    proof safe
+      fix x
+      assume x: "x \<in> circline_set H" "x \<notin> unit_circle_set" 
+      show "\<exists> x'. x' \<in> circline_set H \<inter> unit_disc \<and> (x' = x \<or> x' = inversion x)"
+      proof (cases "x \<in> unit_disc")
+        case True
+        thus ?thesis
+          using x
+          by auto
+      next
+        case False
+        hence "x \<in> unit_disc_compl"
+          using x  in_on_out_univ[of "ounit_circle"]
+          unfolding unit_circle_set_def unit_disc_def unit_disc_compl_def
+          by auto
+        hence "inversion x \<in> unit_disc"
+          using inversion_unit_disc_compl
+          by blast
+        thus ?thesis
+          using is_poincare_line_inverse_point[OF assms, of x] x
+          by auto
+      qed
+    qed
+    then obtain a' b' where 
+      *: "a' \<in> circline_set H" "a' \<in> unit_disc" "b' \<in> circline_set H" "b' \<in> unit_disc" and
+      **: "a' = a \<or> a' = inversion a" "b' = b \<or> b' = inversion b" 
+      using ab
+      by blast
+    have "a' \<noteq> b'"
+      by (metis inversion_involution)
+    thus ?thesis
+      using *
+      by auto
+  qed
+qed
+
+
+lemma unique_is_poincare_line:
+  assumes in_disc: "u \<in> unit_disc" "v \<in> unit_disc" "u \<noteq> v"
+  assumes pl: "is_poincare_line l1" "is_poincare_line l2"
+  assumes on_l: "{u, v} \<subseteq> circline_set l1 \<inter> circline_set l2"
+  shows "l1 = l2"
+proof-
+  have "u \<noteq> inversion u" "v \<noteq> inversion u"
+    using in_disc
+    using inversion_noteq_unit_disc[of u v]
+    using inversion_noteq_unit_disc[of u u]
+    by auto
+  thus ?thesis
+    using on_l
+    using is_poincare_line_inverse_point[of l1 u]
+    using is_poincare_line_inverse_point[of l2 u]
+    using pl
+    by auto                                                                            
+qed
+
+
+lemma unique_is_poincare_line_general:
+  assumes different: "u \<noteq> v" "u \<noteq> inversion v"
+  assumes pl: "is_poincare_line l1" "is_poincare_line l2"
+  assumes on_l: "{u, v} \<subseteq> circline_set l1 \<inter> circline_set l2"
+  shows  "l1 = l2"
+proof (cases "u \<noteq> inversion u")
+  case True
+  thus ?thesis
+    using unique_circline_set[of u "inversion u" "v"]
+    using assms
+    using is_poincare_line_inverse_point by force
+next
+  case False
+  show ?thesis
+  proof (cases "v \<noteq> inversion v")
+    case True
+    thus ?thesis
+      using unique_circline_set[of u "inversion v" "v"]
+      using assms
+      using is_poincare_line_inverse_point by force
+  next
+    case False
+
+    have "on_circline unit_circle u" "on_circline unit_circle v"
+      using inversion_id_iff_on_unit_circle
+      by fastforce+
+    thus ?thesis
+      unfolding circline_set_def
+      apply simp
+    proof (transfer, transfer, safe)
+      fix u1 u2 v1 v2 A1 B1 C1 D1 A2 B2 C2 D2 :: complex
+      let ?u = "(u1, u2)" and ?v = "(v1, v2)" and  ?H1 = "(A1, B1, C1, D1)" and ?H2 = "(A2, B2, C2, D2)"
+      assume *: "?u \<noteq> vec_zero" "?v \<noteq> vec_zero"
+        "on_circline_cmat_cvec unit_circle_cmat ?u" "on_circline_cmat_cvec unit_circle_cmat ?v" 
+        "is_poincare_line_cmat ?H1" "is_poincare_line_cmat ?H2"
+        "hermitean ?H1" "?H1 \<noteq> mat_zero" "hermitean ?H2" "?H2 \<noteq> mat_zero"
+        "on_circline_cmat_cvec ?H1 ?u" "on_circline_cmat_cvec ?H1 ?v"
+        "on_circline_cmat_cvec ?H2 ?u" "on_circline_cmat_cvec ?H2 ?v"
+        "\<not> (u1, u2) \<approx>\<^sub>v (v1, v2)"
+      have **: "A1 = D1" "A2 = D2" "C1 = cnj B1" "C2 = cnj B2" "is_real A1" "is_real A2"
+        using hermitean_elems
+        by auto
+
+      have uv: "u1 \<noteq> 0" "u2 \<noteq> 0" "v1 \<noteq> 0" "v2 \<noteq> 0"
+        using *(1-4)
+        by (auto simp add: vec_cnj_def)
+
+      have u: "cor ((Re (u1/u2))\<^sup>2) + cor ((Im (u1/u2))\<^sup>2) = 1"
+        apply (subst of_real_add[symmetric])
+        apply (subst complex_mult_cnj[symmetric])
+        apply (simp add: vec_cnj_def mult.commute)
+        done
+
+      have v: "cor ((Re (v1/v2))\<^sup>2) + cor ((Im (v1/v2))\<^sup>2) = 1"
+        apply (subst of_real_add[symmetric])
+        apply (subst complex_mult_cnj[symmetric])
+        apply (simp add: vec_cnj_def mult.commute)
+        done
+
+      have 
+        "A1 * (cor ((Re (u1/u2))\<^sup>2) + cor ((Im (u1/u2))\<^sup>2) + 1) + cor (Re B1) * cor(2 * Re (u1/u2)) + cor (Im B1) * cor(2 * Im (u1/u2)) = 0"
+        "A2 * (cor ((Re (u1/u2))\<^sup>2) + cor ((Im (u1/u2))\<^sup>2) + 1) + cor (Re B2) * cor(2 * Re (u1/u2)) + cor (Im B2) * cor(2 * Im (u1/u2)) = 0"
+        "A1 * (cor ((Re (v1/v2))\<^sup>2) + cor ((Im (v1/v2))\<^sup>2) + 1) + cor (Re B1) * cor(2 * Re (v1/v2)) + cor (Im B1) * cor(2 * Im (v1/v2)) = 0"
+        "A2 * (cor ((Re (v1/v2))\<^sup>2) + cor ((Im (v1/v2))\<^sup>2) + 1) + cor (Re B2) * cor(2 * Re (v1/v2)) + cor (Im B2) * cor(2 * Im (v1/v2)) = 0"
+        using circline_equation_quadratic_equation[of A1 "u1/u2" B1 D1 "Re (u1/u2)" "Im (u1 / u2)" "Re B1" "Im B1"]
+        using circline_equation_quadratic_equation[of A2 "u1/u2" B2 D2 "Re (u1/u2)" "Im (u1 / u2)" "Re B2" "Im B2"]
+        using circline_equation_quadratic_equation[of A1 "v1/v2" B1 D1 "Re (v1/v2)" "Im (v1 / v2)" "Re B1" "Im B1"]
+        using circline_equation_quadratic_equation[of A2 "v1/v2" B2 D2 "Re (v1/v2)" "Im (v1 / v2)" "Re B2" "Im B2"]
+        using ** uv
+        by (simp_all add: vec_cnj_def field_simps)
+
+      hence
+        "A1 + cor (Re B1) * cor(Re (u1/u2)) + cor (Im B1) * cor(Im (u1/u2)) = 0"
+        "A1 + cor (Re B1) * cor(Re (v1/v2)) + cor (Im B1) * cor(Im (v1/v2)) = 0"
+        "A2 + cor (Re B2) * cor(Re (u1/u2)) + cor (Im B2) * cor(Im (u1/u2)) = 0"
+        "A2 + cor (Re B2) * cor(Re (v1/v2)) + cor (Im B2) * cor(Im (v1/v2)) = 0"
+        using u v
+        by simp_all algebra+
+
+      hence 
+        "cor (Re A1 + Re B1 * Re (u1/u2) + Im B1 * Im (u1/u2)) = 0"
+        "cor (Re A2 + Re B2 * Re (u1/u2) + Im B2 * Im (u1/u2)) = 0"
+        "cor (Re A1 + Re B1 * Re (v1/v2) + Im B1 * Im (v1/v2)) = 0"
+        "cor (Re A2 + Re B2 * Re (v1/v2) + Im B2 * Im (v1/v2)) = 0"
+        by simp_all
+
+      hence 
+        "Re A1 + Re B1 * Re (u1/u2) + Im B1 * Im (u1/u2) = 0"
+        "Re A1 + Re B1 * Re (v1/v2) + Im B1 * Im (v1/v2) = 0"
+        "Re A2 + Re B2 * Re (u1/u2) + Im B2 * Im (u1/u2) = 0"
+        "Re A2 + Re B2 * Re (v1/v2) + Im B2 * Im (v1/v2) = 0"
+        using of_real_eq_0_iff 
+        by blast+
+
+      moreover
+
+      have "Re(u1/u2) \<noteq> Re(v1/v2) \<or> Im(u1/u2) \<noteq> Im(v1/v2)"
+      proof (rule ccontr)
+        assume "\<not> ?thesis"
+        hence "u1/u2 = v1/v2"
+          using complex_eqI by blast
+        thus False
+          using "*"(1) "*"(2) complex_cvec_eq_mix[OF *(1) *(2)]
+          by (auto simp add: field_simps)
+      qed
+
+      moreover
+
+      have "Re A1 \<noteq> 0 \<or> Re B1 \<noteq> 0 \<or> Im B1 \<noteq> 0"
+        by (metis complex_cnj_zero complex_of_real_Re mat_zero_def of_real_0)
+
+      ultimately
+
+      obtain k where
+        k: "Re A2 = k * Re A1" "Re B2 = k * Re B1" "Im B2 = k * Im B1"
+        using linear_system_homogenous_3_2[of "\<lambda>x y z. 1 * x + Re (u1 / u2) * y + Im (u1 / u2) * z" 1 "Re (u1/u2)" "Im (u1/u2)" 
+                                              "\<lambda>x y z. 1 * x + Re (v1 / v2) * y + Im (v1 / v2) * z" 1 "Re (v1/v2)" "Im (v1/v2)"
+                                              "Re A2" "Re B2" "Im B2" "Re A1" "Re B1" "Im B1"]
+        by (auto simp add: field_simps)
+
+      have "Re A2 \<noteq> 0 \<or> Re B2 \<noteq> 0 \<or> Im B2 \<noteq> 0"
+        by (metis complex_cnj_zero complex_of_real_Re mat_zero_def of_real_0)
+      hence "k \<noteq> 0"
+        using k
+        by auto
+
+      show "circline_eq_cmat ?H1 ?H2"
+        by (auto simp add: vec_cnj_def) (rule_tac x="k" in exI, auto simp add: complex.expand)
+    qed
+  qed
+qed
+
+lemma is_poincare_line_0_real_is_x_axis:
+  assumes "is_poincare_line l" "0\<^sub>h \<in> circline_set l"
+    "x \<in> circline_set l \<inter> circline_set x_axis" "x \<noteq> 0\<^sub>h" "x \<noteq> \<infinity>\<^sub>h"
+  shows "l = x_axis"
+  using assms
+  using is_poincare_line_trough_zero_trough_infty[OF assms(1-2)]
+  using unique_circline_set[of x "0\<^sub>h" "\<infinity>\<^sub>h"]
+  by auto
+
+lemma is_poincare_line_0_imag_is_y_axis:
+  assumes "is_poincare_line l" "0\<^sub>h \<in> circline_set l"
+    "y \<in> circline_set l \<inter> circline_set y_axis" "y \<noteq> 0\<^sub>h" "y \<noteq> \<infinity>\<^sub>h"
+  shows "l = y_axis"
+  using assms
+  using is_poincare_line_trough_zero_trough_infty[OF assms(1-2)]
+  using unique_circline_set[of y "0\<^sub>h" "\<infinity>\<^sub>h"]
+  by auto
+
+
+
+lemma unit_circle_fix_preserve_is_poincare_line [simp]:
+  assumes "unit_circle_fix M" "is_poincare_line H"
+  shows "is_poincare_line (moebius_circline M H)"
+  using assms
+  unfolding is_poincare_line_iff
+proof (safe)
+  let ?H' = "moebius_ocircline M (of_circline H)"
+  let ?U' = "moebius_ocircline M ounit_circle"
+  assume ++: "unit_circle_fix M" "perpendicular H unit_circle"
+  have ounit: "ounit_circle = moebius_ocircline M ounit_circle \<or>
+               ounit_circle = moebius_ocircline M (opposite_ocircline ounit_circle)"
+    using ++(1) unit_circle_fix_iff[of M]
+    by (simp add: inj_of_ocircline moebius_circline_ocircline)
+
+  show "perpendicular (moebius_circline M H) unit_circle"
+  proof (cases "pos_oriented ?H'")
+    case True
+    hence *: "of_circline (of_ocircline ?H') = ?H'"
+      using of_circline_of_ocircline_pos_oriented
+      by blast
+    from ounit show ?thesis
+    proof
+      assume **: "ounit_circle = moebius_ocircline M ounit_circle"
+      show ?thesis
+        using ++ 
+        unfolding perpendicular_def
+        by (simp, subst moebius_circline_ocircline, subst *, subst **) simp

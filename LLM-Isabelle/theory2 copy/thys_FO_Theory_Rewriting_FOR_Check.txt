@@ -1,0 +1,676 @@
+theory FOR_Check
+  imports
+    FOR_Semantics
+    FOL_Extra
+    GTT_RRn
+    First_Order_Terms.Option_Monad
+    LV_to_GTT
+    NF
+    Regular_Tree_Relations.GTT_Transitive_Closure
+    Regular_Tree_Relations.AGTT
+    Regular_Tree_Relations.RR2_Infinite_Q_infinity
+    Regular_Tree_Relations.RRn_Automata
+begin
+
+
+type_synonym ('f, 'v) fin_trs  = "('f, 'v) rule fset"
+
+lemma tl_drop_conv:
+  "tl xs = drop 1 xs"
+  by (induct xs) auto
+
+definition rrn_drop_fst where
+  "rrn_drop_fst \<A> = relabel_reg (trim_reg (collapse_automaton_reg (fmap_funs_reg (drop_none_rule 1) (trim_reg \<A>))))"
+
+lemma rrn_drop_fst_lang:
+  assumes "RRn_spec n A T" "1 < n"
+  shows "RRn_spec (n - 1) (rrn_drop_fst A) (drop 1 ` T)"
+  using drop_automaton_reg[OF _ assms(2), of "trim_reg A" T] assms(1)
+  unfolding rrn_drop_fst_def
+  by (auto simp: trim_ta_reach)
+
+
+definition liftO1 :: "('a \<Rightarrow> 'b) \<Rightarrow> 'a option \<Rightarrow> 'b option" where
+  "liftO1 = map_option"
+
+definition liftO2 :: "('a \<Rightarrow> 'b \<Rightarrow> 'c) \<Rightarrow> 'a option \<Rightarrow> 'b option \<Rightarrow> 'c option" where
+  "liftO2 f a b = case_option None (\<lambda>a'. liftO1 (f a') b) a"
+
+lemma liftO1_Some [simp]:
+  "liftO1 f x = Some y \<longleftrightarrow> (\<exists>x'. x = Some x') \<and> y = f (the x)"
+  by (cases x) (auto simp: liftO1_def)
+
+lemma liftO2_Some [simp]:
+  "liftO2 f x y = Some z \<longleftrightarrow> (\<exists>x' y'. x = Some x' \<and> y = Some y') \<and> z = f (the x) (the y)"
+  by (cases x; cases y) (auto simp: liftO2_def)
+
+
+lemma is_to_trs_props:
+  assumes "\<forall> R \<in> set Rs. finite R \<and> lv_trs R \<and> funas_trs R \<subseteq> \<F>" "\<forall>i \<in> set is. case_ftrs id id i < length Rs"
+  shows "funas_trs (is_to_trs Rs is) \<subseteq> \<F>" "lv_trs (is_to_trs Rs is)" "finite (is_to_trs Rs is)"
+proof (goal_cases \<F> lv fin)
+  case \<F> show ?case using assms nth_mem
+    apply (auto simp: is_to_trs_def funas_trs_def case_prod_beta split: ftrs.splits)
+     apply fastforce
+    apply (metis (no_types, lifting) assms(1) in_mono rhs_wf)
+    apply (metis (no_types, lifting) assms(1) in_mono rhs_wf)
+    by (smt (z3) UN_subset_iff fst_conv in_mono le_sup_iff)
+qed (insert assms, (fastforce simp: is_to_trs_def funas_trs_def lv_trs_def split: ftrs.splits)+)
+
+
+definition is_to_fin_trs :: "('f, 'v) fin_trs list \<Rightarrow> ftrs list \<Rightarrow> ('f, 'v) fin_trs" where
+  "is_to_fin_trs Rs is = |\<Union>|  (fset_of_list (map (case_ftrs ((!) Rs) ((|`|) prod.swap \<circ> (!) Rs)) is))"
+
+
+lemma is_to_fin_trs_conv:
+  assumes "\<forall>i \<in> set is. case_ftrs id id i < length Rs"
+  shows "is_to_trs (map fset Rs) is = fset (is_to_fin_trs Rs is)"
+  using assms unfolding is_to_trs_def is_to_fin_trs_def
+  by (auto simp: ffUnion.rep_eq fset_of_list.rep_eq split: ftrs.splits)
+
+definition is_to_trs' :: "('f, 'v) fin_trs list \<Rightarrow> ftrs list \<Rightarrow> ('f, 'v) fin_trs option" where
+  "is_to_trs' Rs is = do {
+    guard (\<forall>i \<in> set is. case_ftrs id id i < length Rs);
+    Some (is_to_fin_trs Rs is)
+  }"
+
+lemma is_to_trs_conv:
+  "is_to_trs' Rs is = Some S \<Longrightarrow> is_to_trs (map fset Rs) is = fset S"
+  using is_to_fin_trs_conv unfolding is_to_trs'_def
+  by (auto simp add: guard_simps split: bind_splits)
+
+lemma is_to_trs'_props:
+  assumes "\<forall> R \<in> set Rs. lv_trs (fset R) \<and> ffunas_trs R |\<subseteq>| \<F>" and "is_to_trs' Rs is = Some S"
+  shows "ffunas_trs S |\<subseteq>| \<F>" "lv_trs (fset S)"
+proof -
+  from assms(2) have well: "\<forall>i \<in> set is. case_ftrs id id i < length Rs" "is_to_fin_trs Rs is = S"
+    unfolding is_to_trs'_def
+    by (auto simp add: guard_simps split: bind_splits)
+  have "\<forall> R \<in> set Rs. finite (fset R) \<and> lv_trs (fset R) \<and> funas_trs (fset R) \<subseteq> (fset \<F>)"
+    using assms(1) by (auto simp: ffunas_trs.rep_eq less_eq_fset.rep_eq)
+  from is_to_trs_props[of "map fset Rs" "fset \<F>" "is"] this well(1)
+  have "lv_trs (is_to_trs (map fset Rs) is)" "funas_trs (is_to_trs (map fset Rs) is) \<subseteq> fset \<F>"
+    by auto
+  then show "lv_trs (fset S)" "ffunas_trs S |\<subseteq>| \<F>"
+    using is_to_fin_trs_conv[OF well(1)] unfolding well(2)
+    by (auto simp: ffunas_trs.rep_eq less_eq_fset.rep_eq)
+qed
+
+
+fun gtt_of_gtt_rel :: "('f \<times> nat) fset \<Rightarrow> ('f :: linorder, 'v) fin_trs list \<Rightarrow> ftrs gtt_rel \<Rightarrow> (nat, 'f) gtt option" where
+  "gtt_of_gtt_rel \<F> Rs (ARoot is) = liftO1 (\<lambda>R. relabel_gtt (agtt_grrstep R \<F>)) (is_to_trs' Rs is)"
+| "gtt_of_gtt_rel \<F> Rs (GInv g) = liftO1 prod.swap (gtt_of_gtt_rel \<F> Rs g)"
+| "gtt_of_gtt_rel \<F> Rs (AUnion g1 g2) = liftO2 (\<lambda>g1 g2. relabel_gtt (AGTT_union' g1 g2)) (gtt_of_gtt_rel \<F> Rs g1) (gtt_of_gtt_rel \<F> Rs g2)"
+| "gtt_of_gtt_rel \<F> Rs (ATrancl g) = liftO1 (relabel_gtt \<circ> AGTT_trancl) (gtt_of_gtt_rel \<F> Rs g)"
+| "gtt_of_gtt_rel \<F> Rs (GTrancl g) = liftO1 GTT_trancl (gtt_of_gtt_rel \<F> Rs g)"
+| "gtt_of_gtt_rel \<F> Rs (AComp g1 g2) = liftO2 (\<lambda>g1 g2. relabel_gtt (AGTT_comp' g1 g2)) (gtt_of_gtt_rel \<F> Rs g1) (gtt_of_gtt_rel \<F> Rs g2)"
+| "gtt_of_gtt_rel \<F> Rs (GComp g1 g2) = liftO2 (\<lambda>g1 g2. relabel_gtt (GTT_comp' g1 g2)) (gtt_of_gtt_rel \<F> Rs g1) (gtt_of_gtt_rel \<F> Rs g2)"
+
+
+lemma gtt_of_gtt_rel_correct:
+  assumes "\<forall>R \<in> set Rs. lv_trs (fset R) \<and> ffunas_trs R |\<subseteq>| \<F>"
+  shows "gtt_of_gtt_rel \<F> Rs g = Some g' \<Longrightarrow> agtt_lang g' = eval_gtt_rel (fset \<F>) (map fset Rs) g"
+proof (induct g arbitrary: g')
+  note [simp] = bind_eq_Some_conv guard_simps
+  have proj_sq: "fst ` (X \<times> X) = X" "snd ` (X \<times> X) = X" for X by auto
+{
+  case (ARoot "is")
+  then obtain w where w:"is_to_trs' Rs is = Some w" by auto
+  then show ?case using ARoot is_to_trs'_props[OF assms w] is_to_trs_conv[OF w]
+    using agtt_grrstep 
+    by auto
+next
+  case (GInv g) then show ?case by (simp add: agtt_lang_swap gtt_states_def)
+next
+  case (AUnion g1 g2)
+  from AUnion(3)[simplified, THEN conjunct1] AUnion(3)[simplified, THEN conjunct2, THEN conjunct1]
+  obtain w1 w2 where
+    [simp]: "gtt_of_gtt_rel \<F> Rs g1 = Some w1" "gtt_of_gtt_rel \<F> Rs g2 = Some w2"
+    by blast
+  then show ?case using AUnion(3)
+    by (simp add: AGTT_union'_sound AUnion)
+next
+  case (ATrancl g)
+  from ATrancl[simplified] obtain w1 where
+    [simp]: "gtt_of_gtt_rel \<F> Rs g = Some w1" "g' = relabel_gtt (AGTT_trancl w1)" by auto
+  then have fin_lang: "eval_gtt_rel (fset \<F>) (map fset Rs) g = agtt_lang w1"
+    using ATrancl by auto
+  from fin_lang show ?case using AGTT_trancl_sound[of w1]
+    by auto
+next
+  case (GTrancl g) note * = GTrancl(2)[simplified, THEN conjunct2]
+  show ?case unfolding gtt_of_gtt_rel.simps GTT_trancl_alang * gtrancl_rel_def eval_gtt_rel.simps gmctxt_cl_gmctxtex_onp_conv
+  proof ((intro conjI equalityI subrelI; (elim relcompE)?), goal_cases LR RL)
+    case (LR _ _ s _ z s' t' t)
+    show ?case using lift_root_steps_sig_transfer'[OF LR(2)[folded lift_root_step.simps], of "fset \<F>"]
+      lift_root_steps_sig_transfer[OF LR(5)[folded lift_root_step.simps], of "fset \<F>"]
+      image_mono[OF eval_gtt_rel_sig[of "fset \<F>" "map fset Rs" g], of fst, unfolded proj_sq]
+      image_mono[OF eval_gtt_rel_sig[of "fset \<F>" "map fset Rs" g], of snd, unfolded proj_sq]
+      subsetD[OF eval_gtt_rel_sig[of "fset \<F>" "map fset Rs" g]] LR(1, 3, 4) GTrancl
+      by (intro relcompI[OF _ relcompI, of _ s' _ t' _])
+         (auto simp: \<T>\<^sub>G_funas_gterm_conv lift_root_step.simps)
+  next
+    case (RL _ _ s _ z s' t' t)
+    then show ?case using GTrancl
+      lift_root_step_mono[of "fset \<F>" UNIV PAny ESingle "eval_gtt_rel (fset \<F>) (map fset Rs) g", THEN rtrancl_mono]
+      unfolding lift_root_step.simps[symmetric]
+      by (intro relcompI[OF _ relcompI, of _ s' _ t' _])
+         (auto simp: \<T>\<^sub>G_funas_gterm_conv lift_root_step_mono trancl_mono)
+  qed
+next
+  case (AComp g1 g2)
+  from AComp[simplified] obtain w1 w2 where
+    [simp]: "gtt_of_gtt_rel \<F> Rs g1 = Some w1" "gtt_of_gtt_rel \<F> Rs g2 = Some w2"
+            "g' = relabel_gtt (AGTT_comp' w1 w2)" by auto
+  then have fin_lang: "eval_gtt_rel (fset \<F>) (map fset Rs) g1 = agtt_lang w1"
+    "eval_gtt_rel (fset \<F>) (map fset Rs) g2 = agtt_lang w2"
+    using AComp by auto
+  from fin_lang AGTT_comp'_sound[of w1 w2]
+  show ?case by simp
+next
+  case (GComp g1 g2)
+  let ?r = "\<lambda> g. eval_gtt_rel (fset \<F>) (map fset Rs) g"
+  have *: "gmctxtex_onp (\<lambda>C. True) (?r g1) = lift_root_step UNIV PAny EParallel (?r g1)"
+    "gmctxtex_onp (\<lambda>C. True) (?r g2) = lift_root_step UNIV PAny EParallel (?r g2)"
+    by (auto simp: lift_root_step.simps)
+  show ?case using GComp(3)
+    apply (intro conjI equalityI subrelI; simp add: gmctxt_cl_gmctxtex_onp_conv GComp(1,2) gtt_comp'_alang gcomp_rel_def * flip: lift_root_step.simps; elim conjE disjE exE relcompE)
+    subgoal for s t _ _ _ _ _ u
+      using image_mono[OF eval_gtt_rel_sig, of snd "fset \<F>" "map fset Rs", unfolded proj_sq]
+      apply (subst relcompI[of _ u "eval_gtt_rel _ _ g1", OF _ lift_root_step_sig_transfer[of _ UNIV PAny EParallel "_ g2" "fset \<F>"]])
+      apply (force simp add: subsetI \<T>\<^sub>G_equivalent_def)+
+      done
+    subgoal for s t _ _ _ _ _ u
+      using image_mono[OF eval_gtt_rel_sig, of fst "fset \<F>" "map fset Rs", unfolded proj_sq]
+      apply (subst relcompI[of _ u _ _ "eval_gtt_rel _ _ g2", OF lift_root_step_sig_transfer'[of _ UNIV PAny EParallel "_ g1" "fset \<F>"]])
+      apply (force simp add: subsetI \<T>\<^sub>G_equivalent_def)+
+      done
+    by (auto intro: subsetD[OF lift_root_step_mono[of "fset \<F>" UNIV]])
+}
+qed
+
+
+
+definition "simplify_reg \<A> = (relabel_reg (trim_reg \<A>))"
+
+lemma \<L>_simplify_reg [simp]: "\<L> (simplify_reg \<A>) = \<L> \<A>"
+  by (simp add: simplify_reg_def \<L>_trim)
+
+lemma RR1_spec_simplify_reg[simp]:
+  "RR1_spec (simplify_reg \<A>) R = RR1_spec \<A> R"
+  by (auto simp: RR1_spec_def)
+lemma RR2_spec_simplify_reg[simp]:
+  "RR2_spec (simplify_reg \<A>) R = RR2_spec \<A> R"
+  by (auto simp: RR2_spec_def)
+lemma RRn_spec_simplify_reg[simp]:
+  "RRn_spec n (simplify_reg \<A>) R = RRn_spec n \<A> R"
+  by (auto simp: RRn_spec_def)
+
+lemma RR1_spec_eps_free_reg[simp]:
+  "RR1_spec (eps_free_reg \<A>) R = RR1_spec \<A> R"
+  by (auto simp: RR1_spec_def \<L>_eps_free)
+lemma RR2_spec_eps_free_reg[simp]:
+  "RR2_spec (eps_free_reg \<A>) R = RR2_spec \<A> R"
+  by (auto simp: RR2_spec_def \<L>_eps_free)
+lemma RRn_spec_eps_free_reg[simp]:
+  "RRn_spec n (eps_free_reg \<A>) R = RRn_spec n \<A> R"
+  by (auto simp: RRn_spec_def \<L>_eps_free)
+
+fun rr1_of_rr1_rel :: "('f \<times> nat) fset \<Rightarrow> ('f :: linorder, 'v) fin_trs list \<Rightarrow> ftrs rr1_rel \<Rightarrow> (nat, 'f) reg option"
+and rr2_of_rr2_rel :: "('f \<times> nat) fset \<Rightarrow> ('f, 'v) fin_trs list \<Rightarrow> ftrs rr2_rel \<Rightarrow> (nat, 'f option \<times> 'f option) reg option" where
+  "rr1_of_rr1_rel \<F> Rs R1Terms = Some (relabel_reg (term_reg \<F>))"
+| "rr1_of_rr1_rel \<F> Rs (R1NF is) = liftO1 (\<lambda>R. (simplify_reg (nf_reg (fst |`| R) \<F>))) (is_to_trs' Rs is)"
+| "rr1_of_rr1_rel \<F> Rs (R1Inf r) = liftO1 (\<lambda>R.
+    let \<A> = trim_reg R in
+    simplify_reg (proj_1_reg (Inf_reg_impl \<A>))
+  ) (rr2_of_rr2_rel \<F> Rs r)"
+| "rr1_of_rr1_rel \<F> Rs (R1Proj i r) = (case i of 0 \<Rightarrow>
+      liftO1 (trim_reg \<circ> proj_1_reg) (rr2_of_rr2_rel \<F> Rs r)
+    | _ \<Rightarrow> liftO1 (trim_reg \<circ> proj_2_reg) (rr2_of_rr2_rel \<F> Rs r))"
+| "rr1_of_rr1_rel \<F> Rs (R1Union s1 s2) =
+    liftO2 (\<lambda> x y. relabel_reg (reg_union x y)) (rr1_of_rr1_rel \<F> Rs s1) (rr1_of_rr1_rel \<F> Rs s2)"
+| "rr1_of_rr1_rel \<F> Rs (R1Inter s1 s2) =
+    liftO2 (\<lambda> x y. simplify_reg (reg_intersect x y)) (rr1_of_rr1_rel \<F> Rs s1) (rr1_of_rr1_rel \<F> Rs s2)"
+| "rr1_of_rr1_rel \<F> Rs (R1Diff s1 s2) = liftO2 (\<lambda> x y. relabel_reg (trim_reg (difference_reg x y))) (rr1_of_rr1_rel \<F> Rs s1) (rr1_of_rr1_rel \<F> Rs s2)"
+
+| "rr2_of_rr2_rel \<F> Rs (R2GTT_Rel g w x) =
+    (case w of PRoot \<Rightarrow>
+      (case x of ESingle \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g)
+        | EParallel \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> reflcl_reg (lift_sig_RR2 |`| \<F>) \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g)
+        | EStrictParallel \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g))
+      | PNonRoot \<Rightarrow>
+      (case x of ESingle \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> nhole_ctxt_closure_reg (lift_sig_RR2 |`| \<F>) \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g)
+        | EParallel \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> nhole_mctxt_reflcl_reg (lift_sig_RR2 |`| \<F>) \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g)
+        | EStrictParallel \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> nhole_mctxt_closure_reg (lift_sig_RR2 |`| \<F>) \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g))
+      | PAny \<Rightarrow>
+      (case x of ESingle \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> ctxt_closure_reg (lift_sig_RR2 |`| \<F>) \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g)
+        | EParallel \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> parallel_closure_reg (lift_sig_RR2 |`| \<F>) \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g)
+        | EStrictParallel \<Rightarrow> liftO1 (simplify_reg \<circ> eps_free_reg \<circ> mctxt_closure_reg (lift_sig_RR2 |`| \<F>) \<circ> GTT_to_RR2_root_reg) (gtt_of_gtt_rel \<F> Rs g)))"
+| "rr2_of_rr2_rel \<F> Rs (R2Diag s) =
+    liftO1 (\<lambda> x. fmap_funs_reg (\<lambda>f. (Some f, Some f)) x) (rr1_of_rr1_rel \<F> Rs s)"
+| "rr2_of_rr2_rel \<F> Rs (R2Prod s1 s2) =
+    liftO2 (\<lambda> x y. simplify_reg (pair_automaton_reg x y)) (rr1_of_rr1_rel \<F> Rs s1) (rr1_of_rr1_rel \<F> Rs s2)"
+| "rr2_of_rr2_rel \<F> Rs (R2Inv r) = liftO1 (fmap_funs_reg prod.swap) (rr2_of_rr2_rel \<F> Rs r)"
+| "rr2_of_rr2_rel \<F> Rs (R2Union r1 r2) =
+    liftO2 (\<lambda> x y. relabel_reg (reg_union x y)) (rr2_of_rr2_rel \<F> Rs r1) (rr2_of_rr2_rel \<F> Rs r2)"
+| "rr2_of_rr2_rel \<F> Rs (R2Inter r1 r2) =
+    liftO2 (\<lambda> x y. simplify_reg (reg_intersect x y)) (rr2_of_rr2_rel \<F> Rs r1) (rr2_of_rr2_rel \<F> Rs r2)"
+| "rr2_of_rr2_rel \<F> Rs (R2Diff r1 r2) = liftO2 (\<lambda> x y. simplify_reg (difference_reg x y)) (rr2_of_rr2_rel \<F> Rs r1) (rr2_of_rr2_rel \<F> Rs r2)"
+| "rr2_of_rr2_rel \<F> Rs (R2Comp r1 r2) = liftO2 (\<lambda> x y. simplify_reg (rr2_compositon \<F> x y))
+     (rr2_of_rr2_rel \<F> Rs r1) (rr2_of_rr2_rel \<F> Rs r2)"
+
+
+abbreviation lhss where
+  "lhss R \<equiv> fst |`| R"
+
+lemma rr12_of_rr12_rel_correct:
+  fixes Rs :: "(('f :: linorder, 'v) Term.term \<times> ('f, 'v) Term.term) fset list"
+  assumes  "\<forall>R \<in> set Rs. lv_trs (fset R) \<and> ffunas_trs R |\<subseteq>| \<F>"
+  shows "\<forall>ta1. rr1_of_rr1_rel \<F> Rs r1 = Some ta1 \<longrightarrow> RR1_spec ta1 (eval_rr1_rel (fset \<F>) (map fset Rs) r1)"
+    "\<forall>ta2. rr2_of_rr2_rel \<F> Rs r2 = Some ta2 \<longrightarrow> RR2_spec ta2 (eval_rr2_rel (fset \<F>) (map fset Rs) r2)"
+proof (induct r1 and r2)
+  note [simp] = bind_eq_Some_conv guard_simps
+  let ?F = "fset \<F>" let ?Rs = "map fset Rs"
+{
+  case R1Terms
+  then show ?case using term_automaton[of \<F>]
+    by (simp add: \<T>\<^sub>G_equivalent_def)
+next
+  case (R1NF r)
+  consider (a) "\<exists> R. is_to_trs' Rs r = Some R" | (b) "is_to_trs' Rs r = None" by auto
+  then show ?case
+  proof (cases)
+    case a
+    from a obtain R where [simp]: "is_to_trs' Rs r = Some R" "is_to_fin_trs Rs r = R"
+      by (auto simp: is_to_trs'_def)
+    from is_to_trs'_props[OF assms this(1)] have inv: "ffunas_trs R |\<subseteq>| \<F>" "lv_trs (fset R)" .
+    from inv have fl: "\<forall> l |\<in>| lhss R. linear_term l"
+      by (auto simp: lv_trs_def split!: prod.splits)
+    {fix s t assume ass: "(s, t) \<in> grstep (fset R)"
+      then obtain C l r \<sigma> where step: "(l, r) |\<in>| R" "term_of_gterm s = (C :: ('f, 'v) ctxt) \<langle>l \<cdot> \<sigma>\<rangle>" "term_of_gterm t = C\<langle>r \<cdot> \<sigma>\<rangle>"
+        unfolding grstep_def by (auto simp: dest!: rstep_imp_C_s_r)
+      from step ta_nf_lang_sound[of l "lhss R" C \<sigma> \<F>]
+      have "s \<notin> \<L> (nf_reg (lhss R) \<F>)" unfolding \<L>_def
+        by (metis fimage_eqI fst_conv nf_reg_def reg.sel(1, 2) term_of_gterm_in_ta_lang_conv)}
+    note mem = this
+    have funas: "funas_trs (fset R) \<subseteq> ?F" using inv(1)
+      by (simp add: ffunas_trs.rep_eq less_eq_fset.rep_eq subsetD)
+    {fix s assume "s \<in> \<L> (nf_reg (lhss R) \<F>)"
+      then have "s \<in> NF (Restr (grstep (fset R)) (\<T>\<^sub>G (fset \<F>))) \<inter> \<T>\<^sub>G (fset \<F>)"
+        by (meson IntI NF_I \<T>\<^sub>G_funas_gterm_conv gta_lang_nf_ta_funas inf.cobounded1 mem subset_iff)}
+    moreover
+    {fix s assume ass: "s \<in> NF (Restr (grstep (fset R)) (\<T>\<^sub>G (fset \<F>))) \<inter> \<T>\<^sub>G (fset \<F>)"
+      then have *: "(term_of_gterm s, term_of_gterm t) \<notin> rstep (fset R)" for t using funas
+        by (auto simp: funas_trs_def grstep_def NF_iff_no_step \<T>\<^sub>G_funas_gterm_conv)
+           (meson R1NF_reps funas rstep.cases)
+      then have "s \<in> \<L> (nf_reg (lhss R) \<F>)" using fl ass
+        using ta_nf_\<L>_complete[OF fl, of _ \<F>] gta_lang_nf_ta_funas[of _ "lhss R" \<F>]
+        by (smt (verit, ccfv_SIG) IntE R1NF_reps \<T>\<^sub>G_sound fimageE funas surjective_pairing)}
+    ultimately have "\<L> (nf_reg (lhss R) \<F>) = NF (Restr (grstep (fset R)) (\<T>\<^sub>G (fset \<F>))) \<inter> \<T>\<^sub>G (fset \<F>)"
+      by blast
+    then show ?thesis using fl(1)
+      by (simp add: RR1_spec_def is_to_trs_conv)
+  qed auto
+next
+  case (R1Inf r)
+  consider (a) "\<exists> A. rr2_of_rr2_rel \<F> Rs r = Some A" | (b) " rr2_of_rr2_rel \<F> Rs r = None" by auto
+  then show ?case
+  proof cases
+    case a
+    have [simp]: "{u. (t, u) \<in> eval_rr2_rel ?F ?Rs r \<and> funas_gterm u \<subseteq> ?F} =
+     {u. (t, u) \<in> eval_rr2_rel ?F ?Rs r}" for t
+      using eval_rr12_rel_sig(2)[of ?F ?Rs r] by (auto simp: \<T>\<^sub>G_equivalent_def)
+    have [simp]: "infinite {u. (t, u) \<in> eval_rr2_rel ?F ?Rs r} \<Longrightarrow> funas_gterm t \<subseteq> ?F" for t
+      using eval_rr12_rel_sig(2)[of ?F ?Rs r] not_finite_existsD by (fastforce simp: \<T>\<^sub>G_equivalent_def)
+    from a obtain A where [simp]: "rr2_of_rr2_rel \<F> Rs r = Some A" by blast
+    from R1Inf this have spec: "RR2_spec A (eval_rr2_rel ?F ?Rs r)" by auto
+    then have spec_trim: "RR2_spec (trim_reg A) (eval_rr2_rel ?F ?Rs r)" by auto
+    let ?B = "(Inf_reg (trim_reg A) (Q_infty (ta (trim_reg A)) \<F>))"
+    have B: "RR2_spec ?B {(s, t) | s t. gpair s t \<in> \<L> ?B}"
+      using subset_trans[OF Inf_automata_subseteq[of "trim_reg A" \<F>], of "\<L> A"] spec
+      by (auto simp: RR2_spec_def \<L>_trim)
+    have *: "\<L> (Inf_reg_impl (trim_reg A)) = \<L> ?B" using spec
+      using eval_rr12_rel_sig(2)[of ?F ?Rs r]
+      by (intro Inf_reg_impl_sound) (auto simp: \<L>_trim RR2_spec_def \<T>\<^sub>G_equivalent_def)
+    then have **: "RR2_spec (Inf_reg_impl (trim_reg A)) {(s, t) | s t. gpair s t \<in> \<L> ?B}" using B
+      by (auto simp: RR2_spec_def)
+    show ?thesis
+      using spec eval_rr12_rel_sig(2)[of ?F ?Rs r]
+      using \<L>_Inf_reg[OF spec_trim, of \<F>]
+      by (auto simp: \<T>\<^sub>G_equivalent_def * RR1_spec_def \<L>_trim \<L>_proj(1)[OF **]
+                     Inf_branching_terms_def fImage_singleton)
+         (metis (no_types, lifting) SigmaD1 in_mono mem_Collect_eq not_finite_existsD)
+  qed auto
+next
+  case (R1Proj i r)
+  then show ?case
+  proof (cases i)
+    case [simp]:0 show ?thesis using R1Proj
+      using proj_automaton_gta_lang(1)[of "the (rr2_of_rr2_rel \<F> Rs r)" "eval_rr2_rel ?F ?Rs r"]
+      by simp
+  next
+    case (Suc nat) then show ?thesis using R1Proj
+      using proj_automaton_gta_lang(2)[of "the (rr2_of_rr2_rel \<F> Rs r)" "eval_rr2_rel ?F ?Rs r"]
+      by simp
+  qed
+next
+  case (R1Union s1 s2)
+  then show ?case
+    by (auto simp: RR1_spec_def \<L>_union)
+next
+  case (R1Inter s1 s2)
+  from R1Inter show ?case
+    by (auto simp: \<L>_intersect RR1_spec_def)
+next
+  case (R1Diff s1 s2)
+  then show ?case
+    by (auto intro: RR1_difference)
+next
+  case (R2GTT_Rel g w x)
+  note ass = R2GTT_Rel
+  consider (a) "\<exists> A. gtt_of_gtt_rel \<F> Rs g = Some A" | (b) "gtt_of_gtt_rel \<F> Rs g = None" by blast
+  then show ?case
+  proof cases
+    case a then obtain A where [simp]: "gtt_of_gtt_rel \<F> Rs g = Some A" by blast
+    from gtt_of_gtt_rel_correct[OF assms this]
+    have spec [simp]: "eval_gtt_rel ?F ?Rs g = agtt_lang A" by auto
+    let ?B = "GTT_to_RR2_root_reg A" note [simp] = GTT_to_RR2_root[of A]
+    show ?thesis
+    proof (cases w)
+      case [simp]: PRoot show ?thesis
+      proof (cases x)
+        case EParallel
+        then show ?thesis using reflcl_automaton[of ?B "agtt_lang A" \<F>]
+          by auto
+      qed (auto simp: GTT_to_RR2_root)
+    next
+      case PNonRoot
+      then show ?thesis
+        using nhole_ctxt_closure_automaton[of ?B "agtt_lang A" \<F>]
+        using nhole_mctxt_reflcl_automaton[of ?B "agtt_lang A" \<F>]
+        using nhole_mctxt_closure_automaton[of ?B "agtt_lang A" \<F>]
+        by (cases x) auto
+    next
+      case PAny
+      then show ?thesis
+        using ctxt_closure_automaton[of ?B "agtt_lang A" \<F>]
+        using parallel_closure_automaton[of ?B "agtt_lang A" \<F>]
+        using mctxt_closure_automaton[of ?B "agtt_lang A" \<F>]
+        by (cases x) auto
+    qed
+  qed (cases w; cases x, auto)
+next
+  case (R2Diag s)
+  then show ?case
+    by (auto simp: RR2_spec_def RR1_spec_def fmap_funs_\<L> Id_on_iff
+                   fmap_funs_gta_lang map_funs_term_some_gpair)
+next
+  case (R2Prod s1 s2)
+  then show ?case using pair_automaton[of "the (rr1_of_rr1_rel \<F> Rs s1)" _ "the (rr1_of_rr1_rel \<F> Rs s2)"]
+    by auto
+next
+  case (R2Inv r)
+  show ?case using R2Inv by (auto simp: swap_RR2_spec)
+next
+  case (R2Union r1 r2)
+  then show ?case using union_automaton
+    by (auto simp: RR2_spec_def \<L>_union)
+next
+  case (R2Inter r1 r2)
+  then show ?case
+    by (auto simp: \<L>_intersect RR2_spec_def)
+next
+  case (R2Diff r1 r2)
+  then show ?case by (auto intro: RR2_difference)
+next
+  case (R2Comp r1 r2)
+  then show ?case using eval_rr12_rel_sig
+    by (auto intro!: rr2_compositon) blast+
+}
+qed
+
+
+
+lemma eval_formula_arity_cong:
+  assumes "\<And>i. i < formula_arity f \<Longrightarrow> \<alpha>' i = \<alpha> i"
+  shows "eval_formula \<F> Rs \<alpha>' f = eval_formula \<F> Rs \<alpha> f"
+proof -
+  have [simp]: "j < length fs \<Longrightarrow> i < formula_arity (fs ! j) \<Longrightarrow> i < max_list (map formula_arity fs)" for i j fs
+    by (simp add: less_le_trans max_list)
+  show ?thesis using assms
+  proof (induct f arbitrary: \<alpha> \<alpha>')
+    case (FAnd fs)
+    show ?case using FAnd(1)[OF nth_mem, of _ \<alpha>' \<alpha>] FAnd(2) by (auto simp: all_set_conv_all_nth)
+  next
+    case (FOr fs)
+    show ?case using FOr(1)[OF nth_mem, of _ \<alpha>' \<alpha>] FOr(2) by (auto simp: ex_set_conv_ex_nth)
+  next
+    case (FNot f)
+    show ?case using FNot(1)[of \<alpha>' \<alpha>] FNot(2) by simp
+  next
+    case (FExists f)
+    show ?case using FExists(1)[of "\<alpha>'\<langle>0 : z\<rangle>" "\<alpha>\<langle>0 : z\<rangle>" for z] FExists(2) by (auto simp: shift_def)
+  next
+    case (FForall f)
+    show ?case using FForall(1)[of "\<alpha>'\<langle>0 : z\<rangle>" "\<alpha>\<langle>0 : z\<rangle>" for z] FForall(2) by (auto simp: shift_def)
+  qed simp_all
+qed
+
+
+
+primrec form_of_formula :: "'trs formula \<Rightarrow> (unit, 'trs rr1_rel + 'trs rr2_rel) form" where
+  "form_of_formula (FRR1 r1 x) = Pred (Inl r1) [Var x]"
+| "form_of_formula (FRR2 r2 x y) = Pred (Inr r2) [Var x, Var y]"
+| "form_of_formula (FAnd fs) = foldr And (map form_of_formula fs) TT"
+| "form_of_formula (FOr fs) = foldr Or (map form_of_formula fs) FF"
+| "form_of_formula (FNot f) = Neg (form_of_formula f)"
+| "form_of_formula (FExists f) = Exists (And (Pred (Inl R1Terms) [Var 0]) (form_of_formula f))"
+| "form_of_formula (FForall f) = Forall (Impl (Pred (Inl R1Terms) [Var 0]) (form_of_formula f))"
+
+
+fun for_eval_rel :: "('f \<times> nat) set \<Rightarrow> ('f, 'v) trs list \<Rightarrow> ftrs rr1_rel + ftrs rr2_rel \<Rightarrow> 'f gterm list \<Rightarrow> bool" where
+  "for_eval_rel \<F> Rs (Inl r1) [t] \<longleftrightarrow> t \<in> eval_rr1_rel \<F> Rs r1"
+| "for_eval_rel \<F> Rs (Inr r2) [t, u] \<longleftrightarrow> (t, u) \<in> eval_rr2_rel \<F> Rs r2"
+
+lemma eval_formula_conv:
+  "eval_formula \<F> Rs \<alpha> f = eval \<alpha> undefined (for_eval_rel \<F> Rs) (form_of_formula f)"
+proof (induct f arbitrary: \<alpha>)
+  case (FAnd fs) then show ?case
+    unfolding eval_formula.simps by (induct fs) auto
+next
+  case (FOr fs) then show ?case
+    unfolding eval_formula.simps by (induct fs) auto
+qed auto
+
+
+
+lemma shift_rangeI [intro!]:
+  "range \<alpha> \<subseteq> T \<Longrightarrow> x \<in> T \<Longrightarrow> range (shift \<alpha> i x) \<subseteq> T"
+  by (auto simp: shift_def)
+
+definition formula_relevant where
+  "formula_relevant \<F> Rs vs fm \<longleftrightarrow>
+     (\<forall>\<alpha> \<alpha>'. range \<alpha> \<subseteq> \<T>\<^sub>G \<F> \<longrightarrow> range \<alpha>' \<subseteq> \<T>\<^sub>G \<F> \<longrightarrow> map \<alpha> vs = map \<alpha>' vs \<longrightarrow> eval_formula \<F> Rs \<alpha> fm \<longrightarrow> eval_formula \<F> Rs \<alpha>' fm)"
+
+lemma formula_relevant_mono:
+  "set vs \<subseteq> set ws \<Longrightarrow> formula_relevant \<F> Rs vs fm \<Longrightarrow> formula_relevant \<F> Rs ws fm"
+  unfolding formula_relevant_def
+  by (meson map_eq_conv subset_code(1))
+
+lemma formula_relevantD:
+  "formula_relevant \<F> Rs vs fm \<Longrightarrow>
+   range \<alpha> \<subseteq> \<T>\<^sub>G \<F> \<Longrightarrow> range \<alpha>' \<subseteq> \<T>\<^sub>G \<F> \<Longrightarrow> map \<alpha> vs = map \<alpha>' vs \<Longrightarrow>
+   eval_formula \<F> Rs \<alpha> fm \<Longrightarrow> eval_formula \<F> Rs \<alpha>' fm"
+  unfolding formula_relevant_def
+  by blast
+
+lemma trivial_formula_relevant:
+  assumes "\<And>\<alpha>. range \<alpha> \<subseteq> \<T>\<^sub>G \<F> \<Longrightarrow> \<not> eval_formula \<F> Rs \<alpha> fm"
+  shows "formula_relevant \<F> Rs vs fm"
+  using assms unfolding formula_relevant_def
+  by auto
+
+lemma formula_relevant_0_FExists:
+  assumes "formula_relevant \<F> Rs [0] fm"
+  shows "formula_relevant \<F> Rs [] (FExists fm)"
+  unfolding formula_relevant_def
+proof (intro allI, intro impI)
+  fix \<alpha> \<alpha>' assume ass: "range \<alpha> \<subseteq> \<T>\<^sub>G \<F>" "range (\<alpha>' :: fvar \<Rightarrow> 'a gterm) \<subseteq> \<T>\<^sub>G \<F>"
+    "eval_formula \<F> Rs \<alpha> (FExists fm)"
+  from ass(3) obtain z where "z \<in> \<T>\<^sub>G \<F>" "eval_formula \<F> Rs (\<alpha>\<langle>0 : z\<rangle>) fm"
+    by auto
+  then show "eval_formula \<F> Rs \<alpha>' (FExists fm)"
+    using ass(1, 2) formula_relevantD[OF assms, of "\<alpha>\<langle>0:z\<rangle>" "\<alpha>'\<langle>0:z\<rangle>"]
+    by (auto simp: shift_rangeI intro!: exI[of _ z])
+qed
+
+definition formula_spec where
+  "formula_spec \<F> Rs vs A fm \<longleftrightarrow> sorted vs \<and> distinct vs \<and>
+     formula_relevant \<F> Rs vs fm \<and>
+     RRn_spec (length vs) A {map \<alpha> vs |\<alpha>. range \<alpha> \<subseteq> \<T>\<^sub>G \<F> \<and> eval_formula \<F> Rs \<alpha> fm}"
+
+lemma formula_spec_RRn_spec:
+  "formula_spec \<F> Rs vs A fm \<Longrightarrow> RRn_spec (length vs) A {map \<alpha> vs |\<alpha>. range \<alpha> \<subseteq> \<T>\<^sub>G \<F> \<and> eval_formula \<F> Rs \<alpha> fm}"
+  by (simp add: formula_spec_def)
+
+lemma formula_spec_nt_empty_form_sat:
+  "\<not> reg_empty A \<Longrightarrow> formula_spec \<F> Rs vs A fm \<Longrightarrow> \<exists> \<alpha>. range \<alpha> \<subseteq> \<T>\<^sub>G \<F> \<and> eval_formula \<F> Rs \<alpha> fm"
+  unfolding formula_spec_def
+  by (auto simp: RRn_spec_def \<L>_def)
+
+lemma formula_spec_empty:
+  "reg_empty A \<Longrightarrow> formula_spec \<F> Rs vs A fm \<Longrightarrow> range \<alpha> \<subseteq> \<T>\<^sub>G \<F> \<Longrightarrow> eval_formula \<F> Rs \<alpha> fm \<longleftrightarrow> False"
+  unfolding formula_spec_def
+  by (auto simp: RRn_spec_def \<L>_def)
+
+
+lemma false_formula_spec:
+  "sorted vs \<Longrightarrow> distinct vs \<Longrightarrow> formula_spec \<F> Rs vs empty_reg FFalse"
+  by (auto simp: formula_spec_def false_RRn_spec FFalse_def formula_relevant_def)
+
+lemma true_formula_spec:
+  assumes "vs \<noteq> [] \<or> \<T>\<^sub>G (fset \<F>) \<noteq> {}" "sorted vs" "distinct vs"
+  shows "formula_spec (fset \<F>) Rs vs (true_RRn \<F> (length vs)) FTrue"
+proof -
+  have "{ts. length ts = length vs \<and> set ts \<subseteq> \<T>\<^sub>G (fset \<F>)} = {map \<alpha> vs |\<alpha>. range \<alpha> \<subseteq> \<T>\<^sub>G (fset \<F>)}"
+  proof (intro equalityI subsetI CollectI, goal_cases LR RL)
+    case (LR ts)
+    moreover obtain t0 where "funas_gterm t0 \<subseteq> fset \<F>" using LR assms(1) unfolding \<T>\<^sub>G_equivalent_def
+      by (cases vs) fastforce+
+    ultimately show ?case using `distinct vs`
+      apply (intro exI[of _ "\<lambda>t. if t \<in> set vs then ts ! inv_into {0..<length vs} ((!) vs) t else t0"])
+      apply (auto intro!: nth_equalityI dest!: inj_on_nth[of vs "{0..<length vs}"] simp: in_set_conv_nth \<T>\<^sub>G_equivalent_def)
+      by (metis inv_to_set mem_Collect_eq subsetD) 
+  qed fastforce
+  then show ?thesis using assms true_RRn_spec[of "length vs" \<F>]
+    by (auto simp: formula_spec_def FTrue_def formula_relevant_def \<T>\<^sub>G_equivalent_def)
+qed
+
+lemma relabel_formula_spec:
+  "formula_spec \<F> Rs vs A fm \<Longrightarrow> formula_spec \<F> Rs vs (relabel_reg A) fm"
+  by (simp add: formula_spec_def)
+
+lemma trim_formula_spec:
+  "formula_spec \<F> Rs vs A fm \<Longrightarrow> formula_spec \<F> Rs vs (trim_reg A) fm"
+  by (simp add: formula_spec_def)
+
+definition fit_permute :: "nat list \<Rightarrow> nat list \<Rightarrow> nat list \<Rightarrow> nat list" where
+  "fit_permute vs vs' vs'' = map (\<lambda>v. if v \<in> set vs then the (mem_idx v vs) else length vs + the (mem_idx v vs'')) vs'"
+
+definition fit_rrn :: "('f \<times> nat) fset \<Rightarrow> nat list \<Rightarrow> nat list \<Rightarrow> (nat, 'f option list) reg \<Rightarrow> (_, 'f option list) reg" where
+  "fit_rrn \<F> vs vs' A = (let vs'' = subtract_list_sorted vs' vs in
+    fmap_funs_reg (\<lambda>fs. map ((!) fs) (fit_permute vs vs' vs''))
+      (fmap_funs_reg (pad_with_Nones (length vs) (length vs'')) (pair_automaton_reg A (true_RRn \<F> (length vs'')))))"
+
+lemma the_mem_idx_simp [simp]:
+  "distinct xs \<Longrightarrow> i < length xs \<Longrightarrow> the (mem_idx (xs ! i) xs) = i"
+  using mem_idx_sound[THEN iffD1, OF nth_mem, of i xs] mem_idx_sound_output[of "xs ! i" xs] distinct_conv_nth
+  by fastforce
+
+lemma fit_rrn:
+  assumes spec: "formula_spec (fset \<F>) Rs vs A fm" and vs: "sorted vs'" "distinct vs'" "set vs \<subseteq> set vs'"
+  shows "formula_spec (fset \<F>) Rs vs' (fit_rrn \<F> vs vs' A) fm"
+  using spec unfolding formula_spec_def formula_relevant_def
+  apply (elim conjE)
+proof (intro conjI vs(1,2) allI, goal_cases rel spec)
+  case (rel \<alpha> \<alpha>') show ?case using vs(3)
+    by (fastforce intro!: rel(3)[rule_format, of \<alpha> \<alpha>'])
+next
+  case spec
+  define vs'' where "vs'' = subtract_list_sorted vs' vs"
+  have evalI: "range \<alpha> \<subseteq> \<T>\<^sub>G (fset \<F>) \<Longrightarrow> range \<alpha>' \<subseteq> \<T>\<^sub>G (fset \<F>) \<Longrightarrow> map \<alpha> vs = map \<alpha>' vs
+   \<Longrightarrow> eval_formula (fset \<F>) Rs \<alpha> fm \<Longrightarrow> eval_formula (fset \<F>) Rs \<alpha>' fm" for \<alpha> \<alpha>'
+    using spec(3) by blast
+  have [simp]: "set vs' = set vs \<union> set vs''" "set vs'' \<inter> set vs = {}" "set vs \<inter> set vs'' = {}" and d: "distinct vs''"
+    using vs spec(1,2) by (auto simp: vs''_def)
+  then have [dest]: "v \<in> set vs'' \<Longrightarrow> v \<in> set vs \<Longrightarrow> False" for v by blast
+  note * = permute_automaton[OF append_automaton[OF spec(4) true_RRn_spec, of "length vs''"]]
+  have [simp]: "distinct vs \<Longrightarrow> i \<in> set vs \<Longrightarrow> vs ! the (mem_idx i vs) = (i :: nat)" for vs i
+    by (simp add: mem_idx_sound mem_idx_sound_output)
+  have [dest]: "distinct vs \<Longrightarrow> i \<in> set vs \<Longrightarrow> \<not> the (mem_idx i vs) < length vs \<Longrightarrow> False" for i
+    by (meson mem_idx_sound2 mem_idx_sound_output option.exhaust_sel)
+  show ?case unfolding fit_rrn_def Let_def vs''_def[symmetric] \<T>\<^sub>G_equivalent_def
+    apply (rule subst[where P = "\<lambda>l. RRn_spec l _ _", OF _ subst[where P = "\<lambda>ta. RRn_spec _ _ ta", OF _ *]])
+    subgoal by (simp add: fit_permute_def)
+    subgoal
+      apply (intro equalityI subsetI CollectI imageI; elim imageE CollectE exE conjE; unfold \<T>\<^sub>G_equivalent_def)
+      subgoal for x fs ts us \<alpha>
+        using spec(1, 2) d
+        apply (intro exI[of _ "\<lambda>v. if v \<in> set vs'' then us ! the (mem_idx v vs'') else \<alpha> v"])
+        apply (auto simp: fit_permute_def nth_append \<T>\<^sub>G_equivalent_def
+                    intro!: nth_equalityI evalI[of \<alpha> "\<lambda>v. if v \<in> set vs'' then us ! the (mem_idx v vs'') else \<alpha> v"])
+        apply (metis distinct_Ex1 in_mono mem_Collect_eq nth_mem the_mem_idx_simp)
+        apply (metis distinct_Ex1 in_mono mem_Collect_eq nth_mem the_mem_idx_simp)
+        apply blast
+      subgoal premises p for xs \<alpha>
+        apply (intro rev_image_eqI[of "map \<alpha> (vs @ vs'')"])
+        subgoal using p by (force intro!: exI[of _ "map \<alpha> vs", OF exI[of _ "map \<alpha> vs''"]])
+        subgoal using p(1)
+          by (force intro!: nth_equalityI simp: fit_permute_def comp_def nth_append dest: iffD1[OF mem_idx_sound] mem_idx_sound_output)
+        done
+      done
+    subgoal using vs spec(1,2) unfolding fit_permute_def
+      apply (intro equalityI subsetI)
+      subgoal by (auto 0 3 dest: iffD1[OF mem_idx_sound] mem_idx_sound_output)
+      subgoal for x
+        apply (simp add: Compl_eq[symmetric] Diff_eq[symmetric] Un_Diff Diff_triv Int_absorb1)
+        apply (simp add: nth_image[symmetric, of "length xs" xs for xs, simplified] image_iff comp_def)
+        by (smt (z3) add_diff_inverse_nat add_less_cancel_left atLeast0LessThan lessThan_iff the_mem_idx_simp)
+      done
+  done
+qed
+
+definition fit_rrns :: "('f \<times> nat) fset \<Rightarrow> (ftrs formula \<times> nat list \<times> (nat, 'f option list) reg) list \<Rightarrow>
+  nat list \<times> ((nat, 'f option list) reg) list" where
+  "fit_rrns \<F> rrns = (let vs' = fold union_list_sorted (map (fst \<circ> snd) rrns) [] in
+    (vs', map (\<lambda>(fm, vs, ta). relabel_reg (trim_reg (fit_rrn \<F> vs vs' ta))) rrns))"
+
+lemma sorted_union_list_sortedI [simp]:
+  "sorted xs \<Longrightarrow> sorted ys \<Longrightarrow> sorted (union_list_sorted xs ys)"
+  by (induct xs ys rule: union_list_sorted.induct) auto
+
+lemma distinct_union_list_sortedI [simp]:
+  "sorted xs \<Longrightarrow> sorted ys \<Longrightarrow> distinct xs \<Longrightarrow> distinct ys \<Longrightarrow> distinct (union_list_sorted xs ys)"
+  by (induct xs ys rule: union_list_sorted.induct) auto
+
+lemma fit_rrns:
+  assumes infs: "\<And>fvA. fvA \<in> set rrns \<Longrightarrow> formula_spec (fset \<F>) Rs (fst (snd fvA)) (snd (snd fvA)) (fst fvA)"
+  assumes "(vs', tas') = fit_rrns \<F> rrns"
+  shows "length tas' = length rrns" "\<And>i. i < length rrns \<Longrightarrow> formula_spec (fset \<F>) Rs vs' (tas' ! i) (fst (rrns ! i))"
+    "distinct vs'" "sorted vs'"
+proof (goal_cases)
+  have vs': "vs' = fold union_list_sorted (map (fst \<circ> snd) rrns) []" using assms(2) by (simp add: fit_rrns_def Let_def)
+  have *: "sorted vs'" "distinct vs'" "\<And>fvA. fvA \<in> set rrns \<Longrightarrow> set (fst (snd fvA)) \<subseteq> set vs'"
+    using infs[unfolded formula_spec_def, THEN conjunct2, THEN conjunct1]
+      infs[unfolded formula_spec_def, THEN conjunct1]
+    unfolding vs' by (induct rrns rule: rev_induct) auto
+{
+  case 1 then show ?case using assms(2) by (simp add: fit_rrns_def Let_def)
+next
+  case (2 i)
+  have tas': "tas' ! i = relabel_reg (trim_reg (fit_rrn \<F> (fst (snd (rrns ! i))) vs' (snd (snd (rrns ! i)))))"
+    using 2 assms(2) by (simp add: fit_rrns_def Let_def split: prod.splits)
+  from *(1,2) *(3)[OF nth_mem] show ?case using 2 unfolding tas'
+    by (auto intro!: relabel_formula_spec trim_formula_spec fit_rrn 2 assms(1,2))
+next
+  case 3 show ?case by (rule *)

@@ -1,0 +1,184 @@
+theory
+  Interval_Division_Non_Zero
+  imports
+  Interval_Utilities
+begin
+
+
+
+lemma division_leq_neg:
+  fixes x :: "'a::{linordered_field}"
+  assumes "0 < x" and "y < 0" and "z < 0" and "y \<le> z"
+  shows "x / z \<le> x / y"
+proof -
+  have "x * y \<le> x * z" using assms by simp
+  hence "(x * y) / (y * z) \<le> (x * z) / (y * z)" 
+    using assms
+    by (simp add: divide_right_mono zero_less_mult_iff neg_divide_le_eq)
+  thus ?thesis using assms by auto[1]  
+qed
+
+lemma division_leq:
+  fixes x :: "'a::{linordered_field}"
+  shows "x / z \<le> x / y"
+  case True
+  then show ?thesis using assms division_leq_neg by blast
+next
+  case False
+  then show ?thesis 
+    using assms
+    by (simp add: frac_le)
+qed
+
+lemma upper_leq_lower_div:
+  fixes Y :: "'a::{linordered_field} interval"
+  using assms division_leq frac_le 
+  by (metis atLeastAtMost_iff inverse_eq_divide le_imp_inverse_le 
+            le_imp_inverse_le_neg linorder_not_less set_of_eq)
+
+
+locale interval_division = inverse +
+begin 
+end 
+
+lemma interval_non_zero_eq:  
+  by (metis in_bounds in_intervalI linorder_not_less lower_le_upper order_le_less_trans) 
+
+lemma inverse_includes_one:
+  using assms interval_non_zero_eq[of i] 
+  apply(simp add: set_of_eq)
+  apply(safe, simp_all)
+  by (metis in_bounds lower_in_interval mk_interval_upper nonzero_eq_divide_eq times_in_intervalI 
+            upper_in_interval)+ 
+ 
+lemma inverse_includes_one': 
+  by (simp add: assms in_bounds inverse_includes_one less_eq_interval_def) 
+
+
+locale interval_division_inverse = inverse + 
+begin 
+
+sublocale interval_division divide inverse
+  apply(standard)
+  subgoal 
+    by (simp add: inverse_includes_one' inverse_non_zero_def) 
+  subgoal
+    by (metis (no_types, opaque_lifting) divide_non_zero_def interval_mul_commute inverse_includes_one' inverse_non_zero_def mult.assoc one_times_ivl_right times_interval_right) 
+  done 
+
+lemma inverse_left_ge_one:
+proof - 
+    using assms lower_in_interval by metis 
+    using assms lower_in_interval by metis 
+  proof(cases "1 / upper x \<le> 1 / lower x")
+    case True note * = this
+    then show ?thesis 
+    proof(cases "upper x = lower x")
+      case True
+      then show ?thesis 
+        using upper_times[of "mk_interval (1 / upper x, 1 / lower x)" x] 
+              lower_times[of "mk_interval (1 / upper x, 1 / lower x)" x] 
+              interval_eq_iff[of "mk_interval (1 / upper x, 1 / lower x) * x" 1]
+              lower_ne_zero upper_ne_zero
+        unfolding mk_interval'
+        by simp
+    next
+      case False
+      then show ?thesis 
+        using interval_eq_iff[of "mk_interval (1 / upper x, 1 / lower x) * x" 1]
+              upper_times[of "mk_interval (1 / upper x, 1 / lower x)" x] 
+              lower_times[of "mk_interval (1 / upper x, 1 / lower x)" x]
+      proof -
+        have "1 / lower x = upper (mk_interval (1 / upper x, 1 / lower x))"
+          by (simp add: "*")
+        then show ?thesis
+          by (metis (no_types) in_bounds less_eq_interval_def lower_in_interval lower_one 
+              nonzero_divide_eq_eq times_in_intervalI upper_in_interval upper_ne_zero upper_one)
+      qed
+    qed
+  next
+    case False
+    then show ?thesis 
+        using interval_eq_iff[of "mk_interval (1 / upper x, 1 / lower x) * x" 1]
+              upper_times[of "mk_interval (1 / upper x, 1 / lower x)" x] 
+              lower_times[of "mk_interval (1 / upper x, 1 / lower x)" x]
+        using assms lower_le_upper upper_leq_lower_div by blast 
+    qed
+    then show ?thesis 
+  by (simp add: assms inverse_non_zero_def) 
+  qed
+
+lemma division_right_ge_refl: 
+proof - 
+    using inverse_left_ge_one[of y, simplified assms, simplified]
+    by (simp add: interval_set_leq_eq) 
+  show ?thesis
+    using set_of_mul_inc_right[of 1 "mk_interval (1 / upper y, 1 / lower y) * y" x, 
+              simplified one_times_ivl_right[of x] a1, simplified]
+    by (metis a1 interval_set_leq_eq one_times_ivl_right times_interval_right)
+qed
+
+lemma division_right_ge_refl': 
+  by (simp add: assms division_right_ge_refl mult.assoc) 
+
+lemma interval_div_constant:
+proof -
+    by (metis divide_left_mono frac_le in_intervalI linorder_not_less mult_neg_neg order_less_le 
+        zero_less_one_class.zero_le_one)
+  then show ?thesis 
+    using
+    interval_of.abs_eq[of x]
+    assms divide_non_zero_def[of Y "interval_of x", simplified assms, simplified] 
+    inverse_non_zero_def[of Y, simplified assms, simplified]
+    interval_times_scalar_pos_l interval_times_scalar_pos_r by fastforce
+qed
+
+lemma interval_of_width:  
+proof(cases "Y" rule:interval_linorder_case_split[of _ 0 "\<lambda> Y. interval_of(width (divide (interval_of 1) Y)) 
+                                                               = Interval( 1 / lower Y -  1 / upper Y,  1 / lower Y -  1 / upper Y)" ])
+  case LeftOf
+    using assms division_leq_neg LeftOf 
+    by (simp add: le_divide_eq)  
+  then show ?case 
+    using interval_div_constant upper_bounds lower_bounds assms
+    unfolding width_def interval_of_def by fastforce
+next
+  case Including
+  then show ?case using assms by simp
+next
+  case RightOf
+    by (simp add: assms upper_leq_lower_div) 
+  then show ?case
+    using interval_div_constant upper_bounds lower_bounds assms
+    unfolding width_def interval_of_def by fastforce
+qed
+
+lemma abs_pos:
+proof -
+    by (metis assms(1) l dual_order.strict_trans1 zero_less_divide_1_iff)
+    by (metis assms(1) zero_less_divide_1_iff)
+    using assms by (simp add: frac_le)
+    using assms interval_div_constant[of Y 1] by simp
+  ultimately show ?thesis 
+    unfolding abs_interval_def by (simp add: bounds_of_interval_eq_lower_upper)
+qed
+
+lemma abs_neg:
+proof -
+    using assms by (simp, meson assms(1) divide_less_0_1_iff lower_le_upper order_le_less_trans)
+    using assms l by linarith
+    using assms division_leq_neg i1 
+    by (simp add: division_leq)
+    using assms interval_div_constant[of Y 1] by simp
+    using assms i0 i1 i2 i3 unfolding abs_interval_def min_def max_def
+    by (simp add: bounds_of_interval_eq_lower_upper)
+    by auto[1]
+  ultimately show ?thesis 
+    using assms interval_div_constant by force
+qed
+
+
+end 
+
+
+end 

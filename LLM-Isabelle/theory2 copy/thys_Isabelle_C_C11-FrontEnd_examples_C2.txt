@@ -1,0 +1,73 @@
+theory C2
+  imports "../main/C_Main"
+          "HOL-ex.Cartouche_Examples"
+begin
+
+where it is for example possible to recursively nest C code in C. Generally, the present 
+chapter assumes a familiarity with all advance concepts of ML as described in
+we will now see in detail that there are actually subtle differences between the two commands.\<close>
+section \<open>Setup of ML Antiquotations Displaying the Environment (For Debugging) \<close>
+ML\<open>
+fun print_top make_string f _ (_, (value, _, _)) _ = tap (fn _ => writeln (make_string value)) o f
+
+fun print_top' _ f _ _ env = tap (fn _ => writeln ("ENV " ^ C_Env.string_of env)) o f
+
+fun print_stack s make_string stack _ _ thy =
+  let
+    val () = Output.information ("SHIFT  " ^ (case s of NONE => "" | SOME s => "\"" ^ s ^ "\" ")
+                                 ^ Int.toString (length stack - 1) ^ "    +1 ")
+    val () =   stack
+            |> split_list
+            |> #2
+            |> map_index I
+            |> app (fn (i, (value, pos1, pos2)) =>
+                     writeln ("   " ^ Int.toString (length stack - i) ^ " " ^ make_string value
+                              ^ " " ^ Position.here pos1 ^ " " ^ Position.here pos2))
+  in thy end
+
+fun print_stack' s _ stack _ env thy =
+  let
+    val () = Output.information ("SHIFT  " ^ (case s of NONE => "" | SOME s => "\"" ^ s ^ "\" ")
+                                 ^ Int.toString (length stack - 1) ^ "    +1 ")
+    val () = writeln ("ENV " ^ C_Env.string_of env)
+  in thy end
+\<close>
+setup \<open>ML_Antiquotation.inline @{binding print_top}
+                               (Args.context
+                                >> K ("print_top " ^ ML_Pretty.make_string_fn ^ " I"))\<close>
+setup \<open>ML_Antiquotation.inline @{binding print_top'}
+                               (Args.context
+                                >> K ("print_top' " ^ ML_Pretty.make_string_fn ^ " I"))\<close>
+setup \<open>ML_Antiquotation.inline @{binding print_stack}
+                               (Scan.peek (fn _ => Scan.option Parse.embedded)
+                                >> (fn name => ("print_stack "
+                                                ^ (case name of NONE => "NONE"
+                                                              | SOME s => "(SOME \"" ^ s ^ "\")")
+                                                ^ " " ^ ML_Pretty.make_string_fn)))\<close>
+setup \<open>ML_Antiquotation.inline @{binding print_stack'}
+                               (Scan.peek (fn _ => Scan.option Parse.embedded)
+                                >> (fn name => ("print_stack' "
+                                                ^ (case name of NONE => "NONE"
+                                                              | SOME s => "(SOME \"" ^ s ^ "\")")
+                                                ^ " " ^ ML_Pretty.make_string_fn)))\<close>
+section \<open>Introduction to C Annotations: Navigating in the Parsing Stack\<close>
+subsection \<open>Basics\<close>
+text \<open> Since the present theory \<^file>\<open>C1.thy\<close> is depending on
+\<^theory>\<open>Isabelle_C.C_Lexer_Language\<close> and
+\<^theory>\<open>Isabelle_C.C_Parser_Language\<close>, the syntax one is writing in the
+\<^theory_text>\<open>C\<close> command is C11. Additionally, \<^file>\<open>C1.thy\<close> also
+depends on \<^theory>\<open>Isabelle_C.C_Parser_Annotation\<close>, making it possible to write
+\<^theory_text>\<open>\<approx>setup\<close>. \<close>
+C \<comment> \<open>Nesting ML code in C comments\<close> \<open>
+                 /*@ \<approx>setup \<open>@{print_stack}\<close> */
+                 /*@ \<approx>setup \<open>@{print_top}\<close> */
+parser \<^footnote>\<open>\<^url>\<open>https://en.wikipedia.org/wiki/LALR\<close>\<close>, C tokens
+\<^footnote>\<open>\<^url>\<open>https://en.wikipedia.org/wiki/Shift-reduce_parser\<close>\<close>. \<close>
+text \<open>The command \<^theory_text>\<open>\<approx>setup\<close> is similar to the command
+\<^theory_text>\<open>setup\<close> except that the former takes a function with additional
+Note that, in contrast with \<^theory_text>\<open>setup\<close>, the return type of the
+\<^theory_text>\<open>\<approx>setup\<close> function is not
+\<^ML_type>\<open>theory -> theory\<close> but
+\<^ML_type>\<open>Context.generic -> Context.generic\<close>. \<close>
+C \<comment> \<open>Positional navigation: referring to any previous parsed sub-tree in the stack\<close> \<open>
+      + 5)))  /*@@ \<approx>setup \<open>print_top @{make_string} I\<close>

@@ -1,0 +1,115 @@
+theory DetMonad
+imports "../Lib"
+begin
+
+
+section "The Monad"
+
+type_synonym ('s,'a) det_monad = "'s \<Rightarrow> ('a \<times> 's) \<times> bool"
+
+
+definition
+  return :: "'a \<Rightarrow> ('s,'a) det_monad" where
+  "return a \<equiv> \<lambda>s. ((a,s),False)"
+
+
+
+definition "h1 f s = f s"
+definition "h2 g fs = (let (a,b) = fst (fs) in g a b)"
+definition bind:: "('s, 'a) det_monad \<Rightarrow> ('a \<Rightarrow> ('s, 'b) det_monad) \<Rightarrow> 
+           ('s, 'b) det_monad" (infixl ">>=" 60)
+where
+"bind f g \<equiv> \<lambda>s. (
+  let fs = h1 f s;
+      v = h2 g fs
+  in
+  (fst v, (snd v \<or> snd fs)))"
+
+abbreviation(input)
+  bind_rev :: "('c \<Rightarrow> ('a, 'b) det_monad) \<Rightarrow> ('a, 'c) det_monad \<Rightarrow> 
+               ('a, 'b) det_monad" (infixl "=<<" 60) where 
+  "g =<< f \<equiv> f >>= g"
+
+definition
+  get :: "('s,'s) det_monad" where
+  "get \<equiv> \<lambda>s. ((s,s), False)"
+
+definition
+  put :: "'s \<Rightarrow> ('s, unit) det_monad" where
+  "put s \<equiv> \<lambda>_. (((),s), False)"
+
+subsection "Failure"
+
+definition
+  fail :: "'a \<Rightarrow> ('s, 'a) det_monad" where
+ "fail a \<equiv> \<lambda>s. ((a,s), True)"
+
+definition
+  assert :: "bool \<Rightarrow> ('a, unit) det_monad" where
+ "assert P \<equiv> if P then return () else fail ()"
+
+
+definition
+  state_assert :: "('s \<Rightarrow> bool) \<Rightarrow> ('s, unit) det_monad"
+where
+  "state_assert P \<equiv> get >>= (\<lambda>s. assert (P s))"
+
+subsection "Generic functions on top of the state monad"
+
+definition
+  gets :: "('s \<Rightarrow> 'a) \<Rightarrow> ('s, 'a) det_monad" where
+ "gets f \<equiv> get >>= (\<lambda>s. return (f s))"
+
+definition
+  modify :: "('s \<Rightarrow> 's) \<Rightarrow> ('s, unit) det_monad" where
+ "modify f \<equiv> get >>= (\<lambda>s. put (f s))"
+
+lemma simpler_gets_def: "gets f = (\<lambda>s. ((f s, s), False))"
+  apply (simp add: gets_def return_def bind_def h1_def h2_def get_def)
+  done
+
+lemma simpler_modify_def:
+  "modify f = (\<lambda>s. (((), f s), False))"
+  by (simp add: modify_def bind_def h1_def h2_def get_def put_def)
+
+definition
+  the_run_state :: "('s,'a) det_monad \<Rightarrow> 's \<Rightarrow> 'a \<times> 's"
+where
+  "the_run_state M \<equiv> \<lambda>s. THE s'. fst (M s) = s'"
+
+
+subsection "Non-Failure"
+
+definition
+  no_fail :: "('s \<Rightarrow> bool) \<Rightarrow> ('s,'a) det_monad \<Rightarrow> bool"
+where
+  "no_fail P m \<equiv> \<forall>s. P s \<longrightarrow> \<not> (snd (m s))"
+
+
+
+definition
+  validNF ::"('s \<Rightarrow> bool) \<Rightarrow> ('s,'a) det_monad \<Rightarrow> ('a \<Rightarrow> 's \<Rightarrow> bool) \<Rightarrow> bool"
+      ("\<lbrace>_\<rbrace>/ _ /\<lbrace>_\<rbrace>!")
+where
+  "validNF P f Q \<equiv> valid P f Q \<and> no_fail P f"
+
+definition
+  validE_NF :: "('s \<Rightarrow> bool) \<Rightarrow> ('s, 'a + 'b) det_monad \<Rightarrow>
+             ('b \<Rightarrow> 's \<Rightarrow> bool) \<Rightarrow>
+             ('a \<Rightarrow> 's \<Rightarrow> bool) \<Rightarrow> bool"
+  ("\<lbrace>_\<rbrace>/ _ /(\<lbrace>_\<rbrace>,/ \<lbrace>_\<rbrace>!)")
+where
+  "validE_NF P f Q E \<equiv> validE P f Q E \<and> no_fail P f"
+
+lemma validE_NF_alt_def:
+  "\<lbrace> P \<rbrace> B \<lbrace> Q \<rbrace>,\<lbrace> E \<rbrace>! = \<lbrace> P \<rbrace> B \<lbrace> \<lambda>v s. case v of Inl e \<Rightarrow> E e s | Inr r \<Rightarrow> Q r s \<rbrace>!"
+  by (clarsimp simp: validE_NF_def validE_def validNF_def)
+
+section "Basic exception reasoning"
+
+
+definition "no_throw P A \<equiv> \<lbrace> P \<rbrace> A \<lbrace> \<lambda>_ _. True \<rbrace>,\<lbrace> \<lambda>_ _. False \<rbrace>"
+
+definition "no_return P A \<equiv> \<lbrace> P \<rbrace> A \<lbrace>\<lambda>_ _. False\<rbrace>,\<lbrace>\<lambda>_ _. True \<rbrace>"
+
+end

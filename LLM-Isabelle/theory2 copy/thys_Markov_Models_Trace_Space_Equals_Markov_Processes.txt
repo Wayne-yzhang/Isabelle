@@ -1,0 +1,54 @@
+theory Trace_Space_Equals_Markov_Processes
+  imports Discrete_Time_Markov_Chain
+begin
+
+
+locale Time_Homogeneous_Discrete_Markov_Process = M?: prob_space +
+  fixes S :: "'s set" and X :: "nat \<Rightarrow> 'a \<Rightarrow> 's"
+  assumes X [measurable]: "\<And>t. X t \<in> measurable M (count_space UNIV)"
+  assumes S: "countable S" "\<And>n. AE x in M. X n x \<in> S"
+  assumes MC: "\<And>n s s'.
+    \<P>(\<omega> in M. \<forall>t\<le>n. X t \<omega> = s t ) \<noteq> 0 \<Longrightarrow>
+    \<P>(\<omega> in M. X (Suc n) \<omega> = s' \<bar> \<forall>t\<le>n. X t \<omega> = s t ) =
+    \<P>(\<omega> in M. X (Suc n) \<omega> = s' \<bar> X n \<omega> = s n )"
+  assumes TH: "\<And>n m s t.
+    \<P>(\<omega> in M. X n \<omega> = t) \<noteq> 0 \<Longrightarrow> \<P>(\<omega> in M. X m \<omega> = t) \<noteq> 0 \<Longrightarrow>
+    \<P>(\<omega> in M. X (Suc n) \<omega> = s \<bar> X n \<omega> = t) = \<P>(\<omega> in M. X (Suc m) \<omega> = s \<bar> X m \<omega> = t)"
+begin
+
+context
+begin
+
+interpretation pmf_as_measure .
+
+lift_definition I :: "'s pmf" is "distr M (count_space UNIV) (X 0)"
+proof -
+  let ?X = "distr M (count_space UNIV) (X 0)"
+  interpret X: prob_space ?X
+    by (auto simp: prob_space_distr)
+  have "AE x in ?X. measure ?X {x} \<noteq> 0"
+    using S by (subst X.AE_support_countable) (auto simp: AE_distr_iff intro!: exI[of _ S])
+  then show "prob_space ?X \<and> sets ?X = UNIV \<and> (AE x in ?X. measure ?X {x} \<noteq> 0)"
+    by (simp add: prob_space_distr AE_support_countable)
+qed
+
+lemma I_in_S:
+  assumes "pmf I s \<noteq> 0" shows "s \<in> S"
+proof -
+    by transfer (auto simp: measure_distr vimage_def Int_def conj_commute)
+  also have "\<P>(x in M. X 0 x = s) = \<P>(x in M. X 0 x = s \<and> s \<in> S)"
+    using S(2)[of 0] by (intro M.finite_measure_eq_AE) auto
+  finally show ?thesis
+    by (cases "s \<in> S") auto
+qed
+
+lift_definition K :: "'s \<Rightarrow> 's pmf" is
+  "\<lambda>s. with (\<lambda>n. \<P>(\<omega> in M. X n \<omega> = s) \<noteq> 0)
+     (\<lambda>n. distr (uniform_measure M {\<omega>\<in>space M. X n \<omega> = s}) (count_space UNIV) (X (Suc n)))
+     (uniform_measure (count_space UNIV) {s})"
+proof (rule withI)
+  fix s n assume *: "\<P>(\<omega> in M. X n \<omega> = s) \<noteq> 0"
+  let ?D = "distr (uniform_measure M {\<omega>\<in>space M. X n \<omega> = s}) (count_space UNIV) (X (Suc n))"
+  have D: "prob_space ?D"
+    by (intro prob_space.prob_space_distr prob_space_uniform_measure)
+       (auto simp: M.emeasure_eq_measure *)

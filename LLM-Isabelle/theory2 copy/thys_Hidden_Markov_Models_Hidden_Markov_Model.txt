@@ -1,0 +1,118 @@
+theory Hidden_Markov_Model
+  imports
+    Markov_Models.Discrete_Time_Markov_Chain Auxiliary
+    "HOL-Library.IArray"
+begin
+
+
+locale Closed_Kernel =
+  fixes K :: "'s \<Rightarrow> 't pmf" and S :: "'t set"
+  assumes finite: "finite S"
+      and wellformed: "S \<noteq> {}"
+      and closed: "\<forall> s. K s \<subseteq> S"
+
+locale HMM_defs =
+  fixes \<K> :: "'s \<Rightarrow> 's pmf" and \<O> :: "'s \<Rightarrow> 't pmf" and \<O>\<^sub>s :: "'t set"
+
+locale HMM =
+  HMM_defs + O: Closed_Kernel \<O> \<O>\<^sub>s
+begin
+
+lemma observations_finite: "finite \<O>\<^sub>s"
+  and observations_wellformed: "\<O>\<^sub>s \<noteq> {}"
+  and observations_closed: "\<forall> s. \<O> s \<subseteq> \<O>\<^sub>s"
+  using O.finite O.wellformed O.closed by -
+
+end
+
+locale HMM2_defs = HMM_defs \<K> \<O> for \<K> :: "'s \<Rightarrow> 's pmf" and \<O> :: "'s \<Rightarrow> 't pmf" +
+  fixes \<S> :: "'s set"
+
+locale HMM2 = HMM2_defs + HMM + K: Closed_Kernel \<K> \<S>
+begin
+
+lemma states_finite: "finite \<S>"
+  and states_wellformed: "\<S> \<noteq> {}"
+  and states_closed: "\<forall> s. \<K> s \<subseteq> \<S>"
+  using K.finite K.wellformed K.closed by -
+
+end
+
+locale HMM3_defs = HMM2_defs \<O>\<^sub>s \<K> for \<O>\<^sub>s :: "'t set" and \<K> :: "'s \<Rightarrow> 's pmf" +
+  fixes state_list :: "'s list"
+
+locale HMM3 = HMM3_defs _ _ \<O>\<^sub>s \<K> + HMM2 \<O>\<^sub>s \<K> for \<O>\<^sub>s :: "'t set" and \<K> :: "'s \<Rightarrow> 's pmf" +
+  assumes state_list_\<S>: "set state_list = \<S>"
+
+context HMM_defs
+begin
+
+no_notation (ASCII) comp  (infixl "o" 55)
+
+definition
+  "obs \<equiv> SOME x. x \<in> \<O>\<^sub>s"
+
+lemma (in HMM) obs:
+  "obs \<in> \<O>\<^sub>s"
+  unfolding obs_def using observations_wellformed by (auto intro: someI_ex)
+
+definition
+  "K \<equiv> \<lambda> (s\<^sub>1, o\<^sub>1 :: 't). bind_pmf (\<K> s\<^sub>1) (\<lambda> s\<^sub>2. map_pmf (\<lambda> o\<^sub>2. (s\<^sub>2, o\<^sub>2)) (\<O> s\<^sub>2))"
+
+sublocale MC_syntax K .
+
+definition "I (s :: 's) = map_pmf (\<lambda> x. (s, x)) (pmf_of_set \<O>\<^sub>s)"
+
+definition
+  "likelihood s os = T' (I s) {\<omega> \<in> space S. \<exists> o\<^sub>0 xs \<omega>'. \<omega> = (s, o\<^sub>0) ## xs @- \<omega>' \<and> map snd xs = os}"
+
+abbreviation (input) "L os \<omega> \<equiv> \<exists> xs \<omega>'. \<omega> = xs @- \<omega>' \<and> map snd xs = os"
+
+lemma likelihood_alt_def: "likelihood s os = T' (I s) {(s, o) ## xs @- \<omega>' |o xs \<omega>'. map snd xs = os}"
+  unfolding likelihood_def by (simp add: in_S)
+
+
+
+lemma L_Nil:
+  "L [] \<omega> = True"
+  by simp
+
+lemma emeasure_T_observation_Nil:
+  "T (s, o\<^sub>0) {\<omega> \<in> space S. L [] \<omega>} = 1"
+  by simp
+
+lemma L_Cons:
+  "L (o # os) \<omega> \<longleftrightarrow> snd (shd \<omega>) = o \<and> L os (stl \<omega>)"
+  apply (cases \<omega>; cases "shd \<omega>"; safe; clarsimp)
+   apply force
+  subgoal for x xs \<omega>'
+    by (force intro: exI[where x = "(x, o) # xs"])
+  done
+
+lemma L_measurable[measurable]:
+  "Measurable.pred S (L os)"
+  apply (induction os)
+   apply (simp; fail)
+  subgoal premises that for o os
+    by(subst L_Cons)
+      (intro Measurable.pred_intros_logic
+        measurable_compose[OF measurable_shd] measurable_compose[OF measurable_stl that];
+        measurable)
+  done
+
+lemma init_measurable[measurable]:
+  "Measurable.pred S (\<lambda>x. \<exists>o\<^sub>0 xs \<omega>'. x = (s, o\<^sub>0) ## xs @- \<omega>' \<and> map snd xs = os)"
+  (is "Measurable.pred S ?f")
+proof -
+  have *: "?f \<omega> \<longleftrightarrow> fst (shd \<omega>) = s \<and> L os (stl \<omega>)" for \<omega>
+    by (cases \<omega>) auto
+  show ?thesis
+    by (subst *)
+end (* HMM Defs *)
+(*
+  oops
+  by (metis add.right_neutral empty_iff finite.intros(1) insert_iff subsetI sum.empty sum.insert sum.mono_neutral_right that)
+
+  using that
+  apply auto
+*)

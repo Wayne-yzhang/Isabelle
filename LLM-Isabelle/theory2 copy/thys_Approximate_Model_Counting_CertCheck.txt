@@ -1,0 +1,286 @@
+theory CertCheck
+imports ApproxMCAnalysis
+
+begin
+
+
+type_synonym 'a xor = "'a list \<times> bool"
+
+definition satisfies_xorL :: "'a xor \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow> bool"
+  where "satisfies_xorL xb \<omega> =
+    even (sum_list (map (of_bool \<circ> \<omega>) (fst xb)) +
+      of_bool (snd xb)::nat)"
+
+definition sublist_bits::"'a list \<Rightarrow> bool list \<Rightarrow> 'a list"
+  where "sublist_bits ls bs =
+    map fst (filter snd (zip ls bs))"
+
+definition xor_from_bits::
+  "'a list \<Rightarrow> bool list \<times> bool \<Rightarrow> 'a xor"
+  where "xor_from_bits V xsb =
+    (sublist_bits V (fst xsb), snd xsb)"
+
+locale ApproxMCL =
+  fixes sols :: "'fml \<Rightarrow> ('a \<Rightarrow> bool) set"
+  fixes enc_xor :: "'a xor \<Rightarrow> 'fml \<Rightarrow> 'fml"
+  assumes sols_enc_xor:
+    "\<And>F xor.
+      sols (enc_xor xor F) =
+      sols F \<inter> {\<omega>. satisfies_xorL xor \<omega>}"
+begin
+
+definition list_of_set ::"'a set \<Rightarrow> 'a list"
+where "list_of_set x = (@ls. set ls = x \<and> distinct ls)"
+
+definition xor_conc :: "'a set \<times> bool \<Rightarrow> 'a xor"
+  where "xor_conc xsb = (list_of_set (fst xsb), snd xsb)"
+
+definition enc_xor_conc :: "'a set \<times> bool \<Rightarrow> 'fml \<Rightarrow> 'fml"
+  where "enc_xor_conc = enc_xor \<circ> xor_conc"
+
+lemma distinct_count_list:
+  assumes "distinct ls"
+  shows "count_list ls x = of_bool (x \<in> set ls)"
+  using assms
+  apply (induction ls)
+  by auto
+
+lemma list_of_set:
+  assumes "finite x"
+  shows "distinct (list_of_set x)" "set (list_of_set x) = x"
+  unfolding list_of_set_def
+  by (metis (mono_tags, lifting) assms finite_distinct_list someI_ex)+
+
+lemma count_list_list_of_set:
+  assumes "finite x"
+  shows "count_list (list_of_set x) y = of_bool (y \<in> x)"
+  apply (subst distinct_count_list)
+  using list_of_set[OF assms]
+  by auto
+
+lemma satisfies_xorL_xor_conc:
+  assumes "finite x"
+  shows"satisfies_xorL (xor_conc (x,b)) \<omega> \<longleftrightarrow> satisfies_xor (x,b) {x. \<omega> x}"
+  unfolding satisfies_xorL_def xor_conc_def
+  using list_of_set[OF assms]
+  by (auto simp add: sum_list_map_eq_sum_count count_list_list_of_set[OF assms] Int_ac(3) assms)
+
+sublocale appmc: ApproxMC sols enc_xor_conc
+  apply unfold_locales
+  unfolding enc_xor_conc_def o_def
+  apply (subst sols_enc_xor)
+  using satisfies_xorL_xor_conc by fastforce
+
+definition size_xorL ::"
+  'fml \<Rightarrow> 'a list \<Rightarrow>
+  (nat \<Rightarrow> bool list \<times> bool) \<Rightarrow>
+  nat \<Rightarrow> nat"
+  where "size_xorL F S xorsl i = (
+    let xors = map (xor_from_bits S \<circ> xorsl) [0..<i] in
+    let Fenc = fold enc_xor xors F in
+      card (proj (set S) (sols Fenc)))"
+
+definition check_xorL ::"
+  'fml \<Rightarrow> 'a list \<Rightarrow>
+  nat \<Rightarrow>
+  (nat \<Rightarrow> bool list \<times> bool) \<Rightarrow>
+  nat \<Rightarrow> bool"
+  where "check_xorL F S thresh xorsl i =
+  (size_xorL F S xorsl i < thresh)"
+
+definition approxcore_xorsL :: "
+  'fml \<Rightarrow> 'a list \<Rightarrow>
+  nat \<Rightarrow>
+  (nat \<Rightarrow> (bool list \<times> bool)) \<Rightarrow>
+  nat"
+  where "
+    approxcore_xorsL F S thresh xorsl =
+    (case List.find
+      (check_xorL F S thresh xorsl) [1..<length S] of
+      None \<Rightarrow> 2 ^ length S
+    | Some m \<Rightarrow>
+      (2 ^ m * size_xorL F S xorsl m))"
+
+definition xor_abs :: "'a xor \<Rightarrow> 'a set \<times> bool"
+  where "xor_abs xsb = (set (fst xsb), snd xsb)"
+
+lemma sols_fold_enc_xor:
+  assumes "list_all2 (\<lambda>x y.
+    \<forall>w. satisfies_xorL x w = satisfies_xorL y w) xs ys"
+  assumes "sols F = sols G"
+  shows "sols (fold enc_xor xs F) = sols (fold enc_xor ys G)"
+  using assms
+proof (induction xs arbitrary: ys F G)
+  case Nil
+  then show ?case
+    by auto
+  next
+  case (Cons x xss)
+  then obtain y yss where ys: "ys = y#yss"
+  by (meson list_all2_Cons1)
+  have all2: "\<forall>w. satisfies_xorL x w = satisfies_xorL y w"
+    using Cons.prems(1) ys by blast
+  have *: "sols (enc_xor x F) = sols (enc_xor y G)"
+    apply (subst sols_enc_xor)
+    using all2 local.Cons(3) sols_enc_xor by presburger
+  then show ?case unfolding ys
+  using "*" Cons.IH Cons.prems(2) local.Cons(2) local.Cons(3) ys by auto
+qed
+
+lemma satisfies_xor_xor_abs:
+  assumes "distinct x"
+  shows"satisfies_xor (xor_abs (x,b)) {x. \<omega> x} \<longleftrightarrow> satisfies_xorL (x,b) \<omega>"
+  unfolding satisfies_xorL_def xor_abs_def
+  apply (clarsimp simp add: sum_list_map_eq_sum_count)
+  by (smt (verit, ccfv_SIG) IntD1 Int_commute assms card_eq_sum distinct_count_list of_bool_eq(2) sum.cong)
+
+lemma xor_conc_xor_abs_rel:
+  assumes "distinct (fst x)"
+  shows"satisfies_xorL (xor_conc (xor_abs x)) w \<longleftrightarrow>
+    satisfies_xorL x w"
+  unfolding xor_abs_def
+  apply (subst satisfies_xorL_xor_conc)
+  subgoal by (simp add: xor_abs_def[symmetric])
+  using assms satisfies_xor_xor_abs xor_abs_def by auto
+
+lemma sorted_sublist_bits:
+  assumes "sorted V"
+  shows"sorted (sublist_bits V bs)"
+  unfolding sublist_bits_def
+  using assms
+  by (auto intro!: sorted_filter sorted_wrt_take simp add: map_fst_zip_take)
+
+lemma distinct_sublist_bits:
+  assumes "distinct V"
+  shows"distinct (sublist_bits V bs)"
+  unfolding sublist_bits_def
+  using assms
+  by (auto intro!: distinct_map_filter simp add: map_fst_zip_take)
+
+lemma distinct_fst_xor_from_bits:
+  assumes "distinct V"
+  shows"distinct (fst (xor_from_bits V bs))"
+  unfolding xor_from_bits_def
+  using distinct_sublist_bits[OF assms]
+  by auto
+
+lemma size_xorL:
+  assumes "\<And>j. j < i \<Longrightarrow>
+    xorsf j =
+    Some (xor_abs (xor_from_bits S (xorsl j)))"
+  assumes "distinct S"
+  shows "size_xorL F S xorsl i =
+    appmc.size_xor F (set S) xorsf i"
+  unfolding appmc.size_xor_def size_xorL_def
+  apply (clarsimp simp add: enc_xor_conc_def fold_map[symmetric])
+  apply (intro arg_cong[where f = "(\<lambda>x. card (proj (set S) x))"])
+  apply (intro sols_fold_enc_xor)
+  by (auto simp add: list_all2_map1 list_all2_map2 list_all2_same assms(1) assms(2) distinct_fst_xor_from_bits xor_conc_xor_abs_rel)
+
+lemma fold_enc_xor_more:
+  assumes "x \<in> sols (fold enc_xor (xs @ rev ys) F)"
+  shows "x \<in> sols (fold enc_xor xs F)"
+  using assms
+proof (induction ys arbitrary: F)
+  case Nil
+  then show ?case
+    by auto
+next
+  case ih: (Cons y ys)
+  show ?case
+    using ih by (auto simp add: ih.prems(1) sols_enc_xor)
+qed
+
+lemma size_xorL_anti_mono:
+  assumes "x \<le> y" "distinct S"
+  shows "size_xorL F S xorsl x \<ge> size_xorL F S xorsl y"
+proof -
+  obtain ys where ys: "[0..<y] = [0..<x] @ ys" "distinct ys"
+  by (metis assms(1) bot_nat_0.extremum distinct_upt ordered_cancel_comm_monoid_diff_class.add_diff_inverse upt_add_eq_append)
+
+  define rys where"rys = (rev (map (xor_from_bits S \<circ> xorsl) ys))"
+  have *: "\<And>y. y \<in> set rys \<Longrightarrow> distinct (fst y)"
+    unfolding rys_def
+    using assms(2) distinct_fst_xor_from_bits
+    by (metis (no_types, opaque_lifting) ex_map_conv o_apply set_rev)
+
+  show ?thesis
+    unfolding size_xorL_def Let_def
+  apply (intro card_mono proj_mono)
+  subgoal using card_proj(1) by blast
+  unfolding ys
+  by (metis fold_enc_xor_more map_append rev_rev_ident subsetI)
+qed
+
+lemma find_upto_SomeI:
+  assumes "\<And>i. a \<le> i \<Longrightarrow> i < x \<Longrightarrow> \<not>P i"
+  assumes "P x" "a \<le> x" "x < b"
+  shows "find P [a..<b] = Some x"
+proof -
+  have x: "[a..<b] ! (x-a) = x"
+    by (simp add: assms(3) assms(4))
+  have j: "\<And>j. j<x-a \<Longrightarrow> \<not> P ([a..<b] ! j)"
+    using assms(1) assms(4) by auto
+  show ?thesis
+  unfolding find_Some_iff
+  using x j
+  by (metis assms(2) assms(3) assms(4) diff_less_mono length_upt)
+qed
+
+lemma check_xorL:
+  assumes "\<And>j. j < i \<Longrightarrow>
+    xorsf j =
+    Some (xor_abs (xor_from_bits S (xorsl j)))"
+  assumes "distinct S"
+  shows "check_xorL F S thresh xorsl i =
+    appmc.check_xor F (set S) thresh xorsf i"
+  unfolding appmc.check_xor_def check_xorL_def
+  using size_xorL[OF assms] by presburger
+
+lemma approxcore_xorsL:
+  assumes "\<And>j. j < length S - 1  \<Longrightarrow>
+    xorsf j =
+    Some (xor_abs (xor_from_bits S (xorsl j)))"
+  assumes S: "distinct S"
+  shows "approxcore_xorsL F S thresh xorsl =
+    appmc.approxcore_xors F (set S) thresh xorsf"
+proof -
+  have c:"card (set S) = length S" using S
+  by (simp add: distinct_card)
+
+  have *: "find (check_xorL F S thresh xorsl) [1..<length S] =
+   find (appmc.check_xor F (set S) thresh xorsf) [1..<card (set S)]"
+    unfolding c
+    by (auto intro!: find_cong check_xorL[OF assms(1) S])
+
+  have **: "find (appmc.check_xor F
+                  (set S) thresh xorsf)
+            [Suc 0..<length S] =
+           Some a \<Longrightarrow>
+           j < a \<Longrightarrow>
+           xorsf j =
+           Some
+            (xor_abs
+              (xor_from_bits S
+                (xorsl j)))" for a j
+    unfolding find_Some_iff
+    by (auto simp add: assms(1))
+  show ?thesis
+  unfolding appmc.approxcore_xors_def approxcore_xorsL_def * c
+  apply (cases "find (appmc.check_xor F (set S) thresh xorsf)
+           [Suc 0..<length S]")
+  subgoal by clarsimp
+  by (auto intro!: ApproxMCL.size_xorL simp add: ApproxMCL_axioms assms **)
+(* Actually, we can restrict i too *)
+(* Sample t * (l-1) * l XORs *)
+(* This is more convenient for stating what happens when
+  certification returns the "wrong" result *)
+(* Helper functions *)
+(* The canonical assignment specified by a list *)
+(* The canonical assignment specified by a list *)
+(* A size certificate is simply a list of solutions*)
+(* Checks whether the value of m is an appropriate value
+  Especially in the case where 1 \<le> m \<le> |S|-1 *)
+(* Compute the correct choice of n up to a bound arbitrarily set to 256 for now *)
+(* The correctness property for BSAT oracle calls that
+   will be certified externally through proof logging *)

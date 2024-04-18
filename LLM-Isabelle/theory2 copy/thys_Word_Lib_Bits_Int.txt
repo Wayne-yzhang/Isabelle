@@ -1,0 +1,675 @@
+theory Bits_Int
+  imports
+    "Word_Lib.Most_significant_bit"
+    "Word_Lib.Least_significant_bit"
+    "Word_Lib.Generic_set_bit"
+    "Word_Lib.Bit_Comprehension"
+begin
+
+
+lemma bin_last_def:
+  "(odd :: int \<Rightarrow> bool) w \<longleftrightarrow> w mod 2 = 1"
+  by (fact odd_iff_mod_2_eq_one)
+
+lemma bin_last_numeral_simps [simp]:
+  "\<not> odd (0 :: int)"
+  "odd (1 :: int)"
+  "odd (- 1 :: int)"
+  "odd (Numeral1 :: int)"
+  "\<not> odd (numeral (Num.Bit0 w) :: int)"
+  "odd (numeral (Num.Bit1 w) :: int)"
+  "\<not> odd (- numeral (Num.Bit0 w) :: int)"
+  "odd (- numeral (Num.Bit1 w) :: int)"
+  by simp_all
+
+lemma bin_rest_numeral_simps [simp]:
+  "(\<lambda>k::int. k div 2) 0 = 0"
+  "(\<lambda>k::int. k div 2) 1 = 0"
+  "(\<lambda>k::int. k div 2) (- 1) = - 1"
+  "(\<lambda>k::int. k div 2) Numeral1 = 0"
+  "(\<lambda>k::int. k div 2) (numeral (Num.Bit0 w)) = numeral w"
+  "(\<lambda>k::int. k div 2) (numeral (Num.Bit1 w)) = numeral w"
+  "(\<lambda>k::int. k div 2) (- numeral (Num.Bit0 w)) = - numeral w"
+  "(\<lambda>k::int. k div 2) (- numeral (Num.Bit1 w)) = - numeral (w + Num.One)"
+  by simp_all
+
+lemma bin_rl_eqI: "\<lbrakk>(\<lambda>k::int. k div 2) x = (\<lambda>k::int. k div 2) y; odd x = odd y\<rbrakk> \<Longrightarrow> x = y"
+  by (auto elim: oddE)
+
+lemma [simp]:
+  shows bin_rest_lt0: "(\<lambda>k::int. k div 2) i < 0 \<longleftrightarrow> i < 0"
+  and  bin_rest_ge_0: "(\<lambda>k::int. k div 2) i \<ge> 0 \<longleftrightarrow> i \<ge> 0"
+  by auto
+
+lemma bin_rest_gt_0 [simp]: "(\<lambda>k::int. k div 2) x > 0 \<longleftrightarrow> x > 1"
+  by auto
+
+
+
+lemma bin_nth_eq_iff: "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) x = (bit :: int \<Rightarrow> nat \<Rightarrow> bool) y \<longleftrightarrow> x = y"
+  by (simp add: bit_eq_iff fun_eq_iff)
+
+lemma bin_eqI:
+  "x = y" if "\<And>n. (bit :: int \<Rightarrow> nat \<Rightarrow> bool) x n \<longleftrightarrow> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) y n"
+  using that by (rule bit_eqI)
+
+lemma bin_eq_iff: "x = y \<longleftrightarrow> (\<forall>n. (bit :: int \<Rightarrow> nat \<Rightarrow> bool) x n = (bit :: int \<Rightarrow> nat \<Rightarrow> bool) y n)"
+  by (metis bit_eq_iff)
+
+lemma bin_nth_zero [simp]: "\<not> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) 0 n"
+  by simp
+
+lemma bin_nth_1 [simp]: "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) 1 n \<longleftrightarrow> n = 0"
+  by (cases n) (simp_all add: bit_Suc)
+
+lemma bin_nth_minus1 [simp]: "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) (- 1) n"
+  by simp
+
+lemma bin_nth_numeral: "(\<lambda>k::int. k div 2) x = y \<Longrightarrow> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) x (numeral n) = (bit :: int \<Rightarrow> nat \<Rightarrow> bool) y (pred_numeral n)"
+  by (simp add: numeral_eq_Suc bit_Suc)
+
+lemmas bin_nth_numeral_simps [simp] =
+  bin_nth_numeral [OF bin_rest_numeral_simps(8)]
+
+lemmas bin_nth_simps =
+  bit_0 bit_Suc bin_nth_zero bin_nth_minus1
+  bin_nth_numeral_simps
+
+  by (auto simp add: bit_exp_iff)
+
+lemma nth_rest_power_bin: "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) (((\<lambda>k::int. k div 2) ^^ k) w) n = (bit :: int \<Rightarrow> nat \<Rightarrow> bool) w (n + k)"
+  apply (induct k arbitrary: n)
+   apply clarsimp
+  apply clarsimp
+  apply (simp only: bit_Suc [symmetric] add_Suc)
+  done
+
+lemma bin_nth_numeral_unfold:
+  "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) (numeral (num.Bit0 x)) n \<longleftrightarrow> n > 0 \<and> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) (numeral x) (n - 1)"
+  "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) (numeral (num.Bit1 x)) n \<longleftrightarrow> (n > 0 \<longrightarrow> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) (numeral x) (n - 1))"
+  by (cases n; simp)+
+
+
+
+definition bin_sign :: "int \<Rightarrow> int"
+  where "bin_sign k = (if k \<ge> 0 then 0 else - 1)"
+
+lemma bin_sign_simps [simp]:
+  "bin_sign 0 = 0"
+  "bin_sign 1 = 0"
+  "bin_sign (- 1) = - 1"
+  "bin_sign (numeral k) = 0"
+  "bin_sign (- numeral k) = -1"
+  by (simp_all add: bin_sign_def)
+
+lemma bin_sign_rest [simp]: "bin_sign ((\<lambda>k::int. k div 2) w) = bin_sign w"
+  by (simp add: bin_sign_def)
+
+lemma bintrunc_mod2p: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w = w mod 2 ^ n"
+  by (fact take_bit_eq_mod)
+
+lemma sbintrunc_mod2p: "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w = (w + 2 ^ n) mod 2 ^ Suc n - 2 ^ n"
+  by (simp add: bintrunc_mod2p signed_take_bit_eq_take_bit_shift)
+
+lemma sbintrunc_eq_take_bit:
+  by (fact signed_take_bit_eq_take_bit_shift)
+
+lemma sign_bintr: "bin_sign ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w) = 0"
+  by (simp add: bin_sign_def)
+
+lemma bintrunc_n_0: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n 0 = 0"
+  by (fact take_bit_of_0)
+
+lemma sbintrunc_n_0: "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n 0 = 0"
+  by (fact signed_take_bit_of_0)
+
+lemma sbintrunc_n_minus1: "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (- 1) = -1"
+  by (fact signed_take_bit_of_minus_1)
+
+lemma bintrunc_Suc_numeral:
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) 1 = 1"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (- 1) = 1 + 2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (- 1)"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (numeral (Num.Bit0 w)) = 2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (numeral w)"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (numeral (Num.Bit1 w)) = 1 + 2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (numeral w)"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (- numeral (Num.Bit0 w)) = 2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (- numeral w)"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (- numeral (Num.Bit1 w)) = 1 + 2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (- numeral (w + Num.One))"
+  by (simp_all add: take_bit_Suc del: take_bit_minus_one_eq_mask)
+
+lemma sbintrunc_0_numeral [simp]:
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) 0 1 = -1"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) 0 (numeral (Num.Bit0 w)) = 0"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) 0 (numeral (Num.Bit1 w)) = -1"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) 0 (- numeral (Num.Bit0 w)) = 0"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) 0 (- numeral (Num.Bit1 w)) = -1"
+  by simp_all
+
+lemma sbintrunc_Suc_numeral:
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) 1 = 1"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (numeral (Num.Bit0 w)) = 2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (numeral w)"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (numeral (Num.Bit1 w)) = 1 + 2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (numeral w)"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (- numeral (Num.Bit0 w)) = 2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (- numeral w)"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) (- numeral (Num.Bit1 w)) = 1 + 2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (- numeral (w + Num.One))"
+  by (simp_all add: signed_take_bit_Suc)
+
+lemma bin_sign_lem: "(bin_sign ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n bin) = -1) = bit bin n"
+  by (simp add: bin_sign_def)
+
+lemma nth_bintr: "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m w) n \<longleftrightarrow> n < m \<and> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) w n"
+  by (fact bit_take_bit_iff)
+
+lemma nth_sbintr: "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m w) n = (if n < m then (bit :: int \<Rightarrow> nat \<Rightarrow> bool) w n else (bit :: int \<Rightarrow> nat \<Rightarrow> bool) w m)"
+  by (simp add: bit_signed_take_bit_iff min_def)
+
+lemma bin_nth_Bit0:
+  "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) (numeral (Num.Bit0 w)) n \<longleftrightarrow>
+    (\<exists>m. n = Suc m \<and> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) (numeral w) m)"
+
+lemma bin_nth_Bit1:
+  "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) (numeral (Num.Bit1 w)) n \<longleftrightarrow>
+    n = 0 \<or> (\<exists>m. n = Suc m \<and> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) (numeral w) m)"
+  by auto
+
+lemma bintrunc_bintrunc_l: "n \<le> m \<Longrightarrow> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w) = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by simp
+
+lemma sbintrunc_sbintrunc_l: "n \<le> m \<Longrightarrow> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w) = (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by simp
+
+lemma bintrunc_bintrunc_ge: "n \<le> m \<Longrightarrow> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m w) = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by (rule bin_eqI) (auto simp: nth_bintr)
+
+lemma bintrunc_bintrunc_min [simp]: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w) = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (min m n) w"
+  by (rule take_bit_take_bit)
+
+lemma sbintrunc_sbintrunc_min [simp]: "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w) = (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (min m n) w"
+  by (rule signed_take_bit_signed_take_bit)
+
+lemmas sbintrunc_Suc_Pls =
+  signed_take_bit_Suc [where a="0::int", simplified bin_last_numeral_simps bin_rest_numeral_simps]
+
+lemmas sbintrunc_Suc_Min =
+  signed_take_bit_Suc [where a="-1::int", simplified bin_last_numeral_simps bin_rest_numeral_simps]
+
+lemmas sbintrunc_Sucs = sbintrunc_Suc_Pls sbintrunc_Suc_Min
+  sbintrunc_Suc_numeral
+
+lemmas sbintrunc_Pls =
+  signed_take_bit_0 [where a="0::int", simplified bin_last_numeral_simps bin_rest_numeral_simps]
+
+lemmas sbintrunc_Min =
+  signed_take_bit_0 [where a="-1::int", simplified bin_last_numeral_simps bin_rest_numeral_simps]
+
+lemmas sbintrunc_0_simps =
+  sbintrunc_Pls sbintrunc_Min
+
+lemmas sbintrunc_simps = sbintrunc_0_simps sbintrunc_Sucs
+
+lemma bintrunc_minus: "0 < n \<Longrightarrow> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc (n - 1)) w = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by auto
+
+lemma sbintrunc_minus: "0 < n \<Longrightarrow> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc (n - 1)) w = (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by auto
+
+lemmas sbintrunc_minus_simps =
+  sbintrunc_Sucs [THEN [2] sbintrunc_minus [symmetric, THEN trans]]
+
+lemma sbintrunc_BIT_I:
+  by simp
+
+lemma sbintrunc_Suc_Is:
+  by auto
+
+lemma sbintrunc_Suc_lem: "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) x = y \<Longrightarrow> m = Suc n \<Longrightarrow> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m x = y"
+  by (rule ssubst)
+
+lemmas sbintrunc_Suc_Ialts =
+  sbintrunc_Suc_Is [THEN sbintrunc_Suc_lem]
+
+lemma sbintrunc_bintrunc_lt: "m > n \<Longrightarrow> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m w) = (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by (rule bin_eqI) (auto simp: nth_sbintr nth_bintr)
+
+lemma bintrunc_sbintrunc_le: "m \<le> Suc n \<Longrightarrow> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w) = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m w"
+  by (rule take_bit_signed_take_bit)
+
+lemmas bintrunc_sbintrunc [simp] = order_refl [THEN bintrunc_sbintrunc_le]
+lemmas sbintrunc_bintrunc [simp] = lessI [THEN sbintrunc_bintrunc_lt]
+lemmas bintrunc_bintrunc [simp] = order_refl [THEN bintrunc_bintrunc_l]
+lemmas sbintrunc_sbintrunc [simp] = order_refl [THEN sbintrunc_sbintrunc_l]
+
+lemma bintrunc_sbintrunc' [simp]: "0 < n \<Longrightarrow> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (n - 1) w) = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by (cases n) simp_all
+
+lemma sbintrunc_bintrunc' [simp]: "0 < n \<Longrightarrow> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (n - 1) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w) = (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (n - 1) w"
+  by (cases n) simp_all
+
+lemma bin_sbin_eq_iff: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) x = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) y \<longleftrightarrow> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n x = (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n y"
+  apply (rule iffI)
+   apply (rule box_equals [OF _ sbintrunc_bintrunc sbintrunc_bintrunc])
+   apply simp
+  apply (rule box_equals [OF _ bintrunc_sbintrunc bintrunc_sbintrunc])
+  apply simp
+  done
+
+lemma bin_sbin_eq_iff':
+  "0 < n \<Longrightarrow> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n x = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n y \<longleftrightarrow> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (n - 1) x = (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (n - 1) y"
+  by (cases n) (simp_all add: bin_sbin_eq_iff)
+
+lemmas bintrunc_sbintruncS0 [simp] = bintrunc_sbintrunc' [unfolded One_nat_def]
+lemmas sbintrunc_bintruncS0 [simp] = sbintrunc_bintrunc' [unfolded One_nat_def]
+
+lemmas bintrunc_bintrunc_l' = le_add1 [THEN bintrunc_bintrunc_l]
+lemmas sbintrunc_sbintrunc_l' = le_add1 [THEN sbintrunc_sbintrunc_l]
+
+
+lemmas nat_non0_gr =
+  trans [OF iszero_def [THEN Not_eq_iff [THEN iffD2]] refl]
+
+lemma bintrunc_numeral:
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) x = of_bool (odd x) + 2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (x div 2)"
+  by (simp add: numeral_eq_Suc take_bit_Suc mod_2_eq_odd)
+
+lemma sbintrunc_numeral:
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) x = of_bool (odd x) + 2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (x div 2)"
+  by (simp add: numeral_eq_Suc signed_take_bit_Suc mod2_eq_if)
+
+lemma bintrunc_numeral_simps [simp]:
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) (numeral (Num.Bit0 w)) =
+    2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (numeral w)"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) (numeral (Num.Bit1 w)) =
+    1 + 2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (numeral w)"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) (- numeral (Num.Bit0 w)) =
+    2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (- numeral w)"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) (- numeral (Num.Bit1 w)) =
+    1 + 2 * (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (- numeral (w + Num.One))"
+  "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) 1 = 1"
+  by (simp_all add: bintrunc_numeral)
+
+lemma sbintrunc_numeral_simps [simp]:
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) (numeral (Num.Bit0 w)) =
+    2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (numeral w)"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) (numeral (Num.Bit1 w)) =
+    1 + 2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (numeral w)"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) (- numeral (Num.Bit0 w)) =
+    2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (- numeral w)"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) (- numeral (Num.Bit1 w)) =
+    1 + 2 * (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (pred_numeral k) (- numeral (w + Num.One))"
+  "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (numeral k) 1 = 1"
+  by (simp_all add: sbintrunc_numeral)
+
+lemma no_bintr_alt1: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n = (\<lambda>w. w mod 2 ^ n :: int)"
+  by (rule ext) (rule bintrunc_mod2p)
+
+lemma range_bintrunc: "range ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n) = {i. 0 \<le> i \<and> i < 2 ^ n}"
+  by (auto simp add: take_bit_eq_mod image_iff) (metis mod_pos_pos_trivial)
+
+lemma no_sbintr_alt2: "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n = (\<lambda>w. (w + 2 ^ n) mod 2 ^ Suc n - 2 ^ n :: int)"
+  by (rule ext) (simp add : sbintrunc_mod2p)
+
+lemma range_sbintrunc: "range ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n) = {i. - (2 ^ n) \<le> i \<and> i < 2 ^ n}"
+proof -
+    by (simp add: sbintrunc_eq_take_bit fun_eq_iff)
+  ultimately show ?thesis
+    apply (simp only: fun.set_map range_bintrunc)
+    apply (auto simp add: image_iff)
+    apply presburger
+    done
+qed
+
+lemma sbintrunc_inc:
+  using that by (fact signed_take_bit_int_greater_eq)
+
+lemma sbintrunc_dec:
+  using that by (fact signed_take_bit_int_less_eq)
+
+lemma bintr_ge0: "0 \<le> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by (simp add: bintrunc_mod2p)
+
+lemma bintr_lt2p: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w < 2 ^ n"
+  by (simp add: bintrunc_mod2p)
+
+lemma bintr_Min: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (- 1) = 2 ^ n - 1"
+  by (simp add: stable_imp_take_bit_eq mask_eq_exp_minus_1)
+
+lemma sbintr_ge: "- (2 ^ n) \<le> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by (fact signed_take_bit_int_greater_eq_minus_exp)
+
+lemma sbintr_lt: "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w < 2 ^ n"
+  by (fact signed_take_bit_int_less_exp)
+
+lemma sign_Pls_ge_0: "bin_sign bin = 0 \<longleftrightarrow> bin \<ge> 0"
+  for bin :: int
+  by (simp add: bin_sign_def)
+
+lemma sign_Min_lt_0: "bin_sign bin = -1 \<longleftrightarrow> bin < 0"
+  for bin :: int
+  by (simp add: bin_sign_def)
+
+lemma bin_rest_trunc: "(\<lambda>k::int. k div 2) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n bin) = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (n - 1) ((\<lambda>k::int. k div 2) bin)"
+  by (simp add: take_bit_rec [of n bin])
+
+lemma bin_rest_power_trunc:
+  "((\<lambda>k::int. k div 2) ^^ k) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n bin) = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (n - k) (((\<lambda>k::int. k div 2) ^^ k) bin)"
+  by (induct k) (auto simp: bin_rest_trunc)
+
+lemma bin_rest_trunc_i: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n ((\<lambda>k::int. k div 2) bin) = (\<lambda>k::int. k div 2) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) bin)"
+  by (auto simp add: take_bit_Suc)
+
+lemma bin_rest_strunc: "(\<lambda>k::int. k div 2) ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (Suc n) bin) = (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n ((\<lambda>k::int. k div 2) bin)"
+  by (simp add: signed_take_bit_Suc)
+
+lemma bintrunc_rest [simp]: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n ((\<lambda>k::int. k div 2) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n bin)) = (\<lambda>k::int. k div 2) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n bin)"
+  by (induct n arbitrary: bin) (simp_all add: take_bit_Suc)
+
+lemma sbintrunc_rest [simp]: "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n ((\<lambda>k::int. k div 2) ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n bin)) = (\<lambda>k::int. k div 2) ((signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n bin)"
+  by (induct n arbitrary: bin) (simp_all add: signed_take_bit_Suc mod2_eq_if)
+
+lemma bintrunc_rest': "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n \<circ> (\<lambda>k::int. k div 2) \<circ> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n = (\<lambda>k::int. k div 2) \<circ> (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n"
+  by (rule ext) auto
+
+lemma sbintrunc_rest': "(signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n \<circ> (\<lambda>k::int. k div 2) \<circ> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n = (\<lambda>k::int. k div 2) \<circ> (signed_take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n"
+  by (rule ext) auto
+
+lemma rco_lem: "f \<circ> g \<circ> f = g \<circ> f \<Longrightarrow> f \<circ> (g \<circ> f) ^^ n = g ^^ n \<circ> f"
+  apply (rule ext)
+  apply (induct_tac n)
+   apply (simp_all (no_asm))
+  apply (drule fun_cong)
+  apply (unfold o_def)
+  apply (erule trans)
+  apply simp
+  done
+
+lemmas rco_bintr = bintrunc_rest'
+  [THEN rco_lem [THEN fun_cong], unfolded o_def]
+lemmas rco_sbintr = sbintrunc_rest'
+  [THEN rco_lem [THEN fun_cong], unfolded o_def]
+
+
+
+
+lemma [code]:
+  "bin_split (Suc n) w = (let (w1, w2) = bin_split n (w div 2) in (w1, of_bool (odd w) + 2 * w2))"
+  "bin_split 0 w = (w, 0)"
+  by (simp_all add: drop_bit_Suc take_bit_Suc mod_2_eq_odd)
+
+lemma bin_cat_eq_push_bit_add_take_bit:
+  by (simp add: concat_bit_eq)
+
+lemma bin_sign_cat: "bin_sign ((\<lambda>k n l. concat_bit n l k) x n y) = bin_sign x"
+proof -
+  proof -
+      by (simp add: less_le)
+      by auto
+      by (simp add: zdiv_zminus1_eq_if)
+      by simp
+      using zdiv_mono1 zero_less_numeral zero_less_power by blast
+      by simp
+  qed
+  then show ?thesis
+    by (simp add: bin_sign_def not_le not_less bin_cat_eq_push_bit_add_take_bit push_bit_eq_mult take_bit_eq_mod)
+qed
+
+lemma bin_cat_assoc: "(\<lambda>k n l. concat_bit n l k) ((\<lambda>k n l. concat_bit n l k) x m y) n z = (\<lambda>k n l. concat_bit n l k) x (m + n) ((\<lambda>k n l. concat_bit n l k) y n z)"
+  by (fact concat_bit_assoc)
+
+lemma bin_cat_assoc_sym: "(\<lambda>k n l. concat_bit n l k) x m ((\<lambda>k n l. concat_bit n l k) y n z) = (\<lambda>k n l. concat_bit n l k) ((\<lambda>k n l. concat_bit n l k) x (m - n) y) (min m n) z"
+  by (fact concat_bit_assoc_sym)
+
+
+lemma bin_rcat_eq_foldl:
+proof
+    by (induction ks rule: rev_induct)
+      (simp_all add: bin_rcat_def concat_bit_eq push_bit_eq_mult)
+qed
+
+fun bin_rsplit_aux :: "nat \<Rightarrow> nat \<Rightarrow> int \<Rightarrow> int list \<Rightarrow> int list"
+  where "bin_rsplit_aux n m c bs =
+    (if m = 0 \<or> n = 0 then bs
+     else
+      let (a, b) = bin_split n c
+      in bin_rsplit_aux n (m - n) a (b # bs))"
+
+definition bin_rsplit :: "nat \<Rightarrow> nat \<times> int \<Rightarrow> int list"
+  where "bin_rsplit n w = bin_rsplit_aux n (fst w) (snd w) []"
+
+fun bin_rsplitl_aux :: "nat \<Rightarrow> nat \<Rightarrow> int \<Rightarrow> int list \<Rightarrow> int list"
+  where "bin_rsplitl_aux n m c bs =
+    (if m = 0 \<or> n = 0 then bs
+     else
+      let (a, b) = bin_split (min m n) c
+      in bin_rsplitl_aux n (m - n) a (b # bs))"
+
+definition bin_rsplitl :: "nat \<Rightarrow> nat \<times> int \<Rightarrow> int list"
+  where "bin_rsplitl n w = bin_rsplitl_aux n (fst w) (snd w) []"
+
+declare bin_rsplit_aux.simps [simp del]
+declare bin_rsplitl_aux.simps [simp del]
+
+lemma bin_nth_cat:
+  "(bit :: int \<Rightarrow> nat \<Rightarrow> bool) ((\<lambda>k n l. concat_bit n l k) x k y) n =
+    (if n < k then (bit :: int \<Rightarrow> nat \<Rightarrow> bool) y n else (bit :: int \<Rightarrow> nat \<Rightarrow> bool) x (n - k))"
+  by (simp add: bit_concat_bit_iff)
+
+lemma bin_nth_drop_bit_iff:
+  by (simp add: bit_drop_bit_eq)
+
+lemma bin_nth_take_bit_iff:
+  by (fact bit_take_bit_iff)
+
+lemma bin_nth_split:
+  "bin_split n c = (a, b) \<Longrightarrow>
+    (\<forall>k. (bit :: int \<Rightarrow> nat \<Rightarrow> bool) a k = (bit :: int \<Rightarrow> nat \<Rightarrow> bool) c (n + k)) \<and>
+    (\<forall>k. (bit :: int \<Rightarrow> nat \<Rightarrow> bool) b k = (k < n \<and> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) c k))"
+  by (auto simp add: bin_nth_drop_bit_iff bin_nth_take_bit_iff)
+
+lemma bin_cat_zero [simp]: "(\<lambda>k n l. concat_bit n l k) 0 n w = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w"
+  by (simp add: bin_cat_eq_push_bit_add_take_bit)
+
+lemma bintr_cat1: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (k + n) ((\<lambda>k n l. concat_bit n l k) a n b) = (\<lambda>k n l. concat_bit n l k) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) k a) n b"
+  by (metis bin_cat_assoc bin_cat_zero)
+
+lemma bintr_cat: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m ((\<lambda>k n l. concat_bit n l k) a n b) =
+    (\<lambda>k n l. concat_bit n l k) ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (m - n) a) n ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (min m n) b)"
+  by (rule bin_eqI) (auto simp: bin_nth_cat nth_bintr)
+
+lemma bintr_cat_same [simp]: "(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n ((\<lambda>k n l. concat_bit n l k) a n b) = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n b"
+  by (auto simp add : bintr_cat)
+
+lemma cat_bintr [simp]: "(\<lambda>k n l. concat_bit n l k) a n ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n b) = (\<lambda>k n l. concat_bit n l k) a n b"
+  by (simp add: bin_cat_eq_push_bit_add_take_bit)
+
+lemma split_bintrunc: "bin_split n c = (a, b) \<Longrightarrow> b = (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n c"
+  by simp
+
+lemma bin_cat_split: "bin_split n w = (u, v) \<Longrightarrow> w = (\<lambda>k n l. concat_bit n l k) u n v"
+  by (auto simp add: bin_cat_eq_push_bit_add_take_bit bits_ident)
+
+lemma drop_bit_bin_cat_eq:
+  by (rule bit_eqI) (simp add: bit_drop_bit_eq bit_concat_bit_iff)
+
+lemma take_bit_bin_cat_eq:
+  by (rule bit_eqI) (simp add: bit_concat_bit_iff)
+
+lemma bin_split_cat: "bin_split n ((\<lambda>k n l. concat_bit n l k) v n w) = (v, (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w)"
+  by (simp add: drop_bit_bin_cat_eq take_bit_bin_cat_eq)
+
+lemma bin_split_zero [simp]: "bin_split n 0 = (0, 0)"
+  by simp
+
+lemma bin_split_minus1 [simp]:
+  "bin_split n (- 1) = (- 1, (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n (- 1))"
+  by simp
+
+lemma bin_split_trunc:
+  "bin_split (min m n) c = (a, b) \<Longrightarrow>
+    bin_split n ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m c) = ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (m - n) a, b)"
+  apply (induct n arbitrary: m b c, clarsimp)
+  apply (simp add: bin_rest_trunc Let_def split: prod.split_asm)
+  apply (case_tac m)
+   apply (auto simp: Let_def drop_bit_Suc take_bit_Suc mod_2_eq_odd split: prod.split_asm)
+  done
+
+lemma bin_split_trunc1:
+  "bin_split n c = (a, b) \<Longrightarrow>
+    bin_split n ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m c) = ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) (m - n) a, (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m b)"
+  apply (induct n arbitrary: m b c, clarsimp)
+  apply (simp add: bin_rest_trunc Let_def split: prod.split_asm)
+  apply (case_tac m)
+   apply (auto simp: Let_def drop_bit_Suc take_bit_Suc mod_2_eq_odd split: prod.split_asm)
+  done
+
+lemma bin_cat_num: "(\<lambda>k n l. concat_bit n l k) a n b = a * 2 ^ n + (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n b"
+  by (simp add: bin_cat_eq_push_bit_add_take_bit push_bit_eq_mult)
+
+lemma bin_split_num: "bin_split n b = (b div 2 ^ n, b mod 2 ^ n)"
+  by (simp add: drop_bit_eq_div take_bit_eq_mod)
+
+lemmas bin_rsplit_aux_simps = bin_rsplit_aux.simps bin_rsplitl_aux.simps
+lemmas rsplit_aux_simps = bin_rsplit_aux_simps
+
+lemmas th_if_simp1 = if_split [where P = "(=) l", THEN iffD1, THEN conjunct1, THEN mp] for l
+lemmas th_if_simp2 = if_split [where P = "(=) l", THEN iffD1, THEN conjunct2, THEN mp] for l
+
+lemmas rsplit_aux_simp1s = rsplit_aux_simps [THEN th_if_simp1]
+
+lemmas rsplit_aux_simp2ls = rsplit_aux_simps [THEN th_if_simp2]
+lemmas bin_rsplit_aux_simp2s [simp] = rsplit_aux_simp2ls [unfolded Let_def]
+lemmas rbscl = bin_rsplit_aux_simp2s (2)
+
+lemmas rsplit_aux_0_simps [simp] =
+  rsplit_aux_simp1s [OF disjI1] rsplit_aux_simp1s [OF disjI2]
+
+lemma bin_rsplit_aux_append: "bin_rsplit_aux n m c (bs @ cs) = bin_rsplit_aux n m c bs @ cs"
+  apply (induct n m c bs rule: bin_rsplit_aux.induct)
+  apply (subst bin_rsplit_aux.simps)
+  apply (subst bin_rsplit_aux.simps)
+  apply (clarsimp split: prod.split)
+  done
+
+lemma bin_rsplitl_aux_append: "bin_rsplitl_aux n m c (bs @ cs) = bin_rsplitl_aux n m c bs @ cs"
+  apply (induct n m c bs rule: bin_rsplitl_aux.induct)
+  apply (subst bin_rsplitl_aux.simps)
+  apply (subst bin_rsplitl_aux.simps)
+  apply (clarsimp split: prod.split)
+  done
+
+lemmas rsplit_aux_apps [where bs = "[]"] =
+  bin_rsplit_aux_append bin_rsplitl_aux_append
+
+lemmas rsplit_def_auxs = bin_rsplit_def bin_rsplitl_def
+
+lemmas rsplit_aux_alts = rsplit_aux_apps
+  [unfolded append_Nil rsplit_def_auxs [symmetric]]
+
+lemma bin_split_minus: "0 < n \<Longrightarrow> bin_split (Suc (n - 1)) w = bin_split n w"
+  by auto
+
+lemma bin_split_pred_simp [simp]:
+  "(0::nat) < numeral bin \<Longrightarrow>
+    bin_split (numeral bin) w =
+      (let (w1, w2) = bin_split (numeral bin - 1) ((\<lambda>k::int. k div 2) w)
+       in (w1, of_bool (odd w) + 2 * w2))"
+  by (simp add: take_bit_rec drop_bit_rec mod_2_eq_odd)
+
+lemma bin_rsplit_aux_simp_alt:
+  "bin_rsplit_aux n m c bs =
+    (if m = 0 \<or> n = 0 then bs
+     else let (a, b) = bin_split n c in bin_rsplit n (m - n, a) @ b # bs)"
+  apply (simp add: bin_rsplit_aux.simps [of n m c bs])
+  apply (subst rsplit_aux_alts)
+  apply (simp add: bin_rsplit_def)
+  done
+
+lemmas bin_rsplit_simp_alt =
+  trans [OF bin_rsplit_def bin_rsplit_aux_simp_alt]
+
+lemmas bthrs = bin_rsplit_simp_alt [THEN [2] trans]
+
+lemma bin_rsplit_size_sign' [rule_format]:
+  "n > 0 \<Longrightarrow> rev sw = bin_rsplit n (nw, w) \<Longrightarrow> \<forall>v\<in>set sw. (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n v = v"
+  apply (induct sw arbitrary: nw w)
+   apply clarsimp
+  apply clarsimp
+  apply (drule bthrs)
+  apply (simp (no_asm_use) add: Let_def split: prod.split_asm if_split_asm)
+  apply clarify
+  apply simp
+  done
+
+lemmas bin_rsplit_size_sign = bin_rsplit_size_sign' [OF asm_rl
+  rev_rev_ident [THEN trans] set_rev [THEN equalityD2 [THEN subsetD]]]
+
+lemma bin_nth_rsplit [rule_format] :
+  "n > 0 \<Longrightarrow> m < n \<Longrightarrow>
+    \<forall>w k nw.
+      rev sw = bin_rsplit n (nw, w) \<longrightarrow>
+      k < size sw \<longrightarrow> (bit :: int \<Rightarrow> nat \<Rightarrow> bool) (sw ! k) m = (bit :: int \<Rightarrow> nat \<Rightarrow> bool) w (k * n + m)"
+  apply (induct sw)
+   apply clarsimp
+  apply clarsimp
+  apply (drule bthrs)
+  apply (simp (no_asm_use) add: Let_def split: prod.split_asm if_split_asm)
+  apply (erule allE, erule impE, erule exI)
+  apply (case_tac k)
+   apply clarsimp
+   prefer 2
+   apply clarsimp
+   apply (erule allE)
+   apply (erule (1) impE)
+   apply (simp add: bit_drop_bit_eq ac_simps)
+  apply (simp add: bit_take_bit_iff ac_simps)
+  done
+
+lemma bin_rsplit_all: "0 < nw \<Longrightarrow> nw \<le> n \<Longrightarrow> bin_rsplit n (nw, w) = [(take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n w]"
+  by (auto simp: bin_rsplit_def rsplit_aux_simp2ls split: prod.split dest!: split_bintrunc)
+
+lemma bin_rsplit_l [rule_format]:
+  "\<forall>bin. bin_rsplitl n (m, bin) = bin_rsplit n (m, (take_bit :: nat \<Rightarrow> int \<Rightarrow> int) m bin)"
+  apply (rule_tac a = "m" in wf_less_than [THEN wf_induct])
+  apply (simp (no_asm) add: bin_rsplitl_def bin_rsplit_def)
+  apply (rule allI)
+  apply (subst bin_rsplitl_aux.simps)
+  apply (subst bin_rsplit_aux.simps)
+  apply (clarsimp simp: Let_def split: prod.split)
+  apply (simp add: ac_simps)
+  apply (subst rsplit_aux_alts(1))
+  apply (subst rsplit_aux_alts(2))
+  apply clarsimp
+  unfolding bin_rsplit_def bin_rsplitl_def
+  apply (simp add: drop_bit_take_bit)
+  apply (simp_all add: not_less min_def)
+  done
+
+lemma bin_rsplit_rcat [rule_format]:
+  "n > 0 \<longrightarrow> bin_rsplit n (n * size ws, bin_rcat n ws) = map ((take_bit :: nat \<Rightarrow> int \<Rightarrow> int) n) ws"
+  apply (unfold bin_rsplit_def bin_rcat_eq_foldl)
+  apply (rule_tac xs = ws in rev_induct)
+   apply clarsimp
+  apply clarsimp
+  apply (subst rsplit_aux_alts)
+  apply (simp add: drop_bit_bin_cat_eq take_bit_bin_cat_eq)
+  done
+
+lemma bin_rsplit_aux_len_le [rule_format] :
+  "\<forall>ws m. n \<noteq> 0 \<longrightarrow> ws = bin_rsplit_aux n nw w bs \<longrightarrow>
+    length ws \<le> m \<longleftrightarrow> nw + length bs * n \<le> m * n"
+proof -
+  have *: R
+    if d: "i \<le> j \<or> m < j'"
+    and R1: "i * k \<le> j * k \<Longrightarrow> R"
+    and R2: "Suc m * k' \<le> j' * k' \<Longrightarrow> R"
+    for i j j' k k' m :: nat and R
+    using d
+    apply safe
+    apply (rule R1, erule mult_le_mono1)
+    apply (rule R2, erule Suc_le_eq [THEN iffD2 [THEN mult_le_mono1]])
+    done
+  have **: "0 < sc \<Longrightarrow> sc - n + (n + lb * n) \<le> m * n \<longleftrightarrow> sc + lb * n \<le> m * n"
+    for sc m n lb :: nat
+    apply safe
+     apply arith
+    apply (case_tac "sc \<ge> n")
+     apply arith
+    apply (insert linorder_le_less_linear [of m lb])
+    apply (erule_tac k=n and k'=n in *)
+(* BH: Why are these declared as simp rules??? *)

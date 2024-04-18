@@ -1,0 +1,112 @@
+theory  AfterTraceBis
+  imports AfterExtBis "HOL-CSPM.DeadlockResults"
+begin
+
+
+
+      inductive definition is natural.\<close>
+fun AfterTrace :: \<open>'\<alpha> process \<Rightarrow> '\<alpha> trace \<Rightarrow> '\<alpha> process\<close> (infixl \<open>afterTrace\<close> 77)
+  where \<open>P afterTrace [] = P\<close>
+  |     \<open>P afterTrace (e # s) = P afterExt e afterTrace s\<close>
+text \<open>We can also induct backward.\<close>
+lemma AfterTrace_append: \<open>P afterTrace (s @ t) = P afterTrace s afterTrace t\<close>
+lemma AfterTrace_snoc : \<open>P afterTrace (s @ [e]) = P afterTrace s afterExt e\<close>
+text \<open>We have some immediate properties.\<close>
+lemma AfterTrace_STOP : \<open>STOP afterTrace s = STOP\<close>
+lemma AfterTrace_SKIP : \<open>SKIP afterTrace s = (if s = [] then SKIP else STOP)\<close>
+lemma AfterTrace_BOT : \<open>\<bottom> afterTrace s = (if tickFree s then \<bottom> else STOP)\<close>
+subsection \<open>Projections\<close>
+lemma F_AfterTrace : \<open>(s @ t, X) \<in> \<F> P \<Longrightarrow> (t, X) \<in> \<F> (P afterTrace s)\<close>
+  \<open>tickFree (s @ t) \<Longrightarrow> s @ t \<in> \<D> P \<Longrightarrow> t \<in> \<D> (P afterTrace s)\<close>
+  apply (induct s arbitrary: t rule: rev_induct, solves \<open>simp\<close>)
+lemma T_AfterTrace : \<open>s @ t \<in> \<T> P \<Longrightarrow> t \<in> \<T> (P afterTrace s)\<close>
+  \<open>s @ e # t \<in> \<T> P \<Longrightarrow> e \<in> ready_set (P afterTrace s)\<close>
+  \<open>(s, X) \<in> \<F> P \<Longrightarrow> ([], X) \<in> \<F> (P afterTrace s)\<close>
+  \<open>tickFree s \<Longrightarrow> s \<in> \<D> P \<Longrightarrow> P afterTrace s = \<bottom>\<close>
+subsection \<open>Monotony\<close>
+lemma mono_AfterTrace : \<open>P \<sqsubseteq> Q \<Longrightarrow> P afterTrace s \<sqsubseteq> Q afterTrace s\<close>
+  \<open>P \<sqsubseteq>\<^sub>T Q \<Longrightarrow> s \<in> \<T> Q \<Longrightarrow> tickFree s \<Longrightarrow> P afterTrace s \<sqsubseteq>\<^sub>T Q afterTrace s\<close>
+  \<open>P \<sqsubseteq>\<^sub>F Q \<Longrightarrow> s \<in> \<T> Q \<Longrightarrow> tickFree s \<Longrightarrow> P afterTrace s \<sqsubseteq>\<^sub>F Q afterTrace s\<close>
+lemma mono_AfterTrace_D : \<open>P \<sqsubseteq>\<^sub>D Q \<Longrightarrow> P afterTrace s \<sqsubseteq>\<^sub>D Q afterTrace s\<close>
+  \<open>P \<sqsubseteq>\<^sub>F\<^sub>D Q \<Longrightarrow> s \<in> \<T> Q \<Longrightarrow> P afterTrace s \<sqsubseteq>\<^sub>F\<^sub>D Q afterTrace s\<close>
+  \<open>P \<sqsubseteq>\<^sub>D\<^sub>T Q \<Longrightarrow> P afterTrace s \<sqsubseteq>\<^sub>D\<^sub>T Q afterTrace s\<close>
+subsection \<open>Another Definition of \<^const>\<open>events_of\<close>\<close>
+inductive reachable_event :: \<open>'\<alpha> process \<Rightarrow> '\<alpha> \<Rightarrow> bool\<close>
+  where \<open>ev e \<in> ready_set P \<Longrightarrow> reachable_event P e\<close>
+  |     \<open>reachable_event (P after f) e \<Longrightarrow> reachable_event P e\<close>
+lemma events_of_iff_reachable_event: \<open>e \<in> events_of P \<longleftrightarrow> reachable_event P e\<close>
+  show \<open>reachable_event P e \<Longrightarrow> e \<in> events_of P\<close>
+  assume \<open>e \<in> events_of P\<close>
+  then obtain s where * : \<open>s \<in> \<T> P\<close> \<open>ev e \<in> set s\<close> unfolding events_of_def by blast
+  thus \<open>reachable_event P e\<close>
+    show \<open>\<And>P e. ev e \<in> set [] \<Longrightarrow> reachable_event P e\<close> by simp
+    have * : \<open>f \<in> ready_set P\<close> unfolding ready_set_def by force
+    from Cons.prems(2) consider \<open>f = ev e\<close> | \<open>ev e \<in> set s\<close> by auto
+    thus \<open>reachable_event P e\<close>
+      assume \<open>f = ev e\<close>
+      show \<open>reachable_event P e\<close> by (rule reachable_event.intros(1))
+      assume \<open>ev e \<in> set s\<close>
+      show \<open>reachable_event P e\<close>
+        assume \<open>f = ev f'\<close>
+        with * Cons.prems(1) have \<open>s \<in> \<T> (P after f')\<close> by (force simp add: T_After)
+        show \<open>reachable_event P e\<close>
+          by (rule Cons.hyps[OF \<open>s \<in> \<T> (P after f')\<close> \<open>ev e \<in> set s\<close>])
+        from Cons.prems(1) have \<open>f = \<checkmark> \<Longrightarrow> s = []\<close> 
+        thus \<open>f = \<checkmark> \<Longrightarrow> reachable_event P e\<close> 
+          using \<open>ev e \<in> set s\<close> by force
+lemma reachable_event_BOT: \<open>reachable_event \<bottom> e\<close>
+lemma not_reachable_event_STOP: \<open>\<not> reachable_event STOP e\<close>
+lemma reachable_tick_SKIP: \<open>\<not> reachable_event SKIP \<checkmark>\<close>
+  \<open>reachable_event P e \<longleftrightarrow> e \<in> {e| e s. ev e \<in> ready_set (P afterTrace s)}\<close>
+  have \<open>reachable_event P e \<Longrightarrow> \<exists>s. ev e \<in> ready_set (P afterTrace s)\<close>
+    from "2.hyps"(2) obtain s where \<open>ev e \<in> ready_set (P after f afterTrace s)\<close> by blast
+    hence \<open>ev e \<in> ready_set (P afterTrace (ev f # s))\<close> by (simp add: AfterExt_def)
+  also have \<open>ev e \<in> ready_set (P afterTrace s) \<Longrightarrow> reachable_event P e\<close> for s
+    show \<open>ev e \<in> ready_set (P afterTrace []) \<Longrightarrow> reachable_event P e\<close> for P
+    assume  hyp : \<open>ev e \<in> ready_set (P afterTrace s) \<Longrightarrow> reachable_event P e\<close> for P
+    assume prem : \<open>ev e \<in> ready_set (P afterTrace (f # s))\<close>
+    show \<open>reachable_event P e\<close>
+      assume \<open>f = ev f'\<close>
+      show \<open>reachable_event P e\<close> by (rule reachable_event.intros(2)[OF hyp])
+                                    (use prem in \<open>simp add: AfterExt_def \<open>f = ev f'\<close>\<close>)
+      with prem show \<open>f = \<checkmark> \<Longrightarrow> reachable_event P e\<close>
+subsection \<open>Characterizations for Deadlock Freeness\<close> 
+  \<open>deadlock_free P \<longleftrightarrow> range ev \<notin> \<R> P \<and>
+                       (\<forall>e \<in> ready_set P. deadlock_free (P afterExt e))\<close>
+  (is \<open>deadlock_free P \<longleftrightarrow> ?rhs\<close>)
+  have \<open>range ev \<notin> \<R> P \<longleftrightarrow> UNIV - {\<checkmark>} \<notin> \<R> P\<close>
+  thus \<open>deadlock_free P \<Longrightarrow> ?rhs\<close>
+  assume assm : \<open>?rhs\<close>
+  with BOT_iff_D process_charn have non_BOT : \<open>P \<noteq> \<bottom>\<close> by (metis Refusals_iff)
+  show \<open>deadlock_free P\<close>
+    from assm have * : \<open>range ev \<notin> \<R> P\<close>
+      \<open>e \<in> ready_set P \<Longrightarrow>
+       {(tl s, X) |s X. (s, X) \<in> \<F> P \<and> s \<noteq> [] \<and> hd s = e} \<subseteq> \<F> (DF UNIV)\<close> for e
+    assume ** : \<open>(s, X) \<in> \<F> P\<close>
+    show \<open>(s, X) \<in> \<F> (DF UNIV)\<close>
+      show \<open>s = [] \<Longrightarrow> (s, X) \<in> \<F> (DF UNIV)\<close>
+      assume *** : \<open>s = e # s'\<close>
+      with "**" Cons_in_T_imp_elem_ready_set F_T have \<open>e \<in> ready_set P\<close> by blast
+      with "*"(2)[OF this] show \<open>(s, X) \<in> \<F> (DF UNIV)\<close>
+  \<open>deadlock_free\<^sub>S\<^sub>K\<^sub>I\<^sub>P P \<longleftrightarrow> 
+   UNIV \<notin> \<R> P \<and> (\<forall>e \<in> ready_set P - {\<checkmark>}. deadlock_free\<^sub>S\<^sub>K\<^sub>I\<^sub>P (P afterExt e))\<close>
+  (is \<open>deadlock_free\<^sub>S\<^sub>K\<^sub>I\<^sub>P P \<longleftrightarrow> ?rhs\<close>)
+  show \<open>deadlock_free\<^sub>S\<^sub>K\<^sub>I\<^sub>P P \<Longrightarrow> ?rhs\<close>
+  assume assm : \<open>?rhs\<close>
+  with BOT_iff_D process_charn have non_BOT : \<open>P \<noteq> \<bottom>\<close> by (metis Refusals_iff)
+  show \<open>deadlock_free\<^sub>S\<^sub>K\<^sub>I\<^sub>P P\<close>
+    from assm have * : \<open>UNIV \<notin> \<R> P\<close>
+      \<open>e \<in> ready_set P \<and> e \<noteq> \<checkmark> \<Longrightarrow>
+       {(tl s, X) |s X. (s, X) \<in> \<F> P \<and> s \<noteq> [] \<and> hd s = e} \<subseteq> \<F> (DF\<^sub>S\<^sub>K\<^sub>I\<^sub>P UNIV)\<close> for e
+    assume ** : \<open>(s, X) \<in> \<F> P\<close>
+    show \<open>(s, X) \<in> \<F> (DF\<^sub>S\<^sub>K\<^sub>I\<^sub>P UNIV)\<close>
+      show \<open>s = [] \<Longrightarrow> (s, X) \<in> \<F> (DF\<^sub>S\<^sub>K\<^sub>I\<^sub>P UNIV)\<close>
+      assume *** : \<open>s = e # s'\<close>
+      show \<open>(s, X) \<in> \<F> (DF\<^sub>S\<^sub>K\<^sub>I\<^sub>P UNIV)\<close>
+        assume \<open>e = ev e'\<close>
+        have \<open>e \<in> ready_set P \<and> e \<noteq> \<checkmark>\<close> by blast
+        with "*"(2)[OF this] show \<open>(s, X) \<in> \<F> (DF\<^sub>S\<^sub>K\<^sub>I\<^sub>P UNIV)\<close>
+             (metis "**" "***" \<open>e = ev e'\<close> list.distinct(1) list.sel(1))
+        assume \<open>e = \<checkmark>\<close>
+        hence \<open>s = [\<checkmark>]\<close>
+        thus \<open>(s, X) \<in> \<F> (DF\<^sub>S\<^sub>K\<^sub>I\<^sub>P UNIV)\<close>

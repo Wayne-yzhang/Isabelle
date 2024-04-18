@@ -1,0 +1,250 @@
+theory Internal_ZFC_Axioms
+  imports 
+  Forcing_Data
+
+begin
+
+schematic_goal ZF_union_auto:
+    "Union_ax(##A) \<longleftrightarrow> (A, [] \<Turnstile> ?zfunion)"
+  unfolding Union_ax_def 
+  by ((rule sep_rules | simp)+)
+
+synthesize "ZF_union_fm" from_schematic ZF_union_auto
+
+schematic_goal ZF_power_auto:
+    "power_ax(##A) \<longleftrightarrow> (A, [] \<Turnstile> ?zfpow)"
+  unfolding power_ax_def powerset_def subset_def
+  by ((rule sep_rules | simp)+)
+
+synthesize "ZF_power_fm" from_schematic ZF_power_auto
+
+schematic_goal ZF_pairing_auto:
+    "upair_ax(##A) \<longleftrightarrow> (A, [] \<Turnstile> ?zfpair)"
+  unfolding upair_ax_def 
+  by ((rule sep_rules | simp)+)
+
+synthesize "ZF_pairing_fm" from_schematic ZF_pairing_auto
+
+schematic_goal ZF_foundation_auto:
+    "foundation_ax(##A) \<longleftrightarrow> (A, [] \<Turnstile> ?zfpow)"
+  unfolding foundation_ax_def 
+  by ((rule sep_rules | simp)+)
+
+synthesize "ZF_foundation_fm" from_schematic ZF_foundation_auto
+
+schematic_goal ZF_extensionality_auto:
+    "extensionality(##A) \<longleftrightarrow> (A, [] \<Turnstile> ?zfpow)"
+  unfolding extensionality_def 
+  by ((rule sep_rules | simp)+)
+
+synthesize "ZF_extensionality_fm" from_schematic ZF_extensionality_auto
+
+schematic_goal ZF_infinity_auto:
+    "infinity_ax(##A) \<longleftrightarrow> (A, [] \<Turnstile> (?\<phi>(i,j,h)))"
+  unfolding infinity_ax_def 
+  by ((rule sep_rules | simp)+)
+
+synthesize "ZF_infinity_fm" from_schematic ZF_infinity_auto
+
+schematic_goal ZF_choice_auto:
+    "choice_ax(##A) \<longleftrightarrow> (A, [] \<Turnstile> (?\<phi>(i,j,h)))"
+  unfolding choice_ax_def 
+  by ((rule sep_rules | simp)+)
+
+synthesize "ZF_choice_fm" from_schematic ZF_choice_auto
+
+syntax
+  "_choice" :: "i"  ("AC")
+translations
+  "AC" \<rightharpoonup> "CONST ZF_choice_fm"
+
+lemmas ZFC_fm_defs = ZF_extensionality_fm_def ZF_foundation_fm_def ZF_pairing_fm_def
+              ZF_union_fm_def ZF_infinity_fm_def ZF_power_fm_def ZF_choice_fm_def
+
+lemmas ZFC_fm_sats = ZF_extensionality_auto ZF_foundation_auto ZF_pairing_auto
+              ZF_union_auto ZF_infinity_auto ZF_power_auto ZF_choice_auto
+
+definition
+  ZF_fin :: "i" where
+  "ZF_fin \<equiv> { ZF_extensionality_fm, ZF_foundation_fm, ZF_pairing_fm,
+              ZF_union_fm, ZF_infinity_fm, ZF_power_fm }"
+
+definition
+  ZFC_fin :: "i" where
+  "ZFC_fin \<equiv> ZF_fin \<union> {ZF_choice_fm}"
+
+lemma ZFC_fin_type : "ZFC_fin \<subseteq> formula"
+  unfolding ZFC_fin_def ZF_fin_def ZFC_fm_defs by (auto)
+
+lemma iterates_Forall_type [TC]:
+      "\<lbrakk> n \<in> nat; p \<in> formula \<rbrakk> \<Longrightarrow> Forall^n(p) \<in> formula"
+  by (induct set:nat, auto)
+
+lemma last_init_eq :
+  assumes "l \<in> list(A)" "length(l) = succ(n)"
+  shows "\<exists> a\<in>A. \<exists>l'\<in>list(A). l = l'@[a]"
+proof-
+  have "rev(l) \<in> list(A)" "length(rev(l)) = succ(n)"
+    by simp_all
+  then
+  obtain a l' where "a\<in>A" "l'\<in>list(A)" "rev(l) = Cons(a,l')"
+    by (cases;simp)
+  then
+  have "l = rev(l') @ [a]" "rev(l') \<in> list(A)"
+  show ?thesis by blast
+qed
+
+lemma take_drop_eq :
+  assumes "l\<in>list(M)"
+  shows "\<And> n . n < succ(length(l)) \<Longrightarrow> l = take(n,l) @ drop(n,l)"
+proof induct
+  case Nil
+  then show ?case by auto
+next
+  case (Cons a l)
+  then show ?case
+  proof -
+    {
+      fix i
+      assume "i<succ(succ(length(l)))"
+      consider (lt) "i = 0" | (eq) "\<exists>k\<in>nat. i = succ(k) \<and> k < succ(length(l))"
+        by (cases rule:nat_cases[of i];auto)
+      then
+      have "take(i,Cons(a,l)) @ drop(i,Cons(a,l)) = Cons(a,l)"
+        using Cons
+        by (cases;auto)
+    }
+    then show ?thesis using Cons by auto
+  qed
+qed
+
+lemma list_split :
+assumes "n \<le> succ(length(rest))" "rest \<in> list(M)"
+shows  "\<exists>re\<in>list(M). \<exists>st\<in>list(M). rest = re @ st \<and> length(re) = pred(n)"
+proof -
+  from assms
+  have "pred(n) \<le> length(rest)"
+  have "pred(n)\<in>nat" "rest = take(pred(n),rest) @ drop(pred(n),rest)" (is "_ = ?re @ ?st")
+  then
+  have "length(?re) = pred(n)" "?re\<in>list(M)" "?st\<in>list(M)"
+    unfolding min_def
+    by auto
+  then
+  show ?thesis
+    using rev_bexI[of _ _ "\<lambda> re. \<exists>st\<in>list(M). rest = re @ st \<and> length(re) = pred(n)"]
+    by auto
+qed
+
+lemma sats_nForall:
+  assumes
+    "\<phi> \<in> formula"
+  shows
+    "n\<in>nat \<Longrightarrow> ms \<in> list(M) \<Longrightarrow>
+       M, ms \<Turnstile> (Forall^n(\<phi>)) \<longleftrightarrow>
+       (\<forall>rest \<in> list(M). length(rest) = n \<longrightarrow> M, rest @ ms \<Turnstile> \<phi>)"
+proof (induct n arbitrary:ms set:nat)
+  case 0
+  with assms
+  show ?case by simp
+next
+  case (succ n)
+  have "(\<forall>rest\<in>list(M). length(rest) = succ(n) \<longrightarrow> P(rest,n)) \<longleftrightarrow>
+        (\<forall>t\<in>M. \<forall>res\<in>list(M). length(res) = n \<longrightarrow> P(res @ [t],n))"
+    if "n\<in>nat" for n P
+    using that last_init_eq by force
+  have "(\<forall>rest\<in>list(M). length(rest) = succ(n) \<longrightarrow> M, rest @ ms \<Turnstile> \<phi>) \<longleftrightarrow>
+        (\<forall>t\<in>M. \<forall>res\<in>list(M). length(res) = n \<longrightarrow>  M, (res @ [t]) @ ms \<Turnstile> \<phi>)"
+    by simp
+    with assms succ(1,3) succ(2)[of "Cons(_,ms)"]
+  show ?case
+    using arity_sats_iff[of \<phi> _ M "Cons(_, ms @ _)"] app_assoc
+    by (simp)
+qed
+
+definition
+  sep_body_fm :: "i \<Rightarrow> i" where
+  "sep_body_fm(p) \<equiv> Forall(Exists(Forall(
+                           Iff(Member(0,1),And(Member(0,2),
+                                    incr_bv1^2(p))))))"
+
+lemma sep_body_fm_type [TC]: "p \<in> formula \<Longrightarrow> sep_body_fm(p) \<in> formula"
+  by (simp add: sep_body_fm_def)
+
+lemma sats_sep_body_fm: 
+  assumes
+    "\<phi> \<in> formula" "ms\<in>list(M)" "rest\<in>list(M)"
+  shows
+    "M, rest @ ms \<Turnstile> sep_body_fm(\<phi>) \<longleftrightarrow> 
+     separation(##M,\<lambda>x. M, [x] @ rest @ ms \<Turnstile> \<phi>)"
+  using assms formula_add_params1[of _ 2 _ _ "[_,_]" ]
+  unfolding sep_body_fm_def separation_def by simp
+
+definition
+  ZF_separation_fm :: "i \<Rightarrow> i" where
+  "ZF_separation_fm(p) \<equiv> Forall^(pred(arity(p)))(sep_body_fm(p))"
+
+lemma ZF_separation_fm_type [TC]: "p \<in> formula \<Longrightarrow> ZF_separation_fm(p) \<in> formula"
+  by (simp add: ZF_separation_fm_def)
+
+lemma sats_ZF_separation_fm_iff:
+  assumes
+    "\<phi>\<in>formula"
+  shows
+  "(M, [] \<Turnstile> (ZF_separation_fm(\<phi>)))
+   \<longleftrightarrow>
+   (\<forall>env\<in>list(M). arity(\<phi>) \<le> 1 #+ length(env) \<longrightarrow> 
+      separation(##M,\<lambda>x. M, [x] @ env \<Turnstile> \<phi>))"
+proof (intro iffI ballI impI)
+  let ?n="Arith.pred(arity(\<phi>))"
+  fix env
+  assume "M, [] \<Turnstile> ZF_separation_fm(\<phi>)" 
+  assume "arity(\<phi>) \<le> 1 #+ length(env)" "env\<in>list(M)"
+  moreover from this
+  have "arity(\<phi>) \<le> succ(length(env))" by simp
+  then
+  obtain some rest where "some\<in>list(M)" "rest\<in>list(M)" 
+    "env = some @ rest" "length(some) = Arith.pred(arity(\<phi>))"
+  have "arity(\<phi>) \<le> succ(Arith.pred(arity(\<phi>)))"
+   using succpred_leI by simp
+  moreover
+  note assms
+  moreover 
+  assume "M, [] \<Turnstile> ZF_separation_fm(\<phi>)" 
+  moreover from calculation
+  have "M, some \<Turnstile> sep_body_fm(\<phi>)"
+    using sats_nForall[of "sep_body_fm(\<phi>)" ?n]
+    unfolding ZF_separation_fm_def by simp
+  ultimately
+  show "separation(##M, \<lambda>x. M, [x] @ env \<Turnstile> \<phi>)"
+    unfolding ZF_separation_fm_def
+    using sats_sep_body_fm[of \<phi> "[]" M some]
+      arity_sats_iff[of \<phi> rest M "[_] @ some"]
+      separation_cong[of "##M" "\<lambda>x. M, Cons(x, some @ rest) \<Turnstile> \<phi>" _ ]
+    by simp
+  let ?n="Arith.pred(arity(\<phi>))"
+  assume asm:"\<forall>env\<in>list(M). arity(\<phi>) \<le> 1 #+ length(env) \<longrightarrow> 
+    separation(##M, \<lambda>x. M, [x] @ env \<Turnstile> \<phi>)"
+  {
+    fix some
+    assume "some\<in>list(M)" "length(some) = Arith.pred(arity(\<phi>))"
+    moreover
+    moreover from calculation
+    have "arity(\<phi>) \<le> 1 #+ length(some)" 
+      using le_trans[OF succpred_leI] succpred_leI by simp
+    moreover from calculation and asm
+    have "separation(##M, \<lambda>x. M, [x] @ some \<Turnstile> \<phi>)" by blast
+    ultimately
+    have "M, some \<Turnstile> sep_body_fm(\<phi>)" 
+    using sats_sep_body_fm[of \<phi> "[]" M some]
+      arity_sats_iff[of \<phi> _ M "[_,_] @ some"]
+      strong_replacement_cong[of "##M" "\<lambda>x y. M, Cons(x, Cons(y, some @ _)) \<Turnstile> \<phi>" _ ]
+    by simp
+  }
+  show "M, [] \<Turnstile> ZF_separation_fm(\<phi>)"
+    using sats_nForall[of "sep_body_fm(\<phi>)" ?n]
+    unfolding ZF_separation_fm_def
+    by simp
+qed
+
+schematic_goal sats_univalent_fm_auto:
+  assumes 

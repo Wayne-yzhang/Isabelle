@@ -1,0 +1,166 @@
+theory Distance imports CFG begin
+
+context CFG begin
+
+inductive distance :: "'node \<Rightarrow> 'node \<Rightarrow> nat \<Rightarrow> bool"
+where distanceI:
+  "\<lbrakk>n -as\<rightarrow>\<^sub>\<iota>* n'; length as = x; \<forall>as'. n -as'\<rightarrow>\<^sub>\<iota>* n' \<longrightarrow> x \<le> length as'\<rbrakk>
+  \<Longrightarrow> distance n n' x"
+
+
+lemma every_path_distance:
+  assumes "n -as\<rightarrow>\<^sub>\<iota>* n'"
+  obtains x where "distance n n' x" and "x \<le> length as"
+proof(atomize_elim)
+  show "\<exists>x. distance n n' x \<and> x \<le> length as"
+  proof(cases "\<exists>as'. n -as'\<rightarrow>\<^sub>\<iota>* n' \<and> 
+                     (\<forall>asx. n -asx\<rightarrow>\<^sub>\<iota>* n' \<longrightarrow> length as' \<le> length asx)")
+    case True
+    then obtain as' 
+      where "n -as'\<rightarrow>\<^sub>\<iota>* n' \<and> (\<forall>asx. n -asx\<rightarrow>\<^sub>\<iota>* n' \<longrightarrow> length as' \<le> length asx)" 
+      by blast
+    hence "n -as'\<rightarrow>\<^sub>\<iota>* n'" and all:"\<forall>asx. n -asx\<rightarrow>\<^sub>\<iota>* n' \<longrightarrow> length as' \<le> length asx"
+      by simp_all
+    hence "distance n n' (length as')" by(fastforce intro:distanceI)
+  next
+    case False
+    hence all:"\<forall>as'. n -as'\<rightarrow>\<^sub>\<iota>* n' \<longrightarrow> (\<exists>asx. n -asx\<rightarrow>\<^sub>\<iota>* n' \<and> length as' > length asx)"
+      by fastforce
+    have "wf (measure length)" by simp
+      and notin:"\<And>as''. (as'',as') \<in> (measure length) \<Longrightarrow> as'' \<notin> {as. n -as\<rightarrow>\<^sub>\<iota>* n'}"
+      by(erule wfE_min)
+    with all obtain asx where "n -asx\<rightarrow>\<^sub>\<iota>* n'"
+      and "length as' > length asx"
+      by blast
+    with notin have  "asx \<notin> {as. n -as\<rightarrow>\<^sub>\<iota>* n'}" by simp
+    hence "\<not> n -asx\<rightarrow>\<^sub>\<iota>* n'" by simp
+    thus ?thesis by simp
+  qed
+qed
+
+
+lemma distance_det:
+  "\<lbrakk>distance n n' x; distance n n' x'\<rbrakk> \<Longrightarrow> x = x'"
+apply(erule distance.cases)+ apply clarsimp
+apply(erule_tac x="asa" in allE) apply(erule_tac x="as" in allE)
+by simp
+
+
+lemma only_one_SOME_dist_edge:
+  assumes "valid_edge a" and "intra_kind(kind a)" and "distance (targetnode a) n' x"
+  shows "\<exists>!a'. sourcenode a = sourcenode a' \<and> distance (targetnode a') n' x \<and>
+               valid_edge a' \<and> intra_kind(kind a') \<and>
+               targetnode a' = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and>
+                                              distance (targetnode a') n' x \<and>
+                                              valid_edge a' \<and> intra_kind(kind a') \<and> 
+                                              targetnode a' = nx)"
+proof(rule ex_ex1I)
+  show "\<exists>a'. sourcenode a = sourcenode a' \<and> 
+             distance (targetnode a') n' x \<and> valid_edge a' \<and> intra_kind(kind a') \<and>
+             targetnode a' = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and> 
+                                            distance (targetnode a') n' x \<and>
+                                            valid_edge a' \<and> intra_kind(kind a') \<and> 
+                                            targetnode a' = nx)"
+  proof -
+    have "(\<exists>a'. sourcenode a = sourcenode a' \<and> 
+                distance (targetnode a') n' x \<and> valid_edge a' \<and> intra_kind(kind a') \<and>
+                targetnode a' = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and>
+                                               distance (targetnode a') n' x \<and>
+                                               valid_edge a' \<and> intra_kind(kind a') \<and> 
+                                               targetnode a' = nx)) =
+      (\<exists>nx. \<exists>a'. sourcenode a = sourcenode a' \<and> distance (targetnode a') n' x \<and> 
+                 valid_edge a' \<and> intra_kind(kind a') \<and> targetnode a' = nx)"
+      apply(unfold some_eq_ex[of "\<lambda>nx. \<exists>a'. sourcenode a = sourcenode a' \<and> 
+        distance (targetnode a') n' x \<and> valid_edge a' \<and> intra_kind(kind a') \<and> 
+        targetnode a' = nx"])
+      by simp
+    also have "\<dots>" 
+      by blast
+    finally show ?thesis .
+  qed
+next
+  fix a' ax
+  assume "sourcenode a = sourcenode a' \<and> 
+    distance (targetnode a') n' x \<and> valid_edge a' \<and> intra_kind(kind a') \<and> 
+    targetnode a' = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and> 
+                                   distance (targetnode a') n' x \<and> 
+                                   valid_edge a' \<and> intra_kind(kind a') \<and> 
+                                   targetnode a' = nx)"
+    and "sourcenode a = sourcenode ax \<and> 
+    distance (targetnode ax) n' x \<and> valid_edge ax \<and> intra_kind(kind ax) \<and> 
+    targetnode ax = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and>
+                                   distance (targetnode a') n' x \<and> 
+                                   valid_edge a' \<and> intra_kind(kind a') \<and> 
+                                   targetnode a' = nx)"
+  thus "a' = ax" by(fastforce intro!:edge_det)
+qed
+
+
+lemma distance_successor_distance:
+  assumes "distance n n' x" and "x \<noteq> 0" 
+  obtains a where "valid_edge a" and "n = sourcenode a" and "intra_kind(kind a)"
+  and "distance (targetnode a) n' (x - 1)"
+  and "targetnode a = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and> 
+                                     distance (targetnode a') n' (x - 1) \<and>
+                                     valid_edge a' \<and> intra_kind(kind a') \<and>
+                                     targetnode a' = nx)"
+proof(atomize_elim)
+  show "\<exists>a. valid_edge a \<and> n = sourcenode a \<and> intra_kind(kind a) \<and>
+    distance (targetnode a) n' (x - 1) \<and>
+    targetnode a = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and> 
+                                  distance (targetnode a') n' (x - 1) \<and>
+                                  valid_edge a' \<and> intra_kind(kind a') \<and>
+                                  targetnode a' = nx)"
+  proof(rule ccontr)
+    assume "\<not> (\<exists>a. valid_edge a \<and> n = sourcenode a \<and> intra_kind(kind a) \<and>
+                   distance (targetnode a) n' (x - 1) \<and> 
+                   targetnode a = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and> 
+                                                 distance (targetnode a') n' (x - 1) \<and>
+                                                 valid_edge a' \<and> intra_kind(kind a') \<and>
+                                                 targetnode a' = nx))"
+    hence imp:"\<forall>a. valid_edge a \<and> n = sourcenode a \<and> intra_kind(kind a) \<and>
+                   targetnode a = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and>
+                                                 distance (targetnode a') n' (x - 1) \<and>
+                                                 valid_edge a' \<and> intra_kind(kind a') \<and>
+                                                 targetnode a' = nx)
+                 \<longrightarrow> \<not> distance (targetnode a) n' (x - 1)" by blast
+      and all:"\<forall>as'. n -as'\<rightarrow>\<^sub>\<iota>* n' \<longrightarrow> x \<le> length as'"
+      by(auto elim:distance.cases)
+      by(simp_all add:intra_path_def)
+    proof(induct rule:path.induct)
+      case (empty_path n)
+    next
+      case (Cons_path n'' as n' a n)
+      have "intra_kind (kind a)" and "\<forall>a\<in>set as. intra_kind (kind a)"
+        by simp_all
+      have "n'' -as\<rightarrow>\<^sub>\<iota>* n'" by(simp add:intra_path_def)
+      then obtain y where "distance n'' n' y"
+        and "y \<le> length as" by(erule every_path_distance)
+        and "y = length as'" by(auto elim:distance.cases)
+      hence "n'' -as'\<rightarrow>* n'" and "\<forall>a\<in>set as'. intra_kind (kind a)"
+        by(simp_all add:intra_path_def)
+      show False
+      proof(cases "y < length as")
+        case True
+        have "n -a#as'\<rightarrow>* n'" by -(rule path.Cons_path)
+        have "n -a#as'\<rightarrow>\<^sub>\<iota>* n'" by(simp add:intra_path_def)
+        with all have "x \<le> length (a#as')" by blast
+      next
+        case False
+        have "distance (targetnode a) n' y" by simp
+        obtain a' where "sourcenode a = sourcenode a'"
+          and "distance (targetnode a') n' y" and "valid_edge a'"
+          and "intra_kind(kind a')"
+          and "targetnode a' = (SOME nx. \<exists>a'. sourcenode a = sourcenode a' \<and>
+                                              distance (targetnode a') n' y \<and>
+                                              valid_edge a' \<and> intra_kind(kind a') \<and>
+                                              targetnode a' = nx)"
+          by(auto dest:only_one_SOME_dist_edge)
+      qed
+    qed
+  qed
+qed
+
+end
+
+end

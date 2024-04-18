@@ -1,0 +1,198 @@
+theory Derivs
+  imports General_Utils
+begin
+
+lemma field_simp_has_vector_derivative [derivative_intros]:
+  "(f has_field_derivative y) F \<Longrightarrow> (f has_vector_derivative y) F"
+  by (simp add: has_real_derivative_iff_has_vector_derivative)
+
+lemma continuous_on_cases_empty [continuous_intros]:
+  "\<lbrakk>closed S; continuous_on S f; \<And>x. \<lbrakk>x \<in> S; \<not> P x\<rbrakk> \<Longrightarrow> f x = g x\<rbrakk> \<Longrightarrow>
+    continuous_on S (\<lambda>x. if P x then f x else g x)"
+  using continuous_on_cases [of _ "{}"] by force
+
+lemma inj_on_cases:
+  assumes "inj_on f (Collect P \<inter> S)" "inj_on g (Collect (Not \<circ> P) \<inter> S)"
+    "f ` (Collect P \<inter> S) \<inter> g ` (Collect (Not \<circ> P) \<inter> S) = {}"
+  shows "inj_on (\<lambda>x. if P x then f x else g x) S"
+  using assms by (force simp: inj_on_def)
+
+lemma inj_on_arccos: "S \<subseteq> {-1..1} \<Longrightarrow> inj_on arccos S"
+  by (metis atLeastAtMost_iff cos_arccos inj_onI subsetCE)
+
+lemma has_vector_derivative_componentwise_within:
+  "(f has_vector_derivative f') (at a within S) \<longleftrightarrow>
+    (\<forall>i \<in> Basis. ((\<lambda>x. f x \<bullet> i) has_vector_derivative (f' \<bullet> i)) (at a within S))"
+  apply (simp add: has_vector_derivative_def)
+  apply (subst has_derivative_componentwise_within)
+  apply simp
+  done
+
+lemma has_vector_derivative_pair_within:
+  fixes f :: "real \<Rightarrow> 'a::euclidean_space" and g :: "real \<Rightarrow> 'b::euclidean_space"
+  assumes "\<And>u. u \<in> Basis \<Longrightarrow> ((\<lambda>x. f x \<bullet> u) has_vector_derivative f' \<bullet> u) (at x within S)"
+    "\<And>u. u \<in> Basis \<Longrightarrow> ((\<lambda>x. g x \<bullet> u) has_vector_derivative g' \<bullet> u) (at x within S)"
+  shows "((\<lambda>x. (f x, g x)) has_vector_derivative (f',g')) (at x within S)"
+  apply (subst has_vector_derivative_componentwise_within)
+  apply (auto simp: assms Basis_prod_def)
+  done
+
+lemma piecewise_C1_differentiable_const:
+  shows "(\<lambda>x. c) piecewise_C1_differentiable_on s"
+  using continuous_on_const
+  by (auto simp add: piecewise_C1_differentiable_on_def)
+
+declare piecewise_C1_differentiable_const [simp, derivative_intros]
+declare piecewise_C1_differentiable_neg [simp, derivative_intros]
+declare piecewise_C1_differentiable_add [simp, derivative_intros]
+declare piecewise_C1_differentiable_diff [simp, derivative_intros]
+
+
+lemma piecewise_C1_differentiable_on_ident [simp, derivative_intros]:
+  fixes f :: "real \<Rightarrow> 'a::real_normed_vector"
+  shows "(\<lambda>x. x) piecewise_C1_differentiable_on S"
+  unfolding piecewise_C1_differentiable_on_def using C1_differentiable_on_ident
+  by (blast intro: continuous_on_id C1_differentiable_on_ident)
+
+lemma piecewise_C1_differentiable_on_mult [simp, derivative_intros]:
+  fixes f :: "real \<Rightarrow> 'a::real_normed_algebra"
+  assumes "f piecewise_C1_differentiable_on S" "g piecewise_C1_differentiable_on S"
+  shows "(\<lambda>x. f x * g x) piecewise_C1_differentiable_on S"
+  using assms
+  unfolding piecewise_C1_differentiable_on_def
+  apply safe
+   apply (blast intro: continuous_intros)
+  apply (rename_tac A B)
+  apply (rule_tac x="A \<union> B" in exI)
+  apply (auto intro: C1_differentiable_on_mult C1_differentiable_on_subset)
+  done
+
+lemma C1_differentiable_on_cdiv [simp, derivative_intros]:
+  fixes f :: "real \<Rightarrow> 'a :: real_normed_field"
+  shows "f C1_differentiable_on S \<Longrightarrow> (\<lambda>x. f x / c) C1_differentiable_on S"
+  by (simp add: divide_inverse)
+
+lemma piecewise_C1_differentiable_on_cdiv [simp, derivative_intros]:
+  fixes f :: "real \<Rightarrow> 'a::real_normed_field"
+  assumes "f piecewise_C1_differentiable_on S"
+  shows "(\<lambda>x. f x / c) piecewise_C1_differentiable_on S"
+  by (simp add: divide_inverse piecewise_C1_differentiable_const piecewise_C1_differentiable_on_mult assms)
+
+lemma sqrt_C1_differentiable [simp, derivative_intros]:
+  assumes f: "f C1_differentiable_on S" and fim: "f ` S \<subseteq> {0<..}"
+  shows "(\<lambda>x. sqrt (f x)) C1_differentiable_on S"
+proof -
+  have contf: "continuous_on S f"
+    by (simp add: C1_differentiable_imp_continuous_on f)
+  show ?thesis
+    using assms
+    unfolding C1_differentiable_on_def has_real_derivative_iff_has_vector_derivative [symmetric]
+    by (fastforce intro!: contf continuous_intros derivative_intros)
+qed
+
+lemma sqrt_piecewise_C1_differentiable [simp, derivative_intros]:
+  assumes f: "f piecewise_C1_differentiable_on S" and fim: "f ` S \<subseteq> {0<..}"
+  shows "(\<lambda>x. sqrt (f x)) piecewise_C1_differentiable_on S"
+  using assms
+  unfolding piecewise_C1_differentiable_on_def
+  by (fastforce intro!: continuous_intros derivative_intros)
+
+lemma
+  fixes f :: "real \<Rightarrow> 'a::{banach,real_normed_field}"
+  assumes f: "f C1_differentiable_on S"
+  shows sin_C1_differentiable [simp, derivative_intros]: "(\<lambda>x. sin (f x)) C1_differentiable_on S"
+  and   cos_C1_differentiable [simp, derivative_intros]: "(\<lambda>x. cos (f x)) C1_differentiable_on S"
+proof -
+  have contf: "continuous_on S f"
+    by (simp add: C1_differentiable_imp_continuous_on f)
+  note df_sin = field_vector_diff_chain_at [where g=sin, unfolded o_def]
+  note df_cos = field_vector_diff_chain_at [where g=cos, unfolded o_def]
+  show  "(\<lambda>x. sin (f x)) C1_differentiable_on S" "(\<lambda>x. cos (f x)) C1_differentiable_on S"
+    using assms
+    unfolding C1_differentiable_on_def has_real_derivative_iff_has_vector_derivative [symmetric]
+    apply auto
+    by (rule contf continuous_intros df_sin df_cos derivative_intros exI conjI ballI | force)+
+qed
+
+lemma has_derivative_abs:
+  fixes a::real
+  assumes "a \<noteq> 0"
+proof -
+  have [simp]: "norm = abs"
+    using real_norm_def by force
+  show ?thesis
+    using has_derivative_norm [where 'a=real, simplified] assms
+    by (simp add: mult_commute_abs)
+qed
+
+lemma abs_C1_differentiable [simp, derivative_intros]:
+  fixes f :: "real \<Rightarrow> real"
+  assumes f: "f C1_differentiable_on S" and "0 \<notin> f ` S"
+  shows "(\<lambda>x. abs (f x)) C1_differentiable_on S"
+proof -
+  have contf: "continuous_on S f"
+    by (simp add: C1_differentiable_imp_continuous_on f)
+  note df = DERIV_chain [where f=abs and g=f, unfolded o_def]
+  show ?thesis
+    using assms
+    unfolding C1_differentiable_on_def has_real_derivative_iff_has_vector_derivative [symmetric]
+    apply clarify
+    apply (rule df exI conjI ballI)+
+      apply (force simp: has_field_derivative_def intro: has_derivative_abs continuous_intros contf)+
+    done
+qed
+
+lemma C1_differentiable_on_pair [simp, derivative_intros]:
+  fixes f :: "real \<Rightarrow> 'a::euclidean_space" and g :: "real \<Rightarrow> 'b::euclidean_space"
+  assumes "f C1_differentiable_on S" "g C1_differentiable_on S"
+  shows "(\<lambda>x. (f x, g x)) C1_differentiable_on S"
+  using assms unfolding C1_differentiable_on_def
+  apply safe
+  apply (rename_tac A B)
+  apply (intro exI ballI conjI)
+   apply (rule_tac f'="A x" and g'="B x" in has_vector_derivative_pair_within)
+  using  has_vector_derivative_componentwise_within
+  by (blast intro: continuous_on_Pair)+
+
+lemma piecewise_C1_differentiable_on_pair [simp, derivative_intros]:
+  fixes f :: "real \<Rightarrow> 'a::euclidean_space" and g :: "real \<Rightarrow> 'b::euclidean_space"
+  assumes "f piecewise_C1_differentiable_on S" "g piecewise_C1_differentiable_on S"
+  shows "(\<lambda>x. (f x, g x)) piecewise_C1_differentiable_on S"
+  using assms unfolding piecewise_C1_differentiable_on_def
+  by (blast intro!: continuous_intros C1_differentiable_on_pair del: continuous_on_discrete
+      intro: C1_differentiable_on_subset)
+
+lemma test2:
+  assumes s: "\<And>x. x \<in> {0..1} - s \<Longrightarrow> g differentiable at x"
+    and fs: "finite s" and uv: "u \<in> {0..1}" "v \<in> {0..1}" "u \<le> v"
+    and "x \<in> {0..1}" "x \<notin> (\<lambda>t. (v-u) *\<^sub>R t + u) -` s"
+  shows "vector_derivative (\<lambda>x. g ((v-u) * x + u)) (at x within {0..1}) = (v-u) *\<^sub>R vector_derivative g (at ((v-u) * x + u) within{0..1})"
+proof -
+  have i:"(g has_vector_derivative vector_derivative g (at ((v - u) * x + u))) (at ((v-u) * x + u))"
+    using assms s [of "(v - u) * x + u"] uv mult_left_le [of x "v-u"]
+    by (auto simp:  vector_derivative_works)
+  have ii:"((\<lambda>x. g ((v - u) * x + u)) has_vector_derivative (v - u) *\<^sub>R vector_derivative g (at ((v - u) * x + u))) (at x)"
+    by (intro vector_diff_chain_at [simplified o_def] derivative_eq_intros | simp add: i)+
+  have 0: "0 \<le> (v - u) * x + u"
+    using assms uv by auto
+  have 1: "(v - u) * x + u \<le> 1"
+    using assms uv
+    by simp (metis add.commute atLeastAtMost_iff atLeastatMost_empty_iff diff_ge_0_iff_ge empty_iff le_diff_eq mult_left_le)
+  have iii: "vector_derivative g (at ((v - u) * x + u) within {0..1}) = vector_derivative g (at ((v - u) * x + u))"
+    using Derivative.vector_derivative_at_within_ivl[OF i, of "0" "1", OF 0 1]
+    by auto
+  have iv: "vector_derivative (\<lambda>x. g ((v - u) * x + u)) (at x within {0..1}) = (v - u) *\<^sub>R vector_derivative g (at ((v - u) * x + u))"
+    using Derivative.vector_derivative_at_within_ivl[OF ii, of "0" "1"] assms
+    by auto
+  show ?thesis
+    using iii iv by auto
+qed
+
+lemma C1_differentiable_on_components:
+  assumes "\<And>i. i \<in> Basis \<Longrightarrow> (\<lambda>x. f x \<bullet> i) C1_differentiable_on s"
+  shows "f C1_differentiable_on s"
+proof (clarsimp simp add: C1_differentiable_on_def has_vector_derivative_def)
+  have *:"\<forall>f i x. x *\<^sub>R (f \<bullet> i) = (x *\<^sub>R f) \<bullet> i" by auto
+  have "\<exists>f'. \<forall>i\<in>Basis. \<forall>x\<in>s. ((\<lambda>x. f x \<bullet> i) has_derivative (\<lambda>z. z *\<^sub>R f' x \<bullet> i)) (at x) \<and> continuous_on s f'"
+    using assms lambda_skolem_euclidean[of "\<lambda>i D. (\<forall>x\<in>s. ((\<lambda>x. f x \<bullet> i) has_derivative (\<lambda>z. z *\<^sub>R D x)) (at x)) \<and> continuous_on s D"]
+    apply (simp only: C1_differentiable_on_def has_vector_derivative_def *)

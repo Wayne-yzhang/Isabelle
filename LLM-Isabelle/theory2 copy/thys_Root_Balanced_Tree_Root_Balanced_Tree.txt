@@ -1,0 +1,571 @@
+theory Root_Balanced_Tree
+imports
+  Amortized_Complexity.Amortized_Framework0
+  "HOL-Library.Tree_Multiset"
+  "HOL-Data_Structures.Tree_Set"
+  "HOL-Data_Structures.Balance"
+  Time_Monad
+begin
+
+declare Let_def[simp]
+
+
+
+
+fun size_tree_tm :: "'a tree \<Rightarrow> nat tm" where
+"size_tree_tm \<langle>\<rangle> =1 return 0" |
+"size_tree_tm \<langle>l, x, r\<rangle> =1
+  do { m \<leftarrow> size_tree_tm l;
+       n \<leftarrow> size_tree_tm r;
+       return (m+n+1)}"
+
+definition size_tree :: "'a tree \<Rightarrow> nat" where
+"size_tree t = val(size_tree_tm t)"
+
+lemma size_tree_Leaf[simp,code]: "size_tree \<langle>\<rangle> = 0"
+using val_cong[OF size_tree_tm.simps(1)]
+by(simp only: size_tree_def val_simps)
+
+lemma size_tree_Node[simp,code]:
+  "size_tree \<langle>l, x, r\<rangle> =
+  (let m = size_tree l;
+       n = size_tree r
+   in m+n+1)"
+using val_cong[OF size_tree_tm.simps(2)]
+by(simp only: size_tree_def val_simps)
+
+lemma size_tree: "size_tree t = size t"
+by(induction t rule: size_tree_tm.induct)(auto)
+
+definition T_size_tree :: "'a tree \<Rightarrow> nat" where
+"T_size_tree t = time(size_tree_tm t)"
+
+lemma T_size_tree_Leaf: "T_size_tree \<langle>\<rangle> = 1"
+by(simp add: T_size_tree_def tm_simps)
+
+lemma T_size_tree_Node:
+  "T_size_tree \<langle>l, x, r\<rangle> = T_size_tree l + T_size_tree r + 1"
+by(simp add: T_size_tree_def size_tree_def tm_simps split: tm.split)
+
+lemma T_size_tree: "T_size_tree t = 2 * size t + 1"
+by(induction t)(auto simp: T_size_tree_Leaf T_size_tree_Node)
+
+
+fun inorder2_tm :: "'a tree \<Rightarrow> 'a list \<Rightarrow> 'a list tm" where
+"inorder2_tm \<langle>\<rangle> xs =1 return xs" |
+"inorder2_tm \<langle>l, x, r\<rangle> xs =1
+  do { rs \<leftarrow> inorder2_tm r xs; inorder2_tm l (x#rs) }"
+
+definition inorder2 :: "'a tree \<Rightarrow> 'a list \<Rightarrow> 'a list" where
+"inorder2 t xs = val(inorder2_tm t xs)"
+
+lemma inorder2_Leaf[simp,code]: "inorder2 \<langle>\<rangle> xs = xs"
+using val_cong[OF inorder2_tm.simps(1)]
+by(simp only: inorder2_def val_simps)
+
+lemma inorder2_Node[simp,code]:
+  "inorder2 \<langle>l, x, r\<rangle> xs = (let rs = inorder2 r xs in inorder2 l (x # rs))"
+using val_cong[OF inorder2_tm.simps(2), of l]
+by(simp only: inorder2_def val_simps)
+
+lemma inorder2: "inorder2 t xs = Tree.inorder2 t xs"
+by(induction t xs rule: inorder2_tm.induct)(auto simp:inorder2_def)
+
+definition T_inorder2 :: "'a tree \<Rightarrow> 'a list \<Rightarrow> nat" where
+"T_inorder2 t xs = time(inorder2_tm t xs)"
+
+lemma T_inorder2_Leaf: "T_inorder2 \<langle>\<rangle> xs = 1"
+by(simp add: T_inorder2_def tm_simps)
+
+lemma T_inorder2_Node:
+  "T_inorder2 \<langle>l, x, r\<rangle> xs = T_inorder2 r xs + T_inorder2 l (x # inorder2 r xs) + 1"
+by(simp add: T_inorder2_def inorder2_def tm_simps split: tm.split)
+
+lemma T_inorder2: "T_inorder2 t xs = 2*size t + 1"
+by(induction t arbitrary: xs)(auto simp: T_inorder2_Leaf T_inorder2_Node)
+
+
+
+fun split_min_tm :: "'a tree \<Rightarrow> ('a * 'a tree) tm" where
+"split_min_tm Leaf =1 return undefined" |
+"split_min_tm (Node l x r) =1
+  (if l = Leaf then return (x,r)
+   else do { (y,l') \<leftarrow> split_min_tm l; return (y, Node l' x r)})"
+
+definition split_min :: "'a tree \<Rightarrow> ('a * 'a tree)" where
+"split_min t = val (split_min_tm t)"
+
+lemma split_min_Node[simp,code]:
+  "split_min (Node l x r) =
+  (if l = Leaf then (x,r)
+   else let (y,l') = split_min l in (y, Node l' x r))"
+using val_cong[OF split_min_tm.simps(2)]
+by(simp only: split_min_def val_simps)
+
+definition T_split_min :: "'a tree \<Rightarrow> nat" where
+"T_split_min t = time (split_min_tm t)"
+
+lemma T_split_min_Node[simp]:
+  "T_split_min (Node l x r) = (if l = Leaf then 1 else T_split_min l + 1)"
+using val_cong[OF split_min_tm.simps(2)]
+by(simp add: T_split_min_def tm_simps split: tm.split)
+
+lemma split_minD:
+  "split_min t = (x,t') \<Longrightarrow> t \<noteq> Leaf \<Longrightarrow> x # inorder t' = inorder t"
+by(induction t arbitrary: t' rule: split_min.induct)
+  (auto simp: sorted_lems split: prod.splits if_splits)
+
+
+
+fun bal_tm :: "nat \<Rightarrow> 'a list \<Rightarrow> ('a tree * 'a list) tm" where
+"bal_tm n xs =1
+  (if n=0 then return (Leaf,xs) else
+  (let m = n div 2
+   in do { (l, ys) \<leftarrow> bal_tm m xs;
+           (r, zs) \<leftarrow> bal_tm (n-1-m) (tl ys);
+           return (Node l (hd ys) r, zs)}))"
+
+declare bal_tm.simps[simp del]
+
+lemma bal_tm_simps:
+  "bal_tm 0 xs =1 return(Leaf, xs)"
+  "n > 0 \<Longrightarrow>
+   bal_tm n xs =1
+  (let m = n div 2
+   in do { (l, ys) \<leftarrow> bal_tm m xs;
+           (r, zs) \<leftarrow> bal_tm (n-1-m) (tl ys);
+           return (Node l (hd ys) r, zs)})"
+by(simp_all add: bal_tm.simps)
+
+definition bal :: "nat \<Rightarrow> 'a list \<Rightarrow> ('a tree * 'a list)" where
+"bal n xs = val (bal_tm n xs)"
+
+lemma bal_def2[code]:
+"bal n xs =
+  (if n=0 then (Leaf,xs) else
+  (let m = n div 2;
+       (l, ys) = bal m xs;
+       (r, zs) = bal (n-1-m) (tl ys)
+   in (Node l (hd ys) r, zs)))"
+using val_cong[OF bal_tm.simps(1)]
+by(simp only: bal_def val_simps)
+
+lemma bal_simps:
+  "bal 0 xs = (Leaf, xs)"
+  "n > 0 \<Longrightarrow>
+   bal n xs =
+  (let m = n div 2;
+      (l, ys) = bal m xs;
+      (r, zs) = bal (n-1-m) (tl ys)
+  in (Node l (hd ys) r, zs))"
+by(simp_all add: bal_def2)
+
+lemma bal_eq: "bal n xs = Balance.bal n xs"
+apply(induction n xs rule: bal.induct)
+apply(case_tac "n=0")
+ apply(simp add: bal_simps Balance.bal_simps)
+apply(simp add: bal_simps Balance.bal_simps split: prod.split)
+done
+
+
+definition T_bal :: "nat \<Rightarrow> 'a list \<Rightarrow> nat" where
+"T_bal n xs = time (bal_tm n xs)"
+
+lemma T_bal: "T_bal n xs = 2*n+1"
+unfolding T_bal_def
+apply(induction n xs rule: bal_tm.induct)
+apply(case_tac "n=0")
+apply(simp add: bal_tm_simps)
+  apply(auto simp add: bal_tm_simps tm_simps simp del: subst_all split: tm.split)
+done
+
+definition bal_list_tm :: "nat \<Rightarrow> 'a list \<Rightarrow> 'a tree tm" where
+"bal_list_tm n xs = do { (t,_) \<leftarrow> bal_tm n xs; return t }"
+
+definition bal_list :: "nat \<Rightarrow> 'a list \<Rightarrow> 'a tree" where
+"bal_list n xs = val (bal_list_tm n xs)"
+
+lemma bal_list_def2[code]: "bal_list n xs = (let (t,ys) = bal n xs in t)"
+using val_cong[OF bal_list_tm_def]
+by(simp only: bal_list_def bal_def val_simps)
+
+lemma bal_list: "bal_list n xs = Balance.bal_list n xs"
+by(auto simp add: bal_list_def2 Balance.bal_list_def bal_eq split: prod.split)
+
+definition bal_tree_tm :: "nat \<Rightarrow> 'a tree \<Rightarrow> 'a tree tm" where
+"bal_tree_tm n t =1 do { xs \<leftarrow> inorder2_tm t []; bal_list_tm n xs }"
+
+definition bal_tree :: "nat \<Rightarrow> 'a tree \<Rightarrow> 'a tree" where
+"bal_tree n t = val (bal_tree_tm n t)"
+
+lemma bal_tree_def2[code]:
+  "bal_tree n t = (let xs = inorder2 t [] in bal_list n xs)"
+using val_cong[OF bal_tree_tm_def, of n t]
+by(simp only: bal_tree_def bal_list_def inorder2_def val_simps)
+
+lemma bal_tree: "bal_tree n t = Balance.bal_tree n t"
+by(simp add: bal_tree_def2 Balance.bal_tree_def bal_list inorder2 inorder2_inorder)
+
+definition T_bal_tree :: "nat \<Rightarrow> 'a tree \<Rightarrow> nat" where
+"T_bal_tree n xs = time (bal_tree_tm n xs)"
+
+lemma T_bal_tree: "n = size xs \<Longrightarrow> T_bal_tree n xs = 4*n+3"
+by(simp add: T_bal_tree_def bal_tree_tm_def tm_simps bal_list_tm_def
+    surj_TM[OF inorder2_def T_inorder2_def] T_inorder2
+    surj_TM[OF bal_def T_bal_def] T_bal size1_size
+    split: tm.split prod.split)
+
+
+subsection "Naive implementation (insert only)"
+
+fun node :: "bool \<Rightarrow> 'a tree \<Rightarrow> 'a \<Rightarrow> 'a tree \<Rightarrow> 'a tree" where
+"node twist s x t = (if twist then Node t x s else Node s x t)"
+
+datatype 'a up = Same | Bal "'a tree" | Unbal "'a tree"
+
+locale RBTi1 =
+fixes bal_i :: "nat \<Rightarrow> nat \<Rightarrow> bool"
+assumes bal_i_balance:
+  "bal_i (size t) (height (balance_tree (t::'a::linorder tree)))"
+assumes mono_bal_i: "\<lbrakk> bal_i n h; n \<le> n'; h' \<le> h \<rbrakk> \<Longrightarrow> bal_i n' h'"
+begin
+
+
+definition up :: "'a \<Rightarrow> 'a tree \<Rightarrow> bool \<Rightarrow> 'a up \<Rightarrow> 'a up" where
+"up x sib twist u = (case u of Same \<Rightarrow> Same |
+   Bal t \<Rightarrow> Bal(node twist t x sib) |
+   Unbal t \<Rightarrow> let t' = node twist t x sib; h' = height t'; n' = size t'
+              in if bal_i n' h' then Unbal t'
+                 else Bal(balance_tree t'))"
+
+declare up_def[simp]
+
+fun ins :: "nat \<Rightarrow> nat \<Rightarrow> 'a::linorder \<Rightarrow> 'a tree \<Rightarrow> 'a up" where
+"ins n d x Leaf =
+  (if bal_i (n+1) (d+1) then Bal (Node Leaf x Leaf) else Unbal (Node Leaf x Leaf))" |
+"ins n d x (Node l y r) =
+  (case cmp x y of
+     LT \<Rightarrow> up y r False (ins n (d+1) x l) |
+     EQ \<Rightarrow> Same |
+     GT \<Rightarrow> up  y l True (ins n (d+1) x r))"
+
+fun insert :: "'a::linorder \<Rightarrow> 'a tree \<Rightarrow> 'a tree" where
+"insert x t =
+  (case ins (size t) 0 x t of
+    Same \<Rightarrow> t |
+    Bal t' \<Rightarrow> t')"
+
+
+
+lemma height_balance: "\<lbrakk> \<not> bal_i (size t) h \<rbrakk>
+  \<Longrightarrow> height (balance_tree (t::'a::linorder tree)) < h"
+by (meson bal_i_balance leI le_refl mono_bal_i)
+
+lemma mono_bal_i':
+  "\<lbrakk> ASSUMPTION(bal_i n h); n \<le> n'; h' \<le> h \<rbrakk> \<Longrightarrow> bal_i n' h'"
+unfolding ASSUMPTION_def by(rule mono_bal_i)
+
+lemma inorder_ins: "sorted(inorder t) \<Longrightarrow>
+  (ins n d x t = Same \<longrightarrow> ins_list x (inorder t) = inorder t) \<and>
+  (ins n d x t = Bal t' \<longrightarrow> ins_list x (inorder t) = inorder t') \<and>
+  (ins n d x t = Unbal t' \<longrightarrow> ins_list x (inorder t) = inorder t')"
+by(induction t arbitrary: d t')
+  (auto simp: ins_list_simps bal.simps[of "Suc 0"] bal.simps[of 0]
+        split!: if_splits prod.splits up.splits)
+
+lemma ins_size:
+shows "ins n d x t = Bal t' \<Longrightarrow> size t' = size t + 1"
+and "ins n d x t = Unbal t' \<Longrightarrow> size t' = size t + 1"
+by(induction t arbitrary: d t')
+  (auto split: if_splits up.splits)
+
+lemma ins_height:
+shows "ins n d x t = Bal t' \<Longrightarrow> height t' \<le> height t + 1"
+and "ins n d x t = Unbal t' \<Longrightarrow> height t \<le> height t' \<and> height t' \<le> height t + 1"
+proof(induction t arbitrary: d t')
+  case Leaf
+  { case 1 thus ?case by (auto split: if_splits)
+  next
+    case 2 thus ?case by (auto split: if_splits)
+  }
+next
+  case (Node l y r)
+  { case 1
+    consider (ls) "x < y" | (eq) "x = y" | (gr) "x > y" by(metis less_linear)
+    thus ?case
+    proof cases
+      case ls
+      show ?thesis
+      proof (cases "ins n (d+1) x l")
+        case Same thus ?thesis using 1 ls by (simp)
+      next
+        case Bal
+        thus ?thesis
+          using 1 ls by (auto simp: max_def dest: Node)
+      next
+        case (Unbal l')
+        let ?t = "Node l' y r" let ?h = "height ?t" let ?n = "size ?t"
+        have "\<not> bal_i ?n ?h" using 1 ls Unbal by (auto)
+        thus ?thesis
+          using 1 ls Unbal Node.IH(2)[OF Unbal]
+            height_balance[of ?t "height ?t"]
+          by(auto)
+      qed
+    next
+      case eq
+      thus ?thesis using 1 by(simp)
+    next
+      case gr
+      show ?thesis
+      proof (cases "ins n (d+1) x r")
+        case Same
+        thus ?thesis using 1 gr by (simp)
+      next
+        case Bal
+        thus ?thesis
+          using 1 gr by (auto simp: max_def dest: Node)
+      next
+        case (Unbal r')
+        let ?t = "Node l y r'" let ?h = "height ?t" let ?n = "size ?t"
+        have "\<not> bal_i ?n ?h" using 1 gr Unbal by (auto)
+        thus ?thesis
+          using 1 gr Unbal Node.IH(4)[OF Unbal]
+            height_balance[of ?t "height ?t"]
+          by(auto)
+      qed
+    qed
+  next
+    case 2
+    thus ?case
+      by(auto simp: max_def dest: Node split: if_splits up.splits)
+  }
+qed
+
+lemma bal_i0: "bal_i 0 0"
+using bal_i_balance[of Leaf]
+by(auto simp add: Balance.bal_tree_def balance_tree_def Balance.bal_list_def Balance.bal_simps)
+
+lemma bal_i1: "bal_i 1 1"
+using bal_i_balance[of "Node Leaf undefined Leaf"]
+by(auto simp add: balance_tree_def Balance.bal_tree_def Balance.bal_list_def Balance.bal_simps)
+
+lemma bal_i_ins_Unbal:
+  assumes "ins n d x t = Unbal t'" shows "bal_i (size t') (height t')"
+proof(cases t)
+  case Leaf thus ?thesis
+    using assms bal_i1 by(auto split: if_splits)
+next
+  case Node thus ?thesis
+    using assms by(auto split: if_splits up.splits)
+qed
+
+lemma unbal_ins_Unbal:
+  "ins n d x t = Unbal t' \<Longrightarrow> \<not> bal_i (n+1) (height t' + d)"
+proof(induction t arbitrary: d t')
+  case Leaf thus ?case
+    by (auto split: if_splits)
+next
+  case Node thus ?case
+    by(fastforce simp: mono_bal_i' split: if_splits up.splits)
+qed
+
+lemma height_Unbal_l: assumes "ins n (d+1) x l = Unbal l'"
+  "bal_i n (height \<langle>l, y, r\<rangle> + d)"
+shows "height r < height l'" (is ?P)
+proof(rule ccontr)
+  assume "\<not> ?P"
+  thus False
+    using assms(2) unbal_ins_Unbal[OF assms(1)]
+    by (auto simp: mono_bal_i')
+qed
+lemma height_Unbal_r: assumes "ins n (d+1) x r = Unbal r'"
+  "bal_i n (height \<langle>l, y, r\<rangle> + d)"
+shows "height l < height r'" (is ?P)
+proof(rule ccontr)
+  assume "\<not> ?P"
+  thus False
+    using assms(2) unbal_ins_Unbal[OF assms(1)]
+    by (auto simp: mono_bal_i' split: if_splits)
+qed
+  
+lemma ins_bal_i_Bal:
+  "\<lbrakk> ins n d x t = Bal t'; bal_i n (height t + d) \<rbrakk>
+  \<Longrightarrow> bal_i (n+1) (height t' + d)"
+proof(induction t arbitrary: d t')
+  case Leaf
+  thus ?case
+    by (auto split: if_splits)
+next
+  case (Node l y r)
+  consider (ls) "x < y" | (eq) "x = y" | (gr) "x > y"
+    by(metis less_linear)
+  thus ?case
+  proof cases
+    case ls
+    have 2: "bal_i n (height l + (d + 1))"
+      using Node.prems(2) by (simp add: mono_bal_i')
+    show ?thesis
+    proof (cases "ins n (d+1) x l")
+      case Same
+      thus ?thesis
+        using Node.prems ls by (simp)
+    next
+      case Bal
+      thus ?thesis
+        using Node.prems ls ins_height(1)[OF Bal] Node.IH(1)[OF Bal 2]
+        by (auto simp: max_def mono_bal_i')
+    next
+      case (Unbal l')
+      let ?t = "Node l' y r" let ?h = "height ?t" let ?n = "size ?t"
+      have "\<not> bal_i ?n ?h" using Node.prems ls Unbal by (auto)
+      thus ?thesis
+        using Node.prems ls Unbal height_balance[of ?t "height ?t"]
+          ins_height(2)[OF Unbal]
+        by (auto simp: mono_bal_i')
+    qed
+  next
+    case eq
+    thus ?thesis
+      using Node.prems by(simp)
+  next
+    case gr
+    have 2: "bal_i n (height r + (d + 1))"
+      using Node.prems(2) by(simp add: mono_bal_i')
+    show ?thesis
+    proof (cases "ins n (d+1) x r")
+      case Same
+      thus ?thesis
+        using Node.prems gr by (simp)
+    next
+      case Bal
+      thus ?thesis
+        using Node.prems gr ins_height(1)[OF Bal] Node.IH(2)[OF Bal 2]
+        by (auto simp: max_def mono_bal_i')
+    next
+      case (Unbal r')
+      let ?t = "Node l y r'" let ?h = "height ?t" let ?n = "size ?t"
+      have "\<not> bal_i ?n ?h" using Node.prems gr Unbal by (auto)
+      thus ?thesis
+        using Node.prems gr Unbal
+          height_balance[of ?t "height ?t"] ins_height(2)[OF Unbal]
+        by (auto simp: mono_bal_i')
+    qed
+  qed
+qed
+
+lemma ins0_neq_Unbal: assumes "n \<ge> size t" shows "ins n 0 a t \<noteq> Unbal t'"
+proof(cases t)
+  case Leaf thus ?thesis using bal_i1 by(simp add: numeral_eq_Suc mono_bal_i')
+next
+  case Node
+  thus ?thesis
+    using unbal_ins_Unbal[of "n" 0 a t t'] assms
+    by(auto simp: ins_size mono_bal_i' split: up.splits)
+qed
+
+lemma inorder_insert: "sorted(inorder t)
+  \<Longrightarrow> inorder (insert x t) = ins_list x (inorder t)"
+using ins0_neq_Unbal
+by(auto simp add: insert_def inorder_ins split: prod.split up.split)
+
+lemma bal_i_insert: assumes "bal_i (size t) (height t)"
+shows "bal_i (size(insert x t)) (height(insert x t))"
+proof (cases "ins (size t) 0 x t")
+  case Same
+  with assms show ?thesis by simp
+next
+  case Bal
+  thus ?thesis
+    using ins_bal_i_Bal[OF Bal] assms ins_size by(simp add: size1_size)
+next
+  case (Unbal t')
+  hence False using ins0_neq_Unbal by blast
+  thus ?thesis ..
+qed
+
+
+
+interpretation Test: RBTi1 "\<lambda>n h. h \<le> log 2 (real(n + 1)) + 1"
+proof (standard, goal_cases)
+  case (1 t)
+  have *: "log 2 (1 + real(size t)) \<ge> 0" by (simp)
+  show ?case apply(simp add: height_balance_tree) using * by linarith
+next
+  case (2 n h n' h')
+  have "real h' \<le> real h" by(simp add: 2)
+  also have "\<dots> \<le> log 2 (n+1) + 1" by(rule 2)
+  also have "\<dots> \<le> log 2 (n'+1) + 1" using "2"(2,3) by(simp)
+  finally show ?case .
+qed
+
+
+subsection "Efficient Implementation (insert only)"
+
+fun imbal :: "'a tree \<Rightarrow> nat" where
+"imbal Leaf = 0" |
+"imbal (Node l _ r) = nat(abs(int(size l) - int(size r))) - 1"
+
+declare imbal.simps [simp del]
+
+lemma imbal0_if_wbalanced: "wbalanced t \<Longrightarrow> imbal t = 0"
+by (cases t) (auto simp add: imbal.simps)
+
+
+axiomatization c :: real where
+c1: "c > 1"
+
+definition bal_log :: "'a tree \<Rightarrow> bool" where
+"bal_log t = (height t \<le> ceiling(c * log 2 (size1 t)))"
+
+fun hchild :: "'a tree \<Rightarrow> 'a tree" where
+"hchild (Node l _ r) = (if height l \<le> height r then r else l)"
+
+lemma size1_imbal:
+  assumes "\<not> bal_log t" and "bal_log (hchild t)" and "t \<noteq> Leaf"
+  shows "imbal t > (2 powr (1 - 1/c) - 1) * size1 (t) - 1"
+proof -
+  obtain l x r where t: "t = Node l x r"
+  let ?sh = "hchild t"
+  have *: "c * log 2 (size1 ?sh) \<ge> 0"
+    using c1 apply(simp add: zero_le_mult_iff)
+    using size1_ge0[of ?sh] by linarith
+  have "(2 powr (1 - 1/c) - 1) * size1 t - 1
+    = 2 powr (1 - 1/c) * size1 t - size1 t - 1"
+    by (simp add: ring_distribs)
+  also have "\<dots> = 2 * (2 powr (- 1/c) * size1 t) - size1 t - 1"
+    using c1 by(simp add: powr_minus powr_add[symmetric] field_simps)
+  also have "2 powr (- 1/c) * size1 t < size1 ?sh"
+  proof -
+    have "ceiling(c * log 2 (size1 t)) < ceiling (c * log 2 (size1 ?sh)) + 1"
+    proof -
+      have "ceiling(c * log 2 (size1 t)) < height t"
+        using assms(1) by (simp add: bal_log_def)
+      also have "\<dots> = height(?sh) + 1" by(simp add: t max_def)
+      finally show ?thesis
+        using assms(2) unfolding bal_log_def by linarith
+    qed
+    hence "c * log 2 (size1 t) < c * log 2 (size1 ?sh) + 1"
+      using * by linarith
+    hence "log 2 (size1 t) - 1/c < log 2 (size1 ?sh)"
+      using c1 by(simp add: field_simps)
+    from powr_less_mono[OF this, of 2] show ?thesis
+      by (simp add: powr_diff powr_minus field_simps)
+  qed
+  also have "2 * real(size1 ?sh) - size1 t - 1
+           = real(size1 ?sh) - (real(size1 t) - size1 ?sh) - 1"
+    by (simp add: assms(1))
+  also have "\<dots> \<le> imbal t"
+    by (auto simp add: t assms(1) imbal.simps size1_size)
+  finally show ?thesis by simp
+qed
+
+it can pay for the linear-time cost of restructuring a tree
+that is not balanced but whose higher son is.\<close>
+text \<open>An implementation where size and height are computed incrementally:\<close>
+subsubsection \<open>Functions\<close>
+text\<open>@{const up2} traverses \<open>sib\<close> twice; unnecessarily, as it turns out: \<close>
+text\<open>Definition of timed final insertion function:\<close>
+subsubsection \<open>Amortized Complexity\<close>
+text \<open>The insert-only version is shown to have the desired logarithmic
+amortized complexity. First it is shown to be linear in the height of the tree.\<close>
+text\<open>Now it is shown that a certain instantiation of \<open>bal_i\<close> that guarantees

@@ -1,0 +1,946 @@
+theory Algorithm
+  imports Main
+begin
+
+
+
+subsection "Introduction"
+
+subsubsection "Counting sort"
+
+
+subsubsection "Buckets' probability -- Proof"
+
+
+subsubsection "Buckets' probability -- Implementation"
+
+
+subsubsection "Buckets' number -- Proof"
+
+
+subsubsection "Buckets' number -- Implementation"
+
+
+subsubsection "Generalized counting sort (GCsort)"
+
+
+
+subsection "Formal definitions"
+
+
+type_synonym ('a, 'b) index_sign = "('a \<Rightarrow> 'b) \<Rightarrow> 'a \<Rightarrow> nat \<Rightarrow> 'b \<Rightarrow> 'b \<Rightarrow> nat"
+
+definition index_less :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> bool"
+where
+"index_less index key \<equiv>
+  \<forall>x n mi ma. key x \<in> {mi..ma} \<longrightarrow> 0 < n \<longrightarrow>
+    index key x n mi ma < n"
+
+definition index_mono :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> bool"
+where
+"index_mono index key \<equiv>
+  \<forall>x y n mi ma. {key x, key y} \<subseteq> {mi..ma} \<longrightarrow> key x \<le> key y \<longrightarrow>
+    index key x n mi ma \<le> index key y n mi ma"
+
+definition index_same :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> bool"
+where
+"index_same index key \<equiv>
+  \<forall>x y n mi ma. key x \<in> {mi..ma} \<longrightarrow> x \<noteq> y \<longrightarrow> key x = key y \<longrightarrow>
+    index key x n mi ma = index key y n mi ma"
+
+
+fun bn_count :: "nat list \<Rightarrow> nat" where
+"bn_count [] = 0" |
+"bn_count (Suc (Suc (Suc (Suc n))) # ns) = Suc (Suc (bn_count ns))" |
+"bn_count (n # ns) = n + bn_count ns"
+
+fun bn_comp :: "nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<times> nat" where
+"bn_comp (Suc (Suc n)) p q r =
+  ((Suc (Suc n) * p + r) div q, (Suc (Suc n) * p + r) mod q)" |
+"bn_comp n p q r = (n, r)"
+
+fun bn_valid :: "nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> bool" where
+"bn_valid (Suc (Suc n)) p q = (q \<in> {0<..p})" |
+"bn_valid n p q = True"
+
+
+primrec (nonexhaustive) mini :: "'a list \<Rightarrow> ('a \<Rightarrow> 'b::linorder) \<Rightarrow> nat" where
+"mini (x # xs) key =
+  (let m = mini xs key in if xs = [] \<or> key x \<le> key (xs ! m) then 0 else Suc m)"
+
+primrec (nonexhaustive) maxi :: "'a list \<Rightarrow> ('a \<Rightarrow> 'b::linorder) \<Rightarrow> nat" where
+"maxi (x # xs) key =
+  (let m = maxi xs key in if xs = [] \<or> key (xs ! m) < key x then 0 else Suc m)"
+
+
+primrec enum :: "'a list \<Rightarrow> ('a, 'b) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow>
+  nat \<Rightarrow> 'b \<Rightarrow> 'b \<Rightarrow> nat list" where
+"enum [] index key n mi ma = replicate n 0" |
+"enum (x # xs) index key n mi ma =
+  (let i = index key x n mi ma;
+     ns = enum xs index key n mi ma
+   in ns[i := Suc (ns ! i)])"
+
+
+primrec offs :: "nat list \<Rightarrow> nat \<Rightarrow> nat list" where
+"offs [] i = []" |
+"offs (n # ns) i = i # offs ns (i + n)"
+
+
+primrec fill :: "'a list \<Rightarrow> nat list \<Rightarrow> ('a, 'b) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow>
+  nat \<Rightarrow> 'b \<Rightarrow> 'b \<Rightarrow> 'a option list" where
+"fill [] ns index key n mi ma = replicate n None" |
+"fill (x # xs) ns index key n mi ma =
+  (let i = index key x (length ns) mi ma;
+     ys = fill xs (ns[i := Suc (ns ! i)]) index key n mi ma
+   in ys[ns ! i := Some x])"
+
+
+definition round_suc_suc :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow>
+  'a list \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<times> nat list \<times> 'a list" where
+"round_suc_suc index key ws n n' u \<equiv>
+  let nmi = mini ws key; nma = maxi ws key;
+    xmi = ws ! nmi; xma = ws ! nma; mi = key xmi; ma = key xma
+  in if mi = ma
+    then (u + n' - n, replicate (Suc (Suc n)) (Suc 0), ws)
+    else
+      let k = case n of Suc (Suc i) \<Rightarrow> u + n' | _ \<Rightarrow> n;
+        zs = nths ws (- {nmi, nma}); ms = enum zs index key k mi ma
+      in (u + n' - k, Suc 0 # ms @ [Suc 0],
+        xmi # map the (fill zs (offs ms 0) index key n mi ma) @ [xma])"
+
+fun round :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow> nat \<Rightarrow>
+  nat \<times> nat list \<times> 'a list \<Rightarrow> nat \<times> nat list \<times> 'a list" where
+"round index key p q r (u, [], xs) = (u, [], xs)" |
+"round index key p q r (u, 0 # ns, xs) = round index key p q r (u, ns, xs)" |
+"round index key p q r (u, Suc 0 # ns, xs) =
+  (let (u', ns', xs') = round index key p q r (u, ns, tl xs)
+   in (u', Suc 0 # ns', hd xs # xs'))" |
+"round index key p q r (u, Suc (Suc n) # ns, xs) =
+  (let ws = take (Suc (Suc n)) xs; (n', r') = bn_comp n p q r;
+     (v, ms', ws') = round_suc_suc index key ws n n' u;
+     (u', ns', xs') = round index key p q r' (v, ns, drop (Suc (Suc n)) xs)
+   in (u', ms' @ ns', ws' @ xs'))"
+
+
+abbreviation gcsort_round :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow>
+  nat \<Rightarrow> nat list \<Rightarrow> 'a list \<Rightarrow> nat \<times> nat list \<times> 'a list" where
+"gcsort_round index key p ns xs \<equiv>
+  round index key (p - bn_count ns) (length xs - bn_count ns) 0 (0, ns, xs)"
+
+function gcsort_aux :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> nat \<Rightarrow>
+  nat \<times> nat list \<times> 'a list \<Rightarrow> nat \<times> nat list \<times> 'a list" where
+"gcsort_aux index key p (u, ns, xs) = (if find (\<lambda>n. Suc 0 < n) ns = None
+  then (u, ns, xs)
+  else gcsort_aux index key p (gcsort_round index key p ns xs))"
+by auto
+
+
+lemma add_zeros:
+ "foldl (+) (m :: nat) (replicate n 0) = m"
+by (induction n, simp_all)
+
+lemma add_suc:
+ "foldl (+) (Suc m) ns = Suc (foldl (+) m ns)"
+by (induction ns arbitrary: m, simp_all)
+
+lemma add_update:
+ "i < length ns \<Longrightarrow> foldl (+) m (ns[i := Suc (ns ! i)]) = Suc (foldl (+) m ns)"
+by (induction ns arbitrary: i m, simp_all add: add_suc split: nat.split)
+
+lemma add_le:
+ "(m :: nat) \<le> foldl (+) m ns"
+by (induction ns arbitrary: m, simp_all, rule order_trans, rule le_add1)
+
+lemma add_mono:
+ "(m :: nat) \<le> n \<Longrightarrow> foldl (+) m ns \<le> foldl (+) n ns"
+by (induction ns arbitrary: m n, simp_all)
+
+lemma add_max [rule_format]:
+ "ns \<noteq> [] \<longrightarrow> Max (set ns) \<le> foldl (+) (0 :: nat) ns"
+by (induction ns, simp_all add: add_le, erule impCE, simp, rule ballI, drule bspec,
+ assumption, rule order_trans, assumption, rule add_mono, simp)
+
+lemma enum_length:
+ "length (enum xs index key n mi ma) = n"
+by (induction xs, simp_all add: Let_def)
+
+lemma enum_add_le:
+ "foldl (+) 0 (enum xs index key n mi ma) \<le> length xs"
+proof (induction xs, simp_all add: Let_def add_zeros)
+  fix x xs
+  let ?i = "index key x n mi ma"
+  assume "foldl (+) 0 (enum xs index key n mi ma) \<le> length xs"
+    (is "foldl _ _ ?ns \<le> _")
+  thus "foldl (+) 0 (?ns[?i := Suc (?ns ! ?i)]) \<le> Suc (length xs)"
+    by (cases "?i < length ?ns", simp_all add: add_update)
+qed
+
+lemma enum_max_le:
+ "0 < n \<Longrightarrow> Max (set (enum xs index key n mi ma)) \<le> length xs"
+  (is "_ \<Longrightarrow> Max (set ?ns) \<le> _")
+by (insert add_max [of ?ns], insert enum_add_le [of xs index key n mi ma],
+ simp only: length_greater_0_conv [symmetric] enum_length, simp)
+
+lemma mini_less:
+ "0 < length xs \<Longrightarrow> mini xs key < length xs"
+by (induction xs, simp_all add: Let_def)
+
+lemma maxi_less:
+ "0 < length xs \<Longrightarrow> maxi xs key < length xs"
+by (induction xs, simp_all add: Let_def)
+
+lemma mini_lb:
+ "x \<in> set xs \<Longrightarrow> key (xs ! mini xs key) \<le> key x"
+by (induction xs, simp_all add: Let_def, auto)
+
+lemma maxi_ub:
+ "x \<in> set xs \<Longrightarrow> key x \<le> key (xs ! maxi xs key)"
+by (induction xs, simp_all add: Let_def, auto)
+
+lemma mini_maxi_neq [rule_format]:
+ "Suc 0 < length xs \<longrightarrow> mini xs key \<noteq> maxi xs key"
+proof (induction xs, simp_all add: Let_def, rule conjI, (rule impI)+,
+ (rule_tac [2] impI)+, rule_tac [2] notI, simp_all, rule ccontr)
+  fix x xs
+  assume "key (xs ! maxi xs key) < key x" and "key x \<le> key (xs ! mini xs key)"
+  hence "key (xs ! maxi xs key) < key (xs ! mini xs key)" by simp
+  moreover assume "xs \<noteq> []"
+  hence "0 < length xs" by simp
+  hence "mini xs key < length xs"
+    by (rule mini_less)
+  hence "xs ! mini xs key \<in> set xs" by simp
+  hence "key (xs ! mini xs key) \<le> key (xs ! maxi xs key)"
+    by (rule maxi_ub)
+  ultimately show False by simp
+qed
+
+lemma mini_maxi_nths:
+ "length (nths xs (- {mini xs key, maxi xs key})) =
+    (case length xs of 0 \<Rightarrow> 0 | Suc 0 \<Rightarrow> 0 | Suc (Suc n) \<Rightarrow> n)"
+proof (simp add: length_nths split: nat.split, rule allI, rule conjI, rule_tac [2] allI,
+ (rule_tac [!] impI)+, simp add: length_Suc_conv, erule exE, simp, blast)
+  fix n
+  assume A: "length xs = Suc (Suc n)"
+  hence B: "Suc 0 < length xs" by simp
+  hence C: "0 < length xs" by arith
+  have "{i. i < Suc (Suc n) \<and> i \<noteq> mini xs key \<and> i \<noteq> maxi xs key} =
+    {..<Suc (Suc n)} - {mini xs key} - {maxi xs key}"
+    by blast
+  thus "card {i. i < Suc (Suc n) \<and> i \<noteq> mini xs key \<and> i \<noteq> maxi xs key} = n"
+    by (simp add: card_Diff_singleton_if, insert mini_maxi_neq [OF B, of key],
+     simp add: mini_less [OF C] maxi_less [OF C] A [symmetric])
+qed
+
+lemma mini_maxi_nths_le:
+ "length xs \<le> Suc (Suc n) \<Longrightarrow> length (nths xs (- {mini xs key, maxi xs key})) \<le> n"
+by (simp add: mini_maxi_nths split: nat.split)
+
+lemma round_nil:
+ "(fst (snd (round index key p q r t)) \<noteq> []) = (\<exists>n \<in> set (fst (snd t)). 0 < n)"
+by (induction index key p q r t rule: round.induct,
+ simp_all add: round_suc_suc_def Let_def split: prod.split)
+
+lemma round_max_eq [rule_format]:
+ "fst (snd t) \<noteq> [] \<longrightarrow> Max (set (fst (snd t))) = Suc 0 \<longrightarrow>
+    Max (set (fst (snd (round index key p q r t)))) = Suc 0"
+proof (induction index key p q r t rule: round.induct, simp_all add: Let_def split:
+ prod.split del: all_simps, rule impI, (rule_tac [2] allI)+, (rule_tac [2] impI)+,
+ (rule_tac [3] allI)+, (rule_tac [3] impI)+, rule_tac [3] FalseE)
+  fix index p q r u ns xs and key :: "'a \<Rightarrow> 'b"
+  let ?t = "round index key p q r (u, ns, xs)"
+  assume "ns \<noteq> [] \<longrightarrow> Max (set ns) = Suc 0 \<longrightarrow>
+    Max (set (fst (snd ?t))) = Suc 0"
+  moreover assume A: "Max (insert 0 (set ns)) = Suc 0"
+  hence "ns \<noteq> []"
+    by (cases ns, simp_all)
+  moreover from this have "Max (set ns) = Suc 0"
+    using A by simp
+  ultimately show "Max (set (fst (snd ?t))) = Suc 0"
+    by simp
+next
+  fix index p q r u ns xs u' ns' xs' and key :: "'a \<Rightarrow> 'b"
+  let ?t = "round index key p q r (u, ns, tl xs)"
+  assume A: "?t = (u', ns', xs')" and
+   "ns \<noteq> [] \<longrightarrow> Max (set ns) = Suc 0 \<longrightarrow> Max (set (fst (snd ?t))) = Suc 0"
+  hence B: "ns \<noteq> [] \<longrightarrow> Max (set ns) = Suc 0 \<longrightarrow> Max (set ns') = Suc 0"
+    by simp
+  assume C: "Max (insert (Suc 0) (set ns)) = Suc 0"
+  show "Max (insert (Suc 0) (set ns')) = Suc 0"
+  proof (cases "ns' = []", simp)
+    assume D: "ns' \<noteq> []"
+    hence "fst (snd ?t) \<noteq> []"
+      using A by simp
+    hence "\<exists>n \<in> set ns. 0 < n"
+      by (simp add: round_nil)
+    then obtain n where E: "n \<in> set ns" and F: "0 < n" ..
+    hence G: "ns \<noteq> []"
+      by (cases ns, simp_all)
+    moreover have "n \<le> Max (set ns)"
+      using E by (rule_tac Max_ge, simp_all)
+    hence "0 < Max (set ns)"
+      using F by simp
+    hence "Max (set ns) = Suc 0"
+      using C and G by simp
+    ultimately have "Max (set ns') = Suc 0"
+      using B by simp
+    thus ?thesis
+      using D by simp
+  qed
+next
+  fix n ns
+  assume "Max (insert (Suc (Suc n)) (set ns)) = Suc 0"
+  thus False
+    by (cases ns, simp_all)
+qed
+
+lemma round_max_less [rule_format]:
+ "fst (snd t) \<noteq> [] \<longrightarrow> Suc 0 < Max (set (fst (snd t))) \<longrightarrow>
+    Max (set (fst (snd (round index key p q r t)))) < Max (set (fst (snd t)))"
+proof (induction index key p q r t rule: round.induct, simp_all add: Let_def split:
+ prod.split del: all_simps, rule impI, (rule_tac [2] allI)+, (rule_tac [2] impI)+,
+ (rule_tac [3] allI)+, (rule_tac [3] impI)+, rule_tac [2] ballI)
+  fix index p q r u ns xs and key :: "'a \<Rightarrow> 'b"
+  let ?t = "round index key p q r (u, ns, xs)"
+  assume "ns \<noteq> [] \<longrightarrow> Suc 0 < Max (set ns) \<longrightarrow>
+    Max (set (fst (snd ?t))) < Max (set ns)"
+  moreover assume A: "Suc 0 < Max (insert 0 (set ns))"
+  hence "ns \<noteq> []"
+    by (cases ns, simp_all)
+  moreover from this have "Suc 0 < Max (set ns)"
+    using A by simp
+  ultimately show "Max (set (fst (snd ?t))) < Max (insert 0 (set ns))"
+    by simp
+next
+  fix index p q r u ns xs u' ns' xs' i and key :: "'a \<Rightarrow> 'b"
+  let ?t = "round index key p q r (u, ns, tl xs)"
+  assume
+   "?t = (u', ns', xs')" and
+   "ns \<noteq> [] \<longrightarrow> Suc 0 < Max (set ns) \<longrightarrow>
+      Max (set (fst (snd ?t))) < Max (set ns)"
+  hence "ns \<noteq> [] \<longrightarrow> Suc 0 < Max (set ns) \<longrightarrow>
+    Max (set ns') < Max (set ns)"
+    by simp
+  moreover assume A: "Suc 0 < Max (insert (Suc 0) (set ns))"
+  hence B: "ns \<noteq> []"
+    by (cases ns, simp_all)
+  moreover from this have "Suc 0 < Max (set ns)"
+    using A by simp
+  ultimately have "Max (set ns') < Max (set ns)" by simp
+  moreover assume "i \<in> set ns'"
+  hence "i \<le> Max (set ns')"
+    by (rule_tac Max_ge, simp)
+  ultimately show "i < Max (insert (Suc 0) (set ns))"
+    using B by simp
+next
+  fix index p q r u n ns n' r' v ms' ws' u' ns' xs'
+    and key :: "'a \<Rightarrow> 'b" and xs :: "'a list"
+  let ?ws = "take (Suc (Suc n)) xs"
+  let ?ys = "drop (Suc (Suc n)) xs"
+  let ?r = "\<lambda>n'. round_suc_suc index key ?ws n n' u"
+  let ?t = "\<lambda>r' v. round index key p q r' (v, ns, ?ys)"
+  assume
+    A: "?r n' = (v, ms', ws')" and
+    B: "?t r' v = (u', ns', xs')"
+  moreover assume "\<And>ws a b c d e f g h.
+    ws = ?ws \<Longrightarrow> a = bn_comp n p q r \<Longrightarrow> (b, c) = bn_comp n p q r \<Longrightarrow>
+    d = ?r b \<Longrightarrow> (e, f) = ?r b \<Longrightarrow> (g, h) = f \<Longrightarrow>
+      ns \<noteq> [] \<longrightarrow> Suc 0 < Max (set ns) \<longrightarrow>
+        Max (set (fst (snd (?t c e)))) < Max (set ns)" and
+   "bn_comp n p q r = (n', r')"
+  ultimately have C: "ns \<noteq> [] \<longrightarrow> Suc 0 < Max (set ns) \<longrightarrow>
+    Max (set ns') < Max (set ns)"
+    by simp
+  from A [symmetric] show "Max (set ms' \<union> set ns') <
+    Max (insert (Suc (Suc n)) (set ns))"
+  proof (simp add: round_suc_suc_def Let_def, subst Max_less_iff, simp_all,
+   rule_tac impI, simp add: Let_def split: if_split_asm, rule_tac ballI,
+   erule_tac UnE, simp add: Let_def split: if_split_asm, (erule_tac [1-2] conjE)+)
+    fix i
+    assume "i = Suc 0 \<or> i = Suc 0 \<and> 0 < n"
+    hence "i = Suc 0" by blast
+    hence "i < Suc (Suc n)" by simp
+    also have "\<dots> \<le> Max (insert (Suc (Suc n)) (set ns))"
+      by (rule Max_ge, simp_all)
+    finally show "i < Max (insert (Suc (Suc n)) (set ns))" .
+  next
+    fix i
+    let ?nmi = "mini ?ws key"
+    let ?nma = "maxi ?ws key"
+    let ?xmi = "?ws ! ?nmi"
+    let ?xma = "?ws ! ?nma"
+    let ?mi = "key ?xmi"
+    let ?ma = "key ?xma"
+    let ?k = "case n of 0 \<Rightarrow> n | Suc 0 \<Rightarrow> n | Suc (Suc i) \<Rightarrow> u + n'"
+    let ?zs = "nths ?ws (- {?nmi, ?nma})"
+    let ?ms = "enum ?zs index key ?k ?mi ?ma"
+    assume "i = Suc 0 \<or> i \<in> set ?ms"
+    moreover {
+      assume "i = Suc 0"
+      hence "i < Suc (Suc n)" by simp
+    }
+    moreover {
+      assume D: "i \<in> set ?ms"
+      hence "i \<le> Max (set ?ms)"
+      by (rule_tac Max_ge, simp)
+      moreover have "0 < length ?ms"
+        using D by (rule length_pos_if_in_set)
+      hence "0 < ?k"
+        by (simp add: enum_length)
+      hence "Max (set ?ms) \<le> length ?zs"
+        by (rule enum_max_le)
+      ultimately have "i \<le> length ?zs" by simp
+      moreover have "length ?zs \<le> n"
+        by (rule mini_maxi_nths_le, simp)
+      ultimately have "i < Suc (Suc n)" by simp
+    }
+    ultimately have "i < Suc (Suc n)" ..
+    also have "\<dots> \<le> Max (insert (Suc (Suc n)) (set ns))"
+      by (rule Max_ge, simp_all)
+    finally show "i < Max (insert (Suc (Suc n)) (set ns))" .
+  next
+    fix i
+    assume D: "i \<in> set ns'"
+    hence "0 < length ns'"
+      by (rule length_pos_if_in_set)
+    hence "fst (snd (?t r' v)) \<noteq> []"
+      using B by simp
+    hence E: "\<exists>n \<in> set ns. 0 < n"
+      by (simp add: round_nil)
+    hence F: "ns \<noteq> []"
+      by (cases ns, simp_all)
+    show "i < Max (insert (Suc (Suc n)) (set ns))"
+    proof (cases "Suc 0 < Max (set ns)")
+      case True
+      hence "Max (set ns') < Max (set ns)"
+        using C and F by simp
+      moreover have "i \<le> Max (set ns')"
+        using D by (rule_tac Max_ge, simp)
+      ultimately show ?thesis
+        using F by simp
+    next
+      case False
+      moreover from E obtain j where G: "j \<in> set ns" and H: "0 < j" ..
+      have "j \<le> Max (set ns)"
+        using G by (rule_tac Max_ge, simp)
+      hence "0 < Max (set ns)"
+        using H by simp
+      ultimately have "Max (set ns) = Suc 0" by simp
+      hence "Max (set (fst (snd (?t r' v)))) = Suc 0"
+        using F by (rule_tac round_max_eq, simp_all)
+      hence "Max (set ns') = Suc 0"
+        using B by simp
+      moreover have "i \<le> Max (set ns')"
+        using D by (rule_tac Max_ge, simp)
+      ultimately have "i < Suc (Suc n)" by simp
+      also have "\<dots> \<le> Max (insert (Suc (Suc n)) (set ns))"
+        by (rule Max_ge, simp_all)
+      finally show ?thesis .
+    qed
+  qed
+qed
+
+termination gcsort_aux
+proof (relation "measure (\<lambda>(index, key, p, t). Max (set (fst (snd t))))",
+ simp_all add: find_None_iff, erule exE, erule conjE)
+  fix index p ns xs i and key :: "'a \<Rightarrow> 'b"
+  let ?t = "gcsort_round index key p ns xs"
+  assume A: "Suc 0 < i" and B: "i \<in> set ns"
+  have C: "0 < length ns"
+    using B by (rule length_pos_if_in_set)
+  moreover have "\<exists>i \<in> set ns. Suc 0 < i"
+    using A and B ..
+  hence "Suc 0 < Max (set ns)"
+    using C by (subst Max_gr_iff, simp_all)
+  ultimately have "Max (set (fst (snd ?t))) < Max (set (fst (snd (0, ns, xs))))"
+    by (insert round_max_less [of "(0, ns, xs)"], simp)
+  thus "Max (set (fst (snd ?t))) < Max (set ns)" by simp
+qed
+
+
+definition gcsort_in :: "'a list \<Rightarrow> nat \<times> nat list \<times> 'a list" where
+"gcsort_in xs \<equiv> (0, [length xs], xs)"
+
+definition gcsort_out :: "nat \<times> nat list \<times> 'a list \<Rightarrow> 'a list" where
+"gcsort_out \<equiv> snd \<circ> snd"
+
+definition gcsort :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> nat \<Rightarrow>
+  'a list \<Rightarrow> 'a list" where
+"gcsort index key p xs \<equiv> gcsort_out (gcsort_aux index key p (gcsort_in xs))"
+
+inductive_set gcsort_set :: "('a, 'b::linorder) index_sign \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> nat \<Rightarrow>
+  nat \<times> nat list \<times> 'a list \<Rightarrow> (nat \<times> nat list \<times> 'a list) set"
+for index key p t where
+R0: "t \<in> gcsort_set index key p t" |
+R1: "(u, ns, xs) \<in> gcsort_set index key p t \<Longrightarrow>
+  gcsort_round index key p ns xs \<in> gcsort_set index key p t"
+
+lemma gcsort_subset:
+  assumes A: "t' \<in> gcsort_set index key p t"
+  shows "gcsort_set index key p t' \<subseteq> gcsort_set index key p t"
+by (rule subsetI, erule gcsort_set.induct, rule A, rule R1)
+
+lemma gcsort_aux_set:
+ "gcsort_aux index key p t \<in> gcsort_set index key p t"
+proof (induction index key p t rule: gcsort_aux.induct, simp, rule conjI,
+ rule_tac [!] impI, rule R0, simp)
+  fix index p u ns xs and key :: "'a \<Rightarrow> 'b"
+  let ?t = "gcsort_round index key p ns xs"
+  assume "gcsort_aux index key p ?t \<in> gcsort_set index key p ?t"
+  moreover have "(u, ns, xs) \<in> gcsort_set index key p (u, ns, xs)"
+    by (rule R0)
+  hence "?t \<in> gcsort_set index key p (u, ns, xs)"
+    by (rule R1)
+  hence "gcsort_set index key p ?t \<subseteq> gcsort_set index key p (u, ns, xs)"
+    by (rule gcsort_subset)
+  ultimately show "gcsort_aux index key p ?t
+    \<in> gcsort_set index key p (u, ns, xs)" ..
+qed
+
+
+subsection "Proof of a preliminary invariant"
+
+
+fun bn_inv :: "nat \<Rightarrow> nat \<Rightarrow> nat \<times> nat list \<times> 'a list \<Rightarrow> bool" where
+"bn_inv p q (u, ns, xs) =
+  (\<forall>n \<in> set ns. case n of Suc (Suc m) \<Rightarrow> bn_valid m p q | _ \<Rightarrow> True)"
+
+fun add_inv :: "nat \<Rightarrow> nat \<times> nat list \<times> 'a list \<Rightarrow> bool" where
+"add_inv n (u, ns, xs) =
+  (foldl (+) 0 ns = n \<and> length xs = n)"
+
+lemma gcsort_add_input:
+ "add_inv (length xs) (0, [length xs], xs)"
+by simp
+
+lemma add_base:
+ "foldl (+) (k + m) ns = foldl (+) m ns + (k :: nat)"
+by (induction ns arbitrary: m, simp_all, subst add.assoc, simp)
+
+lemma add_base_zero:
+ "foldl (+) k ns = foldl (+) 0 ns + (k :: nat)"
+by (insert add_base [of k 0 ns], simp)
+
+lemma bn_count_le:
+ "bn_count ns \<le> foldl (+) 0 ns"
+by (induction ns rule: bn_count.induct, simp_all add: add_suc, subst add_base_zero,
+ simp)
+
+
+lemma bn_inv_intro [rule_format]:
+ "foldl (+) 0 ns \<le> p \<longrightarrow>
+    bn_inv (p - bn_count ns) (foldl (+) 0 ns - bn_count ns) (u, ns, xs)"
+proof (induction ns, simp_all, (rule impI)+, subst (asm) (3) add_base_zero,
+ subst (1 2) add_base_zero, simp)
+  fix n ns
+  assume
+    A: "\<forall>x \<in> set ns. case x of 0 \<Rightarrow> True | Suc 0 \<Rightarrow> True | Suc (Suc m) \<Rightarrow>
+      bn_valid m (p - bn_count ns) (foldl (+) 0 ns - bn_count ns)" and
+    B: "foldl (+) 0 ns + n \<le> p"
+  show
+   "(case n of 0 \<Rightarrow> True | Suc 0 \<Rightarrow> True | Suc (Suc m) \<Rightarrow>
+      bn_valid m (p - bn_count (n # ns))
+        (foldl (+) 0 ns + n - bn_count (n # ns))) \<and>
+    (\<forall>x \<in> set ns. case x of 0 \<Rightarrow> True | Suc 0 \<Rightarrow> True | Suc (Suc m) \<Rightarrow>
+      bn_valid m (p - bn_count (n # ns))
+        (foldl (+) 0 ns + n - bn_count (n # ns)))"
+  using [[simproc del: defined_all]]
+  proof (rule conjI, rule_tac [2] ballI, simp_all split: nat.split, rule_tac [!] allI,
+   rule_tac [!] impI)
+    fix m
+    assume C: "n = Suc (Suc m)"
+    show "bn_valid m (p - bn_count (Suc (Suc m) # ns))
+      (Suc (Suc (foldl (+) 0 ns + m)) - bn_count (Suc (Suc m) # ns))"
+      (is "bn_valid _ ?p ?q")
+    proof (rule bn_valid.cases [of "(m, ?p, ?q)"], simp_all, erule conjE, rule conjI)
+      fix k
+      have "bn_count ns \<le> foldl (+) 0 ns"
+        by (rule bn_count_le)
+      thus "bn_count ns < Suc (Suc (foldl (+) 0 ns + k))" by simp
+    next
+      fix k
+      assume "m = Suc (Suc k)"
+      hence "Suc (Suc (foldl (+) 0 ns + k)) - bn_count ns =
+        foldl (+) 0 ns + n - Suc (Suc (bn_count ns))"
+        using C by simp
+      also have "\<dots> \<le> p - Suc (Suc (bn_count ns))"
+        using B by simp
+      finally show "Suc (Suc (foldl (+) 0 ns + k)) - bn_count ns \<le>
+        p - Suc (Suc (bn_count ns))" .
+    qed
+  next
+    fix n' m
+    assume "n' \<in> set ns"
+    with A have "case n' of 0 \<Rightarrow> True | Suc 0 \<Rightarrow> True | Suc (Suc m) \<Rightarrow>
+      bn_valid m (p - bn_count ns) (foldl (+) 0 ns - bn_count ns)" ..
+    moreover assume "n' = Suc (Suc m)"
+    ultimately have "bn_valid m (p - bn_count ns) (foldl (+) 0 ns - bn_count ns)"
+      by simp
+    thus "bn_valid m (p - bn_count (n # ns))
+      (foldl (+) 0 ns + n - bn_count (n # ns))"
+      (is "bn_valid _ ?p ?q")
+    proof (rule_tac bn_valid.cases [of "(m, ?p, ?q)"], simp_all, (erule_tac conjE)+,
+     simp)
+      fix p' q'
+      assume "bn_count ns < foldl (+) 0 ns"
+      moreover assume "p - bn_count (n # ns) = p'"
+      hence "p' = p - bn_count (n # ns)" ..
+      moreover assume "foldl (+) 0 ns + n - bn_count (n # ns) = q'"
+      hence "q' = foldl (+) 0 ns + n - bn_count (n # ns)" ..
+      ultimately show "0 < q' \<and> q' \<le> p'"
+        using B by (rule_tac bn_count.cases [of "n # ns"], simp_all)
+    qed
+  qed
+qed
+
+
+lemma bn_comp_fst_ge [rule_format]:
+ "bn_valid n p q \<longrightarrow> n \<le> fst (bn_comp n p q r)"
+proof (induction n p q r rule: bn_comp.induct, simp_all del: mult_Suc,
+ rule impI, erule conjE)
+  fix n p r and q :: nat
+  assume "0 < q"
+  hence "Suc (Suc n) = Suc (Suc n) * q div q" by simp
+  also assume "q \<le> p"
+  hence "Suc (Suc n) * q \<le> Suc (Suc n) * p"
+    by (rule mult_le_mono2)
+  hence "Suc (Suc n) * q div q \<le> (Suc (Suc n) * p + r) div q"
+    by (rule_tac div_le_mono, simp)
+  finally show "Suc (Suc n) \<le> (Suc (Suc n) * p + r) div q" .
+qed
+
+lemma bn_comp_fst_nonzero:
+ "bn_valid n p q \<Longrightarrow> 0 < n \<Longrightarrow> 0 < fst (bn_comp n p q r)"
+by (drule bn_comp_fst_ge [where r = r], simp)
+
+lemma bn_comp_snd_less:
+ "r < q \<Longrightarrow> snd (bn_comp n p q r) < q"
+by (induction n p q r rule: bn_comp.induct, simp_all)
+
+lemma add_replicate:
+ "foldl (+) k (replicate m n) = k + m * n"
+by (induction m arbitrary: k, simp_all)
+
+lemma fill_length:
+ "length (fill xs ns index key n mi ma) = n"
+by (induction xs arbitrary: ns, simp_all add: Let_def)
+
+lemma enum_add [rule_format]:
+  assumes
+    A: "index_less index key" and
+    B: "0 < n"
+  shows "(\<forall>x \<in> set xs. key x \<in> {mi..ma}) \<longrightarrow>
+    foldl (+) 0 (enum xs index key n mi ma) = length xs"
+proof (induction xs, simp_all add: Let_def add_zeros, rule impI, (erule conjE)+,
+ simp)
+  fix x xs
+  assume "mi \<le> key x" and "key x \<le> ma"
+  hence "index key x n mi ma < n"
+    (is "?i < _")
+    using A and B by (simp add: index_less_def)
+  hence "?i < length (enum xs index key n mi ma)"
+    (is "_ < length ?ns")
+    by (simp add: enum_length)
+  hence "foldl (+) 0 (?ns[?i := Suc (?ns ! ?i)]) = Suc (foldl (+) 0 ?ns)"
+    by (rule add_update)
+  moreover assume "foldl (+) 0 ?ns = length xs"
+  ultimately show "foldl (+) 0 (?ns[?i := Suc (?ns ! ?i)]) = Suc (length xs)"
+    by simp
+qed
+
+lemma round_add_inv [rule_format]:
+ "index_less index key \<longrightarrow> bn_inv p q t \<longrightarrow> add_inv n t \<longrightarrow>
+    add_inv n (round index key p q r t)"
+using [[simproc del: defined_all]]
+proof (induction index key p q r t arbitrary: n rule: round.induct, simp_all
+ add: Let_def split: prod.split, (rule allI)+, (rule impI)+, erule conjE,
+ (rule_tac [2] allI)+, (rule_tac [2] impI)+, (erule_tac [2] conjE)+,
+ rule_tac [2] ssubst [OF add_base_zero], simp_all add: add_suc)
+  fix n ns ns' and xs' :: "'a list"
+  assume "\<And>n'. foldl (+) 0 ns = n' \<and> n - Suc 0 = n' \<longrightarrow>
+    foldl (+) 0 ns' = n' \<and> length xs' = n'"
+  hence "foldl (+) 0 ns = n - Suc 0 \<longrightarrow>
+    foldl (+) 0 ns' = n - Suc 0 \<and> length xs' = n - Suc 0"
+    by simp
+  moreover assume "Suc (foldl (+) 0 ns) = n"
+  ultimately show "Suc (foldl (+) 0 ns') = n \<and> Suc (length xs') = n" by simp
+next
+  fix index p q r u m m' ns v ms' ws' ns' n
+    and key :: "'a \<Rightarrow> 'b" and xs :: "'a list" and xs' :: "'a list" and r' :: nat
+  let ?ws = "take (Suc (Suc m)) xs"
+  assume
+    A: "round_suc_suc index key ?ws m m' u = (v, ms', ws')" and
+    B: "bn_comp m p q r = (m', r')" and
+    C: "index_less index key" and
+    D: "bn_valid m p q" and
+    E: "length xs = n"
+  assume "\<And>ws a b c d e f g h n'.
+    ws = ?ws \<Longrightarrow> a = (m', r') \<Longrightarrow> b = m' \<and> c = r' \<Longrightarrow>
+    d = (v, ms', ws') \<Longrightarrow> e = v \<and> f = (ms', ws') \<Longrightarrow> g = ms' \<and> h = ws' \<Longrightarrow>
+      foldl (+) 0 ns = n' \<and> n - Suc (Suc m) = n' \<longrightarrow>
+        foldl (+) 0 ns' = n' \<and> length xs' = n'"
+  moreover assume "Suc (Suc (foldl (+) m ns)) = n"
+  hence F: "foldl (+) 0 ns + Suc (Suc m) = n"
+    by (subst (asm) add_base_zero, simp)
+  ultimately have
+    G: "foldl (+) 0 ns' = n - Suc (Suc m) \<and> length xs' = n - Suc (Suc m)"
+    by simp
+  from A show "foldl (+) 0 ns' + foldl (+) 0 ms' = n \<and>
+    length ws' + length xs' = n"
+  proof (subst (2) add_base_zero, simp add: round_suc_suc_def Let_def split:
+   if_split_asm, (erule_tac [!] conjE)+, simp_all)
+    assume "Suc 0 # Suc 0 # replicate m (Suc 0) = ms'"
+    hence "ms' = Suc 0 # Suc 0 # replicate m (Suc 0)" ..
+    hence "foldl (+) 0 ms' = Suc (Suc m)"
+      by (simp add: add_replicate)
+    hence "foldl (+) 0 ns' + foldl (+) 0 ms' = n"
+      using F and G by simp
+    moreover assume "?ws = ws'"
+    hence "ws' = ?ws" ..
+    hence "length ws' = Suc (Suc m)"
+      using F and E by simp
+    hence "length ws' + length xs' = n"
+      using F and G by simp
+    ultimately show ?thesis ..
+  next
+    let ?nmi = "mini ?ws key"
+    let ?nma = "maxi ?ws key"
+    let ?xmi = "?ws ! ?nmi"
+    let ?xma = "?ws ! ?nma"
+    let ?mi = "key ?xmi"
+    let ?ma = "key ?xma"
+    let ?k = "case m of 0 \<Rightarrow> m | Suc 0 \<Rightarrow> m | Suc (Suc i) \<Rightarrow> u + m'"
+    let ?zs = "nths ?ws (- {?nmi, ?nma})"
+    let ?ms = "enum ?zs index key ?k ?mi ?ma"
+    assume "Suc 0 # ?ms @ [Suc 0] = ms'"
+    hence "ms' = Suc 0 # ?ms @ [Suc 0]" ..
+    moreover assume
+     "?xmi # map the (fill ?zs (offs ?ms 0) index key m ?mi ?ma) @ [?xma] = ws'"
+    hence "ws' = ?xmi # map the (fill ?zs (offs ?ms 0) index key m ?mi ?ma)
+      @ [?xma]" ..
+    ultimately show ?thesis
+    proof (simp add: fill_length, subst (2) add_base_zero, simp, cases m)
+      case 0
+      moreover from this have "length ?ms = 0"
+        by (simp add: enum_length)
+      ultimately show "Suc (Suc (foldl (+) 0 ns' + foldl (+) 0 ?ms)) = n \<and>
+        Suc (Suc (m + length xs')) = n"
+        using F and G by simp
+    next
+      case Suc
+      moreover from this have "0 < fst (bn_comp m p q r)"
+        by (rule_tac bn_comp_fst_nonzero [OF D], simp)
+      hence "0 < m'"
+        using B by simp
+      ultimately have H: "0 < ?k"
+        by (simp split: nat.split)
+      have "foldl (+) 0 ?ms = length ?zs"
+        by (rule enum_add [OF C H], simp, rule conjI,
+         ((rule mini_lb | rule maxi_ub), erule in_set_nthsD)+)
+      moreover have "length ?ws = Suc (Suc m)"
+        using F and E by simp
+      hence "length ?zs = m"
+        by (simp add: mini_maxi_nths)
+      ultimately show "Suc (Suc (foldl (+) 0 ns' + foldl (+) 0 ?ms)) = n \<and>
+        Suc (Suc (m + length xs')) = n"
+        using F and G by simp
+    qed
+  qed
+qed
+
+lemma gcsort_add_inv:
+  assumes A: "index_less index key"
+  shows "\<lbrakk>t' \<in> gcsort_set index key p t; add_inv n t; n \<le> p\<rbrakk> \<Longrightarrow>
+    add_inv n t'"
+by (erule gcsort_set.induct, simp, rule round_add_inv [OF A], simp_all del:
+ bn_inv.simps, erule conjE, frule sym, erule subst, rule bn_inv_intro, simp)
+
+
+subsection "Proof of counters' optimization"
+
+
+lemma round_len_less [rule_format]:
+ "bn_inv p q t \<longrightarrow> r < q \<longrightarrow>
+  (r + (foldl (+) 0 (fst (snd t)) - bn_count (fst (snd t))) * p) mod q = 0 \<longrightarrow>
+    (fst (round index key p q r t) +
+      length (fst (snd (round index key p q r t)))) * q =
+    (fst t + bn_count (fst (snd t))) * q +
+      (foldl (+) 0 (fst (snd t)) - bn_count (fst (snd t))) * p + r"
+using [[simproc del: defined_all]]
+proof (induction index key p q r t rule: round.induct, simp_all add: Let_def
+ split: prod.split del: all_simps, ((rule allI)+, (rule impI)+, simp add:
+ add_suc)+, subst (asm) (3) add_base_zero, subst add_base_zero, erule conjE)
+  fix index p q r u n ns n' r' v ms' ws' u'
+    and key :: "'a \<Rightarrow> 'b" and xs :: "'a list" and ns' :: "nat list"
+  let ?ws = "take (Suc (Suc n)) xs"
+  assume
+    A: "round_suc_suc index key ?ws n n' u = (v, ms', ws')" and
+    B: "bn_comp n p q r = (n', r')" and
+    C: "bn_valid n p q"
+  have D: "bn_count ns \<le> foldl (+) 0 ns"
+    by (rule bn_count_le)
+  assume "\<And>ws a b c d e f g h.
+    ws = ?ws \<Longrightarrow> a = (n', r') \<Longrightarrow> b = n' \<and> c = r' \<Longrightarrow>
+    d = (v, ms', ws') \<Longrightarrow> e = v \<and> f = (ms', ws') \<Longrightarrow> g = ms' \<and> h = ws' \<Longrightarrow>
+      r' < q \<longrightarrow> (r' + (foldl (+) 0 ns - bn_count ns) * p) mod q = 0 \<longrightarrow>
+        (u' + length ns') * q =
+        (v + bn_count ns) * q + (foldl (+) 0 ns - bn_count ns) * p + r'"
+  moreover assume "r < q"
+  hence "snd (bn_comp n p q r) < q"
+    by (rule bn_comp_snd_less)
+  hence "r' < q"
+    using B by simp
+  moreover assume E: "(r + (Suc (Suc (foldl (+) 0 ns + n)) -
+    bn_count (Suc (Suc n) # ns)) * p) mod q = 0"
+  from B [symmetric] have "(r' + (foldl (+) 0 ns - bn_count ns) * p) mod q = 0"
+  proof (rule_tac trans [OF _ E], rule_tac bn_comp.cases [of "(n, p, q, r)"],
+   simp_all add: add_mult_distrib diff_mult_distrib mod_add_left_eq,
+   rule_tac arg_cong2 [where f = "(mod)"], simp_all)
+    fix n p q r
+    have "bn_count ns * p \<le> foldl (+) 0 ns * p"
+      using D by (rule mult_le_mono1)
+    thus "p + (p + (n * p + (foldl (+) 0 ns * p - bn_count ns * p))) =
+      p + (p + (foldl (+) 0 ns * p + n * p)) - bn_count ns * p"
+      by arith
+  qed
+  ultimately have "(u' + length ns') * q =
+    (v + bn_count ns) * q + (foldl (+) 0 ns - bn_count ns) * p + r'"
+    by simp
+  with A [symmetric] and B [symmetric] show
+   "(u' + (length ms' + length ns')) * q =
+    (u + bn_count (Suc (Suc n) # ns)) * q +
+      (Suc (Suc (foldl (+) 0 ns + n)) - bn_count (Suc (Suc n) # ns)) * p + r"
+  proof (rule_tac bn_comp.cases [of "(n, p, q, r)"],
+   simp_all add: round_suc_suc_def Let_def enum_length split: if_split_asm)
+    fix m p' q' r'
+    assume
+     "n = Suc (Suc m)" and
+     "p = p'" and
+     "q = q'" and
+     "r = r'"
+    moreover have "n \<le> fst (bn_comp n p q r)"
+      using C by (rule bn_comp_fst_ge)
+    ultimately have "Suc (Suc m) \<le> (p' + (p' + m * p') + r') div q'"
+      (is "_ \<le> ?a div _")
+      by simp
+    hence F: "Suc (Suc m) * q' \<le> ?a div q' * q'"
+      by (rule mult_le_mono1)
+    moreover assume "(u' + length ns') * q' =
+      (u + ?a div q' - Suc (Suc m) + bn_count ns) * q' +
+        (foldl (+) 0 ns - bn_count ns) * p' + ?a mod q'"
+    ultimately have "(u' + length ns') * q' + Suc (Suc m) * q' =
+      (u + bn_count ns) * q' + (foldl (+) 0 ns - bn_count ns) * p' +
+        ?a div q' * q' + ?a mod q'"
+      (is "?c = ?d")
+    proof (simp add: add_mult_distrib diff_mult_distrib)
+      have "Suc (Suc m) * q' \<le> ?a div q' * q' + ?a mod q'"
+        using F by arith
+      hence "q' + (q' + m * q') \<le> ?a"
+        (is "?b \<le> _")
+        by simp
+      thus
+       "?a + (u * q' + (bn_count ns * q' +
+          (foldl (+) 0 ns * p' - bn_count ns * p'))) - ?b + ?b =
+        ?a + (u * q' + (bn_count ns * q' +
+          (foldl (+) 0 ns * p' - bn_count ns * p')))"
+        by simp
+    qed
+    moreover have "?c = q' + (q' + (u' + (m + length ns')) * q')"
+      (is "_ = ?e")
+      by (simp add: add_mult_distrib)
+    moreover have "bn_count ns * p' \<le> foldl (+) 0 ns * p'"
+      using D by (rule mult_le_mono1)
+    hence "?d = (u + bn_count ns) * q' +
+      ((Suc (Suc (foldl (+) 0 ns + m)) - bn_count ns) * p' + r')"
+      (is "_ = ?f")
+      by (simp (no_asm_simp) add: add_mult_distrib diff_mult_distrib)
+    ultimately show "?e = ?f" by simp
+  next
+    fix m p' q' r'
+    assume "(u' + length ns') * q' = bn_count ns * q' +
+      (foldl (+) 0 ns - bn_count ns) * p' + (p' + (p' + m * p') + r') mod q'"
+      (is "_ = _ + _ + ?a mod _")
+    hence "(u' + length ns') * q' + (u + ?a div q') * q' =
+      (u + bn_count ns) * q' + (foldl (+) 0 ns - bn_count ns) * p' + ?a"
+      (is "?c = ?d")
+      by (simp add: add_mult_distrib)
+    moreover have "?c = (u' + (u + ?a div q' + length ns')) * q'"
+      (is "_ = ?e")
+      by (simp add: add_mult_distrib)
+    moreover have "bn_count ns * p' \<le> foldl (+) 0 ns * p'"
+      using D by (rule mult_le_mono1)
+    hence "?d = (u + bn_count ns) * q' +
+      ((Suc (Suc (foldl (+) 0 ns + m)) - bn_count ns) * p' + r')"
+      (is "_ = ?f")
+      by (simp (no_asm_simp) add: add_mult_distrib diff_mult_distrib)
+    ultimately show "?e = ?f" by simp
+  qed
+qed
+
+lemma round_len_eq [rule_format]:
+ "bn_count (fst (snd t)) = foldl (+) 0 (fst (snd t)) \<longrightarrow>
+    length (fst (snd (round index key p q r t))) = foldl (+) 0 (fst (snd t))"
+using [[simproc del: defined_all]]
+proof (induction index key p q r t rule: round.induct, simp_all add: Let_def
+ split: prod.split del: all_simps, ((rule allI)+, (rule impI)+, simp add:
+ add_suc)+, subst (asm) (3) add_base_zero, subst add_base_zero)
+  fix index p q r u n ns n' v ms' ws'
+    and key :: "'a \<Rightarrow> 'b" and xs :: "'a list" and ns' :: "nat list" and r' :: nat
+  let ?ws = "take (Suc (Suc n)) xs"
+  assume
+    A: "round_suc_suc index key ?ws n n' u = (v, ms', ws')" and
+    B: "bn_count (Suc (Suc n) # ns) = Suc (Suc (foldl (+) 0 ns + n))"
+  assume "\<And>ws a b c d e f g h.
+    ws = ?ws \<Longrightarrow> a = (n', r') \<Longrightarrow> b = n' \<and> c = r' \<Longrightarrow>
+    d = (v, ms', ws') \<Longrightarrow> e = v \<and> f = (ms', ws') \<Longrightarrow> g = ms' \<and> h = ws' \<Longrightarrow>
+      bn_count ns = foldl (+) 0 ns \<longrightarrow> length ns' = foldl (+) 0 ns"
+  moreover have C: "n = 0 \<or> n = Suc 0"
+    using B by (rule_tac bn_comp.cases [of "(n, p, q, r)"],
+     insert bn_count_le [of ns], simp_all)
+  hence "bn_count ns = foldl (+) 0 ns"
+    using B by (erule_tac disjE, simp_all)
+  ultimately have "length ns' = foldl (+) 0 ns" by simp
+  with A [symmetric] show "length ms' + length ns' =
+    Suc (Suc (foldl (+) 0 ns + n))"
+    by (rule_tac disjE [OF C], simp_all
+     add: round_suc_suc_def Let_def enum_length split: if_split_asm)
+qed
+
+theorem round_len:
+  assumes
+    A: "length xs = foldl (+) 0 ns" and
+    B: "length xs \<le> p"
+  shows "if bn_count ns < length xs
+    then fst (gcsort_round index key p ns xs) +
+      length (fst (snd (gcsort_round index key p ns xs))) = p
+    else length (fst (snd (gcsort_round index key p ns xs))) = length xs"
+  (is "if _ then fst ?t + _ = _ else _")
+proof (split if_split, rule conjI, rule_tac [!] impI)
+  assume C: "bn_count ns < length xs"
+  moreover have
+   "bn_inv (p - bn_count ns) (foldl (+) 0 ns - bn_count ns) (0, ns, xs)"
+    using A and B by (rule_tac bn_inv_intro, simp)
+  ultimately have
+   "(fst ?t + length (fst (snd ?t))) * (length xs - bn_count ns) =
+    bn_count ns * (length xs - bn_count ns) +
+      (p - bn_count ns) * (length xs - bn_count ns)"
+    (is "?a * ?b = ?c")
+    using A by (subst round_len_less, simp_all)
+  also have "bn_count ns \<le> p"
+    using B and C by simp
+  hence "bn_count ns * ?b \<le> p * ?b"
+    by (rule mult_le_mono1)
+  hence "?c = p * ?b"
+    by (simp (no_asm_simp) add: diff_mult_distrib)
+  finally have "?a * ?b = p * ?b" .
+  thus "?a = p"
+    using C by simp
+next
+  assume "\<not> bn_count ns < length xs"
+  moreover have "bn_count ns \<le> foldl (+) 0 ns"
+    by (rule bn_count_le)
+  ultimately show "length (fst (snd ?t)) = length xs"
+    using A by (subst round_len_eq, simp_all)
+qed
+
+end

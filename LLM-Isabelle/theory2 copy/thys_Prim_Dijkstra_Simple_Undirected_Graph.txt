@@ -1,0 +1,522 @@
+theory Undirected_Graph
+imports
+  Common
+begin
+
+typedef 'v ugraph 
+  = "{ (V::'v set , E). E \<subseteq> V\<times>V \<and> finite V \<and> sym E \<and> irrefl E }"
+  unfolding sym_def irrefl_def by blast
+
+setup_lifting type_definition_ugraph
+
+lift_definition nodes_internal :: "'v ugraph \<Rightarrow> 'v set" is fst .
+lift_definition edges_internal :: "'v ugraph \<Rightarrow> ('v\<times>'v) set" is snd .
+lift_definition graph_internal :: "'v set \<Rightarrow> ('v\<times>'v) set \<Rightarrow> 'v ugraph" 
+  is "\<lambda>V E. if finite V \<and> finite E then (V\<union>fst`E\<union>snd`E, (E\<union>E\<inverse>)-Id) else ({},{})"
+  by (auto simp: sym_def irrefl_def; force)     
+
+definition nodes :: "'v ugraph \<Rightarrow> 'v set" 
+  where "nodes = nodes_internal" 
+definition edges :: "'v ugraph \<Rightarrow> ('v\<times>'v) set" 
+  where "edges = edges_internal" 
+definition graph :: "'v set \<Rightarrow> ('v\<times>'v) set \<Rightarrow> 'v ugraph" 
+  where "graph = graph_internal" 
+
+lemma edges_subset: "edges g \<subseteq> nodes g \<times> nodes g"
+  unfolding edges_def nodes_def by transfer auto
+
+lemma nodes_finite[simp, intro!]: "finite (nodes g)"
+  unfolding edges_def nodes_def by transfer auto
+  
+lemma edges_sym: "sym (edges g)"    
+  unfolding edges_def nodes_def by transfer auto
+
+lemma edges_irrefl: "irrefl (edges g)"      
+  unfolding edges_def nodes_def by transfer auto
+
+lemma nodes_graph: "\<lbrakk>finite V; finite E\<rbrakk> \<Longrightarrow> nodes (graph V E) = V\<union>fst`E\<union>snd`E"    
+  unfolding edges_def nodes_def graph_def by transfer auto
+  
+lemma edges_graph: "\<lbrakk>finite V; finite E\<rbrakk> \<Longrightarrow> edges (graph V E) = (E\<union>E\<inverse>)-Id"    
+  unfolding edges_def nodes_def graph_def by transfer auto
+
+lemmas graph_accs = nodes_graph edges_graph  
+  
+lemma nodes_edges_graph_presentation: "\<lbrakk>finite V; finite E\<rbrakk> 
+    \<Longrightarrow> nodes (graph V E) = V \<union> fst`E \<union> snd`E \<and> edges (graph V E) = E\<union>E\<inverse> - Id"
+  by (simp add: graph_accs)
+      
+lemma graph_eq[simp]: "graph (nodes g) (edges g) = g"  
+  unfolding edges_def nodes_def graph_def
+  apply transfer
+  unfolding sym_def irrefl_def
+  apply (clarsimp split: prod.splits)
+  by (fastforce simp: finite_subset)
+
+lemma edges_finite[simp, intro!]: "finite (edges g)"
+  using edges_subset finite_subset by fastforce
+  
+lemma graph_cases[cases type]: obtains V E 
+  where "g = graph V E" "finite V" "finite E" "E\<subseteq>V\<times>V" "sym E" "irrefl E"  
+proof -
+  show ?thesis
+    apply (rule that[of "nodes g" "edges g"]) 
+    using edges_subset edges_sym edges_irrefl[of g]
+    by auto
+qed     
+
+lemma graph_eq_iff: "g=g' \<longleftrightarrow> nodes g = nodes g' \<and> edges g = edges g'"  
+  unfolding edges_def nodes_def graph_def by transfer auto
+
+  
+  
+lemma edges_sym': "(u,v)\<in>edges g \<Longrightarrow> (v,u)\<in>edges g" using edges_sym 
+  by (blast intro: symD)
+  
+lemma edges_irrefl'[simp,intro!]: "(u,u)\<notin>edges g"
+  by (meson edges_irrefl irrefl_def)
+  
+lemma edges_irreflI[simp, intro]: "(u,v)\<in>edges g \<Longrightarrow> u\<noteq>v" by auto 
+  
+lemma edgesT_diff_sng_inv_eq[simp]: 
+  "(edges T - {(x, y), (y, x)})\<inverse> = edges T - {(x, y), (y, x)}"
+  using edges_sym' by fast
+  
+lemma nodesI[simp,intro]: assumes "(u,v)\<in>edges g" shows "u\<in>nodes g" "v\<in>nodes g"
+  using assms edges_subset by auto
+  
+lemma split_edges_sym: "\<exists>E. E\<inter>E\<inverse> = {} \<and> edges g = E \<union> E\<inverse>"  
+  using split_sym_rel[OF edges_sym edges_irrefl, of g] by metis
+
+  
+  
+lemma rtrancl_edges_sym': "(u,v)\<in>(edges g)\<^sup>* \<Longrightarrow> (v,u)\<in>(edges g)\<^sup>*"  
+  by (simp add: edges_sym symD sym_rtrancl)
+  
+lemma trancl_edges_subset: "(edges g)\<^sup>+ \<subseteq> nodes g \<times> nodes g"  
+  by (simp add: edges_subset trancl_subset_Sigma)
+      
+lemma find_crossing_edge:
+  assumes "(u,v)\<in>E\<^sup>*" "u\<in>V" "v\<notin>V"
+  obtains u' v' where "(u',v')\<in>E\<inter>V\<times>-V"
+  using assms apply (induction rule: converse_rtrancl_induct)
+  by auto
+
+
+  
+
+  
+definition "graph_empty \<equiv> graph {} {}"
+definition "ins_node v g \<equiv> graph (insert v (nodes g)) (edges g)"
+definition "ins_edge e g \<equiv> graph (nodes g) (insert e (edges g))"
+definition "graph_join g\<^sub>1 g\<^sub>2 \<equiv> graph (nodes g\<^sub>1 \<union> nodes g\<^sub>2) (edges g\<^sub>1 \<union> edges g\<^sub>2)"
+definition "restrict_nodes g V \<equiv> graph (nodes g \<inter> V) (edges g \<inter> V\<times>V)"
+definition "restrict_edges g E \<equiv> graph (nodes g) (edges g \<inter> (E\<union>E\<inverse>))"
+
+
+definition "nodes_edges_consistent V E \<equiv> finite V \<and> irrefl E \<and> sym E \<and> E \<subseteq> V\<times>V"
+
+lemma [simp]:
+  assumes "nodes_edges_consistent V E"
+  shows nodes_graph': "nodes (graph V E) = V" (is ?G1)
+    and edges_graph': "edges (graph V E) = E" (is ?G2)
+proof -
+  from assms have [simp]: "finite E" unfolding nodes_edges_consistent_def
+    by (meson finite_SigmaI rev_finite_subset) 
+
+  show ?G1 ?G2 using assms
+    by (auto simp: nodes_edges_consistent_def nodes_graph edges_graph irrefl_def)
+    
+qed    
+
+lemma nec_empty[simp]: "nodes_edges_consistent {} {}" 
+  by (auto simp: nodes_edges_consistent_def irrefl_def sym_def)
+
+lemma graph_empty_accs[simp]:
+  "nodes graph_empty = {}"
+  "edges graph_empty = {}"
+  unfolding graph_empty_def by (auto)  
+  
+lemma graph_empty[simp]: "graph {} {} = graph_empty"  
+  by (simp add: graph_empty_def)
+    
+lemma nodes_empty_iff_empty[simp]: 
+  "nodes G = {} \<longleftrightarrow> G=graph {} {}"
+  "{} = nodes G \<longleftrightarrow> G=graph_empty"
+  using edges_subset
+  by (auto simp: graph_eq_iff)
+  
+lemma nodes_ins_nodes[simp]: "nodes (ins_node v g) = insert v (nodes g)"         
+  and edges_ins_nodes[simp]: "edges (ins_node v g) = edges g"
+  unfolding ins_node_def by (auto simp: graph_accs edges_sym')
+  
+  
+lemma nodes_ins_edge[simp]: "nodes (ins_edge e g) = {fst e, snd e} \<union> nodes g"
+  and edges_ins_edge: 
+    "edges (ins_edge e g) 
+      = (if fst e = snd e then edges g else {e,prod.swap e}\<union>(edges g))"
+  unfolding ins_edge_def
+  by (auto simp: graph_accs dest: edges_sym')
+  
+lemma edges_ins_edge'[simp]: 
+  "u\<noteq>v \<Longrightarrow> edges (ins_edge (u,v) g) = {(u,v),(v,u)} \<union> edges g"
+  by (auto simp: edges_ins_edge)
+
+lemma edges_ins_edge_ss: "edges g \<subseteq> edges (ins_edge e g)"  
+  by (auto simp: edges_ins_edge)
+  
+  
+lemma nodes_join[simp]: "nodes (graph_join g\<^sub>1 g\<^sub>2) = nodes g\<^sub>1 \<union> nodes g\<^sub>2"  
+  and edges_join[simp]: "edges (graph_join g\<^sub>1 g\<^sub>2) = edges g\<^sub>1 \<union> edges g\<^sub>2"
+  unfolding graph_join_def
+  by (auto simp: graph_accs dest: edges_sym')
+
+lemma nodes_restrict_nodes[simp]: "nodes (restrict_nodes g V) = nodes g \<inter> V"  
+  and edges_restrict_nodes[simp]: "edges (restrict_nodes g V) = edges g \<inter> V\<times>V"
+  unfolding restrict_nodes_def
+  by (auto simp: graph_accs dest: edges_sym')
+  
+lemma nodes_restrict_edges[simp]: "nodes (restrict_edges g E) = nodes g"
+  and edges_restrict_edges[simp]: "edges (restrict_edges g E) = edges g \<inter> (E\<union>E\<inverse>)"
+  unfolding restrict_edges_def
+  by (auto simp: graph_accs dest: edges_sym')
+
+lemma unrestricte_edges: "edges (restrict_edges g E) \<subseteq> edges g" by auto
+lemma unrestrictn_edges: "edges (restrict_nodes g V) \<subseteq> edges g" by auto
+
+lemma unrestrict_nodes: "nodes (restrict_edges g E) \<subseteq> nodes g" by auto
+
+
+
+    
+fun path where
+  "path g u [] v \<longleftrightarrow> u=v"  
+| "path g u (e#ps) w \<longleftrightarrow> (\<exists>v. e=(u,v) \<and> e\<in>edges g \<and> path g v ps w)"  
+
+lemma path_emptyI[intro!]: "path g u [] u" by auto
+    
+lemma path_append[simp]: 
+  "path g u (p1@p2) w \<longleftrightarrow> (\<exists>v. path g u p1 v \<and> path g v p2 w)" 
+  by (induction p1 arbitrary: u) auto
+
+lemma path_transs1[trans]:
+  "path g u p v \<Longrightarrow> (v,w)\<in>edges g \<Longrightarrow> path g u (p@[(v,w)]) w"  
+  "(u,v)\<in>edges g \<Longrightarrow> path g v p w \<Longrightarrow> path g u ((u,v)#p) w"
+  "path g u p1 v \<Longrightarrow> path g v p2 w \<Longrightarrow> path g u (p1@p2) w"
+  by auto
+  
+lemma path_graph_empty[simp]: "path graph_empty u p v \<longleftrightarrow> v=u \<and> p=[]" 
+  by (cases p) auto
+
+abbreviation "revp p \<equiv> rev (map prod.swap p)"
+lemma revp_alt: "revp p = rev (map (\<lambda>(u,v). (v,u)) p)" by auto
+  
+lemma path_rev[simp]: "path g u (revp p) v \<longleftrightarrow> path g v p u"  
+  by (induction p arbitrary: v) (auto dest: edges_sym')
+
+lemma path_rev_sym[sym]: "path g v p u \<Longrightarrow> path g u (revp p) v" by simp 
+
+lemma path_transs2[trans]: 
+  "path g u p v \<Longrightarrow> (w,v)\<in>edges g \<Longrightarrow> path g u (p@[(v,w)]) w"  
+  "(v,u)\<in>edges g \<Longrightarrow> path g v p w \<Longrightarrow> path g u ((u,v)#p) w"
+  "path g u p1 v \<Longrightarrow> path g w p2 v \<Longrightarrow> path g u (p1@revp p2) w"
+  by (auto dest: edges_sym')
+
+  
+lemma path_edges: "path g u p v \<Longrightarrow> set p \<subseteq> edges g"
+  by (induction p arbitrary: u) auto
+
+lemma path_graph_cong: 
+  "\<lbrakk>path g\<^sub>1 u p v; set p \<subseteq> edges g\<^sub>1 \<Longrightarrow> set p \<subseteq> edges g\<^sub>2\<rbrakk> \<Longrightarrow> path g\<^sub>2 u p v"
+  apply (frule path_edges; simp)
+  apply (induction p arbitrary: u) 
+  by auto    
+  
+                
+lemma path_endpoints: 
+  assumes "path g u p v" "p\<noteq>[]" shows "u\<in>nodes g" "v\<in>nodes g"
+  subgoal using assms by (cases p) (auto intro: nodesI)
+  subgoal using assms by (cases p rule: rev_cases) (auto intro: nodesI)
+  done
+
+lemma path_mono: "edges g \<subseteq> edges g' \<Longrightarrow> path g u p v \<Longrightarrow> path g' u p v"  
+  by (meson path_edges path_graph_cong subset_trans)
+
+  
+  
+lemmas unrestricte_path = path_mono[OF unrestricte_edges]
+lemmas unrestrictn_path = path_mono[OF unrestrictn_edges]
+
+lemma unrestrict_path_edges: "path (restrict_edges g E) u p v \<Longrightarrow> path g u p v"  
+  by (induction p arbitrary: u) auto
+  
+lemma unrestrict_path_nodes: "path (restrict_nodes g E) u p v \<Longrightarrow> path g u p v"  
+  by (induction p arbitrary: u) auto
+  
+      
+  
+  
+lemma rtrancl_edges_iff_path: "(u,v)\<in>(edges g)\<^sup>* \<longleftrightarrow> (\<exists>p. path g u p v)"
+  apply rule
+  subgoal
+    apply (induction rule: converse_rtrancl_induct)
+    by (auto dest: path_transs1)
+  apply clarify  
+  subgoal for p by (induction p arbitrary: u; force)
+  done  
+  
+lemma rtrancl_edges_pathE: 
+  assumes "(u,v)\<in>(edges g)\<^sup>*" obtains p where "path g u p v"
+  using assms by (auto simp: rtrancl_edges_iff_path)
+
+lemma path_rtrancl_edgesD: "path g u p v \<Longrightarrow> (u,v)\<in>(edges g)\<^sup>*"
+  by (auto simp: rtrancl_edges_iff_path)  
+      
+  
+  
+definition "uedge \<equiv> \<lambda>(a,b). {a,b}"   
+  
+definition "simple p \<equiv> distinct (map uedge p)"  
+
+
+lemma in_uedge_conv[simp]: "x\<in>uedge (u,v) \<longleftrightarrow> x=u \<or> x=v"
+  by (auto simp: uedge_def)
+
+lemma uedge_eq_iff: "uedge (a,b) = uedge (c,d) \<longleftrightarrow> a=c \<and> b=d \<or> a=d \<and> b=c"
+  by (auto simp: uedge_def doubleton_eq_iff)
+  
+lemma uedge_degen[simp]: "uedge (a,a) = {a}"  
+  by (auto simp: uedge_def)
+
+lemma uedge_in_set_eq: "uedge (u, v) \<in> uedge ` S \<longleftrightarrow> (u,v)\<in>S \<or> (v,u)\<in>S"  
+  by (auto simp: uedge_def doubleton_eq_iff)
+  
+lemma uedge_commute: "uedge (a,b) = uedge (b,a)" by auto 
+      
+lemma simple_empty[simp]: "simple []"
+  by (auto simp: simple_def)
+
+lemma simple_cons[simp]: "simple (e#p) \<longleftrightarrow> uedge e \<notin> uedge ` set p \<and> simple p"
+  by (auto simp: simple_def)
+
+lemma simple_append[simp]: "simple (p\<^sub>1@p\<^sub>2) 
+  \<longleftrightarrow> simple p\<^sub>1 \<and> simple p\<^sub>2 \<and> uedge ` set p\<^sub>1 \<inter> uedge ` set p\<^sub>2 = {}"
+  by (auto simp: simple_def)
+
+  
+lemma simplify_pathD:
+  "path g u p v \<Longrightarrow> \<exists>p'. path g u p' v \<and> simple p' \<and> set p' \<subseteq> set p"
+proof (induction p arbitrary: u v rule: length_induct)
+  case A: (1 p)
+  then show ?case proof (cases "simple p")
+    assume "simple p" with A.prems show ?case by blast
+  next
+    assume "\<not>simple p"  
+    then consider p\<^sub>1 a b p\<^sub>2 p\<^sub>3 where "p=p\<^sub>1@[(a,b)]@p\<^sub>2@[(a,b)]@p\<^sub>3"
+                | p\<^sub>1 a b p\<^sub>2 p\<^sub>3 where "p=p\<^sub>1@[(a,b)]@p\<^sub>2@[(b,a)]@p\<^sub>3"
+      by (auto 
+        simp: simple_def map_eq_append_conv uedge_eq_iff 
+        dest!: not_distinct_decomp)
+    then obtain p' where "path g u p' v" "length p' < length p" "set p' \<subseteq> set p"
+    proof cases
+      case [simp]: 1
+      from A.prems have "path g u (p\<^sub>1@[(a,b)]@p\<^sub>3) v" by auto
+      from that[OF this] show ?thesis by auto
+    next
+      case [simp]: 2
+      from A.prems have "path g u (p\<^sub>1@p\<^sub>3) v" by auto
+      from that[OF this] show ?thesis by auto
+    qed
+    with A.IH show ?thesis by blast
+  qed
+qed  
+    
+lemma simplify_pathE: 
+  assumes "path g u p v" 
+  obtains p' where "path g u p' v" "simple p'" "set p' \<subseteq> set p"
+  using assms by (auto dest: simplify_pathD)
+   
+
+
+lemma find_crossing_edge_on_path:
+  assumes "path g u p v" "\<not>P u" "P v"
+  obtains u' v' where "(u',v')\<in>set p" "\<not>P u'" "P v'"
+  using assms by (induction p arbitrary: u) auto
+  
+lemma find_crossing_edges_on_path:  
+  assumes P: "path g u p v" and "P u" "P v"
+  obtains "\<forall>(u,v)\<in>set p. P u \<and> P v"
+        | u\<^sub>1 v\<^sub>1 v\<^sub>2 u\<^sub>2 p\<^sub>1 p\<^sub>2 p\<^sub>3 
+          where "p=p\<^sub>1@[(u\<^sub>1,v\<^sub>1)]@p\<^sub>2@[(u\<^sub>2,v\<^sub>2)]@p\<^sub>3" "P u\<^sub>1" "\<not>P v\<^sub>1" "\<not>P u\<^sub>2" "P v\<^sub>2"
+proof (cases "\<forall>(u,v)\<in>set p. P u \<and> P v")
+  case True with that show ?thesis by blast
+next
+  case False
+    apply clarsimp apply (induction p arbitrary: u) by auto
+  then obtain u\<^sub>1 v\<^sub>1 where "(u\<^sub>1,v\<^sub>1)\<in>set p" and PRED1: "P u\<^sub>1" "\<not>P v\<^sub>1" by blast
+  then obtain p\<^sub>1 p\<^sub>2\<^sub>3 where [simp]: "p=p\<^sub>1@[(u\<^sub>1,v\<^sub>1)]@p\<^sub>2\<^sub>3" 
+    by (auto simp: in_set_conv_decomp)
+  with P have "path g v\<^sub>1 p\<^sub>2\<^sub>3 v" by auto
+    where "(u\<^sub>2,v\<^sub>2)\<in>set p\<^sub>2\<^sub>3" "\<not>P u\<^sub>2" "P v\<^sub>2" .
+  then show thesis using PRED1
+    by (auto simp: in_set_conv_decomp intro: that)
+qed      
+  
+lemma find_crossing_edge_rtrancl:
+  assumes "(u,v)\<in>(edges g)\<^sup>*" "\<not>P u" "P v"
+  obtains u' v' where "(u',v')\<in>edges g" "\<not>P u'" "P v'"
+  using assms
+  by (metis converse_rtrancl_induct)
+  
+
+lemma path_change: 
+  assumes "u\<in>S" "v\<notin>S" "path g u p v" "simple p"
+  obtains x y p1 p2 where 
+    "(x,y) \<in> set p" "x \<in> S" "y \<notin> S"
+    "path (restrict_edges g (-{(x,y),(y,x)})) u p1 x" 
+    "path (restrict_edges g (-{(x,y),(y,x)})) y p2 v"
+proof -
+  from find_crossing_edge_on_path[where P="\<lambda>x. x\<notin>S"] assms obtain x y where 
+    1: "(x,y)\<in>set p" "x\<in>S" "y\<notin>S" by blast
+  then obtain p1 p2 where [simp]: "p=p1@[(x,y)]@p2" 
+    by (auto simp: in_set_conv_decomp)
+  
+  let ?g' = "restrict_edges g (-{(x,y),(y,x)})"
+  
+    have "uedge (x,y)\<notin>set (map uedge p1)" "uedge (x,y)\<notin>set (map uedge p2)" 
+  by auto
+  then have "path ?g' u p1 x" "path ?g' y p2 v"  
+    using path_graph_cong[OF P1, of ?g'] path_graph_cong[OF P2, of ?g']
+    by (auto simp: uedge_in_set_eq)
+  with 1 show ?thesis by (blast intro: that)
+qed
+      
+
+
+
+
+  
+definition "cycle_free g \<equiv> \<nexists>p u. p\<noteq>[] \<and> simple p \<and> path g u p u"
+
+lemma cycle_free_alt_in_nodes: 
+  "cycle_free g \<equiv> \<nexists>p u. p\<noteq>[] \<and> u\<in>nodes g \<and> simple p \<and> path g u p u"
+  by (smt cycle_free_def path_endpoints(2))
+
+lemma cycle_freeI:
+  assumes "\<And>p u. \<lbrakk> path g u p u; p\<noteq>[]; simple p \<rbrakk> \<Longrightarrow> False"
+  shows "cycle_free g"
+  using assms unfolding cycle_free_def by auto
+
+lemma cycle_freeD:
+  assumes "cycle_free g" "path g u p u" "p\<noteq>[]" "simple p" 
+  shows False
+  using assms unfolding cycle_free_def by auto
+
+  
+lemma cycle_free_antimono: "edges g \<subseteq> edges g' \<Longrightarrow> cycle_free g' \<Longrightarrow> cycle_free g"
+  unfolding cycle_free_def
+  by (auto dest: path_mono)
+
+lemma cycle_free_empty[simp]: "cycle_free graph_empty" 
+  unfolding cycle_free_def by auto
+  
+lemma cycle_free_no_edges: "edges g = {} \<Longrightarrow> cycle_free g"
+  by (rule cycle_freeI) (auto simp: neq_Nil_conv)
+  
+lemma simple_path_cycle_free_unique:
+  assumes CF: "cycle_free g" 
+  assumes P: "path g u p v" "path g u p' v" "simple p" "simple p'"
+  shows "p=p'"
+  using P 
+proof (induction p arbitrary: u p')
+  case Nil
+  then show ?case using cycle_freeD[OF CF] by auto
+next
+  case (Cons e p)
+  
+  note CF = cycle_freeD[OF CF]
+  
+  from Cons.prems obtain u' where 
+    [simp]: "e=(u,u')" 
+    and P': "(u,u')\<notin>set p" "(u',u)\<notin>set p" "(u,u')\<in>edges g"
+    by (auto simp: uedge_in_set_eq)
+  with Cons.prems obtain sp\<^sub>1 where 
+    SP1: "path g u ((u,u')#sp\<^sub>1) v" "simple ((u,u')#sp\<^sub>1)" 
+    by blast
+  
+  from Cons.prems obtain u'' p'' where 
+    [simp]: "p' = (u,u'')#p''" 
+    and P'': "(u,u'')\<notin>set p''" "(u'',u)\<notin>set p''" "(u,u'')\<in>edges g"
+    apply (cases p')
+    subgoal by auto (metis Cons.prems(1) Cons.prems(3) CF list.distinct(1))
+    by (auto simp: uedge_in_set_eq)
+  with Cons.prems obtain sp\<^sub>2 where 
+    SP2: "path g u ((u,u'')#sp\<^sub>2) v" "simple ((u,u'')#sp\<^sub>2)" 
+    by blast  
+    
+  have "u''=u'" proof (rule ccontr)
+    assume [simp, symmetric, simp]: "u''\<noteq>u'"
+    
+    have AUX1: "(u,x)\<notin>set sp\<^sub>1" for x 
+    proof 
+      assume "(u, x) \<in> set sp\<^sub>1" 
+      with SP1 obtain sp' where "path g u ((u,u')#sp') u" and "simple ((u,u')#sp')"
+        by (clarsimp simp: in_set_conv_decomp; blast)
+      with CF show False by blast
+    qed  
+    
+    have AUX2:"(x,u)\<notin>set sp\<^sub>1" for x 
+    proof 
+      assume "(x, u) \<in> set sp\<^sub>1" 
+      
+      with SP1 obtain sp' where "path g u ((u,u')#sp') u" and "simple ((u,u')#sp')"
+        apply (clarsimp simp: in_set_conv_decomp)
+        by (metis Cons.prems(1) Cons.prems(3) Un_iff 
+        path.elims(2) path.simps(2) prod.sel(2) set_append simple_cons)
+      with CF show False by blast
+    qed  
+    
+    have AUX3:"(u,x)\<notin>set sp\<^sub>2" for x 
+    proof 
+      assume "(u, x) \<in> set sp\<^sub>2" 
+      then obtain sp' sp'' where [simp]: "sp\<^sub>2 = sp'@[(u,x)]@sp''"
+        by (auto simp: in_set_conv_decomp)
+      from SP2 have "path g u ((u,u'')#sp') u" "simple ((u,u'')#sp')" by auto
+      with CF show False by blast
+    qed    
+    
+    have AUX4:"(x,u)\<notin>set sp\<^sub>2" for x 
+    proof 
+      assume "(x, u) \<in> set sp\<^sub>2" 
+      then obtain sp' sp'' where [simp]: "sp\<^sub>2 = sp'@[(x,u)]@sp''"
+        by (auto simp: in_set_conv_decomp)
+      from SP2 
+        have "path g u ((u,u'')#sp'@[(x,u)]) u" "simple ((u,u'')#sp'@[(x,u)])" 
+        by auto
+      with CF show False by blast
+    qed    
+    
+    have [simp]: "set (revp p) = (set p)\<inverse>" by auto
+    
+    from SP1 SP2 have "path g u' (sp\<^sub>1@revp sp\<^sub>2) u''" by auto
+    then obtain sp where 
+      SP: "path g u' sp u''" "simple sp" "set sp \<subseteq> set sp\<^sub>1 \<union> set (revp sp\<^sub>2)"
+      by (erule_tac simplify_pathE) auto
+      have "path g u ((u,u')#sp@[(u'',u)]) u"
+      by (auto dest: edges_sym' simp: uedge_eq_iff)
+    moreover
+    from SP SP1 SP2 AUX1 AUX2 AUX3 AUX4 have "simple (((u,u')#sp@[(u'',u)]))"
+      by (auto 0 3 simp: uedge_eq_iff)
+    ultimately show False using CF by blast  
+  qed    
+
+  with Cons.IH[of u' p''] Cons.prems show ?case by simp 
+qed    
+  
+              
+  
+
+
+
+lemma cycle_free_alt: "cycle_free g 
+  \<longleftrightarrow> (\<forall>e\<in>edges g. e\<notin>(edges (restrict_edges g (-{e,prod.swap e})))\<^sup>*)"

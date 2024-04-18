@@ -1,0 +1,211 @@
+theory ICF_Refine_Monadic
+imports ICF_Impl
+begin
+
+
+lemma (in set) drh[refine_dref_RELATES]: 
+  "RELATES (build_rel \<alpha> invar)" by (simp add: RELATES_def)
+lemma (in map) drh[refine_dref_RELATES]: 
+  "RELATES (build_rel \<alpha> invar)" by (simp add: RELATES_def)
+
+lemma (in uprio) drh[refine_dref_RELATES]: "RELATES (build_rel \<alpha> invar)" 
+  by (simp add: RELATES_def)
+lemma (in prio) drh[refine_dref_RELATES]: "RELATES (build_rel \<alpha> invar)" 
+  by (simp add: RELATES_def)
+
+
+lemmas (in StdSet) [refine_hsimp] = correct
+lemmas (in StdMap) [refine_hsimp] = correct
+
+lemma (in set_sel') pick_ref[refine_hsimp]:
+  "\<lbrakk> invar s; \<alpha> s \<noteq> {}\<rbrakk> \<Longrightarrow> the (sel' s (\<lambda>_. True)) \<in> \<alpha> s"
+  by (auto elim!: sel'E)
+
+
+definition "prio_pop_min q \<equiv> do {
+    ASSERT (dom q \<noteq> {});
+    SPEC (\<lambda>(e,w,q'). 
+      q'=q(e:=None) \<and> 
+      q e = Some w \<and> 
+      (\<forall> e' w'. q e' = Some w' \<longrightarrow> w\<le>w')
+    )
+  }"
+
+lemma (in uprio_pop) prio_pop_min_refine[refine]:
+  "(q,q')\<in>build_rel \<alpha> invar \<Longrightarrow> RETURN (pop q) 
+    \<le> \<Down> (\<langle>Id,\<langle>Id,br \<alpha> invar\<rangle>prod_rel\<rangle>prod_rel) (prio_pop_min q')"
+  unfolding prio_pop_min_def
+  apply refine_rcg
+  apply (clarsimp simp: prod_rel_def br_def)
+  apply (erule (1) popE)
+  apply (rule pw_leI)
+  apply (auto simp: refine_pw_simps intro: ranI)
+  done
+
+
+subsection "Iterators"
+lemmas (in poly_map_iteratei) [refine_transfer] = iteratei_correct
+lemmas (in poly_map_iterateoi) [refine_transfer] = iterateoi_correct
+lemmas (in map_no_invar) [refine_transfer] = invar
+
+lemmas (in poly_set_iteratei) [refine_transfer] = iteratei_correct
+lemmas (in poly_set_iterateoi) [refine_transfer] = iterateoi_correct
+lemmas (in set_no_invar) [refine_transfer] = invar
+
+lemma (in poly_set_iteratei) dres_ne_bot_iterate[refine_transfer]:
+  assumes A: "\<And>x s. f x s \<noteq> dSUCCEED"
+  shows "iteratei r c (\<lambda>x s. dbind s (f x)) (dRETURN s) \<noteq> dSUCCEED"
+  unfolding iteratei_def it_to_list_def it_to_it_def
+  apply (rule dres_foldli_ne_bot)
+  by (simp_all add: A)
+lemma (in poly_set_iterateoi) dres_ne_bot_iterateo[refine_transfer]:
+  assumes A: "\<And>x s. f x s \<noteq> dSUCCEED"
+  shows "iterateoi r c (\<lambda>x s. dbind s (f x)) (dRETURN s) \<noteq> dSUCCEED"
+  unfolding iterateoi_def it_to_list_def it_to_it_def
+  apply (rule dres_foldli_ne_bot)
+  by (simp_all add: A)
+
+lemma (in poly_map_iteratei) dres_ne_bot_map_iterate[refine_transfer]:
+  assumes A: "\<And>x s. f x s \<noteq> dSUCCEED"
+  shows "iteratei r c (\<lambda>x s. dbind s (f x)) (dRETURN s) \<noteq> dSUCCEED"
+  unfolding iteratei_def it_to_list_def it_to_it_def
+  apply (rule dres_foldli_ne_bot)
+  by (simp_all add: A)
+lemma (in poly_set_iterateoi) dres_ne_bot_map_iterateo[refine_transfer]:
+  assumes A: "\<And>x s. f x s \<noteq> dSUCCEED"
+  shows "iterateoi r c (\<lambda>x s. dbind s (f x)) (dRETURN s) \<noteq> dSUCCEED"
+  unfolding iterateoi_def it_to_list_def it_to_it_def
+  apply (rule dres_foldli_ne_bot)
+  by (simp_all add: A)
+
+
+
+
+
+subsection "Alternative FOREACH-transfer"
+lemma transfer_FOREACHoci_plain[refine_transfer]:
+  assumes A: "set_iterator_genord iterate s ordR"
+  assumes R: "\<And>x \<sigma>. RETURN (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "RETURN (iterate c fi \<sigma>) \<le> FOREACHoci ordR I s c f \<sigma>"
+proof -
+  from A obtain l where [simp]:
+    "distinct l" 
+    "s = set l" 
+    "sorted_wrt ordR l"
+    "iterate = foldli l" 
+    unfolding set_iterator_genord_def by blast
+  
+  have "RETURN (foldli l c fi \<sigma>) \<le> nfoldli l c f \<sigma>"
+    by (rule nfoldli_transfer_plain[OF R])
+  also have "\<dots> = do { l \<leftarrow> RETURN l; nfoldli l c f \<sigma> }" by simp
+  also have "\<dots> \<le> FOREACHoci ordR I s c f \<sigma>"
+    apply (rule refine_IdD)
+    unfolding FOREACHoci_def
+    apply refine_rcg
+    apply simp
+    apply simp
+    apply (rule nfoldli_while)
+    done
+  finally show ?thesis by simp
+qed
+
+lemma transfer_FOREACHoi_plain[refine_transfer]:
+  assumes A: "set_iterator_genord iterate s ordR"
+  assumes R: "\<And>x \<sigma>. RETURN (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "RETURN (iterate (\<lambda>_. True) fi \<sigma>) \<le> FOREACHoi ordR I s f \<sigma>"
+  using assms unfolding FOREACHoi_def by (rule transfer_FOREACHoci_plain)
+
+lemma transfer_FOREACHci_plain[refine_transfer]:
+  assumes A: "set_iterator iterate s"
+  assumes R: "\<And>x \<sigma>. RETURN (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "RETURN (iterate c fi \<sigma>) \<le> FOREACHci I s c f \<sigma>"
+  using assms unfolding FOREACHci_def set_iterator_def
+  by (rule transfer_FOREACHoci_plain)
+
+lemma transfer_FOREACHi_plain[refine_transfer]:
+  assumes A: "set_iterator iterate s"
+  assumes R: "\<And>x \<sigma>. RETURN (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "RETURN (iterate (\<lambda>_. True) fi \<sigma>) \<le> FOREACHi I s f \<sigma>"
+  using assms unfolding FOREACHi_def
+  by (rule transfer_FOREACHci_plain)
+
+lemma transfer_FOREACHc_plain[refine_transfer]:
+  assumes A: "set_iterator iterate s"
+  assumes R: "\<And>x \<sigma>. RETURN (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "RETURN (iterate c fi \<sigma>) \<le> FOREACHc s c f \<sigma>"
+  using assms unfolding FOREACHc_def
+  by (rule transfer_FOREACHci_plain)
+
+lemma transfer_FOREACH_plain[refine_transfer]:
+  assumes A: "set_iterator iterate s"
+  assumes R: "\<And>x \<sigma>. RETURN (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "RETURN (iterate (\<lambda>_. True) fi \<sigma>) \<le> FOREACH s f \<sigma>"
+  using assms unfolding FOREACH_def
+  by (rule transfer_FOREACHc_plain)
+
+abbreviation "dres_it iterate c (fi::'a \<Rightarrow> 'b \<Rightarrow> 'b dres) \<sigma> \<equiv> 
+  iterate (case_dres False False c) (\<lambda>x s. s\<bind>fi x) (dRETURN \<sigma>)"
+
+lemma transfer_FOREACHoci_nres[refine_transfer]:
+  assumes A: "set_iterator_genord iterate s ordR"
+  assumes R: "\<And>x \<sigma>. nres_of (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "nres_of (dres_it iterate c fi \<sigma>) \<le> FOREACHoci ordR I s c f \<sigma>"
+proof -
+  from A obtain l where [simp]:
+    "distinct l" 
+    "s = set l" 
+    "sorted_wrt ordR l"
+    "iterate = foldli l" 
+    unfolding set_iterator_genord_def by blast
+  
+  have "nres_of (dres_it (foldli l) c fi \<sigma>) \<le> nfoldli l c f \<sigma>"
+    by (rule nfoldli_transfer_dres[OF R])
+  also have "\<dots> = do { l \<leftarrow> RETURN l; nfoldli l c f \<sigma> }" by simp
+  also have "\<dots> \<le> FOREACHoci ordR I s c f \<sigma>"
+    apply (rule refine_IdD)
+    unfolding FOREACHoci_def
+    apply refine_rcg
+    apply simp
+    apply simp
+    apply (rule nfoldli_while)
+    done
+  finally show ?thesis by simp
+qed
+
+lemma transfer_FOREACHoi_nres[refine_transfer]:
+  assumes A: "set_iterator_genord iterate s ordR"
+  assumes R: "\<And>x \<sigma>. nres_of (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "nres_of (dres_it iterate (\<lambda>_. True) fi \<sigma>) \<le> FOREACHoi ordR I s f \<sigma>"
+  using assms unfolding FOREACHoi_def by (rule transfer_FOREACHoci_nres)
+
+lemma transfer_FOREACHci_nres[refine_transfer]:
+  assumes A: "set_iterator iterate s"
+  assumes R: "\<And>x \<sigma>. nres_of (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "nres_of (dres_it iterate c fi \<sigma>) \<le> FOREACHci I s c f \<sigma>"
+  using assms unfolding FOREACHci_def set_iterator_def
+  by (rule transfer_FOREACHoci_nres)
+
+lemma transfer_FOREACHi_nres[refine_transfer]:
+  assumes A: "set_iterator iterate s"
+  assumes R: "\<And>x \<sigma>. nres_of (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "nres_of (dres_it iterate (\<lambda>_. True) fi \<sigma>) \<le> FOREACHi I s f \<sigma>"
+  using assms unfolding FOREACHi_def
+  by (rule transfer_FOREACHci_nres)
+
+lemma transfer_FOREACHc_nres[refine_transfer]:
+  assumes A: "set_iterator iterate s"
+  assumes R: "\<And>x \<sigma>. nres_of (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "nres_of (dres_it iterate c fi \<sigma>) \<le> FOREACHc s c f \<sigma>"
+  using assms unfolding FOREACHc_def
+  by (rule transfer_FOREACHci_nres)
+
+lemma transfer_FOREACH_nres[refine_transfer]:
+  assumes A: "set_iterator iterate s"
+  assumes R: "\<And>x \<sigma>. nres_of (fi x \<sigma>) \<le> f x \<sigma>"
+  shows "nres_of (dres_it iterate (\<lambda>_. True) fi \<sigma>) \<le> FOREACH s f \<sigma>"
+  using assms unfolding FOREACH_def
+  by (rule transfer_FOREACHc_nres)
+
+
+
+end

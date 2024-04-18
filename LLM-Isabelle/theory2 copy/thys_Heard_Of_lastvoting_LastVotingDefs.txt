@@ -1,0 +1,177 @@
+theory LastVotingDefs
+imports "../HOModel"
+begin
+
+
+
+
+
+
+axiomatization where Proc_finite: "OFCLASS(Proc, finite_class)"
+instance Proc :: finite by (rule Proc_finite)
+
+abbreviation
+
+
+definition phase where "phase (r::nat) \<equiv> r div 4"
+
+definition step where "step (r::nat) \<equiv> r mod 4"
+
+lemma phase_zero [simp]: "phase 0 = 0"
+by (simp add: phase_def)
+
+lemma step_zero [simp]: "step 0 = 0"
+by (simp add: step_def)
+
+lemma phase_step: "(phase r * 4) + step r = r"
+  by (auto simp add: phase_def step_def)
+
+
+record 'val pstate =
+
+
+datatype 'val msg =
+  ValStamp "'val" "nat"
+| Vote "'val"
+| Ack
+
+
+definition isValStamp where "isValStamp m \<equiv> \<exists>v ts. m = ValStamp v ts"
+
+definition isVote where "isVote m \<equiv> \<exists>v. m = Vote v"
+
+definition isAck where "isAck m \<equiv> m = Ack"
+
+
+fun val where
+  "val (ValStamp v ts) = v"
+| "val (Vote v) = v"
+
+fun stamp where
+  "stamp (ValStamp v ts) = ts"
+
+
+definition LV_initState where
+  "LV_initState p st crd \<equiv>
+     vote st = None
+   \<and> \<not>(commt st)
+   \<and> \<not>(ready st)
+   \<and> timestamp st = 0
+   \<and> decide st = None
+   \<and> coord\<Phi> st = crd"
+
+
+definition valStampsRcvd where
+  "valStampsRcvd (msgs :: Proc \<rightharpoonup> 'val msg) \<equiv>
+   {q . \<exists>v ts. msgs q = Some (ValStamp v ts)}"
+
+definition highestStampRcvd where
+  "highestStampRcvd msgs \<equiv> 
+   Max {ts . \<exists>q v. (msgs::Proc \<rightharpoonup> 'val msg) q = Some (ValStamp v ts)}"
+
+
+definition send0 where
+  "send0 r p q st \<equiv>
+   if q = coord\<Phi> st then ValStamp (x st) (timestamp st) else Null"
+
+definition next0 where
+  "next0 r p st msgs crd st' \<equiv>
+      if p = coord\<Phi> st \<and> card (valStampsRcvd msgs) > N div 2
+      then (\<exists>p v. msgs p = Some (ValStamp v (highestStampRcvd msgs))
+                \<and> st' = st \<lparr> vote := Some v, commt := True \<rparr> )
+      else st' = st"
+
+
+definition send1 where
+  "send1 r p q st \<equiv>
+   if p = coord\<Phi> st \<and> commt st then Vote (the (vote st)) else Null"
+
+definition next1 where
+  "next1 r p st msgs crd st' \<equiv>
+   if msgs (coord\<Phi> st) \<noteq> None \<and> isVote (the (msgs (coord\<Phi> st)))
+   then st' = st \<lparr> x := val (the (msgs (coord\<Phi> st))), timestamp := Suc(phase r) \<rparr>
+   else st' = st"
+
+
+definition send2 where
+  "send2 r p q st \<equiv>
+   if timestamp st = Suc(phase r) \<and> q = coord\<Phi> st then Ack else Null"
+
+definition acksRcvd where
+  "acksRcvd (msgs :: Proc \<rightharpoonup> 'val msg) \<equiv>
+   { q . msgs q \<noteq> None \<and> isAck (the (msgs q)) }"
+
+definition next2 where
+  "next2 r p st msgs crd st' \<equiv>
+   if p = coord\<Phi> st \<and> card (acksRcvd msgs) > N div 2
+   then st' = st \<lparr> ready := True \<rparr>
+   else st' = st"
+
+
+definition send3 where
+  "send3 r p q st \<equiv>
+   if p = coord\<Phi> st \<and> ready st then Vote (the (vote st)) else Null"
+
+definition next3 where
+  "next3 r p st msgs crd st' \<equiv>
+      (if msgs (coord\<Phi> st) \<noteq> None \<and> isVote (the (msgs (coord\<Phi> st)))
+       then decide st' = Some (val (the (msgs (coord\<Phi> st))))
+       else decide st' = decide st)
+   \<and> (if p = coord\<Phi> st
+      then \<not>(ready st') \<and> \<not>(commt st')
+      else ready st' = ready st \<and> commt st' = commt st)
+   \<and> x st' = x st
+   \<and> vote st' = vote st
+   \<and> timestamp st' = timestamp st
+   \<and> coord\<Phi> st' = crd"
+
+
+definition LV_sendMsg :: "nat \<Rightarrow> Proc \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> 'val msg" where
+  "LV_sendMsg (r::nat) \<equiv>
+   if step r = 0 then send0 r
+   else if step r = 1 then send1 r
+   else if step r = 2 then send2 r
+   else send3 r"
+
+
+definition
+  LV_nextState :: "nat \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> (Proc \<rightharpoonup> 'val msg) 
+                       \<Rightarrow> Proc \<Rightarrow> 'val pstate \<Rightarrow> bool"
+  where
+  "LV_nextState r \<equiv>
+   if step r = 0 then next0 r
+   else if step r = 1 then next1 r
+   else if step r = 2 then next2 r
+   else next3 r"
+
+
+
+
+definition
+  LV_commPerRd where
+  "LV_commPerRd r (HO::Proc HO) (coord::Proc coord) \<equiv> True"
+
+definition
+  LV_commGlobal where
+  "LV_commGlobal HOs coords \<equiv>
+      \<exists>ph::nat. \<exists>c::Proc.
+           (\<forall>p. coords (4*ph) p = c)
+         \<and> card (HOs (4*ph) c) > N div 2
+         \<and> card (HOs (4*ph+2) c) > N div 2
+         \<and> (\<forall>p. c \<in> HOs (4*ph+1) p \<inter> HOs (4*ph+3) p)"
+
+
+
+
+definition LV_CHOMachine where
+  "LV_CHOMachine \<equiv>
+    \<lparr> CinitState = LV_initState,
+      sendMsg = LV_sendMsg,
+      CnextState = LV_nextState,
+      CHOcommPerRd = LV_commPerRd,
+      CHOcommGlobal = LV_commGlobal \<rparr>"
+
+abbreviation 
+  "LV_M \<equiv> (LV_CHOMachine::(Proc, 'val pstate, 'val msg) CHOMachine)"
+
+end

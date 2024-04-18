@@ -1,0 +1,298 @@
+theory Move_to_Front
+imports
+  Swaps
+  On_Off
+  Competitive_Analysis
+begin
+
+declare Let_def[simp]
+
+
+definition mtf :: "'a \<Rightarrow> 'a list \<Rightarrow> 'a list" where
+"mtf x xs =
+ (if x \<in> set xs then x # (take (index xs x) xs) @ drop (index xs x + 1) xs
+  else xs)"
+
+lemma mtf_id[simp]: "x \<notin> set xs \<Longrightarrow> mtf x xs = xs"
+by(simp add: mtf_def)
+
+lemma mtf0[simp]: "x \<in> set xs \<Longrightarrow> mtf x xs ! 0 = x"
+by(auto simp: mtf_def)
+
+lemma before_in_mtf: assumes "z \<in> set xs"
+shows "x < y in mtf z xs  \<longleftrightarrow>
+      (y \<noteq> z \<and> (if x=z then y \<in> set xs else x < y in xs))"
+proof-
+  have 0: "index xs z < size xs" by (metis assms index_less_size_conv)
+  let ?xs = "take (index xs z) xs @ xs ! index xs z # drop (Suc (index xs z)) xs"
+  have "x < y in mtf z xs = (y \<noteq> z \<and> (if x=z then y \<in> set ?xs else x < y in ?xs))"
+    using assms
+    by (auto simp add: mtf_def before_in_def index_append)
+      (metis index_take index_take_if_set le_add1 le_trans less_imp_le_nat)
+  with id_take_nth_drop[OF 0, symmetric] show ?thesis by(simp)
+qed
+
+lemma Inv_mtf: "set xs = set ys \<Longrightarrow> z : set ys \<Longrightarrow> Inv xs (mtf z ys) =
+ Inv xs ys \<union> {(x,z)|x. x < z in xs \<and> x < z in ys}
+ - {(z,x)|x. z < x in xs \<and> x < z in ys}"
+by(auto simp add: Inv_def before_in_mtf not_before_in dest: before_in_setD1)
+
+lemma set_mtf[simp]: "set(mtf x xs) = set xs"
+by(simp add: mtf_def)
+  (metis append_take_drop_id Cons_nth_drop_Suc index_less le_refl Un_insert_right nth_index set_append set_simps(2))
+
+lemma length_mtf[simp]: "size (mtf x xs) = size xs"
+by (auto simp add: mtf_def min_def) (metis index_less_size_conv leD)
+
+lemma distinct_mtf[simp]: "distinct (mtf x xs) = distinct xs"
+by (metis length_mtf set_mtf card_distinct distinct_card)
+
+
+
+definition mtf2 :: "nat \<Rightarrow> 'a \<Rightarrow> 'a list \<Rightarrow> 'a list" where
+"mtf2 n x xs =
+ (if x : set xs then swaps [index xs x - n..<index xs x] xs else xs)"
+
+lemma mtf_eq_mtf2: "mtf x xs = mtf2 (length xs - 1) x xs"
+proof -
+  have "x : set xs \<Longrightarrow> index xs x - (size xs - Suc 0) = 0"
+    by (auto simp: less_Suc_eq_le[symmetric])
+  thus ?thesis
+    by(auto simp: mtf_def mtf2_def swaps_eq_nth_take_drop)
+qed
+
+lemma mtf20[simp]: "mtf2 0 x xs = xs"
+by(auto simp add: mtf2_def)
+
+lemma length_mtf2[simp]: "length (mtf2 n x xs) = length xs"
+by (auto simp: mtf2_def index_less_size_conv[symmetric]
+  simp del:index_conv_size_if_notin)
+
+lemma set_mtf2[simp]: "set(mtf2 n x xs) = set xs"
+by (auto simp: mtf2_def index_less_size_conv[symmetric]
+  simp del:index_conv_size_if_notin)
+
+lemma distinct_mtf2[simp]: "distinct (mtf2 n x xs) = distinct xs"
+by (metis length_mtf2 set_mtf2 card_distinct distinct_card)
+
+lemma card_Inv_mtf2: "xs!j = ys!0 \<Longrightarrow> j < length xs \<Longrightarrow> dist_perm xs ys \<Longrightarrow>
+   card (Inv (swaps [i..<j] xs) ys) = card (Inv xs ys) - int(j-i)"
+proof(induction j arbitrary: xs)
+  case (Suc j)
+  show ?case
+  proof cases
+    assume "i > j" thus ?thesis by simp
+  next
+    assume [arith]: "\<not> i > j"
+    have 0: "Suc j < length ys" by (metis Suc.prems(2,3) distinct_card)
+    have 1: "(ys ! 0, xs ! j) : Inv ys xs"
+    proof (auto simp: Inv_def)
+      show "ys ! 0 < xs ! j in ys" using Suc.prems
+        by (metis Suc_lessD n_not_Suc_n not_before0 not_before_in nth_eq_iff_index_eq nth_mem)
+      show "xs ! j < ys ! 0 in xs" using Suc.prems
+        by (metis Suc_lessD before_id lessI)
+    qed
+    have 2: "card(Inv ys xs) \<noteq> 0" using 1 by auto
+    have "int(card (Inv (swaps [i..<Suc j] xs) ys)) =
+          card (Inv (swap j xs) ys) - int (j-i)" using Suc by simp
+    also have "\<dots> = card (Inv ys (swap j xs)) - int (j-i)"
+      by(simp add: card_Inv_sym)
+    also have "\<dots> = card (Inv ys xs - {(ys ! 0, xs ! j)}) - int (j - i)"
+      using Suc.prems 0 by(simp add: Inv_swap)
+    also have "\<dots> = int(card (Inv ys xs) - 1) - (j - i)"
+      using 1 by(simp add: card_Diff_singleton)
+    also have "\<dots> = card (Inv ys xs) - int (Suc j - i)" using 2 by arith
+    also have "\<dots> = card (Inv xs ys) - int (Suc j - i)" by(simp add: card_Inv_sym)
+    finally show ?thesis .
+  qed
+qed simp
+
+
+
+
+
+subsection "Function Lxy"
+
+
+definition Lxy :: "'a list \<Rightarrow> 'a set \<Rightarrow> 'a list" where
+  "Lxy xs S = filter (\<lambda>z. z\<in>S) xs" 
+thm inter_set_filter
+
+lemma Lxy_length_cons: "length (Lxy xs S) \<le> length (Lxy (x#xs) S)"
+unfolding Lxy_def by(simp)
+
+lemma Lxy_empty[simp]: "Lxy [] S = []"
+unfolding Lxy_def by simp
+
+lemma Lxy_set_filter: "set (Lxy xs S) = S \<inter> set xs" 
+by (simp add: Lxy_def inter_set_filter)
+
+lemma Lxy_distinct: "distinct xs \<Longrightarrow> distinct (Lxy xs S)"
+by (simp add: Lxy_def)
+
+lemma Lxy_append: "Lxy (xs@ys) S = Lxy xs S @ Lxy ys S"
+by(simp add: Lxy_def)
+
+lemma Lxy_snoc: "Lxy (xs@[x]) S = (if x\<in>S then Lxy xs S @ [x] else Lxy xs S)"
+by(simp add: Lxy_def)
+
+lemma Lxy_not: "S \<inter> set xs = {} \<Longrightarrow> Lxy xs S = []"
+unfolding Lxy_def apply(induct xs) by simp_all
+
+
+
+lemma Lxy_notin: "set xs \<inter> S = {} \<Longrightarrow> Lxy xs S = []"
+apply(induct xs) by(simp_all add: Lxy_def)
+
+lemma Lxy_in: "x\<in>S \<Longrightarrow> Lxy [x] S = [x]"
+by(simp add: Lxy_def)
+
+
+
+lemma Lxy_project: 
+  assumes "x\<noteq>y" "x \<in> set xs"  "y\<in>set xs" "distinct xs" 
+    and "x < y in xs"
+  shows "Lxy xs {x,y} = [x,y]"
+proof -
+  from assms have ij: "index xs x < index xs y"
+        and xinxs: "index xs x < length xs"
+        and yinxs: "index xs y < length xs" unfolding before_in_def by auto  
+  from xinxs obtain a as where dec1: "a @ [xs!index xs x] @ as = xs"
+        and "a = take (index xs x) xs" and "as = drop (Suc (index xs x)) xs"
+        and length_a: "length a = index xs x" and length_as: "length as = length xs - index xs x- 1"
+        using id_take_nth_drop by fastforce 
+  have "index xs y\<ge>length (a @ [xs!index xs x])" using length_a ij by auto
+  then have "((a @ [xs!index xs x]) @ as) ! index xs y = as ! (index xs y-length (a @ [xs ! index xs x]))" using nth_append[where xs="a @ [xs!index xs x]" and ys="as"]
+    by(simp)
+  then have xsj: "xs ! index xs y = as ! (index xs y-index xs x-1)" using dec1 length_a by auto   
+  have las: "(index xs y-index xs x-1) < length as" using length_as yinxs ij by simp
+  obtain b c where dec2: "b @ [xs!index xs y] @ c = as"
+            and "b = take (index xs y-index xs x-1) as" "c=drop (Suc (index xs y-index xs x-1)) as"
+            and length_b: "length b = index xs y-index xs x-1" using id_take_nth_drop[OF las] xsj by force
+  have xs_dec: "a @ [xs!index xs x] @ b @ [xs!index xs y] @ c = xs" using dec1 dec2 by auto 
+   
+  from xs_dec assms(4) have "distinct ((a @ [xs!index xs x] @ b @ [xs!index xs y]) @ c)" by simp
+  then have c_empty: "set c \<inter> {x,y} = {}"
+      and b_empty: "set b \<inter> {x,y} = {}"and a_empty: "set a \<inter> {x,y} = {}" by(auto simp add: assms(2,3))
+
+  have "Lxy (a @ [xs!index xs x] @ b @ [xs!index xs y] @ c) {x,y} = [x,y]"
+    apply(simp only: Lxy_append)
+    apply(simp add: assms(2,3))
+    using a_empty b_empty c_empty by(simp add: Lxy_notin Lxy_in)
+
+  with xs_dec show ?thesis by auto
+qed
+
+
+lemma Lxy_mono: "{x,y} \<subseteq> set xs \<Longrightarrow> distinct xs \<Longrightarrow> x < y in xs = x < y in Lxy xs {x,y}"
+apply(cases "x=y")
+  apply(simp add: before_in_irefl)
+proof -
+  assume xyset: "{x,y} \<subseteq> set xs"
+  assume dxs: "distinct xs"
+  assume xy: "x\<noteq>y" 
+  {
+    fix x y
+    assume 1: "{x,y} \<subseteq> set xs" 
+    assume xny: "x\<noteq>y"
+    assume 3: "x < y in xs" 
+    have "Lxy xs {x,y} = [x,y]" apply(rule Lxy_project) 
+          using xny 1 3 dxs by(auto)
+    then have "x < y in Lxy xs {x,y}" using xny by(simp add: before_in_def)
+  } note aha=this
+  have a: "x < y in xs \<Longrightarrow> x < y in Lxy xs {x,y}"
+    apply(subst Lxy_project) 
+      using xy xyset dxs by(simp_all add: before_in_def)
+  have t: "{x,y}={y,x}" by(auto)
+  have f: "~ x < y in xs \<Longrightarrow> y < x in Lxy xs {x,y}"
+    unfolding t
+    apply(rule aha)
+      using xyset apply(simp)
+      using xy apply(simp)
+      using xy xyset by(simp add: not_before_in)
+  have b: "~ x < y in xs \<Longrightarrow> ~ x < y in Lxy xs {x,y}"
+  proof -
+    assume "~ x < y in xs"
+    then have "y < x in Lxy xs {x,y}" using f by auto
+    then have "~ x < y in Lxy xs {x,y}" using xy by(simp add: not_before_in)
+    then show ?thesis .
+  qed
+  from a b
+  show ?thesis by metis
+qed
+
+
+subsection "List Update as Online/Offline Algorithm"
+
+type_synonym 'a state = "'a list"
+type_synonym answer = "nat * nat list"
+
+definition step :: "'a state \<Rightarrow> 'a \<Rightarrow> answer \<Rightarrow> 'a state" where
+"step s r a =
+  (let (k,sws) = a in mtf2 k r (swaps sws s))"
+
+definition t :: "'a state \<Rightarrow> 'a \<Rightarrow> answer \<Rightarrow> nat" where
+"t s r a = (let (mf,sws) = a in index (swaps sws s) r + 1 + size sws)"
+
+definition static where "static s rs = (set rs \<subseteq> set s)"
+
+interpretation On_Off step t static .
+
+type_synonym 'a alg_off = "'a state \<Rightarrow> 'a list \<Rightarrow> answer list"
+type_synonym ('a,'is) alg_on = "('a state,'is,'a,answer) alg_on"
+
+lemma T_ge_len: "length as = length rs \<Longrightarrow> T s rs as \<ge> length rs"
+by(induction arbitrary: s rule: list_induct2)
+  (auto simp: t_def trans_le_add2)
+
+lemma T_off_neq0: "(\<And>rs s0. size(alg s0 rs) = length rs) \<Longrightarrow>
+  rs \<noteq> [] \<Longrightarrow> T_off alg s0 rs \<noteq> 0"
+apply(erule_tac x=rs in meta_allE)
+apply(erule_tac x=s0 in meta_allE)
+apply (auto simp: neq_Nil_conv length_Suc_conv t_def)
+done
+
+lemma length_step[simp]: "length (step s r as) = length s"
+by(simp add: step_def split_def)
+
+lemma step_Nil_iff[simp]: "step xs r act = [] \<longleftrightarrow> xs = []"
+by(auto simp add: step_def mtf2_def split: prod.splits)
+
+lemma set_step2: "set(step s r (mf,sws)) = set s"
+by(auto simp add: step_def)
+
+lemma set_step: "set(step s r act) = set s"
+by(cases act)(simp add: set_step2)
+
+lemma distinct_step: "distinct(step s r as) = distinct s"
+by (auto simp: step_def split_def)
+
+
+subsection "Online Algorithm Move-to-Front is 2-Competitive"
+
+definition MTF :: "('a,unit) alg_on" where
+"MTF = (\<lambda>_. (), \<lambda>s r. ((size (fst s) - 1,[]), ()))"
+
+the Move-to-Front algorithm is 2-competitive.\<close>
+text\<open>This result is independent of MTF
+but is based on the list update problem defined in this theory.\<close>
+proof (rule dense_le_bounded[OF \<open>0 < l\<close>])
+   from \<open>1 < k\<close> have "LIM n F. (k - 1) * g n :> at_top"
+     with \<open>0 < l\<close> l have "0 < f n"
+     note \<open>x = l / k + m\<close>
+       using l \<open>1 < k\<close> by (simp add: field_simps)
+       using d \<open>1 < k\<close> \<open>0 < f n\<close> by (intro divide_left_mono mult_pos_pos) (auto simp: field_simps)
+       using \<open>c / m - d \<le> g n\<close> \<open>0 < g n\<close> \<open>0 < g n + d\<close> \<open>m < 0\<close> by (simp add: field_simps)
+       using \<open>0 < g n + d\<close> by (auto simp: add_divide_distrib)
+  from competE[OF assms(5) \<open>c\<ge>0\<close> _ \<open>s0 \<in> S0\<close>] assms(3) obtain b where
+  with rat_fun_lem[OF sequentially_bot \<open>l>0\<close> _ _ g', of "f s0 o cruel" "-b" "- a" c] assms(7) l
+text \<open>Sorting\<close>
+text\<open>The cruel adversary:\<close>
+text \<open>The main theorem:\<close>
+proof (rule compet_lb0[OF _ _ assms(1) \<open>c\<ge>0\<close>])
+    hence "Z \<le> ?off n" using \<open>n \<ge> nat(ceiling Z)\<close> by linarith }
+      using T_cruel[of ?s0 "Suc n"] \<open>l \<noteq> 0\<close>
+      hence "?off n + ?a > 0" using \<open>n \<ge> l^2 + l + 1\<close> by linarith
+        using T_adv[OF \<open>l\<noteq>0\<close>, of A n]
+  show "0 < 2*l / (l+1)" using \<open>l \<noteq> 0\<close> by(simp)
+  show "\<And>n. static ?s0 (?cruel n)" using \<open>l \<noteq> 0\<close> by(simp add: static_cruel del: cruel.simps)

@@ -1,0 +1,253 @@
+theory Winding_Number_Eval imports 
+  Cauchy_Index_Theorem 
+  "HOL-Eisbach.Eisbach_Tools"
+begin
+  
+
+lemma not_on_closed_segmentI:
+  fixes z::"'a::euclidean_space"
+  assumes "norm (z - a) *\<^sub>R (b - z) \<noteq> norm (b - z) *\<^sub>R (z - a)"
+  shows "z \<notin> closed_segment a b"
+  using assms by (auto simp add:between_mem_segment[symmetric] between_norm)
+
+lemma not_on_closed_segmentI_complex:    
+  fixes z::"complex"
+  assumes "(Re b - Re z) * (Im z - Im a) \<noteq> (Im b - Im z) * (Re z - Re a)"
+  shows "z \<notin> closed_segment a b"
+proof (cases "z\<noteq>a \<and> z\<noteq>b")
+  case True
+  then have "cmod (z - a)\<noteq>0" "cmod (b - z)\<noteq>0" by auto
+  then have "(Re b - Re z) * (Im z - Im a) = (Im b - Im z) * (Re z - Re a)" when 
+    "cmod (z - a) * (Re b - Re z) = cmod (b - z) * (Re z - Re a)"
+    "cmod (z - a) * (Im b - Im z) = cmod (b - z) * (Im z - Im a)"
+    using that by algebra
+  then show ?thesis using assms
+    apply (intro not_on_closed_segmentI)
+    by (auto simp add:scaleR_complex.ctr simp del:Complex_eq)
+next
+  case False
+  then have "(Re b - Re z) * (Im z - Im a) = (Im b - Im z) * (Re z - Re a)" by auto
+  then have False using assms by auto
+  then show ?thesis by auto
+qed
+
+
+definition finite_axes_cross::"(real \<Rightarrow> complex) \<Rightarrow> complex \<Rightarrow> bool" where
+  "finite_axes_cross g z = finite {t. (Re (g t-z) = 0 \<or> Im (g t-z) = 0) \<and> 0 \<le> t \<and> t \<le> 1}"
+
+lemma finite_cross_intros:
+  "\<lbrakk>Re a\<noteq>Re z \<or> Re b \<noteq>Re z; Im a\<noteq>Im z \<or> Im b\<noteq>Im z\<rbrakk>\<Longrightarrow>finite_axes_cross (linepath a b) z"
+  "\<lbrakk>st \<noteq> tt; r \<noteq> 0\<rbrakk> \<Longrightarrow> finite_axes_cross (part_circlepath z0 r st tt) z"
+  "\<lbrakk>finite_axes_cross g1 z;finite_axes_cross g2 z\<rbrakk> \<Longrightarrow> finite_axes_cross (g1+++g2) z"
+proof -
+  assume asm:"Re a\<noteq>Re z \<or> Re b \<noteq>Re z" "Im a\<noteq>Im z \<or> Im b\<noteq>Im z"
+  let ?S1="{t. Re (linepath a b t-z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  and ?S2="{t. Im (linepath a b t-z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  have "finite ?S1" 
+    using linepath_half_finite_inter[of a "Complex 1 0" "Re z" b] asm(1) 
+    by (auto simp add:inner_complex_def)
+  moreover have "finite ?S2"
+    using linepath_half_finite_inter[of a "Complex 0 1" "Im z" b] asm(2) 
+    by (auto simp add:inner_complex_def)
+  moreover have "{t. (Re (linepath a b t-z) = 0 \<or> Im (linepath a b t-z) = 0) \<and> 0 \<le> t \<and> t \<le> 1} 
+      = ?S1 \<union> ?S2"
+    by fast
+  ultimately show "finite_axes_cross (linepath a b) z"
+    unfolding finite_axes_cross_def by force
+next
+  assume asm: "st \<noteq>tt" "r\<noteq>0"
+  let ?S1="{t. Re (part_circlepath z0 r st tt t-z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  and ?S2="{t. Im (part_circlepath z0 r st tt t-z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  have "finite ?S1"
+    using part_circlepath_half_finite_inter[of st tt r "Complex 1 0" z0 "Re z"] asm 
+    by (auto simp add:inner_complex_def Complex_eq_0)
+  moreover have "finite ?S2"
+    using part_circlepath_half_finite_inter[of st tt r "Complex 0 1" z0 "Im z"] asm 
+    by (auto simp add:inner_complex_def Complex_eq_0)
+  moreover have "{t. (Re (part_circlepath z0 r st tt t-z) = 0 
+      \<or> Im (part_circlepath z0 r st tt t-z) = 0) \<and> 0 \<le> t \<and> t \<le> 1} = ?S1 \<union> ?S2"
+    by fast
+  ultimately show "finite_axes_cross (part_circlepath z0 r st tt) z" 
+    unfolding finite_axes_cross_def by auto
+next
+  assume asm:"finite_axes_cross g1 z" "finite_axes_cross g2 z"
+  let ?g1R="{t. Re (g1 t-z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  and ?g1I="{t. Im (g1 t-z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  and ?g2R="{t. Re (g2 t-z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  and ?g2I="{t. Im (g2 t-z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  have "finite ?g1R" "finite ?g1I"
+  proof -
+    have "{t. (Re (g1 t - z) = 0 \<or> Im (g1 t - z) = 0) \<and> 0 \<le> t \<and> t \<le> 1} = ?g1R \<union> ?g1I"
+      by force
+    then have "finite (?g1R \<union> ?g1I)"
+      using asm(1) unfolding finite_axes_cross_def by auto
+    then show "finite ?g1R" "finite ?g1I" by blast+
+  qed
+  have "finite ?g2R" "finite ?g2I" 
+  proof -
+    have "{t. (Re (g2 t - z) = 0 \<or> Im (g2 t - z) = 0) \<and> 0 \<le> t \<and> t \<le> 1} = ?g2R \<union> ?g2I"
+      by force
+    then have "finite (?g2R \<union> ?g2I)"
+      using asm(2) unfolding finite_axes_cross_def by auto
+    then show "finite ?g2R" "finite ?g2I" by blast+
+  qed
+  let ?S1 = "{t. Re ((g1 +++ g2) t - z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  and ?S2 = "{t. Im ((g1 +++ g2) t - z) = 0 \<and> 0 \<le> t \<and> t \<le> 1}"
+  have "finite ?S1"  
+    using finite_half_joinpaths_inter[of g1 "Complex 1 0" "Re z" g2,simplified] 
+    by (auto simp add:inner_complex_def)
+  moreover have "finite ?S2"  
+    using finite_half_joinpaths_inter[of g1 "Complex 0 1" "Im z" g2,simplified] 
+    by (auto simp add:inner_complex_def)
+  moreover have "{t. (Re ((g1 +++ g2) t - z) = 0 \<or> Im ((g1 +++ g2) t - z) = 0) \<and> 0 \<le> t \<and> t \<le> 1}
+        = ?S1 \<union> ?S2" 
+    by force
+  ultimately show "finite_axes_cross (g1 +++ g2) z"
+    unfolding finite_axes_cross_def 
+    by auto
+qed
+
+lemma cindex_path_joinpaths:
+  assumes "finite_axes_cross g1 z" "finite_axes_cross g2 z"
+    and "path g1" "path g2" "pathfinish g1 = pathstart g2" "pathfinish g1\<noteq>z" 
+  shows "cindex_path (g1+++g2) z = cindex_path g1 z + jumpF_pathstart g2 z 
+            - jumpF_pathfinish g1 z  + cindex_path g2 z"
+proof -
+  define h12 where "h12 = (\<lambda>t. Im ((g1+++g2) t - z) / Re ((g1+++g2) t - z))"
+  let ?h = "\<lambda>g. \<lambda>t. Im (g t - z) / Re (g t - z)"
+  have "cindex_path (g1+++g2) z = cindex 0 1 h12"
+    unfolding cindex_path_def h12_def by simp
+  also have "... = cindex 0 (1/2) h12 + jump h12 (1/2) + cindex (1/2) 1 h12"
+  proof (rule cindex_combine)
+    have "finite_axes_cross (g1+++g2) z" using assms by (auto intro:finite_cross_intros)
+    then have "finite {t. Re ((g1+++g2) t - z) = 0 \<and> 0\<le>t \<and> t\<le>1}" 
+      unfolding finite_axes_cross_def by (auto elim:rev_finite_subset)
+    moreover have " jump h12 t = 0" when "Re ((g1 +++ g2) t - z) \<noteq> 0" "0 < t" "t < 1" for t 
+      apply (rule jump_Im_divide_Re_0[of "\<lambda>t. (g1+++g2) t- z",folded h12_def,OF _ that])
+      using assms by (auto intro:path_offset)
+    ultimately show "finite {x. jump h12 x \<noteq> 0 \<and> 0 < x \<and> x < 1}" 
+      apply (elim rev_finite_subset)
+      by auto
+  qed auto
+  also have "... = cindex_path g1 z + jumpF_pathstart g2 z  
+      - jumpF_pathfinish g1 z  + cindex_path g2 z"
+  proof -
+    have "jump h12 (1/2) =  jumpF_pathstart g2 z -  jumpF_pathfinish g1 z  "
+    proof -
+      have "jump h12 (1 / 2) = jumpF h12 (at_right (1 / 2)) - jumpF h12 (at_left (1 / 2))"
+      proof (cases "Re ((g1+++g2) (1/2) - z) = 0")
+        case False
+        have "jump h12 (1 / 2) = 0"
+          unfolding h12_def
+          apply (rule jump_Im_divide_Re_0)
+          using assms False by (auto intro:path_offset)
+        moreover have "jumpF h12 (at_right (1/2)) = 0"
+          unfolding h12_def 
+          apply (intro jumpF_im_divide_Re_0)
+          subgoal using assms by (auto intro:path_offset)
+          subgoal using assms(5-6) False unfolding joinpaths_def pathfinish_def pathstart_def by auto
+          by auto
+        moreover have "jumpF h12 (at_left (1/2)) = 0"
+          unfolding h12_def 
+          apply (intro jumpF_im_divide_Re_0)
+          subgoal using assms by (auto intro:path_offset)
+          subgoal using assms(5-6) False unfolding joinpaths_def pathfinish_def pathstart_def by auto
+          by auto    
+        ultimately show ?thesis by auto
+      next
+        case True
+        then have "Im ((g1 +++ g2) (1 / 2) - z) \<noteq> 0"
+          using assms(5,6)
+          by (metis (no_types, opaque_lifting) Re_divide_numeral complex_Re_numeral complex_eq 
+              divide_self_if joinpaths_def  minus_complex.simps mult.commute mult.left_neutral
+              numeral_One pathfinish_def pathstart_def right_minus_eq times_divide_eq_left zero_neq_numeral)
+        show ?thesis
+        proof (rule jump_jumpF[of _ h12 "sgnx h12 (at_left (1/2))" "sgnx h12 (at_right (1/2))"])
+          define g where "g=(\<lambda>t. (g1 +++ g2) t - z)"
+          have h12_def:"h12 = (\<lambda>t. Im(g t)/Re(g t))" unfolding h12_def g_def by simp  
+          have "path g" using assms unfolding g_def by (auto intro!:path_offset)
+          then have "isCont (\<lambda>t. Im (g t)) (1 / 2)" "isCont (\<lambda>t. Re (g t)) (1 / 2)" 
+            unfolding path_def by (auto intro!:continuous_intros continuous_on_interior)
+          moreover have "Im (g (1/2)) \<noteq>0"
+          ultimately show "isCont (inverse \<circ> h12) (1 / 2)" 
+            unfolding h12_def comp_def 
+            by (auto intro!: continuous_intros)
+              
+          define l where "l \<equiv> sgnx h12 (at_left (1/2))"
+          define r where "r \<equiv> sgnx h12 (at_right (1/2))"
+          have *:"continuous_on ({0<..<1}- {t. h12 t = 0 \<and> 0 < t \<and> t < 1}) h12"
+            apply (auto intro!: continuous_intros)
+            by (auto elim:continuous_on_subset)   
+          have **:"finite {t. h12 t = 0 \<and> 0 < t \<and> t < 1}" 
+          proof -
+            have "finite_axes_cross (g1 +++ g2) z" 
+              using assms(1,2) finite_cross_intros(3)[of g1 z g2] by auto
+            then have "finite {t. (Re (g t) = 0 \<or> Im (g t) = 0) \<and> 0 < t \<and> t < 1}" 
+              unfolding finite_axes_cross_def g_def 
+              apply (elim rev_finite_subset)
+              by auto
+            then show ?thesis unfolding h12_def 
+              by (simp add:disj_commute)
+          qed 
+          have "h12 sgnx_able at_left (1/2)" "l \<noteq> 0" "h12 sgnx_able at_right (1/2)" "r \<noteq> 0"
+            unfolding l_def r_def using finite_sgnx_at_left_at_right[OF ** * **] 
+            by auto
+          then show "(h12 has_sgnx l) (at_left (1/2))" "(h12 has_sgnx r) (at_right (1/2))" "l\<noteq>0" "r\<noteq>0"
+            unfolding l_def r_def by (auto elim:sgnx_able_sgnx)
+        qed 
+      qed
+      moreover have "jumpF h12 (at_right (1/2)) = jumpF_pathstart g2 z"
+      proof -
+        have " jumpF h12 (at_right (1 / 2)) = jumpF (h12 \<circ> (\<lambda>x. x / 2 + 1 / 2)) (at_right 0)"
+          using jumpF_linear_comp[of "1/2" h12 "1/2" 0,simplified] by simp
+        also have "jumpF (h12 \<circ> (\<lambda>x. x / 2 + 1 / 2)) (at_right 0) = jumpF_pathstart g2 z"
+          unfolding h12_def jumpF_pathstart_def
+        proof (rule jumpF_cong)
+          show "\<forall>\<^sub>F x in at_right 0. ((\<lambda>t. Im ((g1 +++ g2) t - z) / Re ((g1 +++ g2) t - z)) 
+                  \<circ> (\<lambda>x. x / 2 + 1 / 2)) x = Im (g2 x - z) / Re (g2 x - z)"
+            unfolding eventually_at_right
+            apply (intro exI[where x="1/2"])
+            unfolding joinpaths_def by auto
+        qed simp
+        finally show ?thesis .
+      qed
+      moreover have "jumpF h12 (at_left (1 / 2)) = jumpF_pathfinish g1 z" 
+      proof -
+        have "jumpF h12 (at_left (1 / 2)) = jumpF (h12 \<circ> (\<lambda>x. x / 2)) (at_left 1)"
+          using jumpF_linear_comp[of "1/2" h12 0 1,simplified] by simp
+        also have "jumpF (h12 \<circ> (\<lambda>x. x / 2 )) (at_left 1) = jumpF_pathfinish g1 z"
+          unfolding h12_def jumpF_pathfinish_def
+        proof (rule jumpF_cong)
+          show " \<forall>\<^sub>F x in at_left 1. ((\<lambda>t. Im ((g1 +++ g2) t - z) / Re ((g1 +++ g2) t - z)) 
+              \<circ> (\<lambda>x. x / 2)) x = Im (g1 x - z) / Re (g1 x - z)"
+            unfolding eventually_at_left
+            apply (intro exI[where x="1/2"])
+            unfolding joinpaths_def by auto
+        qed simp
+        finally show ?thesis .
+      qed
+      ultimately show ?thesis by auto
+    qed
+    moreover have "cindex 0 (1 / 2) h12 = cindex_path g1 z"
+    proof -
+      have "cindex 0 (1 / 2) h12 = cindex 0 1 (h12 \<circ> (\<lambda>x. x / 2))"
+        using cindex_linear_comp[of "1/2" 0 1 h12 0,simplified,symmetric] .
+      also have "... = cindex_path g1 z"
+      proof -
+        let ?g = " (\<lambda>t. Im (g1 t - z) / Re (g1 t - z))"
+        have *:"jump (h12 \<circ> (\<lambda>x. x / 2)) x = jump ?g x" when "0<x" "x<1" for x 
+          unfolding h12_def   
+        proof (rule jump_cong)
+          show "\<forall>\<^sub>F x in at x. ((\<lambda>t. Im ((g1 +++ g2) t - z) / Re ((g1 +++ g2) t - z)) 
+              \<circ> (\<lambda>x. x / 2)) x = Im (g1 x - z) / Re (g1 x - z)"
+            unfolding eventually_at joinpaths_def comp_def using that
+            apply (intro exI[where x="(1-x)/2"])
+            by (auto simp add: dist_norm)
+        qed simp
+        then have "{x. jump (h12 \<circ> (\<lambda>x. x / 2)) x \<noteq> 0 \<and> 0 < x \<and> x < 1} 
+            = {x. jump ?g x \<noteq> 0 \<and> 0 < x \<and> x < 1}"
+          by auto
+        then show ?thesis
+          unfolding cindex_def cindex_path_def 
+          apply (elim sum.cong)
+          by (auto simp add:*)

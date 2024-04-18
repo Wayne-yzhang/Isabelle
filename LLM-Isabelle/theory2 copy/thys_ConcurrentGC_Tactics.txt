@@ -1,0 +1,187 @@
+theory Tactics
+imports
+  Proofs_Basis
+begin
+
+
+
+
+definition
+  valid_proc :: "('field, 'mut, 'payload, 'ref) gc_pred \<Rightarrow> 'mut process_name \<Rightarrow> ('field, 'mut, 'payload, 'ref) gc_pred \<Rightarrow> bool" ("\<lbrace>_\<rbrace> _ \<lbrace>_\<rbrace>")
+where
+  "\<lbrace>P\<rbrace> p \<lbrace>Q\<rbrace> = (\<forall>(c, afts) \<in> vcg_fragments (gc_coms p). gc_coms, p, afts \<turnstile> \<lbrace>P\<rbrace> c \<lbrace>Q\<rbrace>)"
+
+abbreviation
+  valid_proc_inv_syn :: "('field, 'mut, 'payload, 'ref) gc_pred \<Rightarrow> 'mut process_name \<Rightarrow> bool" ("\<lbrace>_\<rbrace> _" [100,0] 100)
+where
+  "\<lbrace>P\<rbrace> p \<equiv> \<lbrace>P\<rbrace> p \<lbrace>P\<rbrace>"
+
+lemma valid_pre:
+  assumes "\<lbrace>Q\<rbrace> p \<lbrace>R\<rbrace>"
+  assumes "\<And>s. P s \<Longrightarrow> Q s"
+  shows "\<lbrace>P\<rbrace> p \<lbrace>R\<rbrace>"
+using assms
+apply (clarsimp simp: valid_proc_def)
+apply (drule (1) bspec)
+apply (auto elim: vcg_pre)
+done
+
+lemma valid_conj_lift:
+  assumes x: "\<lbrace>P\<rbrace> p \<lbrace>Q\<rbrace>"
+  assumes y: "\<lbrace>P'\<rbrace> p \<lbrace>Q'\<rbrace>"
+  shows      "\<lbrace>P \<^bold>\<and> P'\<rbrace> p \<lbrace>Q \<^bold>\<and> Q'\<rbrace>"
+apply (clarsimp simp: valid_proc_def)
+apply (rule vcg_conj)
+ apply (rule vcg_pre[OF spec[OF spec[OF x[unfolded Ball_def valid_proc_def split_paired_All]], simplified, rule_format]], simp, simp)
+apply (rule vcg_pre[OF spec[OF spec[OF y[unfolded Ball_def valid_proc_def split_paired_All]], simplified, rule_format]], simp, simp)
+done
+
+lemma valid_all_lift:
+  assumes "\<And>x. \<lbrace>P x\<rbrace> p \<lbrace>Q x\<rbrace>"
+  shows "\<lbrace>\<lambda>s. \<forall>x. P x s\<rbrace> p \<lbrace>\<lambda>s. \<forall>x. Q x s\<rbrace>"
+using assms by (fastforce simp: valid_proc_def intro: vcg_all_lift)
+
+
+
+
+
+schematic_goal system_responds_actionE:
+  "\<lbrakk> (\<lbrace>l\<rbrace> Response action, afts) \<in> fragments (gc_coms p) {}; v \<in> action x s;
+     \<lbrakk> p = sys; ?P \<rbrakk> \<Longrightarrow> Q \<rbrakk> \<Longrightarrow> Q"
+apply (cases p)
+apply (simp_all add: all_com_interned_defs)
+apply atomize
+
+apply (drule_tac P="x \<or> y" and Q="v \<in> action p k" for x y p k in conjI, assumption)
+apply (thin_tac "v \<in> action p k" for p k)
+apply (simp only: conj_disj_distribR conj_assoc mem_Collect_eq cong: conj_cong)
+
+apply (erule mp)
+apply (thin_tac "p = sys")
+apply (assumption)
+done
+
+schematic_goal system_responds_action_caseE:
+  "\<lbrakk> (\<lbrace>l\<rbrace> Response action, afts) \<in> fragments (gc_coms p) {}; v \<in> action (pname, req) s;
+     \<lbrakk> p = sys; case_request_op ?P1 ?P2 ?P3 ?P4 ?P5 ?P6 ?P7 ?P8 ?P9 ?P10 ?P11 ?P12 ?P13 ?P14 req \<rbrakk> \<Longrightarrow> Q \<rbrakk> \<Longrightarrow> Q"
+apply (erule(1) system_responds_actionE)
+apply (cases req; simp only: request_op.simps prod.inject simp_thms fst_conv snd_conv if_cancel empty_def[symmetric] empty_iff)
+apply (drule meta_mp[OF _ TrueI], erule meta_mp, erule_tac P="A \<and> B" for A B in triv)+
+done
+
+schematic_goal system_responds_action_specE:
+  "\<lbrakk> (\<lbrace>l\<rbrace> Response action, afts) \<in> fragments (gc_coms p) {}; v \<in> action x s;
+     \<lbrakk> p = sys; case_request_op ?P1 ?P2 ?P3 ?P4 ?P5 ?P6 ?P7 ?P8 ?P9 ?P10 ?P11 ?P12 ?P13 ?P14 (snd x) \<rbrakk> \<Longrightarrow> Q \<rbrakk> \<Longrightarrow> Q"
+apply (erule system_responds_action_caseE[where pname="fst x" and req="snd x"])
+ apply simp
+apply assumption
+done
+
+
+
+lemma atS_dests:
+  "\<lbrakk> atS p ls s; atS p ls' s \<rbrakk> \<Longrightarrow> atS p (ls \<union> ls') s"
+  "\<lbrakk> \<not>atS p ls s; \<not>atS p ls' s \<rbrakk> \<Longrightarrow> \<not>atS p (ls \<union> ls') s"
+  "\<lbrakk> \<not>atS p ls s; atS p ls' s \<rbrakk> \<Longrightarrow> atS p (ls' - ls) s"
+  "\<lbrakk> \<not>atS p ls s; at p l s \<rbrakk> \<Longrightarrow> atS p ({l} - ls) s"
+by (auto simp: atS_def)
+
+lemma schematic_prem: "\<lbrakk>Q \<Longrightarrow> P; Q\<rbrakk> \<Longrightarrow> P"
+by blast
+
+lemma TrueE: "\<lbrakk>True; P\<rbrakk> \<Longrightarrow> P"
+by blast
+
+lemma thin_locs_pre_discardE:
+  "\<lbrakk>at p l' s \<longrightarrow> P; at p l s; l' \<noteq> l; Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>atS p ls s \<longrightarrow> P; at p l s; l \<notin> ls; Q\<rbrakk> \<Longrightarrow> Q"
+unfolding atS_def by blast+
+
+lemma thin_locs_pre_keep_atE:
+  "\<lbrakk>at p l s \<longrightarrow> P; at p l s; P \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> Q"
+by blast
+
+lemma thin_locs_pre_keep_atSE:
+  "\<lbrakk>atS p ls s \<longrightarrow> P; at p l s; l \<in> ls; P \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> Q"
+unfolding atS_def by blast
+
+lemma thin_locs_post_discardE:
+  "\<lbrakk>AT s' = (AT s)(p := lfn, q := lfn'); l' \<notin> lfn; p \<noteq> q\<rbrakk> \<Longrightarrow> at p l' s' \<longrightarrow> P"
+  "\<lbrakk>AT s' = (AT s)(p := lfn); l' \<notin> lfn\<rbrakk> \<Longrightarrow> at p l' s' \<longrightarrow> P"
+  "\<lbrakk>AT s' = (AT s)(p := lfn, q := lfn'); \<And>l. l \<in> lfn \<Longrightarrow> l \<notin> ls;  p \<noteq> q\<rbrakk> \<Longrightarrow> atS p ls s' \<longrightarrow> P"
+  "\<lbrakk>AT s' = (AT s)(p := lfn); \<And>l. l \<in> lfn \<Longrightarrow> l \<notin> ls\<rbrakk> \<Longrightarrow> atS p ls s' \<longrightarrow> P"
+unfolding atS_def by (auto simp: fun_upd_apply)
+
+lemmas thin_locs_post_discard_conjE =
+  conjI[OF thin_locs_post_discardE(1)]
+  conjI[OF thin_locs_post_discardE(2)]
+  conjI[OF thin_locs_post_discardE(3)]
+  conjI[OF thin_locs_post_discardE(4)]
+
+lemma thin_locs_post_keep_locsE:
+  "\<lbrakk>(L \<longrightarrow> P) \<and> R; R \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> (L \<longrightarrow> P) \<and> Q"
+  "L \<longrightarrow> P \<Longrightarrow> L \<longrightarrow> P"
+by blast+
+
+lemma thin_locs_post_keepE:
+  "\<lbrakk>P \<and> R; R \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> (L \<longrightarrow> P) \<and> Q"
+  "P \<Longrightarrow> L \<longrightarrow> P"
+by blast+
+
+lemma ni_thin_locs_discardE:
+  "\<lbrakk>at proc l s \<longrightarrow> P; AT s' = (AT s)(p := lfn, q := lfn'); at proc l' s'; l \<noteq> l'; proc \<noteq> p; proc \<noteq> q; Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>at proc l s \<longrightarrow> P; AT s' = (AT s)(p := lfn); at proc l' s'; l \<noteq> l'; proc \<noteq> p; Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>atS proc ls s \<longrightarrow> P; AT s' = (AT s)(p := lfn, q := lfn'); at proc l' s'; l' \<notin> ls; proc \<noteq> p; proc \<noteq> q; Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>atS proc ls s \<longrightarrow> P; AT s' = (AT s)(p := lfn); at proc l' s'; l' \<notin> ls; proc \<noteq> p; Q\<rbrakk> \<Longrightarrow> Q"
+
+  "\<lbrakk>at proc l s \<longrightarrow> P; AT s' = (AT s)(p := lfn, q := lfn'); atS proc ls' s'; l \<notin> ls'; proc \<noteq> p; proc \<noteq> q; Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>at proc l s \<longrightarrow> P; AT s' = (AT s)(p := lfn); atS proc ls' s'; l \<notin> ls'; proc \<noteq> p; Q\<rbrakk> \<Longrightarrow> Q"
+unfolding atS_def by auto
+
+lemma ni_thin_locs_keep_atE:
+  "\<lbrakk>at proc l s \<longrightarrow> P; AT s' = (AT s)(p := lfn, q := lfn'); at proc l s'; proc \<noteq> p; proc \<noteq> q; P \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>at proc l s \<longrightarrow> P; AT s' = (AT s)(p := lfn); at proc l s'; proc \<noteq> p; P \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> Q"
+by (auto simp: fun_upd_apply)
+
+lemma ni_thin_locs_keep_atSE:
+  "\<lbrakk>atS proc ls s \<longrightarrow> P; AT s' = (AT s)(p := lfn, q := lfn'); at proc l' s'; l' \<in> ls; proc \<noteq> p; proc \<noteq> q; P \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>atS proc ls s \<longrightarrow> P; AT s' = (AT s)(p := lfn); at proc l' s'; l' \<in> ls; proc \<noteq> p; P \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>atS proc ls s \<longrightarrow> P; AT s' = (AT s)(p := lfn, q := lfn'); atS proc ls' s'; ls' \<subseteq> ls; proc \<noteq> p; proc \<noteq> q; P \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> Q"
+  "\<lbrakk>atS proc ls s \<longrightarrow> P; AT s' = (AT s)(p := lfn); atS proc ls' s'; ls' \<subseteq> ls; proc \<noteq> p; P \<Longrightarrow> Q\<rbrakk> \<Longrightarrow> Q"
+unfolding atS_def by (auto simp: fun_upd_apply)
+
+lemma loc_mem_tac_intros:
+  "\<lbrakk>c \<notin> A; c \<notin> B\<rbrakk> \<Longrightarrow> c \<notin> A \<union> B"
+  "c \<noteq> d \<Longrightarrow> c \<notin> {d}"
+  "c \<notin> A \<Longrightarrow> c \<in> - A"
+  "c \<in> A \<Longrightarrow> c \<notin> - A"
+  "A \<subseteq> A"
+by blast+
+
+lemmas loc_mem_tac_elims =
+  singletonE
+  UnE
+
+lemmas loc_mem_tac_simps =
+  prefix_code suffix_to_prefix
+  simp_thms
+  Eq_FalseI
+  not_Cons_self
+
+lemmas vcg_fragments'_simps =
+  valid_proc_def gc_coms.simps vcg_fragments'.simps atC.simps
+  ball_Un bool_simps if_False if_True
+
+lemmas vcg_sem_simps =
+  lconst.simps
+  simp_thms
+  True_implies_equals
+  prod.simps fst_conv snd_conv
+  gc_phase.simps process_name.simps hs_type.simps hs_phase.simps
+  mem_store_action.simps mem_load_action.simps request_op.simps response.simps
+
+lemmas vcg_inv_simps =
+  simp_thms
+
+
+end

@@ -1,0 +1,151 @@
+theory Abs_Qr
+
+imports Mod_Plus_Minus
+        Kyber_spec
+
+begin
+
+lemma finite_range_plus: 
+  assumes "finite (range f)"
+          "finite (range g)"
+  shows "finite (range (\<lambda>x. f x + g x))"
+proof -
+  have subs: "range (\<lambda>x. (f x, g x)) \<subseteq> range f \<times> range g" by auto
+  have cart: "finite (range f \<times> range g)" using assms by auto
+  have finite: "finite (range (\<lambda>x. (f x, g x)))" 
+    using rev_finite_subset[OF cart subs] .
+  have "range (\<lambda>x. f x + g x) = (\<lambda>(a,b). a+b) ` range (\<lambda>x. (f x, g x))"
+    using range_composition[of "(\<lambda>(a,b). a+b)" "(\<lambda>x. (f x, g x))"] 
+    by auto
+  then show ?thesis 
+    using finite finite_image_set[where f = "(\<lambda>(a,b). a+b)"] 
+    by auto
+qed
+
+lemma all_impl_Max: 
+  assumes "\<forall>x. f x \<ge> (a::int)"
+          "finite (range f)"
+  shows "(MAX x. f x) \<ge> a"
+by (simp add: Max_ge_iff assms(1) assms(2))
+
+lemma Max_mono':
+  assumes "\<forall>x. f x \<le> g x"
+          "finite (range f)"
+          "finite (range g)"
+  shows "(MAX x. f x) \<le> (MAX x. g x)"
+using assms 
+by (metis (no_types, lifting) Max_ge_iff Max_in UNIV_not_empty 
+  image_is_empty rangeE rangeI)  
+
+lemma Max_mono_plus:
+  assumes "finite (range (f::_\<Rightarrow>_::ordered_ab_semigroup_add))" 
+          "finite (range g)"
+  shows "(MAX x. f x + g x) \<le> (MAX x. f x) + (MAX x. g x)"
+proof -
+  obtain xmax where xmax_def: "f xmax + g xmax = (MAX x. f x + g x)" 
+    using finite_range_plus[OF assms] Max_in by fastforce
+  have "(MAX x. f x + g x) = f xmax + g xmax" using xmax_def by auto
+  also have "\<dots> \<le> (MAX x. f x) + g xmax" 
+    using Max_ge[OF assms(1), of "f xmax"] 
+    by (auto simp add: add_right_mono[of "f xmax"]) 
+  also have "\<dots> \<le> (MAX x. f x) + (MAX x. g x)" 
+    using Max_ge[OF assms(2), of "g xmax"]
+    by (auto simp add: add_left_mono[of "g xmax"])
+  finally show ?thesis by auto
+qed
+
+
+
+
+lemma of_qr_mult:
+  "of_qr (a * b) = of_qr a * of_qr b mod qr_poly"
+by (metis of_qr_to_qr to_qr_mult to_qr_of_qr)
+
+lemma of_qr_scale:
+  "of_qr (to_module s * b) = 
+  Polynomial.smult (of_int_mod_ring s) (of_qr b)"
+unfolding to_module_def
+  by (auto simp add: of_qr_mult[of "to_qr [:of_int_mod_ring s:]" "b"] 
+  of_qr_to_qr) (simp add: mod_mult_left_eq mod_smult_left of_qr.rep_eq)
+
+lemma to_module_mult:
+  "poly.coeff (of_qr (to_module s * a)) x1 = 
+   of_int_mod_ring (s) * poly.coeff (of_qr a) x1"
+using of_qr_scale[of s a] by simp
+
+lemma odd_round_up:
+assumes "odd x"
+shows "round (real_of_int x / 2) = (x+1) div 2"
+proof -
+  have "round (real_of_int x / 2) = round (real_of_int (x+1) /2)"
+    using assms unfolding round_def 
+    by (metis (no_types, opaque_lifting) add.commute 
+      add_divide_distrib even_add even_succ_div_2 
+      floor_divide_of_int_eq odd_one of_int_add 
+      of_int_hom.hom_one of_int_numeral)
+  also have "\<dots> = (x+1) div 2"
+    by (metis add_divide_distrib calculation 
+    floor_divide_of_int_eq of_int_add of_int_hom.hom_one 
+    of_int_numeral round_def)
+  finally show ?thesis by blast
+qed
+
+lemma floor_unique:
+assumes "real_of_int a \<le> x" "x < a+1"
+shows "floor x = a"
+  using assms(1) assms(2) by linarith
+
+lemma same_floor:
+assumes "real_of_int a \<le> x" "real_of_int a \<le> y" 
+  "x < a+1" "y < a+1"
+shows "floor x = floor y"
+using assms floor_unique  by presburger
+
+lemma one_mod_four_round:
+assumes "x mod 4 = 1"
+shows "round (real_of_int x / 4) = (x-1) div 4"
+proof -
+  have leq: "(x-1) div 4 \<le> real_of_int x / 4  + 1 / 2"
+    using assms by linarith 
+  have gr: "real_of_int x / 4  + 1 / 2 < (x-1) div 4 + 1" 
+  proof -
+    have "x+2 < 4 * ((x-1) div 4 + 1)" 
+    proof -
+      have *:  "(x-1) div 4 + 1 = (x+3) div 4" by auto
+      have "4 dvd x + 3" using assms by presburger
+      then have "4 * ((x+3) div 4) = x+3" 
+        by (subst dvd_imp_mult_div_cancel_left, auto)
+      then show ?thesis unfolding * by auto
+    qed
+    then show ?thesis by auto
+  qed
+  show "round (real_of_int x / 4) = (x-1) div 4"
+    using floor_unique[OF leq gr] unfolding round_def by auto
+qed
+
+lemma odd_half_floor:
+assumes "odd x"
+shows "\<lfloor>real_of_int x / 2\<rfloor> = (x-1) div 2"
+using assms by (metis add.commute diff_add_cancel even_add 
+ even_succ_div_2 floor_divide_of_int_eq odd_one of_int_numeral)
+
+
+
+context module_spec
+begin 
+
+
+  Unfortunately this is not a norm per se, as the homogeneity only holds in 
+  inequality, not equality. Still, it fulfils its purpose, since we only 
+  need the triangular inequality.\<close>
+text \<open>Helping lemmas and properties of \<open>Max\<close>, \<open>range\<close> and \<open>finite\<close>.\<close>
+text \<open>Show that \<open>abs_infty_q\<close> is definite, positive and fulfils the triangle inequality.\<close>
+text \<open>Scaling only with inequality not equality! This causes a problem in proof of the 
+  Kyber scheme. Needed to add $q\equiv 1 \mod 4$ to change proof.\<close>
+text \<open>Triangle inequality for \<open>abs_infty_q\<close>.\<close>
+text \<open>Show that \<open>abs_infty_poly\<close> is definite, positive and fulfils the triangle inequality.\<close>
+text \<open>Again, homogeneity is only true for inequality not necessarily equality! 
+  Need to add $q\equiv 1\mod 4$ such that proof of crypto scheme works out.\<close>
+text \<open>Triangle inequality for \<open>abs_infty_poly\<close>.\<close>
+text \<open>Estimation inequality using message bit.\<close>
+      \<open>metis dvd_minus_mod\<close>, force)

@@ -1,0 +1,80 @@
+theory GPV_Expectation imports
+  Computational_Model
+begin
+
+lemma le_enn2realI: "\<lbrakk> ennreal x \<le> y; y = \<top> \<Longrightarrow> x \<le> 0 \<rbrakk> \<Longrightarrow> x \<le> enn2real y"
+by(cases y) simp_all
+
+lemma enn2real_leD: "\<lbrakk> enn2real x < y; x \<noteq> \<top> \<rbrakk> \<Longrightarrow> x < ennreal y"
+by(cases x)(simp_all add: ennreal_lessI)
+
+lemma ennreal_mult_le_self2I: "\<lbrakk> y > 0 \<Longrightarrow> x \<le> 1 \<rbrakk> \<Longrightarrow> x * y \<le> y" for x y :: ennreal
+apply(cases x; cases y)
+apply(auto simp add: top_unique ennreal_top_mult ennreal_mult[symmetric] intro: ccontr)
+using mult_left_le_one_le by force
+
+lemma ennreal_leI: "x \<le> enn2real y \<Longrightarrow> ennreal x \<le> y"
+by(cases y) simp_all
+
+lemma enn2real_INF: "\<lbrakk> A \<noteq> {}; \<forall>x\<in>A. f x < \<top> \<rbrakk> \<Longrightarrow> enn2real (INF x\<in>A. f x) = (INF x\<in>A. enn2real (f x))"
+apply(rule antisym)
+ apply(rule cINF_greatest)
+  apply simp
+ apply(rule enn2real_mono)
+  apply(erule INF_lower)
+ apply simp
+apply(rule le_enn2realI)
+ apply simp_all
+apply(rule INF_greatest)
+apply(rule ennreal_leI)
+apply(rule cINF_lower)
+apply(rule bdd_belowI[where m=0])
+apply auto
+done
+
+lemma monotone_times_ennreal1: "monotone (\<le>) (\<le>) (\<lambda>x. x * y :: ennreal)"
+by(auto intro!: monotoneI mult_right_mono)
+
+lemma monotone_times_ennreal2: "monotone (\<le>) (\<le>) (\<lambda>x. y * x :: ennreal)"
+by(auto intro!: monotoneI mult_left_mono)
+
+lemma mono2mono_times_ennreal[THEN lfp.mono2mono2, cont_intro, simp]:
+  shows monotone_times_ennreal: "monotone (rel_prod (\<le>) (\<le>)) (\<le>) (\<lambda>(x, y). x * y :: ennreal)"
+by(simp add: monotone_times_ennreal1 monotone_times_ennreal2)
+
+lemma mcont_times_ennreal1: "mcont Sup (\<le>) Sup (\<le>) (\<lambda>y. x * y :: ennreal)"
+by(auto intro!: mcontI contI simp add: SUP_mult_left_ennreal[symmetric])
+
+lemma mcont_times_ennreal2: "mcont Sup (\<le>) Sup (\<le>) (\<lambda>y. y * x :: ennreal)"
+by(subst mult.commute)(rule mcont_times_ennreal1)
+
+lemma mcont2mcont_times_ennreal [cont_intro, simp]:
+  "\<lbrakk> mcont lub ord Sup (\<le>) (\<lambda>x. f x);
+    mcont lub ord Sup (\<le>) (\<lambda>x. g x) \<rbrakk>
+  \<Longrightarrow> mcont lub ord Sup (\<le>) (\<lambda>x. f x * g x :: ennreal)"
+by(best intro: ccpo.mcont2mcont'[OF complete_lattice_ccpo] mcont_times_ennreal1 mcont_times_ennreal2 ccpo.mcont_const[OF complete_lattice_ccpo])
+
+lemma ereal_INF_cmult: "0 < c \<Longrightarrow> (INF i\<in>I. c * f i) = ereal c * (INF i\<in>I. f i)"
+using ereal_Inf_cmult[where P="\<lambda>x. \<exists>i\<in>I. x = f i", of c]
+
+lemma ereal_INF_multc: "0 < c \<Longrightarrow> (INF i\<in>I. f i * c) = (INF i\<in>I. f i) * ereal c"
+using ereal_INF_cmult[of c f I] by(simp add: mult.commute)
+
+lemma INF_mult_left_ennreal: 
+  assumes "I = {} \<Longrightarrow> c \<noteq> 0"
+  and "\<lbrakk> c = \<top>; \<exists>i\<in>I. f i > 0 \<rbrakk> \<Longrightarrow> \<exists>p>0. \<forall>i\<in>I. f i \<ge> p"
+  shows "c * (INF i\<in>I. f i) = (INF i\<in>I. c * f i ::ennreal)"
+proof -
+  consider (empty) "I = {}" | (top) "c = \<top>" | (zero) "c = 0" | (normal) "I \<noteq> {}" "c \<noteq> \<top>" "c \<noteq> 0" by auto
+  then show ?thesis
+  proof cases
+    case empty then show ?thesis by(simp add: ennreal_mult_top assms(1))
+  next
+    case top
+    show ?thesis
+    proof(cases "\<exists>i\<in>I. f i > 0")
+      case True
+      with assms(2) top obtain p where "p > 0" and p: "\<And>i. i \<in> I \<Longrightarrow> f i \<ge> p" by auto
+      then have *: "\<And>i. i \<in> I \<Longrightarrow> f i > 0" by(auto intro: less_le_trans)
+      finally show ?thesis using top by(auto simp add: ennreal_top_mult dest: *)
+    apply(simp add: distrib_left mult_ac nn_integral_cmult[symmetric] generat.case_distrib[where h="(*) _"])

@@ -1,0 +1,144 @@
+theory CVP_p
+
+imports 
+  Main 
+  Lattice_int
+  Subset_Sum
+begin
+
+
+
+definition pth_p_norm_vec :: "nat \<Rightarrow> ('a::{abs, power, comm_monoid_add}) vec \<Rightarrow> 'a" where
+  "pth_p_norm_vec p v = (\<Sum>i<dim_vec v. \<bar>v$i\<bar>^p)"
+
+
+locale fixed_p =
+assumes p_def: "p\<ge>1"
+begin
+
+definition "p_norm_vec \<equiv> pth_p_norm_vec p"
+
+
+
+definition is_closest_vec :: "int_lattice \<Rightarrow> int vec \<Rightarrow> int vec \<Rightarrow> bool" where
+  "is_closest_vec L b v \<equiv> (is_lattice L) \<and> 
+    (\<forall>x\<in>L. p_norm_vec (x - b) \<ge> p_norm_vec (v - b) \<and> v\<in>L)"
+
+definition gap_cvp :: "(int_lattice \<times> int vec \<times> real) set" where
+  "gap_cvp \<equiv> {(L, b, r). (is_lattice L) \<and> (\<exists>v\<in>L. of_int (p_norm_vec (v - b)) \<le> r^p)}"
+
+
+
+definition gen_basis_p :: "int vec \<Rightarrow> int mat" where
+  "gen_basis_p as = mat (dim_vec as + 1) (dim_vec as) (\<lambda> (i, j). if i = 0 then as$j 
+    else (if i = j + 1 then 2 else 0))"
+
+
+definition gen_t_p :: "int vec \<Rightarrow> int \<Rightarrow> int vec" where
+  "gen_t_p as s = vec (dim_vec as + 1) ((\<lambda> i. 1)(0:= s))"
+
+
+definition reduce_cvp_subset_sum_p :: 
+  "((int vec) * int) \<Rightarrow> (int_lattice * (int vec) * real)" where
+  "reduce_cvp_subset_sum_p \<equiv> (\<lambda> (as,s).
+    (gen_lattice (gen_basis_p as), gen_t_p as s, root p (dim_vec as)))"
+
+
+
+lemma vec_lambda_eq[intro]: "(\<forall>i<n. a i = b i) \<longrightarrow> vec n a = vec n b"
+by auto
+
+lemma eq_fun_applic: assumes "x = y" shows "f x = f y"
+using assms by auto
+
+
+lemma sum_if_zero:
+  assumes "finite A" "i\<in>A"
+  shows "(\<Sum>j\<in>A. (if i = j then a j else 0)) = a i"
+proof -
+  have "(\<Sum>x\<in>A. if x = i then a x else 0) =
+  (if i = i then a i else 0) + (\<Sum>x\<in>A - {i}. if x = i then a x else 0)"
+  using sum.remove[OF assms, of "(\<lambda>x. if x = i then a x else 0)"] by auto
+  then show ?thesis by (simp add: assms(1))
+qed
+
+
+lemma set_compr_elem: 
+  assumes "finite A" "a\<in>A"
+  shows "{f i | i. i\<in>A} = {f a} \<union> {f i | i. i\<in>A-{a}}"
+
+
+lemma Bx_rewrite: 
+  assumes x_dim: "dim_vec as = dim_vec x"
+  shows "(gen_basis_p as) *\<^sub>v x = 
+    vec (dim_vec as + 1) (\<lambda> i. if i = 0 then (x \<bullet> as) 
+    else (2 * x$(i-1)))"
+    (is "?init_vec = ?goal_vec")
+proof -
+  define n::nat where n_def: "n = dim_vec as"
+  have "vec n (\<lambda>j. (as $ j)) \<bullet>  x = (x \<bullet> as)"
+    unfolding n_def scalar_prod_def using x_dim by (simp add: mult.commute)
+  moreover have "vec (dim_vec as) (\<lambda>j. if i = Suc j then 2 else 0) \<bullet> x =
+         2 * x $ (i - Suc 0)" if "i < Suc (dim_vec as)" "0 < i" for i
+  proof -
+    have "(\<Sum>ia = 0..<dim_vec x.
+      vec (dim_vec as) (\<lambda>j.  (if i = (Suc j) then 2 else 0)) $ ia * x $ ia) =
+      (\<Sum>ia<n.  (if i = ia+1 then 2 * (x $ ia) else 0))"
+      by (intro sum.cong, auto simp add: n_def x_dim)
+    also have "\<dots> = (\<Sum>ib\<in>{1..<n+1}. 
+         (if i = ib then 2 * (x $ (ib-1)) else 0))" 
+    proof - 
+      have eq: "(\<lambda>ib.  (if i = ib then 2 * x $ (ib - 1) else 0)) \<circ> (+) 1
+          = (\<lambda>ia.  (if i = ia + 1 then 2 * x $ ia else 0))"
+      by auto
+      then show ?thesis
+        by (subst sum.atLeastLessThan_shift_0[
+            of "(\<lambda>ib.  (if i = ib then 2 * x $ (ib - 1) else 0))" 1 "n+1"])
+    qed
+    also have "\<dots> = 2 *  (x $ (i-1))" 
+    proof - 
+      have finite: "finite {1..<n+1}" by auto
+      have is_in: "i \<in> {1..<n+1}" using that by (auto simp add: n_def)
+      show ?thesis 
+      by (subst sum_if_zero[OF finite is_in, of "(\<lambda>k. 2 * (x $ (k-1)))"], auto)
+    qed
+    finally show ?thesis unfolding scalar_prod_def by auto
+  qed
+  ultimately show ?thesis 
+    unfolding gen_basis_p_def reduce_cvp_subset_sum_p_def gen_t_p_def
+    by (intro eq_vecI, auto simp add: n_def)
+qed
+
+
+lemma Bx_s_rewrite: 
+  assumes x_dim: "dim_vec as = dim_vec x"
+  shows "(gen_basis_p as) *\<^sub>v x - (gen_t_p as s) = 
+    vec (dim_vec as + 1) (\<lambda> i. if i = 0 then  (x \<bullet> as - s) else  (2 * x$(i-1) - 1))"
+    (is "?init_vec = ?goal_vec")
+unfolding gen_t_p_def by (subst  Bx_rewrite[OF assms], auto)
+
+
+lemma p_norm_vec_Bx_s:
+  assumes x_dim: "dim_vec as = dim_vec x"
+  shows "p_norm_vec ((gen_basis_p as) *\<^sub>v x - (gen_t_p as s)) = 
+     \<bar>x \<bullet> as - s\<bar>^p + (\<Sum>i=1..<dim_vec as +1. \<bar>2*x$(i-1)-1\<bar>^p)"
+proof -
+  let ?init_vec = "(gen_basis_p as) *\<^sub>v x - (gen_t_p as s)"
+  let ?goal_vec = "vec (dim_vec as + 1) (\<lambda> i. if i = 0 then (x \<bullet> as - s)
+       else  (2 * x$(i-1) - 1))"
+  have "p_norm_vec ?init_vec = p_norm_vec ?goal_vec" using Bx_s_rewrite[OF x_dim] by auto
+  also have "\<dots> = (\<Sum>i\<in>{0..<dim_vec as+1}. \<bar>?goal_vec$i\<bar>^p)" 
+    unfolding p_norm_vec_def pth_p_norm_vec_def by (metis atLeast0LessThan dim_vec)
+  also have "\<dots> = \<bar>x \<bullet> as - s\<bar>^p + (\<Sum>i\<in>{1..<dim_vec as+1}. \<bar>2*x$(i-1)-1\<bar>^p)"
+  proof -
+    have subs: "{0}\<subseteq>{0..<dim_vec as+1}" by auto
+    have "{0..<dim_vec as +1} = {0} \<union> {1..<dim_vec as +1}" by auto
+    then show ?thesis by (subst sum.subset_diff[OF subs],auto)
+  qed
+  finally show ?thesis by blast
+qed
+
+  is linearly independent.\<close>
+text \<open>Well-definedness of the reduction function.\<close>
+text \<open>NP-hardness of reduction function.\<close>
+text \<open>CVP is NP-hard in $p$-norm.\<close>

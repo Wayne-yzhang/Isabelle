@@ -1,0 +1,54 @@
+theory Eval
+imports
+  Extra
+  Kripke
+  ODList
+begin
+
+
+
+function
+  eval_rec :: "(('rep :: linorder) odlist \<Rightarrow> 'p \<Rightarrow> 'rep odlist)
+             \<Rightarrow> ('a \<Rightarrow> 'rep \<Rightarrow> 'rep odlist)
+             \<Rightarrow> ('a list \<Rightarrow> 'rep \<Rightarrow> 'rep odlist)
+             \<Rightarrow> 'rep odlist
+             \<Rightarrow> ('a, 'p) Kform
+             \<Rightarrow> 'rep odlist"
+where
+  "eval_rec val R CR X (Kprop p)     = val X p"
+| "eval_rec val R CR X (Knot \<phi>)      = ODList.difference X (eval_rec val R CR X \<phi>)"
+| "eval_rec val R CR X (Kand \<phi> \<psi>)    = ODList.intersect (eval_rec val R CR X \<phi>) (eval_rec val R CR X \<psi>)"
+| "eval_rec val R CR X (Kknows a \<phi>)  = ODList.filter (\<lambda>s. eval_rec val R CR (R a s) (Knot \<phi>) = ODList.empty) X"
+| "eval_rec val R CR X (Kcknows as \<phi>) = (if as = [] then X else ODList.filter (\<lambda>s. eval_rec val R CR (CR as s) (Knot \<phi>) = ODList.empty) X)"
+  by pat_completeness auto
+
+fun
+  kf_k_measure :: "('a, 'p) Kform \<Rightarrow> nat"
+where
+  "kf_k_measure (Kprop p)  = 0"
+| "kf_k_measure (Knot \<phi>)   = kf_k_measure \<phi>"
+| "kf_k_measure (Kand \<phi> \<psi>) = kf_k_measure \<phi> + kf_k_measure \<psi>"
+| "kf_k_measure (Kknows a \<phi>) = 1 + kf_k_measure \<phi>"
+| "kf_k_measure (Kcknows as \<phi>) = 1 + kf_k_measure \<phi>"
+
+termination eval_rec
+  apply (relation "measures [\<lambda>(_, _, _, _, \<phi>). size \<phi>, \<lambda>(_, _, _, _, \<phi>). kf_k_measure \<phi>]")
+  apply auto
+  done
+
+
+fun
+  evalS :: "(('rep :: linorder) odlist \<Rightarrow> 'p \<Rightarrow> 'rep odlist)
+          \<Rightarrow> ('a \<Rightarrow> 'rep \<Rightarrow> 'rep odlist)
+          \<Rightarrow> ('a list \<Rightarrow> 'rep \<Rightarrow> 'rep odlist)
+          \<Rightarrow> 'rep odlist
+          \<Rightarrow> ('a, 'p) Kform \<Rightarrow> bool"
+where
+  "evalS val R CR X (Kprop p)      = undefined"
+| "evalS val R CR X (Knot \<phi>)       = (\<not>evalS val R CR X \<phi>)"
+| "evalS val R CR X (Kand \<phi> \<psi>)     = (evalS val R CR X \<phi> \<and> evalS val R CR X \<psi>)"
+| "evalS val R CR X (Kknows a \<phi>)   = (eval_rec val R CR X (Knot \<phi>) = ODList.empty)"
+| "evalS val R CR X (Kcknows as \<phi>) = (eval_rec val R CR (ODList.big_union (CR as) (toList X)) (Knot \<phi>) = ODList.empty)"
+
+
+end

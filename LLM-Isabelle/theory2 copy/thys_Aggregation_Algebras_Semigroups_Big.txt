@@ -1,0 +1,252 @@
+theory Semigroups_Big
+  imports Main
+begin
+
+
+
+locale abel_semigroup_set = abel_semigroup +
+  fixes z :: 'a ("\<^bold>1")
+  assumes z_neutral [simp]: "x \<^bold>* y \<^bold>* \<^bold>1 = x \<^bold>* y"
+  assumes z_idem [simp]: "\<^bold>1 \<^bold>* \<^bold>1 = \<^bold>1"
+begin
+
+interpretation comp_fun_commute f
+  by standard (simp add: fun_eq_iff left_commute)
+
+interpretation comp?: comp_fun_commute "f \<circ> g"
+  by (fact comp_comp_fun_commute)
+
+definition F :: "('b \<Rightarrow> 'a) \<Rightarrow> 'b set \<Rightarrow> 'a"
+  where eq_fold: "F g A = Finite_Set.fold (f \<circ> g) \<^bold>1 A"
+
+lemma infinite [simp]: "\<not> finite A \<Longrightarrow> F g A = \<^bold>1"
+  by (simp add: eq_fold)
+
+lemma empty [simp]: "F g {} = \<^bold>1"
+  by (simp add: eq_fold)
+
+lemma insert [simp]: "finite A \<Longrightarrow> x \<notin> A \<Longrightarrow> F g (insert x A) = g x \<^bold>* F g A"
+  by (simp add: eq_fold)
+
+lemma remove:
+  assumes "finite A" and "x \<in> A"
+  shows "F g A = g x \<^bold>* F g (A - {x})"
+proof -
+    by (auto dest: mk_disjoint_insert)
+  ultimately show ?thesis by simp
+qed
+
+lemma insert_remove: "finite A \<Longrightarrow> F g (insert x A) = g x \<^bold>* F g (A - {x})"
+  by (cases "x \<in> A") (simp_all add: remove insert_absorb)
+
+lemma insert_if: "finite A \<Longrightarrow> F g (insert x A) = (if x \<in> A then F g A else g x \<^bold>* F g A)"
+  by (cases "x \<in> A") (simp_all add: insert_absorb)
+
+lemma neutral: "\<forall>x\<in>A. g x = \<^bold>1 \<Longrightarrow> F g A = \<^bold>1"
+  by (induct A rule: infinite_finite_induct) simp_all
+
+lemma neutral_const [simp]: "F (\<lambda>_. \<^bold>1) A = \<^bold>1"
+  by (simp add: neutral)
+
+lemma F_one [simp]: "F g A \<^bold>* \<^bold>1 = F g A"
+proof -
+  have "\<And>f b B. F f (insert (b::'b) B) \<^bold>* \<^bold>1 = F f (insert b B) \<or> infinite B"
+    using insert_remove by fastforce
+  then show ?thesis
+    by (metis (no_types) all_not_in_conv empty z_idem infinite insert_if)
+qed
+
+lemma one_F [simp]: "\<^bold>1 \<^bold>* F g A = F g A"
+  using F_one commute by auto
+
+lemma F_g_one [simp]: "F (\<lambda>x . g x \<^bold>* \<^bold>1) A = F g A"
+  apply (induct A rule: infinite_finite_induct)
+  apply simp
+  apply simp
+  by (metis one_F assoc insert)
+
+lemma union_inter:
+  assumes "finite A" and "finite B"
+  shows "F g (A \<union> B) \<^bold>* F g (A \<inter> B) = F g A \<^bold>* F g B"
+  using assms
+proof (induct A)
+  case empty
+  then show ?case by simp
+next
+  case (insert x A)
+  then show ?case
+    by (auto simp: insert_absorb Int_insert_left commute [of _ "g x"] assoc left_commute)
+qed
+
+corollary union_inter_neutral:
+  assumes "finite A" and "finite B"
+    and "\<forall>x \<in> A \<inter> B. g x = \<^bold>1"
+  shows "F g (A \<union> B) = F g A \<^bold>* F g B"
+  using assms by (simp add: union_inter [symmetric] neutral)
+
+corollary union_disjoint:
+  assumes "finite A" and "finite B"
+  assumes "A \<inter> B = {}"
+  shows "F g (A \<union> B) = F g A \<^bold>* F g B"
+  using assms by (simp add: union_inter_neutral)
+
+lemma union_diff2:
+  assumes "finite A" and "finite B"
+  shows "F g (A \<union> B) = F g (A - B) \<^bold>* F g (B - A) \<^bold>* F g (A \<inter> B)"
+proof -
+  have "A \<union> B = A - B \<union> (B - A) \<union> A \<inter> B"
+    by auto
+  with assms show ?thesis
+    by simp (subst union_disjoint, auto)+
+qed
+
+lemma subset_diff:
+  assumes "B \<subseteq> A" and "finite A"
+  shows "F g A = F g (A - B) \<^bold>* F g B"
+proof -
+  from assms have "finite (A - B)" by auto
+  moreover from assms have "finite B" by (rule finite_subset)
+  moreover from assms have "(A - B) \<inter> B = {}" by auto
+  ultimately have "F g (A - B \<union> B) = F g (A - B) \<^bold>* F g B" by (rule union_disjoint)
+  moreover from assms have "A \<union> B = A" by auto
+  ultimately show ?thesis by simp
+qed
+
+lemma setdiff_irrelevant:
+  assumes "finite A"
+  shows "F g (A - {x. g x = z}) = F g A"
+  using assms by (induct A) (simp_all add: insert_Diff_if)
+
+lemma not_neutral_contains_not_neutral:
+  assumes "F g A \<noteq> \<^bold>1"
+  obtains a where "a \<in> A" and "g a \<noteq> \<^bold>1"
+proof -
+  from assms have "\<exists>a\<in>A. g a \<noteq> \<^bold>1"
+  proof (induct A rule: infinite_finite_induct)
+    case infinite
+    then show ?case by simp
+  next
+    case empty
+    then show ?case by simp
+  next
+    case (insert a A)
+    then show ?case by fastforce
+  qed
+  with that show thesis by blast
+qed
+
+lemma reindex:
+  assumes "inj_on h A"
+  shows "F g (h ` A) = F (g \<circ> h) A"
+proof (cases "finite A")
+  case True
+  with assms show ?thesis
+    by (simp add: eq_fold fold_image comp_assoc)
+next
+  case False
+  with assms have "\<not> finite (h ` A)" by (blast dest: finite_imageD)
+  with False show ?thesis by simp
+qed
+
+lemma cong [fundef_cong]:
+  assumes "A = B"
+  assumes g_h: "\<And>x. x \<in> B \<Longrightarrow> g x = h x"
+  shows "F g A = F h B"
+  by (induct B rule: infinite_finite_induct) auto
+
+lemma strong_cong [cong]:
+  assumes "A = B" "\<And>x. x \<in> B =simp=> g x = h x"
+  shows "F (\<lambda>x. g x) A = F (\<lambda>x. h x) B"
+
+lemma reindex_cong:
+  assumes "inj_on l B"
+  assumes "A = l ` B"
+  assumes "\<And>x. x \<in> B \<Longrightarrow> g (l x) = h x"
+  shows "F g A = F h B"
+  using assms by (simp add: reindex)
+
+lemma UNION_disjoint:
+  assumes "finite I" and "\<forall>i\<in>I. finite (A i)"
+    and "\<forall>i\<in>I. \<forall>j\<in>I. i \<noteq> j \<longrightarrow> A i \<inter> A j = {}"
+  shows "F g (\<Union>(A ` I)) = F (\<lambda>x. F g (A x)) I"
+  apply (insert assms)
+  apply (induct rule: finite_induct)
+   apply simp
+  apply atomize
+  apply (subgoal_tac "\<forall>i\<in>Fa. x \<noteq> i")
+   prefer 2 apply blast
+  apply (subgoal_tac "A x \<inter> \<Union>(A ` Fa) = {}")
+   prefer 2 apply blast
+  apply (simp add: union_disjoint)
+  done
+
+lemma Union_disjoint:
+  assumes "\<forall>A\<in>C. finite A" "\<forall>A\<in>C. \<forall>B\<in>C. A \<noteq> B \<longrightarrow> A \<inter> B = {}"
+  shows "F g (\<Union>C) = (F \<circ> F) g C"
+proof (cases "finite C")
+  case True
+  from UNION_disjoint [OF this assms] show ?thesis by simp
+next
+  case False
+  then show ?thesis by (auto dest: finite_UnionD intro: infinite)
+qed
+
+lemma distrib: "F (\<lambda>x. g x \<^bold>* h x) A = F g A \<^bold>* F h A"
+  by (induct A rule: infinite_finite_induct) (simp_all add: assoc commute left_commute)
+
+lemma Sigma:
+  "finite A \<Longrightarrow> \<forall>x\<in>A. finite (B x) \<Longrightarrow> F (\<lambda>x. F (g x) (B x)) A = F (case_prod g) (SIGMA x:A. B x)"
+  apply (subst Sigma_def)
+  apply (subst UNION_disjoint)
+     apply assumption
+    apply simp
+   apply blast
+  apply (rule cong)
+   apply rule
+  apply (simp add: fun_eq_iff)
+  apply (subst UNION_disjoint)
+     apply simp
+    apply simp
+   apply blast
+  apply (simp add: comp_def)
+  done
+
+lemma related:
+  assumes Re: "R \<^bold>1 \<^bold>1"
+    and Rop: "\<forall>x1 y1 x2 y2. R x1 x2 \<and> R y1 y2 \<longrightarrow> R (x1 \<^bold>* y1) (x2 \<^bold>* y2)"
+    and fin: "finite S"
+    and R_h_g: "\<forall>x\<in>S. R (h x) (g x)"
+  shows "R (F h S) (F g S)"
+  using fin by (rule finite_subset_induct) (use assms in auto)
+
+lemma mono_neutral_cong_left:
+  assumes "finite T"
+    and "S \<subseteq> T"
+    and "\<forall>i \<in> T - S. h i = \<^bold>1"
+    and "\<And>x. x \<in> S \<Longrightarrow> g x = h x"
+  shows "F g S = F h T"
+proof-
+    by (auto intro: finite_subset)
+  show ?thesis using assms(4)
+    by (simp add: union_disjoint [OF f d, unfolded eq [symmetric]] neutral [OF assms(3)])
+qed
+
+lemma mono_neutral_cong_right:
+  "finite T \<Longrightarrow> S \<subseteq> T \<Longrightarrow> \<forall>i \<in> T - S. g i = \<^bold>1 \<Longrightarrow> (\<And>x. x \<in> S \<Longrightarrow> g x = h x) \<Longrightarrow>
+    F g T = F h S"
+  by (auto intro!: mono_neutral_cong_left [symmetric])
+
+lemma mono_neutral_left: "finite T \<Longrightarrow> S \<subseteq> T \<Longrightarrow> \<forall>i \<in> T - S. g i = \<^bold>1 \<Longrightarrow> F g S = F g T"
+  by (blast intro: mono_neutral_cong_left)
+
+lemma mono_neutral_right: "finite T \<Longrightarrow> S \<subseteq> T \<Longrightarrow> \<forall>i \<in> T - S. g i = \<^bold>1 \<Longrightarrow> F g T = F g S"
+  by (blast intro!: mono_neutral_left [symmetric])
+
+lemma mono_neutral_cong:
+  assumes [simp]: "finite T" "finite S"
+    and *: "\<And>i. i \<in> T - S \<Longrightarrow> h i = \<^bold>1" "\<And>i. i \<in> S - T \<Longrightarrow> g i = \<^bold>1"
+    and gh: "\<And>x. x \<in> S \<inter> T \<Longrightarrow> g x = h x"
+ shows "F g S = F h T"
+proof-
+  have "F g S = F g (S \<inter> T)"
+    by(rule mono_neutral_right)(auto intro: *)

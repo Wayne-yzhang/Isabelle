@@ -1,0 +1,351 @@
+theory Kernels
+  imports Lemmas_S_Finite_Measure_Monad
+begin
+
+locale s_finite_measure =
+  fixes M :: "'a measure"
+  assumes s_finite_sum: "\<exists>Mi :: nat \<Rightarrow> 'a measure. (\<forall>i. sets (Mi i) = sets M) \<and> (\<forall>i. finite_measure (Mi i)) \<and> (\<forall>A\<in>sets M. M A = (\<Sum>i. Mi i A))"
+
+lemma(in sigma_finite_measure) s_finite_measure: "s_finite_measure M"
+proof
+  obtain A :: "nat \<Rightarrow> _" where A: "range A \<subseteq> sets M" "\<Union> (range A) = space M" "\<And>i. emeasure M (A i) \<noteq> \<infinity>" "disjoint_family A"
+    by(metis sigma_finite_disjoint)
+  define Mi where "Mi \<equiv> (\<lambda>i. measure_of (space M) (sets M) (\<lambda>a. M (a \<inter> A i)))"
+  have emeasure_Mi:"Mi i a = M (a \<inter> A i)" if "a \<in> sets M" for i a
+  proof -
+    have "positive (sets (Mi i)) (\<lambda>a. M (a \<inter> A i))" "countably_additive (sets (Mi i)) (\<lambda>a. M (a \<inter> A i))"
+      unfolding positive_def countably_additive_def
+    proof safe
+      fix B :: "nat \<Rightarrow> _"
+      assume "range B \<subseteq> sets (Mi i)" "disjoint_family B"
+      with A(1) have "range (\<lambda>j. B j \<inter> A i) \<subseteq> sets M" "disjoint_family (\<lambda>j. B j \<inter> A i)"
+        by(fastforce simp: Mi_def disjoint_family_on_def)+
+      thus "(\<Sum>j. M (B j \<inter> A i)) = M (\<Union> (range B) \<inter> A i)"
+        by (metis UN_extend_simps(4) suminf_emeasure)
+    qed simp
+    from emeasure_measure_of[OF _ _ this] that show ?thesis
+      by(auto simp add: Mi_def sets.space_closed)
+  qed
+  have sets_Mi:"sets (Mi i) = sets M" for i by(simp add: Mi_def)
+  show "\<exists>Mi. (\<forall>i. sets (Mi i) = sets M) \<and> (\<forall>i. finite_measure (Mi i)) \<and> (\<forall>A\<in>sets M. emeasure M A = (\<Sum>i. emeasure (Mi i) A))"
+  proof(safe intro!: exI[where x=Mi])
+    fix i
+    show "finite_measure (Mi i)"
+      using A by(auto intro!: finite_measureI simp: sets_eq_imp_space_eq[OF sets_Mi] emeasure_Mi)
+  next
+    fix B
+    assume B:"B \<in> sets M"
+    with A(1,4) have "range (\<lambda>i. B \<inter> A i) \<subseteq> sets M" "disjoint_family (\<lambda>i. B \<inter> A i)"
+      by(auto simp: disjoint_family_on_def)
+    then show "M B = (\<Sum>i. (Mi i) B)"
+      by(simp add: emeasure_Mi[OF B] suminf_emeasure A(2) B)
+  qed(simp_all add: sets_Mi)
+qed
+
+lemmas(in finite_measure) s_finite_measure_finite_measure = s_finite_measure
+
+lemmas(in subprob_space) s_finite_measure_subprob = s_finite_measure
+
+lemmas(in prob_space) s_finite_measure_prob = s_finite_measure
+
+sublocale sigma_finite_measure \<subseteq> s_finite_measure
+  by(rule s_finite_measure)
+
+lemma s_finite_measureI:
+  assumes "\<And>i. sets (Mi i) = sets M" "\<And>i. finite_measure (Mi i)" "\<And>A. A\<in>sets M \<Longrightarrow> M A = (\<Sum>i. Mi i A)"
+  shows "s_finite_measure M"
+  by standard (use assms in blast)
+
+lemma s_finite_measure_prodI:
+  assumes "\<And>i j. sets (Mij i j) = sets M" "\<And>i j. Mij i j (space M) < \<infinity>" "\<And>A. A \<in> sets M \<Longrightarrow> M A = (\<Sum>i. (\<Sum>j. Mij i j A))"
+  shows "s_finite_measure M"
+proof -
+  define Mi' where "Mi' \<equiv> (\<lambda>n. case_prod Mij (prod_decode n))"
+  have sets_Mi'[measurable_cong]:"\<And>i. sets (Mi' i) = sets M"
+    using assms(1) by(simp add: Mi'_def split_beta')
+  have Mi'_finite:"\<And>i. finite_measure (Mi' i)"
+    using assms(2) sets_eq_imp_space_eq[OF sets_Mi'[symmetric]] top.not_eq_extremum
+    by(fastforce intro!: finite_measureI simp: Mi'_def split_beta')
+  show ?thesis
+  proof(safe intro!: s_finite_measureI[where Mi=Mi'] sets_Mi' Mi'_finite)
+    fix A
+    show "A \<in> sets M \<Longrightarrow> M A = (\<Sum>i. Mi' i A)"
+      by(simp add: assms(3) suminf_ennreal_2dimen[where f="\<lambda>(x,y). Mij x y A", simplified,OF refl,symmetric] Mi'_def split_beta')
+  qed
+qed
+
+corollary s_finite_measure_s_finite_sumI:
+  assumes "\<And>i. sets (Mi i) = sets M" "\<And>i. s_finite_measure (Mi i)" "\<And>A. A \<in> sets M \<Longrightarrow> M A = (\<Sum>i. Mi i A)"
+  shows "s_finite_measure M"
+proof -
+  from s_finite_measure.s_finite_sum[OF assms(2)]
+  obtain Mij where Mij[measurable]: "\<And>i j. sets (Mij i j) = sets M" "\<And>i j. finite_measure (Mij i j)" "\<And>i j A. A \<in> sets M \<Longrightarrow> Mi i A = (\<Sum>j. Mij i j A)"
+    by (metis assms(1))
+  show ?thesis
+    using finite_measure.emeasure_finite[OF Mij(2)]
+    by(auto intro!: s_finite_measure_prodI[where Mij = Mij] simp: assms(3) Mij top.not_eq_extremum)
+qed
+
+lemma countable_space_s_finite_measure:
+  assumes "countable (space M)" "sets M = Pow (space M)"
+  shows "s_finite_measure M"
+proof -
+  define Mi where "Mi \<equiv> (\<lambda>i. measure_of (space M) (sets M) (\<lambda>A. emeasure M (A \<inter> {from_nat_into (space M) i})))"
+  have sets_Mi[measurable_cong,simp]: "sets (Mi i) = sets M" for i
+    by(auto simp: Mi_def)
+  have emeasure_Mi: "emeasure (Mi i) A = emeasure M (A \<inter> {from_nat_into (space M) i})" if [measurable]: "A \<in> sets M" and i:"i \<in> to_nat_on (space M) ` (space M)" for i A
+  proof -
+    have "from_nat_into (space M) i \<in> space M"
+      by (simp add: from_nat_into_def i inv_into_into)
+    hence [measurable]: "{from_nat_into (space M) i} \<in> sets M"
+      using assms(2) by auto
+    have 1:"countably_additive (sets M) (\<lambda>A. emeasure M (A \<inter> {from_nat_into (space M) i}))"
+      unfolding countably_additive_def
+    proof safe
+      fix B :: "nat \<Rightarrow> _"
+      assume "range B \<subseteq> sets M" "disjoint_family B"
+      then have [measurable]:"\<And>i. B i \<in> sets M" and "disjoint_family (\<lambda>j. B j \<inter> {from_nat_into (space M) i})"
+        by(auto simp: disjoint_family_on_def)
+      then have "(\<Sum>j. emeasure M (B j \<inter> {from_nat_into (space M) i})) = emeasure M (\<Union> (range (\<lambda>j. B j \<inter> {from_nat_into (space M) i})))"
+        by(intro suminf_emeasure) auto
+      thus "(\<Sum>j. emeasure M (B j \<inter> {from_nat_into (space M) i})) = emeasure M (\<Union> (range B) \<inter> {from_nat_into (space M) i})"
+        by simp
+    qed
+    have 2:"positive (sets M) (\<lambda>A. emeasure M (A \<inter> {from_nat_into (space M) i}))"
+      by(auto simp: positive_def)
+    show ?thesis
+      by(simp add: Mi_def emeasure_measure_of_sigma[OF sets.sigma_algebra_axioms 2 1])
+  qed
+  define Mi' where "Mi' \<equiv> (\<lambda>i. if i \<in> to_nat_on (space M) ` (space M) then Mi i else null_measure M)"
+  have [measurable_cong, simp]: "sets (Mi' i) = sets M" for i
+    by(auto simp: Mi'_def)
+  show ?thesis
+  proof(rule s_finite_measure_s_finite_sumI[where Mi=Mi'])
+    fix A
+    assume A[measurable]: "A \<in> sets M"
+    show "emeasure M A = (\<Sum>i. emeasure (Mi' i) A)" (is "?lhs = ?rhs")
+    proof -
+      have "?lhs = (\<integral>\<^sup>+ x. emeasure M {x} \<partial>count_space A)"
+        using sets.sets_into_space[OF A] by(auto intro!: emeasure_countable_singleton simp: assms(2) countable_subset[OF _ assms(1)])
+      also have "... = (\<integral>\<^sup>+ x. emeasure (Mi (to_nat_on (space M) x)) A \<partial>count_space A)"
+      proof(safe intro!: nn_integral_cong)
+        fix x
+        assume "x \<in> space (count_space A)"
+        then have 1:"x \<in> A" by simp
+        hence 2:"to_nat_on (space M) x \<in> to_nat_on (space M) ` (space M)"
+          using A assms(2) by auto
+        have [simp]: "from_nat_into (space M) (to_nat_on (space M) x) = x"
+          by (metis 1 2 A assms(1) eq_from_nat_into_iff in_mono sets.sets_into_space)
+        show "emeasure M {x} = emeasure (Mi (to_nat_on (space M) x)) A"
+          using 1 by(simp add: emeasure_Mi[OF A 2])
+      qed
+      also have "... = (\<integral>\<^sup>+ x\<in>A. emeasure (Mi (to_nat_on (space M) x)) A \<partial>count_space UNIV)"
+        by (simp add: nn_integral_count_space_indicator)
+      also have "... = (\<integral>\<^sup>+ i\<in>to_nat_on (space M) ` A. emeasure (Mi i) A \<partial>count_space UNIV)"
+        by(rule nn_integral_count_compose_inj[OF inj_on_subset[OF inj_on_to_nat_on[OF assms(1)] sets.sets_into_space[OF A]]])
+      also have "... = (\<integral>\<^sup>+ i\<in>to_nat_on (space M) ` A. emeasure (Mi' i) A \<partial>count_space UNIV)"
+      proof -
+        {
+          fix x
+          assume "x \<in> A"
+          then have "to_nat_on (space M) x \<in> to_nat_on (space M) ` (space M)"
+            using sets.sets_into_space[OF A] by auto
+          hence "emeasure (Mi (to_nat_on (space M) x)) A = emeasure (Mi' (to_nat_on (space M) x)) A"
+            by(auto simp: Mi'_def)
+        }
+        thus ?thesis
+          by(auto intro!: nn_integral_cong simp: indicator_def)
+      qed
+      also have "... = (\<integral>\<^sup>+ i. emeasure (Mi' i) A \<partial>count_space UNIV)"
+      proof -
+        { 
+          fix i
+          assume i:"i \<notin> to_nat_on (space M) ` A"
+          have "from_nat_into (space M) i \<notin> A" if "i \<in> to_nat_on (space M) ` (space M)"
+            by (metis i image_eqI that to_nat_on_from_nat_into)
+          with emeasure_Mi have "emeasure (Mi' i) A = 0"
+            by(auto simp: Mi'_def)
+        }
+        thus ?thesis
+          by(auto intro!: nn_integral_cong simp: indicator_def)
+      qed
+      also have "... = ?rhs"
+        by(rule nn_integral_count_space_nat)
+      finally show ?thesis .
+    qed
+  next
+    fix i
+    show "s_finite_measure (Mi' i)"
+    proof -
+      {
+        fix x
+        assume h:"x \<in> space M" "i = to_nat_on (space M) x"
+        then have i:"i \<in> to_nat_on (space M) ` space M"
+          by blast
+        have x: "from_nat_into (space M) i = x"
+          using h by (simp add: assms(1))
+        consider "M {x} = 0" | "M {x} \<noteq> 0" "M {x} < \<infinity>" | "M {x} = \<infinity>"
+          using top.not_eq_extremum by fastforce
+        hence "s_finite_measure (Mi (to_nat_on (space M) x))"
+        proof cases
+          case 1
+          then have [simp]:"Mi i = null_measure M"
+            by(auto intro!: measure_eqI simp: emeasure_Mi[OF _ i] x Int_insert_right)
+          show ?thesis
+            by(auto simp: h(2)[symmetric] intro!: finite_measure.s_finite_measure_finite_measure finite_measureI)
+        next
+          case 2
+          then show ?thesis
+            unfolding h(2)[symmetric]
+            by(auto intro!: finite_measure.s_finite_measure_finite_measure finite_measureI simp: sets_eq_imp_space_eq[OF sets_Mi] emeasure_Mi[OF _ i] x h(1))
+        next
+          case 3
+          show ?thesis
+            unfolding h(2)[symmetric] s_finite_measure_def
+          proof(safe intro!: exI[where x="\<lambda>j. return M x"] prob_space.finite_measure prob_space_return h(1))
+            fix A
+            assume "A \<in> sets (Mi i)"
+            then have [measurable]: "A \<in> sets M"
+              by(simp add: Mi_def)
+            thus "emeasure (Mi i) A = (\<Sum>i. emeasure (return M x) A)"
+              by(simp add: emeasure_Mi[OF _ i] x) (cases "x \<in> A",auto simp: 3 nn_integral_count_space_nat[symmetric])
+          qed(auto simp: Mi_def)
+        qed
+      }
+      thus ?thesis
+        by(auto simp: Mi'_def) (auto intro!: finite_measure.s_finite_measure_finite_measure finite_measureI)
+    qed
+  qed simp
+qed
+
+lemma s_finite_measure_subprob_space:
+ "s_finite_measure M \<longleftrightarrow> (\<exists>Mi :: nat \<Rightarrow> 'a measure. (\<forall>i. sets (Mi i) = sets M) \<and> (\<forall>i. (Mi i) (space M) \<le> 1) \<and> (\<forall>A\<in>sets M. M A = (\<Sum>i. Mi i A)))"
+proof
+  assume "\<exists>Mi. (\<forall>i. sets (Mi i) = sets M) \<and> (\<forall>i. emeasure (Mi i) (space M) \<le> 1) \<and> (\<forall>A\<in>sets M. M A = (\<Sum>i. (Mi i) A))"
+  then obtain Mi where 1:"\<And>i. sets (Mi i) = sets M" "\<And>i. emeasure (Mi i) (space M) \<le> 1" "(\<forall>A\<in>sets M. M A = (\<Sum>i. (Mi i) A))"
+    by auto
+  thus "s_finite_measure M"
+    by(auto simp: s_finite_measure_def sets_eq_imp_space_eq[OF 1(1)] intro!: finite_measureI exI[where x=Mi])  (metis ennreal_one_less_top linorder_not_le)
+next
+  assume "s_finite_measure M"
+  then obtain Mi' where Mi': "\<And>i. sets (Mi' i) = sets M" "\<And>i. finite_measure (Mi' i)" "\<And>A. A\<in>sets M \<Longrightarrow> M A = (\<Sum>i. Mi' i A)"
+    by (metis s_finite_measure.s_finite_sum)
+  obtain u where u:"\<And>i. u i < \<infinity>" "\<And>i. Mi' i (space M) = u i"
+    using Mi'(2) finite_measure.emeasure_finite top.not_eq_extremum by fastforce
+  define Mmn where "Mmn \<equiv> (\<lambda>(m,n). if n < nat \<lceil>enn2real (u m)\<rceil> then scale_measure (1 / ennreal (real_of_int \<lceil>enn2real (u m)\<rceil>)) (Mi' m) else (sigma (space M) (sets M)))"
+  have sets_Mmn : "sets (Mmn k) = sets M" for k by(simp add: Mmn_def split_beta Mi')
+  have emeasure_Mmn: "(Mmn (m, n)) A = (Mi' m A) / ennreal (real_of_int \<lceil>enn2real (u m)\<rceil>)" if "n < nat \<lceil>enn2real (u m)\<rceil>" "A \<in> sets M" for n m A
+    by(auto simp: Mmn_def that ennreal_divide_times)
+  have emeasure_Mmn_less1: "(Mmn (m, n)) A \<le> 1" for m n A
+  proof (cases "n < nat \<lceil>enn2real (u m)\<rceil> \<and> A \<in> sets M")
+    case h:True
+    have "(Mi' m) A \<le> ennreal (real_of_int \<lceil>enn2real (u m)\<rceil>)"
+      by(rule order.trans[OF emeasure_mono[OF sets.sets_into_space sets.top]]) (insert u(1) h, auto simp: u(2)[symmetric] enn2real_le top.not_eq_extremum sets_eq_imp_space_eq[OF Mi'(1)] Mi'(1))
+    with h show ?thesis
+      by(simp add: emeasure_Mmn) (metis divide_le_posI_ennreal dual_order.eq_iff ennreal_zero_divide mult.right_neutral not_gr_zero zero_le)
+  qed(auto simp: Mmn_def emeasure_sigma emeasure_notin_sets  Mi')
+  have Mi'_sum:"Mi' m A = (\<Sum>n. Mmn (m, n) A)" if "A \<in> sets M" for m A
+  proof -
+    have "(\<Sum>n. Mmn (m, n) A) = (\<Sum>n. Mmn (m, n + nat \<lceil>enn2real (u m)\<rceil>) A) + (\<Sum>n< nat \<lceil>enn2real (u m)\<rceil>. Mmn (m, n) A)"
+      by(simp add: suminf_offset[where f="\<lambda>n. Mmn (m, n) A"])
+    also have "... = (\<Sum>n< nat \<lceil>enn2real (u m)\<rceil>. Mmn (m, n) A)"
+      by(simp add: emeasure_sigma Mmn_def)
+    also have "... = (\<Sum>n< nat \<lceil>enn2real (u m)\<rceil>. (Mi' m A) / ennreal (real_of_int \<lceil>enn2real (u m)\<rceil>))"
+      by(rule Finite_Cartesian_Product.sum_cong_aux) (auto simp: emeasure_Mmn that)
+    also have "... = Mi' m A"
+    proof (cases "nat \<lceil>enn2real (u m)\<rceil>")
+      case 0
+      with u[of m] show ?thesis
+        by simp (metis Mi'(1) emeasure_mono enn2real_positive_iff less_le_not_le linorder_less_linear not_less_zero sets.sets_into_space sets.top that)
+    next
+      case (Suc n')
+      then have "ennreal (real_of_int \<lceil>enn2real (u m)\<rceil>) > 0"
+        using ennreal_less_zero_iff by fastforce
+      with u(1)[of m] have "of_nat (nat \<lceil>enn2real (u m)\<rceil>) / ennreal (real_of_int \<lceil>enn2real (u m)\<rceil>) = 1"
+        by (simp add: ennreal_eq_0_iff ennreal_of_nat_eq_real_of_nat)
+      thus ?thesis
+        by (simp add: ennreal_divide_times[symmetric])
+    qed
+    finally show ?thesis ..
+  qed
+  define Mi where "Mi \<equiv> (\<lambda>i. Mmn (prod_decode i))"
+  show "\<exists>Mi. (\<forall>i. sets (Mi i) = sets M) \<and> (\<forall>i. emeasure (Mi i) (space M) \<le> 1) \<and> (\<forall>A\<in>sets M. M A = (\<Sum>i. (Mi i) A))"
+   by(auto intro!: exI[where x=Mi] simp: Mi_def sets_Mmn suminf_ennreal_2dimen[OF Mi'_sum] Mi'(3)) (metis emeasure_Mmn_less1 prod_decode_aux.cases)
+qed
+
+lemma(in s_finite_measure) finite_measures:
+  obtains Mi where "\<And>i. sets (Mi i) = sets M" "\<And>i. (Mi i) (space M) \<le> 1" "\<And>A. M A = (\<Sum>i. Mi i A)"
+proof -
+  obtain Mi where Mi:"\<And>i. sets (Mi i) = sets M" "\<And>i. (Mi i) (space M) \<le> 1" "\<And>A. A \<in> sets M \<Longrightarrow> M A = (\<Sum>i. Mi i A)"
+    using s_finite_measure_axioms by(metis s_finite_measure_subprob_space)
+  hence "M A = (\<Sum>i. Mi i A)" for A
+    by(cases "A \<in> sets M") (auto simp: emeasure_notin_sets)
+  with Mi(1,2) show ?thesis
+    using that by blast
+qed
+
+lemma(in s_finite_measure) finite_measures_ne:
+  assumes "space M \<noteq> {}"
+  obtains Mi where "\<And>i. sets (Mi i) = sets M" "\<And>i. subprob_space (Mi i)" "\<And>A. M A = (\<Sum>i. Mi i A)"
+  by (metis assms finite_measures sets_eq_imp_space_eq subprob_spaceI)
+
+lemma(in s_finite_measure) finite_measures':
+  obtains Mi where "\<And>i. sets (Mi i) = sets M" "\<And>i. finite_measure (Mi i)" "\<And>A. M A = (\<Sum>i. Mi i A)"
+  by (metis ennreal_top_neq_one finite_measureI finite_measures infinity_ennreal_def sets_eq_imp_space_eq top.extremum_uniqueI)
+
+lemma(in s_finite_measure) s_finite_measure_distr:
+  assumes f[measurable]:"f \<in> M \<rightarrow>\<^sub>M N"
+  shows "s_finite_measure (distr M N f)"
+proof -
+  obtain Mi where Mi[measurable_cong]:"\<And>i. sets (Mi i) = sets M" "\<And>i. finite_measure (Mi i)" "\<And>A. M A = (\<Sum>i. Mi i A)"
+    by(metis finite_measures')
+  show ?thesis
+    by(auto intro!: s_finite_measureI[where Mi="(\<lambda>i. distr (Mi i) N f)"] finite_measure.finite_measure_distr[OF Mi(2)] simp: emeasure_distr Mi(3) sets_eq_imp_space_eq[OF Mi(1)])
+qed
+
+lemma nn_integral_measure_suminf:
+  assumes [measurable_cong]:"\<And>i. sets (Mi i) = sets M" and "\<And>A. A\<in>sets M \<Longrightarrow> M A = (\<Sum>i. Mi i A)" "f \<in> borel_measurable M"
+  shows "(\<Sum>i. \<integral>\<^sup>+x. f x \<partial>(Mi i)) = (\<integral>\<^sup>+x. f x \<partial>M)"
+  using assms(3)
+proof induction
+  case (cong f g)
+  then show ?case
+    by (metis (no_types, lifting) assms(1) nn_integral_cong sets_eq_imp_space_eq suminf_cong)
+next
+  case (set A)
+  then show ?case
+    using assms(1,2) by simp
+next
+  case (mult u c)
+  then show ?case
+    by(simp add: nn_integral_cmult)
+next
+  case (add u v)
+  then show ?case
+    by(simp add: nn_integral_add suminf_add[symmetric])
+next
+  case ih:(seq U)
+  have "(\<Sum>i. integral\<^sup>N (Mi i) (\<Squnion> range U)) = (\<Sum>i. \<integral>\<^sup>+ x. (\<Squnion>j. U j x)  \<partial>(Mi i))"
+    by(auto intro!: suminf_cong) (metis SUP_apply)
+  also have "... = (\<Sum>i. \<Squnion>j. \<integral>\<^sup>+ x. U j x \<partial>(Mi i))"
+    using ih by(auto intro!: suminf_cong nn_integral_monotone_convergence_SUP)
+  also have "... = (\<Squnion>j. (\<Sum>i. \<integral>\<^sup>+ x. U j x \<partial>(Mi i)))"
+    using ih(3) by(auto intro!: ennreal_suminf_SUP_eq incseq_nn_integral)
+  also have "... = (\<Squnion>j. integral\<^sup>N M (U j))"
+    by(simp add: ih)
+  also have "... = (\<integral>\<^sup>+ x. (\<Squnion>j. U j x) \<partial>M)"
+    using ih by(auto intro!: nn_integral_monotone_convergence_SUP[symmetric])
+  also have "... = integral\<^sup>N M (\<Squnion> range U)"
+    by(metis SUP_apply)
+  finally show ?case .
+qed
+
+       We do not require additional assumption, unlike $\sigma$-finite measures.\<close>
+  have "finite (insert i I)" using \<open>finite I\<close> by auto
+text \<open> Every s-finite measure is represented as the push-forward measure of a $\sigma$-finite measure.\<close>
+subsection \<open> Measure Kernel \<close>
+subsection \<open> Finite Kernel \<close>
+subsection \<open> Sub-Probability Kernel\<close>
+subsection \<open> Probability Kernel \<close>
+subsection\<open> S-Finite Kernel \<close>
+text \<open> Each kernel does not need to be bounded by a uniform upper-bound in the definition of @{term s_finite_kernel} \<close>

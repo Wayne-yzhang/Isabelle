@@ -1,0 +1,172 @@
+theory Fair_Price imports Filtration Martingale Geometric_Random_Walk
+begin
+
+
+lemma (in prob_space) finite_borel_measurable_integrable:
+  assumes "f\<in> borel_measurable M"
+  and "finite (f`(space M))"
+  shows "integrable M f"
+proof -
+  have "simple_function M f" using assms by (simp add: simple_function_borel_measurable)
+  moreover have "emeasure M {y \<in> space M. f y \<noteq> 0} \<noteq> \<infinity>" by simp
+  ultimately have "Bochner_Integration.simple_bochner_integrable M f"
+    using Bochner_Integration.simple_bochner_integrable.simps by blast
+  hence "has_bochner_integral M f (Bochner_Integration.simple_bochner_integral M f)"
+    using has_bochner_integral_simple_bochner_integrable by auto
+  thus ?thesis using integrable.simps by auto
+qed
+
+
+
+lemma AE_eq_trans[trans]:
+  assumes "AE x in M. A x = B x"
+  and "AE x in M. B x = C x"
+  shows "AE x in M. A x = C x"
+  using assms  by auto
+
+
+abbreviation AEeq where "AEeq M X Y \<equiv> AE w in M. X w = Y w"
+
+
+
+lemma AE_add:
+  assumes "AE w in M. f w = g w"
+  and "AE w in M. f' w = g' w"
+shows "AE w in M. f w + f' w = g w + g' w" using assms by auto
+
+
+lemma AE_sum:
+  assumes "finite I"
+  and  "\<forall> i\<in>I. AE w in M. f i w = g i w"
+  shows "AE w in M. (\<Sum>i\<in> I. f i w) = (\<Sum>i\<in> I. g i w)" using assms(1) subset_refl[of I]
+proof (induct rule: finite_subset_induct)
+  case empty
+  then show ?case by simp
+next
+  case (insert a F)
+  have "AEeq M (f a) (g a)" using assms(2) insert.hyps(2) by auto
+  have "AE w in M. (\<Sum>i\<in> insert a F. f i w) = f a w + (\<Sum>i\<in> F. f i w)"
+    by (simp add: insert.hyps(1) insert.hyps(3))
+  also have "AE w in M. f a w + (\<Sum>i\<in> F. f i w) = g a w + (\<Sum>i\<in> F. f i w)"
+  also have "AE w in M. g a w + (\<Sum>i\<in> F. f i w) = g a w + (\<Sum>i\<in> F. g i w)"
+    using insert.hyps(4) by auto
+  also have "AE w in M. g a w + (\<Sum>i\<in> F. g i w) = (\<Sum>i\<in> insert a F. g i w)"
+    by (simp add: insert.hyps(1) insert.hyps(3))
+  finally show ?case by auto
+qed
+
+
+lemma AE_eq_cst:
+  assumes "AE w in M. (\<lambda>w. c) w = (\<lambda>w. d) w"
+  and "emeasure M (space M) \<noteq> 0"
+  shows "c = d"
+proof (rule ccontr)
+  assume "c \<noteq> d"
+    by (force elim:AE_E)
+  hence "{w\<in> space M. (\<lambda>w. c) w \<noteq> (\<lambda>w. d) w} = space M" by auto
+  hence "space M\<subseteq> N" using Nprops by auto
+qed
+
+
+lemma (in prob_space) subalgebra_sigma_finite:
+  assumes "subalgebra M N"
+  shows "sigma_finite_subalgebra M N" unfolding sigma_finite_subalgebra_def by (simp add: assms prob_space_axioms prob_space_imp_sigma_finite prob_space_restr_to_subalg)
+
+
+
+lemma (in prob_space) trivial_subalg_cond_expect_AE:
+  assumes "subalgebra M N"
+  and "sets N = {{}, space M}"
+  and "integrable M f"
+shows "AE x in M. real_cond_exp M N f x = (\<lambda>x. expectation f) x"
+proof (intro sigma_finite_subalgebra.real_cond_exp_charact)
+  show "sigma_finite_subalgebra M N" by (simp add: assms(1) subalgebra_sigma_finite)
+  show "integrable M f" using assms by simp
+  show "integrable M (\<lambda>x. expectation f)" by auto
+  show "(\<lambda>x. expectation f) \<in> borel_measurable N" by simp
+  show "\<And>A. A \<in> sets N \<Longrightarrow> set_lebesgue_integral M A f = \<integral>x\<in>A. expectation f\<partial>M"
+  proof -
+    fix A
+    assume "A \<in> sets N"
+    show "set_lebesgue_integral M A f = \<integral>x\<in>A. expectation f\<partial>M"
+    proof (cases "A = {}")
+      case True
+      thus ?thesis by (simp add: set_lebesgue_integral_def)
+    next
+      case False
+        by (metis (mono_tags, lifting) Bochner_Integration.integral_cong indicator_simps(1)
+                  scaleR_one set_lebesgue_integral_def)
+        by (auto simp add:prob_space set_lebesgue_integral_def)
+      finally show ?thesis .
+    qed
+  qed
+qed
+
+lemma (in prob_space) triv_subalg_borel_eq:
+  assumes "subalgebra M F"
+  and "sets F = {{}, space M}"
+  and "AE x in M. f x = (c::'b::{t2_space})"
+  and "f\<in> borel_measurable F"
+shows "\<forall>x\<in> space M. f x = c"
+proof
+  fix x
+  assume "x\<in> space M"
+  have "space M = space F" using assms by (simp add:subalgebra_def)
+  have "space M \<noteq> {}" by (simp add:not_empty)
+  hence "\<exists>d. \<forall>y\<in> space F. f y = d" by (metis assms(1) assms(2) assms(4) subalgebra_def triv_measurable_cst)
+  from this obtain d where "\<forall>y \<in>space F. f y = d" by auto
+  also have "... = c"
+  proof (rule ccontr)
+    assume "d\<noteq> c"
+      by (force elim:AE_E)
+    hence "space M\<subseteq> N" using Nprops by auto
+  qed
+  finally show "f x = c" .
+qed
+
+
+
+lemma (in prob_space) trivial_subalg_cond_expect_eq:
+  assumes "subalgebra M N"
+  and "sets N = {{}, space M}"
+  and "integrable M f"
+shows "\<forall>x\<in> space M. real_cond_exp M N f x = expectation f"
+proof (rule triv_subalg_borel_eq)
+  show "subalgebra M N" "sets N = {{}, space M}" using assms by auto
+  show "real_cond_exp M N f \<in> borel_measurable N" by simp
+  show "AE x in M. real_cond_exp M N f x = expectation f"
+    by (rule trivial_subalg_cond_expect_AE, (auto simp add:assms))
+qed
+
+
+
+lemma (in sigma_finite_subalgebra) real_cond_exp_cong':
+  assumes "\<forall>w \<in> space M. f w = g w"
+  and "f\<in> borel_measurable M"
+shows "AE w in M. real_cond_exp M F f w = real_cond_exp M F g w"
+proof (rule real_cond_exp_cong)
+  show "AE w in M. f w = g w" using assms by simp
+  show "f\<in> borel_measurable M" using assms by simp
+  show "g\<in> borel_measurable M" using assms by (metis measurable_cong)
+qed
+
+lemma (in sigma_finite_subalgebra) real_cond_exp_bsum :
+  fixes f::"'b \<Rightarrow> 'a \<Rightarrow> real"
+  assumes [measurable]: "\<And>i. i\<in>I \<Longrightarrow> integrable M (f i)"
+  shows "AE x in M. real_cond_exp M F (\<lambda>x. \<Sum>i\<in>I. f i x) x = (\<Sum>i\<in>I. real_cond_exp M F (f i) x)"
+proof (rule real_cond_exp_charact)
+  fix A assume [measurable]: "A \<in> sets F"
+  then have A_meas [measurable]: "A \<in> sets M" by (meson subsetD subalg subalgebra_def)
+
+  have *: "\<And>i. i \<in> I \<Longrightarrow> integrable M (\<lambda>x. indicator A x * f i x)"
+  have **: "\<And>i. i \<in> I \<Longrightarrow> integrable M (\<lambda>x. indicator A x * real_cond_exp M F (f i) x)"
+  have inti: "\<And>i. i \<in> I \<Longrightarrow>(\<integral>x. indicator A x * f i x \<partial>M) = (\<integral>x. indicator A x * real_cond_exp M F (f i) x \<partial>M)" using
+      real_cond_exp_intg(2)[symmetric,of "indicator A" ]
+  have "(\<integral>x\<in>A. (\<Sum>i\<in>I. f i x)\<partial>M) = (\<integral>x. (\<Sum>i\<in>I. indicator A x * f i x)\<partial>M)"
+    by (simp add: sum_distrib_left set_lebesgue_integral_def)
+  also have "... = (\<Sum>i\<in>I. (\<integral>x. indicator A x * f i x \<partial>M))" using Bochner_Integration.integral_sum[of I M "\<lambda>i x. indicator A x * f i x"] *
+    by simp
+  also have "... = (\<Sum>i\<in>I. (\<integral>x. indicator A x * real_cond_exp M F (f i) x \<partial>M))"
+    using inti by auto
+  also have "... = (\<integral>x. (\<Sum>i\<in>I. indicator A x * real_cond_exp M F (f i) x)\<partial>M)"
+    by (rule Bochner_Integration.integral_sum[symmetric], simp add: **)

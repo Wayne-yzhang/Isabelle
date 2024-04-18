@@ -1,0 +1,985 @@
+theory Generic_Join_Correctness
+  imports Generic_Join
+begin
+
+definition wf_set :: "nat \<Rightarrow> vertices \<Rightarrow> bool" where
+  "wf_set n V \<longleftrightarrow> (\<forall>x\<in>V. x < n)"
+
+definition wf_atable :: "nat \<Rightarrow> 'a atable \<Rightarrow> bool" where
+  "wf_atable n X \<longleftrightarrow> table n (fst X) (snd X) \<and> finite (fst X)"
+
+definition wf_query :: "nat \<Rightarrow> vertices \<Rightarrow> 'a query \<Rightarrow> 'a query \<Rightarrow> bool" where
+  "wf_query n V Q_pos Q_neg \<longleftrightarrow> (\<forall>X\<in>(Q_pos \<union> Q_neg). wf_atable n X) \<and> (wf_set n V) \<and> (card Q_pos \<ge> 1)"
+
+definition included :: "vertices \<Rightarrow> 'a query \<Rightarrow> bool" where
+  "included V Q \<longleftrightarrow> (\<forall>(S, X)\<in>Q. S \<subseteq> V)"
+
+definition covering :: "vertices \<Rightarrow> 'a query \<Rightarrow> bool" where
+  "covering V Q \<longleftrightarrow> V \<subseteq> (\<Union>(S, X)\<in>Q. S)"
+
+definition non_empty_query :: "'a query \<Rightarrow> bool" where
+  "non_empty_query Q = (\<forall>X\<in>Q. card (fst X) \<ge> 1)"
+
+definition rwf_query :: "nat \<Rightarrow> vertices \<Rightarrow> 'a query \<Rightarrow> 'a query \<Rightarrow> bool" where
+  "rwf_query n V Qp Qn \<longleftrightarrow> wf_query n V Qp Qn \<and> covering V Qp \<and> included V Qp \<and> included V Qn
+                         \<and> non_empty_query Qp \<and> non_empty_query Qn"
+
+lemma wf_tuple_empty: "wf_tuple n {} v \<longleftrightarrow> v = replicate n None"
+  by (auto intro!: replicate_eqI simp add: wf_tuple_def in_set_conv_nth)
+
+lemma table_empty: "table n {} X \<longleftrightarrow> (X = empty_table \<or> X = unit_table n)"
+  by (auto simp add: wf_tuple_empty unit_table_def table_def)
+
+context getIJ begin
+
+lemma isSame_equi_dev:
+  assumes "wf_set n V"
+  assumes "wf_tuple n A t1"
+  assumes "wf_tuple n B t2"
+  assumes "s \<subseteq> A"
+  assumes "s \<subseteq> B"
+  assumes "A \<subseteq> V"
+  assumes "B \<subseteq> V"
+  shows "isSameIntersection t1 s t2 = (restrict s t1 = restrict s t2)"
+proof -
+  have "(\<forall>i\<in>s. t1!i = t2!i) \<longleftrightarrow> (restrict s t1 = restrict s t2)" (is "?A \<longleftrightarrow> ?B")
+  proof -
+    have "?B \<Longrightarrow> ?A"
+    proof -
+      assume "?B"
+      have "\<And>i. i\<in>s \<Longrightarrow> t1!i = t2!i"
+      proof -
+        fix i assume "i \<in> s"
+        then have "i \<in> A" using assms(4) by blast
+        then have "i < n" using assms(1) assms(6) wf_set_def by auto
+              assms(2) length_restrict nth_restrict wf_tuple_length)
+      qed
+      then show "?A" by blast
+    qed
+    moreover have "?A \<Longrightarrow> ?B"
+    proof -
+      assume "?A"
+      obtain "length (restrict s t1) = n" "length (restrict s t2) = n"
+        using assms(2) assms(3) length_restrict wf_tuple_length by blast
+      then have "\<And>i. i < n \<Longrightarrow> (restrict s t1)!i = (restrict s t2)!i"
+      proof -
+        fix i assume "i < n"
+        then show "(restrict s t1)!i = (restrict s t2)!i"
+        proof (cases "i \<in> s")
+          case True
+        next
+          case False
+          then show ?thesis
+                wf_tuple_restrict_simple)
+        qed
+      qed
+      then show "?B"
+    qed
+    then show ?thesis using calculation by linarith
+  qed
+  then show ?thesis by simp
+qed
+
+lemma wf_getIJ:
+  assumes "card V \<ge> 2"
+  assumes "wf_set n V"
+  assumes "(I, J) = getIJ Q_pos Q_neg V"
+  shows "wf_set n I" and "wf_set n J"
+  using assms unfolding wf_set_def by (metis Un_iff coreProperties)+
+
+lemma wf_projectTable:
+  assumes "wf_atable n X"
+  shows "wf_atable n (projectTable I X) \<and> (fst (projectTable I X) = (fst X \<inter> I))"
+proof -
+  obtain Y where "Y = projectTable I X" by simp
+  obtain sX tX where "(sX, tX) = X" by (metis surj_pair)
+  moreover obtain S where "S = I \<inter> sX" by simp
+  moreover obtain sY tY where "(sY, tY) = Y" by (metis surj_pair)
+  then have "sY = S"
+  then have "\<And>t. t \<in> tY \<Longrightarrow> wf_tuple n S t"
+  proof -
+    fix t assume "t \<in> tY"
+    then have "wf_tuple n sX x"
+    proof -
+      have "table n sX tX" using assms(1) calculation(1) wf_atable_def by fastforce
+    qed
+  qed
+  then have "\<forall>t \<in> tY. wf_tuple n S t" by blast
+  then have "table n S tY" using table_def by blast
+  then show ?thesis
+qed
+
+lemma set_filterQuery:
+  assumes "QQ = filterQuery I Q"
+  assumes "non_empty_query Q"
+  shows "\<forall>X\<in>Q. (card (fst X \<inter> I) \<ge> 1 \<longleftrightarrow> X \<in> QQ)"
+proof -
+  have "\<And>X. X \<in> Q \<Longrightarrow> (card (fst X \<inter> I) \<ge> 1 \<longleftrightarrow> X \<in> QQ)"
+  proof -
+    fix X assume "X \<in> Q"
+    have "card (fst X \<inter> I) \<ge> 1 \<Longrightarrow> X \<in> QQ"
+    proof -
+      assume "card (fst X \<inter> I) \<ge> 1"
+      then have "(\<lambda>(s, _). s \<inter> I \<noteq> {}) X" by force
+    qed
+    moreover have "X \<in> QQ \<Longrightarrow> card (fst X \<inter> I) \<ge> 1"
+    proof -
+      assume "X \<in> QQ"
+      then have "fst X \<inter> I \<noteq> {}" by (simp add: case_prod_beta')
+      then show ?thesis
+    qed
+    then show "(card (fst X \<inter> I) \<ge> 1 \<longleftrightarrow> X \<in> QQ)"
+      using calculation by blast
+  qed
+  then show ?thesis by blast
+qed
+
+lemma wf_filterQuery:
+  assumes "I \<subseteq> V"
+  assumes "card I \<ge> 1"
+  assumes "rwf_query n V Qp Qn"
+  assumes "QQp = filterQuery I Qp"
+  assumes "QQn = filterQueryNeg I Qn"
+  shows "wf_query n I QQp QQn" "non_empty_query QQp" "covering I QQp"
+proof -
+  show "non_empty_query QQp"
+    by (metis assms(3) assms(4) filterQuery.simps member_filter non_empty_query_def rwf_query_def)
+  show "covering I QQp"
+  proof -
+    have "\<forall>X\<in>Qp. (card (fst X \<inter> I) \<ge> 1 \<longleftrightarrow> X \<in> QQp)"
+      using set_filterQuery assms(3) assms(4) rwf_query_def by fastforce
+    have "(\<Union>(S, X)\<in>Qp. S) \<inter> I \<subseteq> (\<Union>(S, _)\<in>QQp. S)" (is "?A \<inter> I \<subseteq> ?B")
+    proof (rule subsetI)
+      fix x assume "x \<in> ?A \<inter> I"
+      then obtain S X where "(S, X) \<in> Qp" and "x \<in> S" by blast
+      moreover have "(S, X) \<in> QQp" by (metis Int_iff One_nat_def Suc_le_eq
+            calculation(1) calculation(2) card_gt_0_iff empty_iff finite_Int fst_conv)
+      ultimately show "x \<in> ?B" by auto
+    qed
+    then show ?thesis
+      by (metis (mono_tags, lifting) assms(1) assms(3) covering_def inf.absorb_iff2 le_infI1 rwf_query_def)
+  qed
+  show "wf_query n I QQp QQn"
+  proof -
+    have "(\<forall>X\<in>QQp. wf_atable n X)"
+      using assms(3) assms(4) rwf_query_def wf_query_def by fastforce
+    moreover have "(wf_set n I)"
+      by (meson assms(1) assms(3) rwf_query_def subsetD wf_query_def wf_set_def)
+    moreover have "card QQp \<ge> 1"
+    proof -
+      have "\<not> (Set.is_empty QQp)"
+      proof (rule ccontr)
+        assume "\<not> (\<not> (Set.is_empty QQp))"
+        then show "False"
+      qed
+      moreover have "finite QQp"
+        by (metis assms(3) assms(4) card.infinite filterQuery.simps finite_filter not_one_le_zero rwf_query_def wf_query_def)
+      then show ?thesis
+        by (metis One_nat_def Set.is_empty_def Suc_leI calculation card_gt_0_iff)
+    qed
+    moreover have "QQn \<subseteq> Qn"
+    proof -
+      have "QQn = filterQueryNeg I Qn" by (simp add: assms(5))
+      then show ?thesis by auto
+    qed
+    moreover have "wf_query n I QQp Qn"
+      by (meson Un_iff assms(3) calculation(1) calculation(2) calculation(3) rwf_query_def wf_query_def)
+    then have "(\<forall>X\<in>Qn. wf_atable n X)" by (simp add: wf_query_def)
+    then show ?thesis 
+  qed
+qed
+
+lemma wf_set_subset:
+  assumes "I \<subseteq> V"
+  assumes "card I \<ge> 1"
+  assumes "wf_set n V"
+  shows "wf_set n I"
+  using assms(1) assms(3) wf_set_def by auto
+
+lemma wf_projectQuery:
+  assumes "card I \<ge> 1"
+  assumes "wf_query n I Q Qn"
+  assumes "non_empty_query Q"
+  assumes "covering I Q"
+  assumes "\<forall>X\<in>Q. card (fst X \<inter> I) \<ge> 1"
+  assumes "QQ = projectQuery I Q"
+  assumes "included I Qn"
+  assumes "non_empty_query Qn"
+  shows "rwf_query n I QQ Qn"
+proof -
+  have "wf_query n I QQ Qn"
+  proof -
+    have "\<forall>X\<in>QQ. wf_atable n X" using assms(2) assms(6) wf_query_def
+      by (simp add: wf_projectTable wf_query_def)
+    moreover have "wf_set n I" using assms(2) wf_query_def by blast
+    moreover have "card QQ \<ge> 1"
+    proof -
+      have "card QQ = card (Set.image (projectTable I) Q)" by (simp add: assms(6))
+      then show ?thesis
+        by (metis One_nat_def Suc_le_eq assms(2) card_gt_0_iff finite_imageI image_is_empty wf_query_def)
+    qed
+    then show ?thesis by (metis Un_iff assms(2) calculation(1) wf_query_def)
+  qed
+  moreover have "covering I QQ"
+  proof -
+    have "I \<subseteq> (\<Union>(S, X)\<in>Q. S)" using assms(4) covering_def by auto
+    moreover have "(\<Union>(S, X)\<in>Q. S \<inter> I) \<subseteq> (\<Union>(S, X)\<in>QQ. S)"
+    proof (rule subsetI)
+      fix x assume "x \<in> (\<Union>(S, X)\<in>Q. S \<inter> I)"
+      then have "fst (projectTable I (S, X)) = S \<inter> I" by simp
+      then have "wf_atable n (projectTable I (S, X))" using wf_projectTable by blast 
+    qed
+    moreover have "(\<Union>(S, X)\<in>Q. S \<inter> I) = (\<Union>(S, X)\<in>Q. S) \<inter> I" by blast
+    then show ?thesis using calculation(1) calculation(2) covering_def inf_absorb2 by fastforce
+  qed
+  moreover have "included I QQ"
+  proof -
+    have "\<And>S X. (S, X) \<in> QQ \<Longrightarrow> S \<subseteq> I"
+    proof -
+      fix S X assume "(S, X) \<in> QQ"
+      then have "S = I \<inter> (fst XX)"
+        by (metis projectTable.simps fst_conv inf_commute prod.collapse)
+      then show "S \<subseteq> I" by simp
+    qed
+    then have "(\<forall>(S, X)\<in>QQ. S \<subseteq> I)" by blast
+    then show ?thesis by (simp add: included_def)
+  qed
+  moreover have "non_empty_query QQ" using assms(5) assms(6) non_empty_query_def by fastforce
+  then show ?thesis
+    by (simp add: assms(7) assms(8) calculation(1) calculation(2) calculation(3) rwf_query_def)
+qed
+
+lemma wf_firstRecursiveCall:
+  assumes "rwf_query n V Qp Qn"
+  assumes "card V \<ge> 2"
+  assumes "(I, J) = getIJ Qp Qn V"
+  assumes "Q_I_pos = projectQuery I (filterQuery I Qp)"
+  assumes "Q_I_neg = filterQueryNeg I Qn"
+  shows "rwf_query n I Q_I_pos Q_I_neg"
+proof -
+  obtain "I \<subseteq> V" "card I \<ge> 1" using assms(2) assms(3) getIJProperties(5) getIJProperties(1) by fastforce
+  define tQ where "tQ = filterQuery I Qp"
+  obtain "wf_query n I tQ Q_I_neg" "non_empty_query tQ" "covering I tQ"
+    by (metis wf_filterQuery(1) wf_filterQuery(2) wf_filterQuery(3)
+  moreover obtain "card I \<ge> 1" and "\<forall>X\<in>tQ. card (fst X \<inter> I) \<ge> 1"
+  moreover have "included I Q_I_neg" by (simp add: assms(5) included_def)
+  then show ?thesis
+        assms(1) assms(4) assms(5) calculation(4) calculation(5) filterQueryNeg.simps member_filter non_empty_query_def rwf_query_def tQ_def)
+qed
+
+lemma wf_atable_subset:
+  assumes "table n V X"
+  assumes "Y \<subseteq> X"
+  shows "table n V Y"
+  by (meson assms(1) assms(2) subsetD table_def)
+
+lemma same_set_semiJoin:
+  "fst (semiJoin x other) = fst x"
+proof -
+  obtain sx tx where "x = (sx, tx)" by (metis surj_pair)
+  obtain so to where "other = (so, to)" by (metis surj_pair)
+qed
+
+lemma wf_semiJoin:
+  assumes "card J \<ge> 1"
+  assumes "wf_query n J Q Qn"
+  assumes "non_empty_query Q"
+  assumes "covering J Q"
+  assumes "\<forall>X\<in>Q. card (fst X \<inter> J) \<ge> 1"
+  assumes "QQ = (Set.image (\<lambda>tab. semiJoin tab (st, t)) Q)"
+  shows "wf_query n J QQ Qn" "non_empty_query QQ" "covering J QQ"
+proof -
+  show "wf_query n J QQ Qn"
+  proof -
+    have "\<forall>X\<in>QQ. wf_atable n X"
+    proof -
+      have "\<And>X. X\<in>QQ \<Longrightarrow> wf_atable n X"
+      proof -
+        fix X assume "X \<in> QQ"
+        then have "wf_atable n Y" using assms(2) wf_query_def by blast
+        then show "wf_atable n X"
+        proof -
+          have "fst X = fst Y"
+          moreover have "snd X \<subseteq> snd Y"
+          then show ?thesis by (simp add: calculation(2) wf_atable_def)
+        qed
+      qed
+      then show ?thesis by blast
+    qed
+    moreover have "wf_set n J" using assms(2) wf_query_def by blast
+    moreover have "card QQ \<ge> 1"
+      by (metis One_nat_def Suc_leI assms(2) assms(6) card.infinite card_gt_0_iff finite_imageI image_is_empty wf_query_def)
+    then show ?thesis using calculation(1) calculation(2) wf_query_def Un_iff assms(2) by metis
+  qed
+  show "non_empty_query QQ"
+    by (metis (no_types, lifting) assms(3) assms(6) image_iff non_empty_query_def same_set_semiJoin)
+  show "covering J QQ"
+  proof -
+    have "(\<Union>(S, X)\<in>Q. S) = (\<Union>(S, X)\<in>QQ. S)" using assms(6) same_set_semiJoin by auto
+    then show ?thesis by (metis assms(4) covering_def)
+  qed
+qed
+
+lemma newQuery_equiv_def:
+  "newQuery V Q (st, t) = projectQuery V (Set.image (\<lambda>tab. semiJoin tab (st, t)) Q)"
+  by (metis image_image newQuery.simps projectQuery.elims)
+
+lemma included_project:
+  "included V (projectQuery V Q)"
+proof -
+  have "\<And>S X. (S, X)\<in>(projectQuery V Q) \<Longrightarrow> S \<subseteq> V"
+  proof -
+    fix S X assume "(S, X)\<in>(projectQuery V Q)"
+    obtain SS XX where "(S, X) = projectTable V (SS, XX)"
+    then have "S = SS \<inter> V" by auto
+    then show "S \<subseteq> V" by simp
+  qed
+  then show ?thesis by (metis case_prodI2 included_def)
+qed
+
+lemma non_empty_newQuery:
+  assumes "Q1 = filterQuery J Q0"
+  assumes "Q2 = newQuery J Q1 (I, t)"
+  assumes "\<forall>X\<in>Q0. wf_atable n X"
+  shows "non_empty_query Q2"
+proof -
+  have "\<And>X. X\<in>Q2 \<Longrightarrow> card (fst X) \<ge> 1"
+  proof -
+    fix X assume "X \<in> Q2"
+    obtain X2 where "X = projectTable J X2" and "X2 \<in> Set.image (\<lambda>tab. semiJoin tab (I, t)) Q1"
+    then have "card (fst X2 \<inter> J) \<ge> 1"
+    proof -
+      obtain X1 where "X1 \<in> Q1" and "X2 = semiJoin X1 (I, t)"
+      then have "fst X1 = fst X2" by (simp add: same_set_semiJoin)
+      then have "(\<lambda>(s, _). s \<inter> J \<noteq> {}) X1" using Set.is_empty_def by auto
+      then have "\<not> (Set.is_empty (fst X1 \<inter> J))" by (simp add: Set.is_empty_def case_prod_beta')
+      then show ?thesis
+            assms(3) calculation card_gt_0_iff finite_Int member_filter wf_atable_def)
+    qed
+    then show "card (fst X) \<ge> 1"
+  qed
+  then show ?thesis by (simp add: non_empty_query_def)
+qed
+
+lemma wf_newQuery:
+  assumes "card J \<ge> 1"
+  assumes "wf_query n J Q Qn0"
+  assumes "non_empty_query Q"
+  assumes "covering J Q"
+  assumes "\<forall>X\<in>Q. card (fst X \<inter> J) \<ge> 1"
+  assumes "QQ = newQuery J Q t"
+  assumes "QQn = newQuery J Qn t"
+  assumes "non_empty_query Qn"
+  assumes "Qn = filterQuery J Qn0"
+  shows "rwf_query n J QQ QQn"
+proof -
+  obtain tt st where "(st, tt) = t" by (metis surj_pair)
+  have "QQ = projectQuery J (Set.image (\<lambda>tab. semiJoin tab (st, tt)) Q)"
+  define QS where "QS = Set.image (\<lambda>tab. semiJoin tab (st, tt)) Q"
+  obtain "wf_query n J QS Qn0" "non_empty_query QS" "covering J QS"
+    by (metis wf_semiJoin(1) wf_semiJoin(2) wf_semiJoin(3) QS_def
+        assms(1) assms(2) assms(3) assms(4) assms(5))
+  moreover have "\<forall>X\<in>QS. card (fst X \<inter> J) \<ge> 1" using QS_def assms(5) by auto
+  then have "\<forall>X\<in>(projectQuery J QS). wf_atable n X"
+    by (metis (no_types, lifting) projectQuery.simps Un_iff calculation(1) image_iff
+        wf_projectTable wf_query_def)
+  then have "wf_query n J QQ QQn"
+  proof -
+    have "\<And>X. X\<in>QQn \<Longrightarrow> wf_atable n X"
+    proof -
+      fix X assume "X \<in> QQn"
+      have "QQn = projectQuery J (Set.image (\<lambda>tab. semiJoin tab (st, tt)) Qn)"
+      then obtain XX where "X = projectTable J XX" "XX \<in> (Set.image (\<lambda>tab. semiJoin tab (st, tt)) Qn)"
+      then obtain XXX where "XX = semiJoin XXX (st, tt)" "XXX \<in> Qn" by blast
+      then have "wf_atable n XXX"
+        by (metis filterQuery.elims Un_iff assms(2) assms(9) member_filter wf_query_def)
+      then have "wf_atable n XX"
+      proof -
+        have "fst XX = fst XXX"
+        moreover have "snd XX = Set.filter (isSameIntersection tt (fst XX \<inter> st)) (snd XXX)"
+        moreover have "snd XX \<subseteq> snd XXX" using calculation(2) by auto
+        then show ?thesis
+      qed
+    qed
+    then have "\<forall>X\<in>QQn. wf_atable n X" by blast
+    then have "\<forall>X\<in>(QQ \<union> QQn). wf_atable n X"
+    moreover have "card QQ \<ge> 1"
+          assms(6) card.infinite card_gt_0_iff finite_imageI image_is_empty wf_query_def)
+    then show ?thesis using assms(2) calculation wf_query_def by blast
+  qed
+  moreover have "included J QQn"
+  proof -
+    have "QQn = projectQuery J (Set.image (\<lambda>tab. semiJoin tab (st, tt)) Qn)"
+    then show ?thesis using included_project by blast
+  qed
+  moreover have "covering J QQ"
+  proof -
+    have "QQ = projectQuery J ((\<lambda>tab. semiJoin tab (st, tt)) `Q)"
+    then have "covering J ((\<lambda>tab. semiJoin tab (st, tt)) `Q)" using QS_def calculation(3) by blast
+    then have "J \<subseteq> (\<Union>(S, X)\<in>(((\<lambda>tab. semiJoin tab (st, tt)) `Q)). S)"
+      by (simp add: covering_def)
+    then have "J \<subseteq> (\<Union>(S, X)\<in>(((\<lambda>tab. semiJoin tab (st, tt)) `Q)). S) \<inter> J" by blast
+    moreover have "(\<Union>(S, X)\<in>(((\<lambda>tab. semiJoin tab (st, tt)) `Q)). S) \<inter> J  \<subseteq> (\<Union>(S, X)\<in>(((\<lambda>tab. semiJoin tab (st, tt)) `Q)). S \<inter> J)"
+      using image_cong by auto
+    then have "(\<Union>(S, X)\<in>((\<lambda>tab. semiJoin tab (st, tt)) `Q). S) \<inter> J  \<subseteq> (\<Union>(S, X)\<in>(projectQuery J ((\<lambda>tab. semiJoin tab (st, tt)) `Q)). S)"
+      by auto
+    then show ?thesis
+  qed
+  moreover have "non_empty_query QQn"
+  then show ?thesis
+      calculation(4) calculation(5) calculation(6) calculation(7) rwf_query_def by blast
+qed
+
+lemma subset_Q_neg:
+  assumes "rwf_query n V Q Qn"
+  assumes "QQn \<subseteq> Qn"
+  shows "rwf_query n V Q QQn"
+proof -
+  have "wf_query n V Q QQn"
+  proof -
+    have "\<forall>X\<in>QQn. wf_atable n X" by (meson Un_iff assms(1) assms(2) rwf_query_def subsetD wf_query_def)
+    then show ?thesis
+      by (meson UnE UnI1 assms(1) rwf_query_def wf_query_def)
+  qed
+  moreover have "included V QQn" by (meson assms(1) assms(2) included_def rwf_query_def subsetD)
+  then show ?thesis by (metis (full_types) assms(2) non_empty_query_def subsetD assms(1) calculation rwf_query_def)
+qed
+
+lemma wf_secondRecursiveCalls:
+  assumes "card V \<ge> 2"
+  assumes "rwf_query n V Q Qn"
+  assumes "(I, J) = getIJ Q Qn V"
+  assumes "Qns \<subseteq> Qn"
+  assumes "Q_J_neg = filterQuery J Qns"
+  assumes "Q_J_pos = filterQuery J Q"
+  shows "rwf_query n J (newQuery J Q_J_pos t) (newQuery J Q_J_neg t)"
+proof -
+  have "\<forall>X\<in>Q_J_pos. card (fst X \<inter> J) \<ge> 1"
+    using set_filterQuery assms(2) assms(6) rwf_query_def by fastforce
+  moreover have "card J \<ge> 1" by (metis assms(1) assms(3) getIJ.coreProperties getIJ_axioms)
+  moreover have "wf_query n J Q_J_pos Qns"
+  proof -
+    have "wf_query n J Q Qns"
+      by (metis subset_Q_neg wf_set_subset assms(1) assms(2) assms(3) assms(4)
+          getIJ.coreProperties getIJ_axioms rwf_query_def sup_ge2 wf_query_def)
+    moreover have "Q_J_pos \<subseteq> Q" using assms(6) by auto
+    then have "\<forall>X\<in>(Q_J_pos \<union> Qns). wf_atable n X" using calculation wf_query_def by fastforce
+    moreover have "card Q_J_pos \<ge> 1"
+      by (metis wf_filterQuery(1) assms(1) assms(2) assms(3) assms(6) getIJ.coreProperties
+          getIJ_axioms sup_ge2 wf_query_def)
+    then show ?thesis using calculation(1) calculation(2) wf_query_def by blast
+  qed
+  moreover have "non_empty_query Q_J_pos"
+    by (metis wf_filterQuery(2) assms(1) assms(2) assms(3) assms(6) getIJ.coreProperties
+        getIJ_axioms sup_ge2)
+  moreover have  "covering J Q_J_pos"
+    by (metis wf_filterQuery(3) assms(1) assms(2) assms(3) assms(6) getIJ.coreProperties
+        getIJ_axioms sup_ge2)
+  moreover have "non_empty_query Q_J_neg"
+    by (metis (no_types, lifting) filterQuery.elims assms(2) assms(4) assms(5) member_filter
+        non_empty_query_def rwf_query_def subsetD)
+  then show ?thesis
+    using wf_newQuery assms(5) calculation(1) calculation(2) calculation(3) calculation(4)
+      calculation(5) by blast
+qed
+
+lemma simple_merge_option:
+  "merge_option (a, b) = None \<longleftrightarrow> (a = None \<and> b = None)"
+  using merge_option.elims by blast
+
+lemma wf_merge:
+  assumes "wf_tuple n I t1"
+  assumes "wf_tuple n J t2"
+  assumes "V = I \<union> J"
+  assumes "t = merge t1 t2"
+  shows "wf_tuple n V t"
+proof -
+  have "\<And>i. i < n \<Longrightarrow> (t ! i = None \<longleftrightarrow> i \<notin> V)"
+  proof -
+    fix i
+    assume "i < n"
+    show "t ! i = None \<longleftrightarrow> i \<notin> V"
+    proof (cases "t ! i = None")
+      case True
+      have "t = merge t1 t2" by (simp add: assms(4))
+      then have "... = map merge_option (zip t1 t2)" by simp
+      then have "merge_option (t1 ! i, t2 ! i) = None"
+      obtain "t1 ! i = None" and "t2 ! i = None"
+      then show ?thesis
+    next
+      case False
+      have "t = map merge_option (zip t1 t2)" by (simp add: assms(4))
+      then obtain x where "merge_option (t1 ! i, t2 ! i) = Some x"
+      then show ?thesis
+    qed
+  qed
+  moreover have "length t = n"
+  proof -
+    obtain "length t1 = n" and "length t2 = n"
+      using assms(1) assms(2) wf_tuple_def by blast
+    then have "length (zip t1 t2) = n" by simp
+    then show ?thesis by (simp add: assms(4))
+  qed
+  then show ?thesis by (simp add: calculation wf_tuple_def)
+qed
+
+lemma wf_inter:
+  assumes "rwf_query n {i} Q Qn"
+  assumes "(sa, a) \<in> Q"
+  assumes "(sb, b) \<in> Q"
+  shows "table n {i} (a \<inter> b)"
+proof -
+  obtain "card sa \<ge> 1" "card sb \<ge> 1"
+    by (metis assms(1) assms(2) assms(3) fst_conv non_empty_query_def rwf_query_def)
+  have "included {i} Q" using assms(1) rwf_query_def by blast
+  then have "(\<forall>(S, X)\<in>Q. S \<subseteq> {i})" by (simp add: included_def)
+  then obtain "sa \<subseteq> {i}" "sb \<subseteq> {i}" using assms(2) assms(3) by blast
+  then obtain "sa = {i}" "sb = {i}"
+  then show ?thesis
+    using assms(1) assms(2) inf_le1 prod.sel(1) prod.sel(2) rwf_query_def wf_atable_def
+      wf_atable_subset wf_query_def Un_iff by metis
+qed
+
+lemma table_subset:
+  assumes "table n V T"
+  assumes "S \<subseteq> T"
+  shows "table n V S"
+  using wf_atable_subset assms(1) assms(2) by blast
+
+lemma wf_base_case:
+  assumes "card V = 1"
+  assumes "rwf_query n V Q Qn"
+  assumes "R = genericJoin V Q Qn"
+  shows "table n V R"
+proof -
+  have "wf_query n V Q Qn \<and> included V Q \<and> non_empty_query Q \<Longrightarrow> table n V ((\<Inter>(_, x) \<in> Q. x) - (\<Union>(_, x) \<in> Qn. x))"
+  proof (induction "card Q - 1" arbitrary: Q)
+    case 0
+    have "card Q = 1"
+      by (metis "0.hyps" "0.prems" One_nat_def le_add_diff_inverse plus_1_eq_Suc wf_query_def)
+    obtain s x where "Q = {(s, x)}"
+          nat.simps(3) not_one_le_zero subrelI)
+    moreover obtain i where "V = {i}" using assms(1) card_1_singletonE by auto
+    then have "card s \<ge> 1"
+    proof -
+      have "(s, x) \<in> Q" by (simp add: calculation)
+      moreover obtain X where "X = (s, x)" by simp
+      then show ?thesis
+        using "0.prems" calculation non_empty_query_def rwf_query_def by fastforce
+    qed
+    then have "s = {i}"
+    proof -
+      then show ?thesis
+    qed
+    moreover have "table n s x"
+      using "0.prems" calculation(1) rwf_query_def wf_atable_def wf_query_def
+      by (simp add: rwf_query_def wf_atable_def wf_query_def)
+    then show ?case
+  next
+    case (Suc y)
+    obtain xx where "xx \<in> Q" by (metis Suc.hyps(2) all_not_in_conv card.empty nat.simps(3) zero_diff)
+    moreover obtain H where "H = Q - {xx}" by simp
+    then have "card H - 1 = y"
+      by (metis Suc.hyps(2) calculation card_Diff_singleton card.infinite diff_Suc_1 less_imp_le not_one_le_zero zero_less_Suc zero_less_diff)
+    moreover have "wf_query n V H Qn \<and> included V H \<and> non_empty_query H"
+    proof -
+      have "wf_query n V H Qn"
+          card.infinite le_add1 not_one_le_zero plus_1_eq_Suc wf_query_def
+        by (metis (no_types, lifting) Un_iff)
+      then show ?thesis
+    qed
+    then have "wf_query n V H Qn \<and> included V H \<and> non_empty_query H" by simp
+    then have "table n V ((\<Inter>(_, x)\<in>H. x) - (\<Union>(_, x)\<in>Qn. x))" using Suc.hyps(1) calculation(2) by simp
+    moreover obtain sa a where "(sa, a) \<in> H"
+    moreover have "\<not> (Set.is_empty sa)"
+          card.empty non_empty_query_def not_one_le_zero prod.sel(1))
+    then have "table n V (((\<Inter>(_, x) \<in> H. x) \<inter> (snd xx)) - (\<Union>(_, x)\<in>Qn. x))"
+      by (metis Diff_Int2 Diff_Int_distrib2 IntE calculation(3) table_def)
+  qed
+  then show ?thesis
+    using assms(1) assms(2) assms(3) genericJoin.simps le_numeral_extra(4) rwf_query_def by auto
+qed
+
+lemma filter_Q_J_neg_same:
+  assumes "card V \<ge> 2"
+  assumes "(I, J) = getIJ Q Qn V"
+  assumes "Q_I_neg = filterQueryNeg I Qn"
+  assumes "rwf_query n V Q Qn"
+  shows "filterQuery J (Qn - Q_I_neg) = Qn - Q_I_neg" (is "?A = ?B")
+proof-
+  have "?A \<subseteq> ?B" by (simp add: subset_iff)
+  moreover have "?B \<subseteq> ?A"
+  proof (rule subsetI)
+    fix x assume "x \<in> Qn - Q_I_neg"
+    obtain A X where "(A, X) = x" by (metis surj_pair)
+    have "card (A \<inter> J) \<ge> 1"
+    proof (rule ccontr)
+      assume "\<not> (card (A \<inter> J) \<ge> 1)"
+      have "Set.is_empty (A \<inter> J)"
+            assms(2) card_gt_0_iff finite_Int getIJ.coreProperties getIJ_axioms)
+      moreover have "A \<subseteq> I"
+      proof -
+        then have "included V Qn" using assms(4) rwf_query_def by blast
+        then show ?thesis
+          by (metis Set.is_empty_def UnE assms(1) assms(2) calculation disjoint_iff_not_equal
+              getIJProperties(5) subsetD subsetI)
+      qed
+    qed
+      by (metis Diff_subset subset_Q_neg assms(4) fst_conv rwf_query_def set_filterQuery)
+  qed
+  then show ?thesis by auto
+qed
+
+lemma vars_genericJoin:
+  assumes "card V \<ge> 2"
+  assumes "(I, J) = getIJ Q Qn V"
+  assumes "Q_I_pos = projectQuery I (filterQuery I Q)"
+  assumes "Q_I_neg = filterQueryNeg I Qn"
+  assumes "R_I = genericJoin I Q_I_pos Q_I_neg"
+  assumes "Q_J_neg = filterQuery J (Qn - Q_I_neg)"
+  assumes "Q_J_pos = filterQuery J Q"
+  assumes "X = {(t, genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))) | t . t \<in> R_I}"
+  assumes "R = (\<Union>(t, x) \<in> X. {merge xx t | xx . xx \<in> x})"
+  assumes "rwf_query n V Q Qn"
+  shows "R = genericJoin V Q Qn"
+proof -
+  have "filterQuery J (Qn - Q_I_neg) = Qn - Q_I_neg"
+    using assms(1) assms(10) assms(2) assms(4) filter_Q_J_neg_same by blast
+  then have "Q_J_neg = Qn - Q_I_neg" by (simp add: assms(6))
+  moreover have "genericJoin V Q Qn =
+    (if card V \<le> 1 then
+      (\<Inter>(_, x) \<in> Q. x) - (\<Union>(_, x) \<in> Qn. x)
+    else
+      let (I, J) = getIJ Q Qn V in
+      let Q_I_pos = projectQuery I (filterQuery I Q) in
+      let Q_I_neg = filterQueryNeg I Qn in
+      let R_I = genericJoin I Q_I_pos Q_I_neg in
+      let Q_J_neg = Qn - Q_I_neg in
+      let Q_J_pos = filterQuery J Q in
+      let X = {(t, genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))) | t . t \<in> R_I} in
+      (\<Union>(t, x) \<in> X. {merge xx t | xx . xx \<in> x}))"
+    by simp
+  moreover have "\<not> (card V \<le> 1)" using assms(1) by linarith
+  then have gen: "genericJoin V Q Qn = (let (I, J) = getIJ Q Qn V in
+      let Q_I_pos = projectQuery I (filterQuery I Q) in
+      let Q_I_neg = filterQueryNeg I Qn in
+      let R_I = genericJoin I Q_I_pos Q_I_neg in
+      let Q_J_neg = Qn - Q_I_neg in
+      let Q_J_pos = filterQuery J Q in
+      let X = {(t, genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))) | t . t \<in> R_I} in
+      (\<Union>(t, x) \<in> X. {merge xx t | xx . xx \<in> x}))"
+    using assms by simp
+  then have "... = (
+      let Q_I_pos = projectQuery I (filterQuery I Q) in
+      let Q_I_neg = filterQueryNeg I Qn in
+      let R_I = genericJoin I Q_I_pos Q_I_neg in
+      let Q_J_neg = Qn - Q_I_neg in
+      let Q_J_pos = filterQuery J Q in
+      let X = {(t, genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))) | t . t \<in> R_I} in
+      (\<Union>(t, x) \<in> X. {merge xx t | xx . xx \<in> x}))"
+    using assms(2) by (metis (no_types, lifting) case_prod_conv)
+  then show ?thesis using assms by (metis calculation(1) gen)
+qed
+
+lemma base_genericJoin:
+  assumes "card V \<le> 1"
+  shows "genericJoin V Q Qn =  (\<Inter>(_, x) \<in> Q. x) - (\<Union>(_, x) \<in> Qn. x)"
+proof -
+  have "genericJoin V Q Qn =
+    (if card V \<le> 1 then
+      (\<Inter>(_, x) \<in> Q. x) - (\<Union>(_, x) \<in> Qn. x)
+    else
+      let (I, J) = getIJ Q Qn V in
+      let Q_I_pos = projectQuery I (filterQuery I Q) in
+      let Q_I_neg = filterQueryNeg I Qn in
+      let R_I = genericJoin I Q_I_pos Q_I_neg in
+
+      let Q_J_neg = Qn - Q_I_neg in
+      let Q_J_pos = filterQuery J Q in
+      let X = {(t, genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))) | t . t \<in> R_I} in
+      (\<Union>(t, x) \<in> X. {merge xx t | xx . xx \<in> x}))"
+    by simp
+  then show ?thesis using assms by auto
+qed
+
+lemma wf_genericJoin:
+  "\<lbrakk>rwf_query n V Q Qn; card V \<ge> 1\<rbrakk> \<Longrightarrow> table n V (genericJoin V Q Qn)"
+proof (induction V Q Qn rule: genericJoin.induct)
+  case (1 V Q Qn)
+  then show ?case
+  proof (cases "card V \<le> 1")
+    case True
+    then show ?thesis using "1.prems"(1) "1.prems"(2) le_antisym wf_base_case by blast
+  next
+    case False
+    obtain I J where "(I, J) = getIJ Q Qn V" by (metis surj_pair)
+    define Q_I_pos where "Q_I_pos = projectQuery I (filterQuery I Q)"
+    define Q_I_neg where "Q_I_neg = filterQueryNeg I Qn"
+    define R_I where "R_I = genericJoin I Q_I_pos Q_I_neg"
+    define Q_J_neg where "Q_J_neg = filterQuery J (Qn - Q_I_neg)"
+    define Q_J_pos where "Q_J_pos = filterQuery J Q"
+    define X where "X = {(t, genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))) | t . t \<in> R_I}"
+    define R where "R = (\<Union>(t, x) \<in> X. {merge xx t | xx . xx \<in> x})"
+    moreover have "card V \<ge> 2" using False by auto
+    then have "R = genericJoin V Q Qn"
+      using vars_genericJoin[where ?V=V and ?I=I and ?J=J and ?Q_I_pos=Q_I_pos and ?Q=Q and ?Qn=Qn and
+        ?Q_I_neg=Q_I_neg and ?R_I=R_I and ?Q_J_neg=Q_J_neg and ?Q_J_pos=Q_J_pos]
+    obtain "card I \<ge> 1" "card J \<ge> 1"
+    moreover have "rwf_query n I Q_I_pos Q_I_neg"
+    moreover have "\<And>t. t\<in>R_I \<Longrightarrow> table n J (genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t)))"
+    proof -
+      fix t assume "t \<in> R_I"
+      have "rwf_query n J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))"
+          getIJ.wf_secondRecursiveCalls getIJ_axioms by fastforce
+      then show "table n J (genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t)))"
+    qed
+    then have "\<And>t xx. t \<in> R_I \<and> xx \<in> (genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t)))
+               \<Longrightarrow> wf_tuple n V (merge xx t)"
+    proof -
+      fix t xx assume "t \<in> R_I \<and> xx \<in> genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))"
+      have "V = I \<union> J"
+      moreover have "wf_tuple n J xx"
+      moreover have "wf_tuple n I t"
+        by (metis "1.IH"(1) False Q_I_neg_def Q_I_pos_def
+            (newQuery J Q_J_neg (I, t))\<close> table_def)
+    then show ?thesis using \<open>R = genericJoin V Q Qn\<close> table_def by blast
+subsection \<open>Correctness\<close>
+    have "wf_tuple n V z" by (meson \<open>z \<in> genericJoin V Q Qn\<close> assms(1) assms(2) table_def wf_base_case)
+          using \<open>(A, X) \<in> Q\<close> assms(2) non_empty_query_def rwf_query_def by fastforce
+          using \<open>(A, X) \<in> Q\<close> assms(2) included_def rwf_query_def by fastforce
+        using \<open>z \<in> genericJoin V Q Qn\<close> assms(1) by auto
+      then have "z \<in> X" using INT_D \<open>(A, X) \<in> Q\<close> case_prod_conv by auto
+      have "card A \<ge> 1" using \<open>(A, X) \<in> Qn\<close> assms(2) non_empty_query_def rwf_query_def by fastforce
+      moreover have "A \<subseteq> V" using \<open>(A, X) \<in> Qn\<close> assms(2) included_def rwf_query_def by blast
+      then have "restrict A z = z"  using \<open>wf_tuple n V z\<close> restrict_idle by blast
+          using \<open>z \<in> genericJoin V Q Qn\<close> assms(1) by auto
+      then show "restrict A z \<notin> X" using UN_iff \<open>(A, X) \<in> Qn\<close> calculation(2) prod.sel(2) snd_def by auto
+      by (metis (mono_tags, lifting) One_nat_def \<open>wf_tuple n V z \<and> (\<forall>(A, X)\<in>Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Qn. restrict A z \<notin> X)\<close>
+        by (metis (mono_tags, lifting) One_nat_def \<open>wf_tuple n V z \<and> (\<forall>(A, X)\<in>Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Qn. restrict A z \<notin> X)\<close>
+        using \<open>wf_tuple n V z \<and> (\<forall>(A, X)\<in>Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Qn. restrict A z \<notin> X)\<close> calculation(2) by fastforce
+        by (metis \<open>genericJoin V Q Qn = (\<Inter>(_, x)\<in>Q. x) - (\<Union>(_, x)\<in>Qn. x)\<close>)
+        by (metis \<open>z \<in> (\<Inter>(_, x)\<in>Q. x)\<close> \<open>z \<notin> (\<Union>(_, x)\<in>Qn. x)\<close>)
+      have "(restrict A t)!i = t!i" by (simp add: True \<open>i < n\<close> assms(4) nth_restrict)
+          by (metis True \<open>i < n\<close> assms(1) assms(3) assms(5) disjoint_iff_not_equal simple_restrict_none)
+          using \<open>i < n\<close> \<open>length xx = length t\<close> assms(3) by auto
+        then have "(merge xx t)!i = t!i" using \<open>xx ! i = None\<close> calculation(2) by auto
+          then show ?thesis by (simp add: True \<open>i < n\<close> nth_restrict)
+      have "(restrict A t)!i = None" by (simp add: False \<open>i < n\<close> assms(4) restrict_def)
+        using False \<open>i < n\<close> calculation simple_restrict_none by blast
+      then show ?thesis by (simp add: \<open>restrict A t ! i = None\<close>)
+      then show ?thesis using \<open>i < length v\<close> assms(2) nth_restrict by blast
+      then show ?thesis by (metis \<open>i < length v\<close> assms(1) nth_restrict simple_restrict_none wf_tuple_def)
+      then show ?thesis by (simp add: \<open>t ! i = merge_option (tI ! i, tJ ! i)\<close> calculation)
+        then show ?thesis by (simp add: \<open>t ! i = merge_option (tI ! i, tJ ! i)\<close> calculation)
+      obtain "tI!i = None" and "tJ!i = None " by (meson False \<open>i \<notin> I\<close> assms(2) assms(3) assms(5) wf_tuple_def)
+        by (simp add: \<open>t ! i = merge_option (tI ! i, tJ ! i)\<close> \<open>tI ! i = None\<close> \<open>tJ ! i = None\<close>)
+      then show ?thesis using False \<open>i \<notin> I\<close> by blast
+        by (meson True \<open>i < n\<close> assms(1) assms(2) assms(3) disjoint_iff_not_equal merge_index)
+        by (metis True \<open>i < n\<close> \<open>length (merge tI tJ) = n\<close> simple_restrict_some)
+        by (metis True \<open>i < n\<close> \<open>length (merge tI tJ) = n\<close> assms(1) assms(2) assms(3) disjoint_iff_not_equal restrict_idle simple_restrict_none wf_tuple_def)
+          using True \<open>i < n\<close> assms(1) assms(2) assms(3) merge_index by blast
+          by (metis (no_types, lifting) False \<open>i < n\<close> \<open>length (merge tI tJ) = n\<close> assms(2) assms(3) simple_restrict_none simple_restrict_some wf_tuple_def)
+        have "(merge tI tJ)!i = None" using False \<open>i < n\<close> \<open>i \<notin> I\<close> assms(1) assms(2) assms(3) merge_index by blast
+          by (metis False \<open>i < n\<close> \<open>i \<notin> I\<close> \<open>length (merge tI tJ) = n\<close> assms(2) assms(3) eq_iff equalityD1 restrict_idle_include simple_restrict_none wf_tuple_def wf_tuple_restrict_simple)
+    by (metis \<open>\<And>i. i < n \<Longrightarrow> restrict I (merge tI tJ) ! i = restrict I tI ! i \<and> restrict J (merge tI tJ) ! i = restrict J tJ ! i\<close> calculation(3) length_restrict simple_list_index_equality)
+  then show ?thesis by (simp add: \<open>f ` X = {f x |x. x \<in> X}\<close> calculation)
+        by (metis restrict_index_in \<open>i < length (restrict A z)\<close> assms(1) assms(2) length_restrict subsetD)
+        by (metis simple_restrict_none \<open>i < length (restrict A z)\<close> calculation length_restrict)
+    have "wf_tuple n A x" using \<open>x \<in> X\<close> assms(1) table_def by blast
+    by (simp add: \<open>\<And>x. x \<in> X \<Longrightarrow> restrict I x = x\<close>)
+  then show ?thesis by (simp add: \<open>A \<inter> I = A\<close>)
+        by (metis True \<open>i < n\<close> assms(2) assms(4) nth_restrict wf_tuple_def)
+          by (metis simple_restrict_none Set.is_empty_def True \<open>i < n\<close> assms(2) assms(3) assms(5) disjoint_iff_not_equal wf_tuple_length)
+        moreover have "(merge xx t) ! i = merge_option (xx ! i, t ! i)" using \<open>i < n\<close> assms(2) assms(3) assms(4) wf_tuple_length by fastforce
+          then show ?thesis using \<open>merge xx t ! i = merge_option (xx ! i, t ! i)\<close> \<open>xx ! i = None\<close> by auto
+          then show ?thesis using \<open>merge xx t ! i = merge_option (xx ! i, t ! i)\<close> \<open>xx ! i = None\<close> by auto
+          by (metis True \<open>i < n\<close> assms(2) assms(3) nth_restrict wf_tuple_def)
+          then show ?thesis  by (metis True UnI1 \<open>i < n\<close> assms(1) assms(2) calculation sup_commute wf_tuple_def)
+          have "t ! i = None" by (metis False simple_restrict_none \<open>i < n\<close> assms(2) assms(4) wf_tuple_length)
+          then show ?thesis using Some \<open>i < n\<close> assms(2) assms(3) assms(4) wf_tuple_length by fastforce
+        have "z!i = None" by (metis False UnE \<open>i < n\<close> \<open>i \<notin> I\<close> assms(1) assms(2) wf_tuple_def)
+            by (metis False New_max.simple_restrict_none \<open>i < n\<close> assms(2) assms(3) wf_tuple_length)
+            by (metis New_max.simple_restrict_none \<open>i < n\<close> \<open>i \<notin> I\<close> assms(2) assms(4) wf_tuple_length)
+          ultimately show ?thesis using \<open>i < n\<close> assms(2) assms(3) assms(4) wf_tuple_length by fastforce
+      moreover have "wf_tuple n A zz" using \<open>zz \<in> X\<close> assms(6) table_def by blast
+        using \<open>isSameIntersection zI (A \<inter> I) zz\<close> assms(7) assms(9) calculation(2) calculation(3) by blast
+    have "length zz = n" using \<open>zz \<in> X\<close> assms(6) table_def wf_tuple_def by blast
+      by (metis \<open>restrict (A \<inter> I) zz = restrict A zI\<close> assms(1) calculation length_restrict)
+            by (simp add: True \<open>i < n\<close> \<open>i \<in> A\<close> calculation(1) restrict_index_in)
+          then have "... = (restrict A zI)!i" by (simp add: \<open>restrict (A \<inter> I) zz = restrict A zI\<close>)
+            by (metis True \<open>i < n\<close> \<open>i \<in> A\<close> \<open>zz ! i = restrict (A \<inter> I) zz ! i\<close> assms(1) calculation(2)
+            by (metis False True UnE \<open>i < n\<close> \<open>zAJ = restrict J zz\<close> assms(7) calculation(1)
+            by (metis False True UnE \<open>i < n\<close> \<open>zz ! i = restrict (A \<inter> J) zJ ! i\<close> assms(2) assms(7)
+          by (metis \<open>i < n\<close> \<open>zz \<in> X\<close> assms(6) calculation(2) length_restrict simple_restrict_none table_def wf_tuple_def)
+    using \<open>zz \<in> X\<close> by auto
+      by (metis (no_types, lifting) Set.is_empty_def \<open>\<And>thesis. (\<lbrakk>wf_tuple n I t; wf_tuple n J xx\<rbrakk> \<Longrightarrow> thesis) \<Longrightarrow> thesis\<close>
+      by (metis Set.is_empty_def \<open>\<And>thesis. (\<lbrakk>wf_tuple n I t; wf_tuple n J xx\<rbrakk> \<Longrightarrow> thesis) \<Longrightarrow> thesis\<close>
+    moreover have "restrict J xx = xx" using \<open>wf_tuple n J xx\<close> restrict_idle by auto
+    moreover have "restrict I t = t" using \<open>wf_tuple n I t\<close> restrict_idle by auto
+      using \<open>(A, X) \<in> Qn\<close> assms(17) non_empty_query_def rwf_query_def by fastforce
+      have "(A, X) \<in> Q_I_neg" by (simp add: True \<open>(A, X) \<in> Qn\<close> assms(7))
+        moreover have "(A, X) \<in> (Q \<union> Qn)" by (simp add: \<open>(A, X) \<in> Qn\<close>)
+      then have "restrict A t \<notin> X" using \<open>(A, X) \<in> Q_I_neg\<close> assms(12) assms(15) by blast
+      moreover have "restrict A z = restrict A t" using True \<open>restrict I z = t\<close> nested_include_restrict by blast
+        have "(A, X) \<in> Qn - Q_I_neg" using False \<open>(A, X) \<in> Qn\<close> assms(7) by auto
+              Suc_le_lessD \<open>(A, X) \<in> Qn\<close> assms(1) assms(17) assms(2) assms(4) card_gt_0_iff case_prodD
+        by (metis AJ_def newQuery.simps projectTable.simps \<open>(A, X) \<in> Q_J_neg\<close> assms(10) image_eqI)
+        then show ?thesis using \<open>(AJ, XXX) \<in> NQ_neg\<close> by blast
+          by (metis nested_include_restrict \<open>restrict I z = t\<close> inf_le1 inf_le2 zA_def)
+          moreover have "A \<subseteq> V" using \<open>(A, X) \<in> Qn\<close> assms(17) included_def rwf_query_def by fastforce
+            using \<open>wf_tuple n V z\<close> calculation(5) wf_tuple_restrict_simple zA_def by blast
+            by (simp add: \<open>restrict (A \<inter> I) zA = restrict (A \<inter> I) t\<close> \<open>wf_tuple n I t\<close> calculation(1) calculation(4) calculation(5))
+        then have "zA \<in> XX" using \<open>(A, XX) = semiJoin (A, X) (I, t)\<close> calculation by auto
+        then have "restrict J zA \<in> XXX" using \<open>(AJ, XXX) = projectTable J (A, XX)\<close> by auto
+          by (metis AJ_def restrict_nested \<open>restrict J z = xx\<close> inf.right_idem inf_commute zA_def)
+        then show "False" using \<open>restrict AJ xx \<notin> XXX\<close> calculation(2) by auto
+      by (metis (no_types, lifting) Set.is_empty_def \<open>\<And>thesis. (\<lbrakk>wf_tuple n I t; wf_tuple n J xx\<rbrakk> \<Longrightarrow> thesis) \<Longrightarrow> thesis\<close>
+      by (metis Set.is_empty_def \<open>\<And>thesis. (\<lbrakk>wf_tuple n I t; wf_tuple n J xx\<rbrakk> \<Longrightarrow> thesis) \<Longrightarrow> thesis\<close>
+    moreover have "restrict J xx = xx" using \<open>wf_tuple n J xx\<close> restrict_idle by auto
+    moreover have "restrict I t = t" using \<open>wf_tuple n I t\<close> restrict_idle by auto
+      using \<open>(A, X) \<in> Q\<close> assms(17) non_empty_query_def rwf_query_def by fastforce
+        then have "A \<inter> I \<noteq> {}" using \<open>1 \<le> card A\<close> by auto
+          by (metis \<open>(A, X) \<in> Q\<close> \<open>1 \<le> card A\<close> \<open>A \<inter> I = A\<close> assms(17) fst_conv rwf_query_def set_filterQuery)          
+        moreover have "(A, X) \<in> (Q \<union> Qn)" by (simp add: \<open>(A, X) \<in> Q\<close>)
+      then have "(A, X) \<in> Q_I_pos" by (metis \<open>(A, X) \<in> filterQuery I Q\<close> assms(5) image_eqI projectQuery.elims)
+      then have "restrict A t \<in> X" using \<open>\<forall>(A, X)\<in>Q_I_pos. restrict A t \<in> X\<close> by blast
+      moreover have "restrict A z = restrict A t" using True \<open>restrict I z = t\<close> nested_include_restrict by blast
+        then show ?thesis using \<open>(A, X) \<in> Q\<close> included_def by fastforce
+          using \<open>wf_tuple n I t\<close> calculation(6) by blast
+          using \<open>\<forall>(A, X)\<in>NQ_pos. restrict A xx \<in> X\<close> \<open>wf_tuple n J xx\<close> \<open>zJ = xx\<close> by blast
+          using True \<open>(A, X) \<in> Q\<close> \<open>1 \<le> card (A \<inter> J)\<close> assms(6) assms(17) rwf_query_def set_filterQuery by fastforce
+        then have "(AI, XI) \<in> Q_I_pos" by (metis \<open>(A, X) \<in> filterQuery I Q\<close> assms(5) image_eqI projectQuery.elims)
+        then have "restrict AI zI \<in> XI" using \<open>wf_tuple n I zI \<and> (\<forall>(A, X)\<in>Q_I_pos. restrict A zI \<in> X)\<close> by blast
+          using \<open>(A, X) \<in> Q_J_pos\<close> \<open>(AJ, XJ) = projectTable J (semiJoin (A, X) (I, zI))\<close> \<open>zI = t\<close> image_iff
+          using \<open>wf_tuple n J zJ \<and> (\<forall>(A, X)\<in>NQ_pos. restrict A zJ \<in> X)\<close> by blast
+          using \<open>(AJ, XJ) = projectTable J (semiJoin (A, X) (I, zI))\<close> by auto
+          using \<open>restrict AJ zJ \<in> XJ\<close> by blast
+          using \<open>(A, X) \<in> Q\<close> assms(17) rwf_query_def wf_atable_def wf_query_def by fastforce
+        moreover have "A \<subseteq> I \<union> J" using \<open>A \<subseteq> V\<close> assms(1) by auto
+        then show ?thesis using restrict_merge[of zI I z zJ J A X n] AI_def True XI_def \<open>AJ = A \<inter> J\<close>
+            \<open>restrict AI zI \<in> XI\<close> \<open>restrict I z = t\<close> \<open>restrict J z = xx\<close> \<open>wf_tuple n V z\<close> assms(1)
+        have "(A, X) \<in> Q_J_pos" using \<open>(A, X) \<in> Q\<close> \<open>1 \<le> card (A \<inter> J)\<close> assms(6) assms(17)
+          by (metis False One_nat_def Set.is_empty_def Suc_leI Suc_le_lessD \<open>1 \<le> card A\<close> \<open>A \<subseteq> V\<close>
+        then have "restrict A z = restrict A xx" using \<open>restrict J z = xx\<close> nested_include_restrict by blast
+        have "zJ = xx" by (simp add: \<open>restrict J z = xx\<close> zJ_def)
+        have "zI = t" by (simp add: \<open>restrict I z = t\<close> zI_def)
+        have "z = merge zJ zI" by (simp add: \<open>zI = t\<close> \<open>zJ = xx\<close> assms(14))
+          using \<open>(AA, XX) = projectTable J (semiJoin (A, X) (I, t))\<close> by auto
+          using \<open>(AA, XX) = projectTable J (semiJoin (A, X) (I, t))\<close> calculation image_iff assms(9)
+          using \<open>(AA, XX) \<in> NQ_pos\<close> \<open>\<forall>(A, X)\<in>NQ_pos. restrict A xx \<in> X\<close> \<open>zJ = xx\<close> by blast
+        then have "restrict A z = restrict A zJ" by (simp add: \<open>restrict A z = restrict A xx\<close> \<open>zJ = xx\<close>)
+        moreover have "restrict AA zJ = restrict A zJ" by (simp add: \<open>A \<subseteq> J\<close> \<open>AA = A \<inter> J\<close> inf.absorb1)
+        then have "restrict A z \<in> XX" using \<open>restrict AA zJ \<in> XX\<close> calculation(2) by auto
+            using \<open>(AA, XX) = projectTable J (semiJoin (A, X) (I, t))\<close> \<open>(AAA, XXX) = semiJoin (A, X) (I, t)\<close> by auto
+          then show ?thesis by (simp add: \<open>XXX \<subseteq> X\<close> image_mono)
+          using \<open>restrict A z \<in> restrict J ` X\<close> by blast
+          by (metis Int_absorb2 \<open>A \<subseteq> J\<close> restrict_nested subset_refl)
+          have "(A, X) \<in> Q" by (simp add: \<open>(A, X) \<in> Q\<close>)
+          then have "wf_tuple n A zz" using \<open>zz \<in> X\<close> table_def by blast
+        then have "restrict A zz = zz" using \<open>restrict A z = restrict J zz\<close> calculation(4) by auto
+        then show ?thesis by (simp add: \<open>zz \<in> X\<close> calculation(4))
+    obtain X where "X \<in> A" "x \<in> f X" using \<open>x \<in> I\<close> assms by auto
+    then show "x \<in> (\<Union>X\<in>A. (f X) \<inter> I)" using \<open>x \<in> I\<close> by blast
+        by (metis simple_restrict_none \<open>i < length z1\<close> \<open>length z1 = length z2\<close> assms(1)
+        by (metis simple_restrict_none UnE \<open>i < length z1\<close> \<open>length z1 = length z2\<close> assms(2)
+    by (simp add: simple_list_index_equality \<open>length z1 = length z2\<close>)
+    have "(A, X) \<in> projectQuery I Q" using \<open>(A, X) \<in> Q_I_pos\<close> assms(5) by auto
+    moreover have "A \<subseteq> I" using \<open>(A, X) \<in> Q_I_neg\<close> assms(7) by auto
+  then have "zI \<in> R_I" using \<open>wf_tuple n I zI\<close> assms(13) calculation by auto
+    obtain "wf_set n V" "wf_tuple n I zI" using \<open>wf_tuple n I zI\<close> assms(16) rwf_query_def wf_query_def by blast
+      then show ?thesis using \<open>(A, X) \<in> Q_J_pos\<close> included_def by fastforce
+      using NQ_def \<open>(A, X) \<in> NQ\<close> by auto
+    then have "restrict AA z \<in> XX" using \<open>\<And>X A. (A, X) \<in> Q_J_pos \<Longrightarrow> restrict A z \<in> X\<close> by blast
+      using \<open>(AA, XX) \<in> Q_J_pos\<close> \<open>\<And>X A. (A, X) \<in> Q_J_pos \<Longrightarrow> isSameIntersection zI (A \<inter> I) (restrict A z)\<close> by auto
+      using \<open>(A, X) = projectTable J (semiJoin (AA, XX) (I, zI))\<close> by auto
+      by (metis \<open>(A, X) = projectTable J (semiJoin (AA, XX) (I, zI))\<close> fst_conv inf.idem inf_commute
+    using \<open>zI \<in> R_I\<close> assms(14) by auto
+    then have "(AA, XX) \<in> Qn" using \<open>(AA, XX) \<in> Q_J_neg\<close> assms(8) by auto
+        by (metis projectTable.simps semiJoin.simps \<open>(A, X) = projectTable J (semiJoin (AA, XX) (I, zI))\<close>
+        by (simp add: restrict_nested \<open>A = AA \<inter> J\<close> zJ_def)
+          by (metis (no_types, lifting) restrict_nested \<open>restrict A zJ = restrict AA zJ\<close>
+          using \<open>zz \<in> Set.filter (isSameIntersection zI (I \<inter> AA)) XX\<close> by auto
+          moreover have "(AA, XX) \<in> Q \<union> Qn" by (simp add: \<open>(AA, XX) \<in> Qn\<close>)
+            using \<open>zz \<in> Set.filter (isSameIntersection zI (I \<inter> AA)) XX\<close> table_def wf_atable_def by fastforce
+          then show ?thesis using \<open>(AA, XX) \<in> Qn\<close> included_def by fastforce
+          by (metis (mono_tags, lifting) isSame_equi_dev \<open>wf_tuple n I zI\<close> assms(1)
+          by (metis \<open>(AA, XX) \<in> Qn\<close> assms(1) assms(16) case_prodD included_def rwf_query_def)
+      then show "False" using \<open>restrict AA z \<notin> XX\<close> calculation(2) by auto
+    using \<open>wf_tuple n J zJ\<close> calculation(3) calculation(4) by blast
+    using \<open>zI \<in> R_I\<close> assms(10) by blast
+    using \<open>zJ \<in> genericJoin J (newQuery J Q_J_pos (I, zI)) (newQuery J Q_J_neg (I, zI))\<close> assms(11)
+            \<open>(I, J) = getIJ Q Qn V\<close> not_less_eq_eq)
+        by (metis "1.prems"(1) False Q_I_neg_def Q_I_pos_def Suc_1 \<open>(I, J) = getIJ Q Qn V\<close> getIJ.getIJProperties(1)
+        using "1.IH"(1) False Q_I_neg_def Q_I_pos_def R_I_def \<open>(I, J) = getIJ Q Qn V\<close> by auto
+          by (metis False Suc_1 \<open>(I, J) = getIJ Q Qn V\<close> getIJProperties(2) le_SucE nat_le_linear)
+          by (metis "1.prems"(1) Diff_subset False Q_J_neg_def Q_J_pos_def Suc_1 \<open>(I, J) = getIJ Q Qn V\<close>
+            using NQ_neg_def NQ_pos_def \<open>rwf_query n J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))\<close> by blast
+                Q_J_pos_def R_I_def Suc_1 \<open>(I, J) = getIJ Q Qn V\<close> calculation filter_Q_J_neg_same not_less_eq_eq)
+        by (metis False Set.is_empty_def Suc_1 \<open>(I, J) = getIJ Q Qn V\<close> coreProperties not_less_eq_eq)
+            using R_def \<open>R = genericJoin V Q Qn\<close> \<open>z \<in> genericJoin V Q Qn\<close> by blast
+            using \<open>z \<in> (\<Union>(t, x)\<in>X. {merge xx t |xx. xx \<in> x})\<close> by blast
+          have "R_NQ = genericJoin J NQ NQ_neg" using NQ_def NQ_neg_def X_def \<open>(t, R_NQ) \<in> X\<close> by blast
+            using \<open>z \<in> {merge xx t |xx. xx \<in> R_NQ}\<close> by blast
+              using NQ_def NQ_neg_def \<open>t \<in> R_I\<close> calculation(2) by auto
+            moreover have "t\<in>R_I" by (simp add: \<open>t \<in> R_I\<close>)
+            then show ?thesis using \<open>R_NQ = genericJoin J NQ NQ_neg\<close> by blast
+              \<open>R_NQ = genericJoin J NQ NQ_neg\<close> \<open>\<forall>y. (y \<in> R_NQ) = (wf_tuple n J y \<and> (\<forall>(A, X)\<in>NQ. restrict A y \<in> X) \<and> (\<forall>(A, X)\<in>NQ_neg. restrict A y \<notin> X))\<close>
+              \<open>t \<in> R_I\<close> \<open>xx \<in> R_NQ\<close> \<open>z = merge xx t\<close> calculation(1) calculation(3) calculation(4) calculation(5) calculation(6) by blast
+              \<open>1 \<le> card I\<close> \<open>1 \<le> card J\<close> \<open>Set.is_empty (I \<inter> J)\<close> \<open>V = I \<union> J\<close>
+              \<open>\<forall>t\<in>R_I. \<forall>y. (y \<in> genericJoin J (newQuery J Q_J_pos (I, t)) (newQuery J Q_J_neg (I, t))) = (wf_tuple n J y \<and> (\<forall>(A, X)\<in>newQuery J Q_J_pos (I, t). restrict A y \<in> X) \<and> (\<forall>(A, X)\<in>newQuery J Q_J_neg (I, t). restrict A y \<notin> X))\<close>
+              \<open>\<forall>x. (x \<in> R_I) = (wf_tuple n I x \<and> (\<forall>(A, X)\<in>Q_I_pos. restrict A x \<in> X) \<and> (\<forall>(A, X)\<in>Q_I_neg. restrict A x \<notin> X))\<close>
+              \<open>wf_tuple n V z \<and> (\<forall>(A, X)\<in>Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Qn. restrict A z \<notin> X)\<close> by blast
+          then show "z \<in> genericJoin V Q Qn" using \<open>R = genericJoin V Q Qn\<close> by blast
+        using \<open>wf_tuple n (\<Union>(A, X)\<in>Q_pos. A) z \<and> (\<forall>(A, X)\<in>Q_pos. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Q_neg. restrict A z \<notin> X)\<close>
+      then have "X \<subseteq> {?v}" using \<open>Set.is_empty A\<close> table_empty unit_table_def
+        by (metis Set.is_empty_def \<open>\<not> Set.is_empty X\<close> empty_table_def set_eq_subset)
+      then show ?thesis using \<open>(A, X) \<in> Q_neg\<close> \<open>Set.is_empty A\<close> \<open>\<not> Set.is_empty X\<close>
+          \<open>wf_tuple n (\<Union>(A, X)\<in>Q_pos. A) z \<and> (\<forall>(A, X)\<in>Q_pos. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Q_neg. restrict A z \<notin> X)\<close>
+        by (metis (no_types, lifting) Set.is_empty_def \<open>table n A X\<close> case_prod_beta' empty_table_def
+  then show ?thesis using \<open>?r = {}\<close> by simp
+        then show ?thesis by (simp add: Q_def Set.is_empty_def \<open>(A, X) \<in> Q_pos\<close>)
+      then show "X \<subseteq> {replicate n None}" using \<open>A = {}\<close> \<open>table n A X\<close> table_empty unit_table_def by fastforce
+      obtain A X where "(A, X) \<in> Q_pos" using \<open>card Q_pos \<ge> 1\<close>
+      then have "x \<in> X" using \<open>x \<in> ?r\<close> r_def by auto
+      then show "x \<in> {replicate n None}" using \<open>(A, X) \<in> Q_pos\<close> \<open>\<And>X A. (A, X) \<in> Q_pos \<Longrightarrow> X \<subseteq> {replicate n None}\<close> by blast
+        then have x_pos: "\<forall>(A, X)\<in>Q_pos. X = {?v}" using \<open>\<And>X A. (A, X) \<in> Q_pos \<Longrightarrow> X \<subseteq> {replicate n None}\<close> by blast
+        moreover have x_neg: "\<forall>(A, X)\<in>Q_neg. ?v \<notin> X" using \<open>\<nexists>A X. (A, X) \<in> Q_pos \<and> X = {} \<or> (A, X) \<in> Q_neg \<and> {replicate n None} \<subseteq> X\<close> by blast
+          using \<open>wf_tuple n (\<Union>(A, X)\<in>Q_pos. A) z \<and> (\<forall>(A, X)\<in>Q_pos. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Q_neg. restrict A z \<notin> X)\<close> empty_u wf_tuple_empty by auto
+        then have "(\<exists>(A, X)\<in>Q_pos. z \<notin> X) \<or> (\<exists>(A, X)\<in>Q_neg. z \<in> X)" using disj using \<open>z = replicate n None\<close> by auto
+          using \<open>\<And>A. restrict A z = z\<close> \<open>wf_tuple n (\<Union>(A, X)\<in>Q_pos. A) z \<and> (\<forall>(A, X)\<in>Q_pos. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Q_neg. restrict A z \<notin> X)\<close> by auto
+      then have "?r = {?v}" using \<open>wrapperGenericJoin Q_pos Q_neg \<subseteq> {replicate n None}\<close> by blast
+          using Set.is_empty_def \<open>\<And>X A. (A, X) \<in> Q_pos \<Longrightarrow> X \<subseteq> {replicate n None}\<close> forall by fastforce
+      moreover have "\<forall>(A, X)\<in>Q_neg. ?v \<notin> X" using \<open>wrapperGenericJoin Q_pos Q_neg = {replicate n None}\<close> r_def by auto
+          then have "z = ?v" using \<open>wrapperGenericJoin Q_pos Q_neg = {replicate n None}\<close> by blast
+          then show "?b" using \<open>\<forall>(A, X)\<in>Q_neg. replicate n None \<notin> X\<close> \<open>\<forall>(A, X)\<in>Q_pos. X = {replicate n None}\<close>
+              \<open>z = replicate n None\<close> empty_u wf_tuple_empty by fastforce
+          using \<open>wrapperGenericJoin Q_pos Q_neg = {replicate n None}\<close> empty_u wf_tuple_empty by auto
+          obtain A X where "x \<in> A" "(A, X) \<in> Q" using V_def \<open>x \<in> V\<close> by blast
+          then show "x < n" using \<open>x \<in> A\<close> wf_set_def by blast
+          by (metis (no_types, lifting) Q_def UnE Un_iff \<open>Y \<in> Q \<union> Q_neg\<close> assms(2) case_prodD member_filter sup_commute)
+            by (metis (no_types, lifting) Q_def UnE Un_iff \<open>Y = (A, X)\<close> \<open>Y \<in> Q \<union> Q_neg\<close> assms(2) case_prod_conv member_filter sup.commute)
+        ultimately show "wf_atable n Y" by (simp add: \<open>Y = (A, X)\<close> wf_atable_def)
+      then show ?thesis using Un_iff \<open>Qn \<subseteq> Q_neg\<close> subsetD wf_query_def
+          using \<open>Qn \<subseteq> Q_neg\<close> by blast
+        then have "pp Qn Q n \<in> Q \<union> Q_neg \<or> wf_query n V Q Qn" using \<open>1 \<le> card Q\<close> \<open>wf_set n V\<close> f1 by auto
+        then show ?thesis using \<open>1 \<le> card Q\<close> \<open>\<And>Y. Y \<in> Q \<union> Q_neg \<Longrightarrow> wf_atable n Y\<close> \<open>wf_set n V\<close> f1 by blast
+          by (metis \<open>included V Q\<close> calculation(3) case_prodD included_def subsetD wf_query_def wf_set_def)
+      by (simp add: \<open>included V Q\<close> calculation(1) calculation(3) calculation(4) calculation(5) rwf_query_def)
+      then have "A \<subseteq> V" by (metis Q_def \<open>included V Q\<close> included_def member_filter prod.simps(2))
+      moreover have "finite V" using wf_set_finite \<open>wf_query n V Q Qn\<close> wf_query_def by blast
+        by (metis One_nat_def Set.is_empty_def Suc_leI \<open>\<not> Set.is_empty A\<close> card_gt_0_iff subset_empty)
+          by (metis (no_types, lifting) DiffD1 DiffD2 Q_def \<open>(A, X) \<in> Q_pos - Q\<close> case_prod_beta' member_filter prod.sel(1))
+        moreover have "\<not> Set.is_empty X" using forall using \<open>(A, X) \<in> Q_pos - Q\<close> by blast
+          using \<open>(z \<in> genericJoin V Q Qn) = (wf_tuple n V z \<and> (\<forall>(A, X)\<in>Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Qn. restrict A z \<notin> X))\<close> \<open>z \<in> genericJoin V Q Qn\<close> by linarith
+          using \<open>Set.is_empty A\<close> wf_tuple_empty wf_tuple_restrict_simple
+            by (metis DiffD1 Set.is_empty_def True \<open>(A, X) \<in> Q_neg - Qn\<close> \<open>1 \<le> card V\<close> card_eq_0_iff forall notc prod.simps(2) rev_finite_subset)
+            have "(A, X) \<in> Q_neg" using \<open>(A, X) \<in> Q_neg - Qn\<close> by auto
+            then show ?thesis by (simp add: \<open>i \<in> A\<close> wf_set_def)
+            have "(A, X) \<in> Q_neg" using \<open>(A, X) \<in> Q_neg - Qn\<close> by auto
+            using \<open>(z \<in> genericJoin V Q Qn) = (wf_tuple n V z \<and> (\<forall>(A, X)\<in>Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Qn. restrict A z \<notin> X))\<close> \<open>z \<in> genericJoin V Q Qn\<close> by blast
+            then have "wf_tuple n A ?zz" using \<open>table n A X\<close> table_def by blast
+              by (simp add: \<open>i \<in> A\<close> calculation wf_tuple_def)
+            moreover have "z ! i = None" using \<open>wf_tuple n V z\<close> \<open>i \<notin> V\<close> wf_tuple_def using \<open>i < n\<close> by blast
+              using \<open>i < n\<close> \<open>i \<in> A\<close> \<open>wf_tuple n A (restrict A z)\<close> nth_restrict wf_tuple_length by fastforce
+      have "?a \<Longrightarrow> ?b" using Diff_iff \<open>(z \<in> genericJoin V Q Qn) = ((\<forall>(A, X)\<in>Q_pos - Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Q_neg - Qn. restrict A z \<notin> X) \<and> wf_tuple n V z \<and> (\<forall>(A, X)\<in>Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Qn. restrict A z \<notin> X))\<close> \<open>V = (\<Union>(A, X)\<in>Q_pos. A)\<close> \<open>wrapperGenericJoin Q_pos Q_neg = genericJoin V Q Qn\<close> by blast
+      moreover have "?b \<Longrightarrow> ?a" using Q_def Qn_def \<open>(z \<in> genericJoin V Q Qn) = (wf_tuple n V z \<and> (\<forall>(A, X)\<in>Q. restrict A z \<in> X) \<and> (\<forall>(A, X)\<in>Qn. restrict A z \<notin> X))\<close> \<open>V = (\<Union>(A, X)\<in>Q_pos. A)\<close> \<open>wrapperGenericJoin Q_pos Q_neg = genericJoin V Q Qn\<close> by auto

@@ -1,0 +1,195 @@
+theory Sepref_Guide_Reference
+begin
+
+
+schematic_goal 
+  notes [id_rules] = itypeI[of x "TYPE(nat)"] itypeI[of a "TYPE(bool list)"]
+  shows "hn_refine 
+    (hn_ctxt nat_assn x xi * hn_ctxt (array_assn bool_assn) a ai) 
+    (?c::?'c Heap) ?\<Gamma>' ?R 
+    (do { ASSERT (x<length a); RETURN (a!x) })"
+  by sepref
+
+
+schematic_goal "(uncurry (?c), uncurry (\<lambda>x a. do {ASSERT (x<length a); RETURN (a!x)}))
+  \<in> nat_assn\<^sup>k *\<^sub>a (array_assn bool_assn)\<^sup>k \<rightarrow>\<^sub>a bool_assn"
+  by sepref
+thm intf_of_assn
+
+
+
+thm sepref_preproc
+thm intf_of_assn
+
+  Then, it applies @{thm [source] CONS_init}, to make postcondition and 
+  result relation schematic, and introduce (separation logic) implications to
+  the originals, which are discharged after synthesis.
+\<close>
+text \<open>Use @{method sepref_dbg_cons_init} for direct access to this phase.
+  combinator rules. 
+\<close>
+subsubsection \<open>Operation Identification Phase\<close>
+text \<open>The purpose of this phase is to identify the conceptual operations in the given program.
+  Consider, for example, a map @{term_type "m::'k\<rightharpoonup>'v"}. 
+  If one writes @{term "m(k\<mapsto>v)"}, this is a map update. However, in Isabelle/HOL maps
+  are encoded as functions @{typ "'k \<Rightarrow> 'v option"}, and the map update is just syntactic
+  sugar for @{term [source] "fun_upd m k (Some v)"}. And, likewise, map lookup is just 
+  function application.
+
+  However, the Sepref tool must be able to distinguish between maps and functions into the
+  option type, because maps shall be refined, to e.g., hash-tables, while functions into the
+  interpreted as the constructor of the option datatype, or as a map, mapping each element to
+  itself, and perhaps be implemented with a hashtable.
+  
+  Moreover, for technical reasons, the translation phase of Sepref expects each operation 
+  to be a single constant applied to its operands. This criterion is neither matched by map 
+  lookup (no constant, just application of the first to the second operand), nor map update 
+  (complex expression, involving several constants).
+
+  The operation identification phase uses a heuristics to find the conceptual types in a term
+  (e.g., discriminate between map and function to option), and rewrite the operations to single 
+  constants (e.g. @{const op_map_lookup} for map lookup). The heuristics is a type-inference 
+  algorithm combined with rewriting. Note that the inferred conceptual type does not necessarily
+  match the HOL type, nor does it have a semantic meaning, other than guiding the heuristics.
+
+  The heuristics store a set of typing rules for constants, in @{attribute id_rules}.
+  Moreover, it stores two sets of rewrite rules, in @{attribute pat_rules} 
+  and @{attribute def_pat_rules}. A term is typed by first trying to apply a rewrite rule, and
+  then applying standard Hindley-Milner type inference rules for application and abstraction. 
+  Constants (and free variables) are typed
+  signature. This does not work for free variables, such that rules must be available
+  
+  If typing succeeds, the result is the rewritten term.
+
+  For example, consider the type of maps. Their interface (or conceptual) type is 
+  Moreover, there is a rule to rewrite function application to map lookup (@{thm pat_map_lookup}). 
+  It can be backtracked over, such that also functions into the option type are possible.
+\<close>
+text \<open>
+  The operation identification phase, and all further phases, work on a tagged 
+  version of the input term, where all function applications are replaced by the
+  tagging constant @{term "($)"}, and all abstractions are replaced by 
+  @{term "\<lambda>x. PROTECT2 (t x) DUMMY"} (syntax: @{term "\<lambda>x. (#t x#)"}, 
+  input syntax: @{term "\<lambda>\<^sub>2x. t x"}). This is required to tame Isabelle's 
+  higher-order unification. However, it makes tagged terms quite unreadable, and it
+  internal states for debugging purposes.
+
+  To prevent looping, rewrite-rules can use @{term "($')"} on the RHS. This is
+  a synonym for @{term "($)"}, and gets rewritten to @{term "($)"} after the operation
+  identification phase. During the operation identification phase, it prevents infinite
+  loops of pattern rewrite rules.
+
+
+  Interface type annotations can be added to the term using @{const CTYPE_ANNOT} 
+  (syntax @{term "t:::\<^sub>iTYPE('a)"}).
+
+  In many cases, it is desirable to treat complex terms as a single constant, 
+  a standard example are constants defined inside locales, which may have locale 
+  parameters attached. Those terms can be wrapped into an @{const PR_CONST} tag,
+  which causes them to be treated like a single constant. Such constants must always 
+\<close>
+subsubsection \<open>Troubleshooting Operation Identification\<close>
+text \<open>
+  If the operation identification fails, in most cases one has forgotten to register 
+  rule is malformed. Note that, in practice, identification rules are registered by 
+  the @{command sepref_register} (see below), which catches many malformed rules, and
+  forgetting to register a constant with a conceptual type other than its signature. 
+  In this case, operation identification gets stuck trying to unify the signature's type with
+  the interface type, e.g., @{typ "'k \<Rightarrow> 'v option"} with @{typ "('k,'v)i_map"}.
+
+  The method @{method sepref_dbg_id} invokes the id-phase in isolation.
+  The method @{method sepref_dbg_id_keep} returns the internal state where type 
+  inference got stuck. It returns a sequence of all stuck states, which can be inspected
+  using @{command back}. 
+
+  The methods @{method sepref_dbg_id_init},@{method sepref_dbg_id_step}, 
+  and @{method sepref_dbg_id_solve} can be used to single-step the operation 
+  identification phase. Here, solve applies single steps until the current subgoal is discharged.
+  Be aware that application of single steps allows no automatic backtracking, such that backtracking
+  has to be done manually.
+\<close>
+text \<open>Examples for identification errors\<close>
+    \<comment> \<open>Forgot to register \<open>n\<close>\<close>
+  text \<open>Solution: Register \<open>n\<close>, be careful not to export meaningless registrations from context!\<close>
+  \<comment> \<open>Stuck at refinement for function update on map\<close>
+text \<open>Solution: Register with correct interface type\<close>
+subsubsection \<open>Monadify Phase\<close>
+text \<open>
+  The monadify phase rewrites the program such that every operation becomes 
+  visible on the monad level, that is, nested HOL-expressions are flattened.
+  Also combinators (e.g. if, fold, case) may get flattened, if special rules 
+  are registered for that.
+
+  Moreover, the monadify phase fixes the number of operands applied to an operation,
+  using eta-expansion to add missing operands. 
+
+  Finally, the monadify phase handles duplicate parameters to an operation, by
+  inserting a @{const COPY} tag. This is necessary as our tool expects the 
+  parameters of a function to be separate, even for read-only 
+\<close>
+text \<open>The monadify phase consists of a number of sub-phases.
+  The method @{method sepref_dbg_monadify} executes the monadify phase,
+  the method @{method sepref_dbg_monadify_keep} stops at a failing sub-phase
+  and presents the internal goal state before the failing sub-phase.
+\<close>
+subsubsection \<open>Monadify: Arity\<close>
+text \<open>In the first sub-phase, the rules from @{attribute sepref_monadify_arity} 
+  are used to standardize the number of operands applied to a constant.
+  The rules work by rewriting each constant to a lambda-expression with the 
+  desired number of arguments, and the using beta-reduction to account for
+  already existing arguments. Also higher-order arguments can be enforced,
+  for example, the rule for fold enforces three arguments, the function itself
+  having two arguments (@{thm fold_arity}).
+
+  In order to prevent arity rules being applied infinitely often, 
+  the @{const SP} tag can be used on the RHS. It prevents anything inside 
+  from being changed, and gets removed after the arity step.
+
+  The method @{method sepref_dbg_monadify_arity} gives you direct access to this phase.
+
+  only has first-order arguments, which are evaluated before the function is applied (e.g. @{term "(+)"}),
+  evaluation orders (e.g. @{term "fold"}, @{term "If"}).
+
+  Note: In practice, most arity (and combinator) rules are declared automatically
+    by @{command sepref_register} or @{command sepref_decl_op}. Manual declaration
+    is only required for higher-order functions.
+\<close>
+subsubsection \<open>Monadify: Combinators\<close>
+text \<open>The second sub-phase flattens the term. 
+  It has a rule for every function into @{typ "_ nres"} type, that determines
+  the evaluation order of the arguments. First-order arguments are evaluated before
+  an operation is applied. Higher-order arguments are treated specially, as they
+  are evaluated during executing the (combinator) operation. The rules are in
+  @{attribute sepref_monadify_comb}.
+
+  Evaluation of plain (non-monadic) terms is triggered by wrapping them into
+  the @{const EVAL} tag. The @{attribute sepref_monadify_comb} rules may also contain
+  rewrite-rules for the @{const EVAL} tag, for example to unfold plain combinators
+  into the monad (e.g. @{thm dflt_plain_comb}). If no such rule applies, the 
+  default method is to interpret the head of the term as a function, and recursively
+  evaluate the arguments, using left-to-right evaluation order. The head of 
+  a term inside @{const EVAL} must not be an abstraction. Otherwise, the 
+  @{const EVAL} tag remains in the term, and the next sub-phase detects this 
+  and fails.
+
+  The method @{method sepref_dbg_monadify_comb} executes the combinator-phase 
+  in isolation.
+\<close>
+subsubsection \<open>Monadify: Check-Eval\<close>
+text \<open>This phase just checks for remaining @{const EVAL} tags in the term,
+  and fails if there are such tags. The method @{method sepref_dbg_monadify_check_EVAL}
+  gives direct access to this phase.
+
+  Remaining @{const EVAL} tags indicate
+  higher-order functions without an appropriate setup of the combinator-rules
+  being used. For example:
+\<close>
+  \<comment> \<open>An \<open>EVAL\<close>-tag with an abstraction remains. This is b/c the default heuristics
+  The syntax is \<open>(uncurry\<^sub>x f, uncurry\<^sub>x g) \<in> [P]\<^sub>f (...(R\<^sub>1\<times>\<^sub>rR\<^sub>2)\<times>\<^sub>r...)\<times>\<^sub>rR\<^sub>n) \<rightarrow> R\<close>,
+  and without precondition, we have \<open>(...(R\<^sub>1\<times>\<^sub>rR\<^sub>2)\<times>\<^sub>r...)\<times>\<^sub>rR\<^sub>n) \<rightarrow>\<^sub>f R\<close>. 
+  As we do not support refinement of heap-programs, but only refinement \<^emph>\<open>into\<close> heap 
+  The \<open>FCOMP\<close> attribute tries to convert its arguments to hfref/fref form, such that
+  The standard use-case for \<open>FCOMP\<close> is to compose multiple refinement steps to
+  Another use-case for \<open>FCOMP\<close> is to compose a refinement theorem of a 
+  @{command sepref_decl_impl} are used for this purpose. Internally, they use \<open>FCOMP\<close>.
+  which is automated by the \<open>sepref_register\<close> tool. Currently, it only 

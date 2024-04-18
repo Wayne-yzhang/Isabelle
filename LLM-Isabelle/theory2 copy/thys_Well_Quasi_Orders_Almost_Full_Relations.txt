@@ -1,0 +1,107 @@
+theory Almost_Full_Relations
+imports Minimal_Bad_Sequences
+begin
+
+lemma (in mbs) mbs':
+  assumes "\<not> almost_full_on P A"
+  shows "\<exists>m \<in> BAD P. \<forall>g. (m, g) \<in> gseq \<longrightarrow> good P g"
+using assms and mbs unfolding almost_full_on_def by blast
+
+
+definition with_bot :: "'a set \<Rightarrow> 'a option set" ("_\<^sub>\<bottom>" [1000] 1000)
+where
+  "A\<^sub>\<bottom> = {None} \<union> Some ` A"
+
+lemma with_bot_iff [iff]:
+  "Some x \<in> A\<^sub>\<bottom> \<longleftrightarrow> x \<in> A"
+  by (auto simp: with_bot_def)
+
+lemma NoneI [simp, intro]:
+  "None \<in> A\<^sub>\<bottom>"
+  by (simp add: with_bot_def)
+
+lemma not_None_the_mem [simp]:
+  "x \<noteq> None \<Longrightarrow> the x \<in> A \<longleftrightarrow> x \<in> A\<^sub>\<bottom>"
+  by auto
+
+lemma with_bot_cases:
+  "u \<in> A\<^sub>\<bottom> \<Longrightarrow> (\<And>x. x \<in> A \<Longrightarrow> u = Some x \<Longrightarrow> P) \<Longrightarrow> (u = None \<Longrightarrow> P) \<Longrightarrow> P"
+  by auto
+
+lemma with_bot_empty_conv [iff]:
+  "A\<^sub>\<bottom> = {None} \<longleftrightarrow> A = {}"
+  by (auto elim: with_bot_cases)
+
+lemma with_bot_UNIV [simp]:
+  "UNIV\<^sub>\<bottom> = UNIV"
+proof (rule set_eqI)
+  fix x :: "'a option"
+  show "x \<in> UNIV\<^sub>\<bottom> \<longleftrightarrow> x \<in> UNIV" by (cases x) auto
+qed
+
+
+
+fun
+  option_le :: "('a \<Rightarrow> 'a \<Rightarrow> bool) \<Rightarrow> 'a option \<Rightarrow> 'a option \<Rightarrow> bool"
+where
+  "option_le P None y = True" |
+  "option_le P (Some x) None = False" |
+  "option_le P (Some x) (Some y) = P x y"
+
+lemma None_imp_good_option_le [simp]:
+  assumes "f i = None"
+  shows "good (option_le P) f"
+  by (rule goodI [of i "Suc i"]) (auto simp: assms)
+
+lemma almost_full_on_with_bot:
+  assumes "almost_full_on P A"
+  shows "almost_full_on (option_le P) A\<^sub>\<bottom>" (is "almost_full_on ?P ?A")
+proof
+  fix f :: "nat \<Rightarrow> 'a option"
+  assume *: "\<forall>i. f i \<in> ?A"
+  show "good ?P f"
+  proof (cases "\<forall>i. f i \<noteq> None")
+    case True
+    then have **: "\<And>i. Some (the (f i)) = f i"
+      and "\<And>i. the (f i) \<in> A" using * by auto
+    with almost_full_onD [OF assms, of "the \<circ> f"] obtain i j where "i < j"
+      and "P (the (f i)) (the (f j))" by auto
+    then have "?P (Some (the (f i))) (Some (the (f j)))" by simp
+    then have "?P (f i) (f j)" unfolding ** .
+  qed auto
+qed
+
+
+
+fun
+  sum_le :: "('a \<Rightarrow> 'a \<Rightarrow> bool) \<Rightarrow> ('b \<Rightarrow> 'b \<Rightarrow> bool) \<Rightarrow> 'a + 'b \<Rightarrow> 'a + 'b \<Rightarrow> bool"
+where
+  "sum_le P Q (Inl x) (Inl y) = P x y" |
+  "sum_le P Q (Inr x) (Inr y) = Q x y" |
+  "sum_le P Q x y = False"
+
+lemma not_sum_le_cases:
+  assumes "\<not> sum_le P Q a b"
+    and "\<And>x y. \<lbrakk>a = Inl x; b = Inl y; \<not> P x y\<rbrakk> \<Longrightarrow> thesis"
+    and "\<And>x y. \<lbrakk>a = Inr x; b = Inr y; \<not> Q x y\<rbrakk> \<Longrightarrow> thesis"
+    and "\<And>x y. \<lbrakk>a = Inl x; b = Inr y\<rbrakk> \<Longrightarrow> thesis"
+    and "\<And>x y. \<lbrakk>a = Inr x; b = Inl y\<rbrakk> \<Longrightarrow> thesis"
+  shows thesis
+  using assms by (cases a b rule: sum.exhaust [case_product sum.exhaust]) auto
+
+lemma almost_full_on_Plus:
+  assumes "almost_full_on P A" and "almost_full_on Q B"
+  shows "almost_full_on (sum_le P Q) (A <+> B)" (is "almost_full_on ?P ?A")
+proof
+  fix f :: "nat \<Rightarrow> ('a + 'b)"
+  let ?I = "f -` Inl ` A"
+  let ?J = "f -` Inr ` B"
+  assume "\<forall>i. f i \<in> ?A"
+  then have *: "?J = (UNIV::nat set) - ?I" by (fastforce)
+  show "good ?P f"
+  proof (rule ccontr)
+    assume bad: "bad ?P f"
+    show False
+    proof (cases "finite ?I")
+      assume "finite ?I"
+      then have "infinite ?J" by (auto simp: *)

@@ -1,0 +1,159 @@
+theory RandomXOR imports
+  ApproxMCPreliminaries
+  Frequency_Moments.Product_PMF_Ext
+  Monad_Normalisation.Monad_Normalisation
+begin
+
+
+definition random_xor :: "'a set \<Rightarrow> ('a set \<times> bool) pmf"
+  where "random_xor V =
+    pair_pmf (pmf_of_set (Pow V)) (bernoulli_pmf (1/2))"
+
+lemma pmf_of_set_Pow_fin_map:
+  assumes V:"finite V"
+  shows "pmf_of_set (Pow V) =
+    map_pmf (\<lambda>b. {x \<in> V. b x = Some True})
+     (Pi_pmf V def (\<lambda>_. map_pmf Some (bernoulli_pmf (1 / 2))))"
+proof -
+  have *: "Pi_pmf V def (\<lambda>_. map_pmf Some (bernoulli_pmf (1 / 2))) =
+    map_pmf (\<lambda>f x. if x \<in> V then f x else def)
+    (Pi_pmf V (Some False) (\<lambda>_. map_pmf Some (bernoulli_pmf (1 / 2))))"
+    unfolding Pi_pmf_default_swap[OF V] by auto
+
+  have **: "pmf_of_set (Pow V) =
+    map_pmf
+     (\<lambda>x. {xa. (xa \<in> V \<longrightarrow> x xa) \<and> xa \<in> V})
+     (Pi_pmf V False  (\<lambda>_. bernoulli_pmf (1 / 2)))"
+    by (smt (verit, ccfv_SIG) Collect_cong pmf_of_set_Pow_conv_bernoulli V pmf.map_cong)
+  show ?thesis
+    unfolding *
+    apply (subst Pi_pmf_map[OF V, of _ "False"])
+    using ** by (auto simp add: pmf.map_comp o_def)
+qed
+
+lemma random_xor_from_bits:
+  assumes V:"finite V"
+  shows "random_xor V =
+    pair_pmf
+      (map_pmf (\<lambda>b. {x \<in> V. b x = Some True})
+        (Pi_pmf V def (\<lambda>_. map_pmf Some (bernoulli_pmf (1/2)))))
+      (bernoulli_pmf (1/2))"
+  unfolding random_xor_def
+  using V pmf_of_set_Pow_fin_map by fastforce
+
+fun satisfies_xor :: "('a set \<times> bool) \<Rightarrow> 'a set \<Rightarrow> bool"
+  where "satisfies_xor (x,b) \<omega> =
+     even (card (\<omega> \<inter> x) + of_bool b) "
+
+
+lemma satisfies_xor_inter:
+  shows "satisfies_xor ( \<omega> \<inter> x ,b) \<omega> = satisfies_xor (x,b) \<omega>"
+  by (auto simp add: Int_commute)
+
+lemma prob_bernoulli_bind_pmf:
+  assumes "0 \<le> p" "p \<le> 1"
+  assumes "finite E"
+  shows "measure_pmf.prob
+   (bernoulli_pmf p \<bind> x) E =
+  p * (measure_pmf.prob (x True) E) +
+  (1 - p) * (measure_pmf.prob (x False) E) "
+  using assms
+  by (auto simp add: pmf_bind measure_measure_pmf_finite[OF assms(3)] vector_space_over_itself.scale_sum_right comm_monoid_add_class.sum.distrib mult.commute)
+
+lemma set_pmf_random_xor:
+  assumes V: "finite V"
+  shows "set_pmf (random_xor V) = (Pow V) \<times> UNIV"
+  unfolding random_xor_def
+  using assms by (auto simp add: Pow_not_empty Set.basic_monos(7))
+
+lemma pmf_of_set_prod:
+  assumes "P \<noteq> {}" "Q \<noteq> {}"
+  assumes "finite P" "finite Q"
+  shows "pmf_of_set (P \<times> Q) = pair_pmf (pmf_of_set P) (pmf_of_set Q)"
+  by (auto intro!: pmf_eqI simp add: indicator_def pmf_pair assms)
+
+lemma random_xor_pmf_of_set:
+  assumes V:"finite V"
+  shows "random_xor V  = pmf_of_set ((Pow V) \<times> UNIV)"
+  unfolding random_xor_def
+  apply (subst pmf_of_set_prod)
+  using V bernoulli_pmf_half_conv_pmf_of_set by auto
+
+lemma prob_random_xor_with_set_pmf:
+  assumes V: "finite V"
+  shows "prob_space.prob (random_xor V) {c. P c} =
+    prob_space.prob (random_xor V) {c. fst c \<subseteq> V \<and> P c}"
+  by (smt (verit, best) PowD assms measure_pmf.measure_pmf_eq mem_Collect_eq mem_Sigma_iff prod.collapse set_pmf_random_xor)
+
+lemma prob_set_parity:
+  assumes "measure_pmf.prob M
+    {c. P c} = q"
+  shows "measure_pmf.prob M
+    {c. P c = b} = (if b then q else 1 - q)"
+proof -
+  {
+    assume b:"b"
+    have ?thesis using assms
+      using b by presburger
+  }
+  moreover {
+    assume b:"\<not>b"
+    have "{c. P c} \<in> measure_pmf.events M" by auto
+    from measure_pmf.prob_compl[OF this]
+    have "1 - q = measure_pmf.prob M (UNIV - {c. P c})"
+      using assms by auto
+    moreover have " ... =
+      prob_space.prob M
+      {c. P c = b}"
+      by (simp add: b measure_pmf.measure_pmf_eq)
+    ultimately have ?thesis
+      using b by presburger
+  }
+  ultimately show ?thesis by auto
+qed
+
+lemma satisfies_random_xor:
+  assumes V: "finite V"
+  shows "prob_space.prob (random_xor V)
+    {c. satisfies_xor c \<omega>} = 1 / 2"
+proof -
+  have eq: "{(c::'a set \<times> bool). fst c \<subseteq> V} = {c. c \<subseteq> V} \<times> UNIV"
+    by auto
+  then have "finite {(c::'a set \<times> bool). fst c \<subseteq> V}"
+    using assms by auto
+
+  then have *: "
+    x \<subseteq> V \<Longrightarrow>
+    measure_pmf.prob (bernoulli_pmf (1 / 2) \<bind> (\<lambda>y. return_pmf (x, y)))
+        {c. fst c \<subseteq> V \<and> satisfies_xor c \<omega>} = 1 / 2" for x
+    apply (subst prob_bernoulli_bind_pmf)
+    by (auto simp add: indicator_def)
+
+  have "prob_space.prob (random_xor V) {c. satisfies_xor c \<omega>} =
+    prob_space.prob (random_xor V) {c. fst c \<subseteq> V \<and> satisfies_xor c \<omega>}"
+    using prob_random_xor_with_set_pmf[OF V] by auto
+  also have "... =
+    prob_space.expectation (random_xor V)
+    (indicat_real {c. fst c \<subseteq> V \<and> satisfies_xor c \<omega>})"
+    by auto
+  also have "... = (\<Sum>a\<in>Pow V.
+       inverse (real (card (Pow V))) *
+       measure_pmf.prob
+        (bernoulli_pmf (1 / 2) \<bind>
+         (\<lambda>y. return_pmf (a, y)))
+        {c. fst c \<subseteq> V \<and> satisfies_xor c \<omega>})"
+    unfolding random_xor_def pair_pmf_def
+    apply (subst pmf_expectation_bind_pmf_of_set)
+    using assms by auto
+  also have "... = (\<Sum>a\<in>Pow V.
+       inverse (real (card (Pow V))) * (1/2))"
+    by (simp add: *)
+(* TODO: there is a more general version below *)
+(* TODO: duplicated in Schwartz_Zippel, but
+  we don't want to pull in the multivariate polynomials library *)
+(*
+  Fix any event E that does not touch x
+  Then we can sample that event separately
+*)
+(* Split probability for two disjoint non-empty sets *)
+(* Split probability for three disjoint non-empty sets *)

@@ -1,0 +1,157 @@
+  extended by time bookkeeping.\<close>
+subsection \<open>The monad\<close>
+subsubsection \<open>Monad construction\<close>
+text \<open>Monadic heap actions either produce values
+  and transform the heap, or fail\<close>
+subsubsection \<open>Specialised lifters\<close>
+subsubsection \<open>Predicate classifying successful computations\<close>
+subsubsection \<open>Predicate for a simple relational calculus\<close>
+text \<open>
+\<close>  
+subsubsection \<open>Monad combinators\<close>
+definition raise :: "string \<Rightarrow> 'a Heap" where \<comment> \<open>the string is just decoration\<close>
+subsection \<open>Generic combinators\<close>
+subsubsection \<open>Assertions\<close>
+subsubsection \<open>Plain lifting\<close>
+subsubsection \<open>Iteration -- warning: this is rarely useful!\<close>
+subsection \<open>Partial function definition setup\<close>
+declaration \<open>Partial_Function.init "heap_time" @{term heap.fixp_fun}
+  @{term heap.mono_body} @{thm heap.fixp_rule_uc} @{thm heap.fixp_induct_uc}
+  (SOME @{thm fixp_induct_heap})\<close>
+subsection \<open>Code generator setup\<close>
+subsubsection \<open>SML and OCaml\<close>
+subsubsection \<open>Haskell\<close>
+text \<open>Adaption layer\<close>
+\<open>import qualified Control.Monad;
+import qualified Control.Monad.ST;
+import qualified Data.STRef;
+import qualified Data.Array.ST;
+
+type RealWorld = Control.Monad.ST.RealWorld;
+type ST s a = Control.Monad.ST.ST s a;
+type STRef s a = Data.STRef.STRef s a;
+type STArray s a = Data.Array.ST.STArray s Integer a;
+
+newSTRef = Data.STRef.newSTRef;
+readSTRef = Data.STRef.readSTRef;
+writeSTRef = Data.STRef.writeSTRef;
+
+newArray :: Integer -> a -> ST s (STArray s a);
+newArray k = Data.Array.ST.newArray (0, k - 1);
+
+newListArray :: [a] -> ST s (STArray s a);
+newListArray xs = Data.Array.ST.newListArray (0, (fromInteger . toInteger . length) xs - 1) xs;
+
+newFunArray :: Integer -> (Integer -> a) -> ST s (STArray s a);
+newFunArray k f = Data.Array.ST.newListArray (0, k - 1) (map f [0..k-1]);
+
+lengthArray :: STArray s a -> ST s Integer;
+lengthArray a = Control.Monad.liftM (\(_, l) -> l + 1) (Data.Array.ST.getBounds a);
+
+readArray :: STArray s a -> Integer -> ST s a;
+readArray = Data.Array.ST.readArray;
+
+writeArray :: STArray s a -> Integer -> a -> ST s ();
+writeArray = Data.Array.ST.writeArray;\<close>
+text \<open>Monad\<close>
+subsubsection \<open>Scala\<close>
+\<open>object Heap {
+  def bind[A, B](f: Unit => A, g: A => Unit => B): Unit => B = (_: Unit) => g(f(()))(())
+}
+
+class Ref[A](x: A) {
+  var value = x
+}
+
+object Ref {
+  def apply[A](x: A): Ref[A] =
+    new Ref[A](x)
+  def lookup[A](r: Ref[A]): A =
+    r.value
+  def update[A](r: Ref[A], x: A): Unit =
+    { r.value = x }
+}
+
+object Array {
+  class T[A](n: Int)
+  {
+    val array: Array[AnyRef] = new Array[AnyRef](n)
+    def apply(i: Int): A = array(i).asInstanceOf[A]
+    def update(i: Int, x: A): Unit = array(i) = x.asInstanceOf[AnyRef]
+    def length: Int = array.length
+    def toList: List[A] = array.toList.asInstanceOf[List[A]]
+    override def toString: String = array.mkString("Array.T(", ",", ")")
+  }
+  def init[A](n: Int)(f: Int => A): T[A] = {
+    val a = new T[A](n)
+    for (i <- 0 until n) a(i) = f(i)
+    a
+  }
+  def make[A](n: BigInt)(f: BigInt => A): T[A] = init(n.toInt)((i: Int) => f(BigInt(i)))
+  def alloc[A](n: BigInt)(x: A): T[A] = init(n.toInt)(_ => x)
+  def len[A](a: T[A]): BigInt = BigInt(a.length)
+  def nth[A](a: T[A], n: BigInt): A = a(n.toInt)
+  def upd[A](a: T[A], n: BigInt, x: A): Unit = a.update(n.toInt, x)
+  def freeze[A](a: T[A]): List[A] = a.toList
+}
+\<close>
+subsubsection \<open>Target variants with less units\<close>
+setup \<open>
+
+let
+
+open Code_Thingol;
+
+val imp_program =
+  let
+    val dummy_name = "";
+    val dummy_case_term = IVar NONE;
+    val unitt =
+        annotation = NONE, range = unitT };
+    fun dest_abs ((v, ty) `|=> (t, _), _) = ((v, ty), t)
+      | dest_abs (t, ty) =
+          let
+            val vs = fold_varnames cons t [];
+            val v = singleton (Name.variant_list vs) "x";
+            val ty' = (hd o fst o unfold_fun) ty;
+          in ((SOME v, ty'), t `$ IVar (SOME v)) end;
+    fun force (t as IConst { sym = Code_Symbol.Constant c, ... } `$ t') = if is_return c
+          then t' else t `$ unitt
+      | force t = t `$ unitt;
+    fun tr_bind'' [(t1, _), (t2, ty2)] =
+      let
+        val ((v, ty), t) = dest_abs (t2, ty2);
+      in ICase { term = force t1, typ = ty, clauses = [(IVar v, tr_bind' t)], primitive = dummy_case_term } end
+    and tr_bind' t = case unfold_app t
+     of (IConst { sym = Code_Symbol.Constant c, dom = ty1 :: ty2 :: _, ... }, [x1, x2]) => if is_bind c
+          then tr_bind'' [(x1, ty1), (x2, ty2)]
+          else force t
+      | _ => force t;
+    fun imp_monad_bind'' ts = (SOME dummy_name, unitT) `|=>
+      (ICase { term = IVar (SOME dummy_name), typ = unitT, clauses = [(unitt, tr_bind'' ts)], primitive = dummy_case_term }, unitT)
+    fun imp_monad_bind' (const as { sym = Code_Symbol.Constant c, dom = dom, ... }) ts = if is_bind c then case (ts, dom)
+       of ([t1, t2], ty1 :: ty2 :: _) => imp_monad_bind'' [(t1, ty1), (t2, ty2)]
+        | ([t1, t2, t3], ty1 :: ty2 :: _) => imp_monad_bind'' [(t1, ty1), (t2, ty2)] `$ t3
+        | (ts, _) => imp_monad_bind (saturated_application 2 (const, ts))
+      else IConst const `$$ map imp_monad_bind ts
+    and imp_monad_bind (IConst const) = imp_monad_bind' const []
+      | imp_monad_bind (t as IVar _) = t
+      | imp_monad_bind (t as _ `$ _) = (case unfold_app t
+         of (IConst const, ts) => imp_monad_bind' const ts
+          | (t, ts) => imp_monad_bind t `$$ map imp_monad_bind ts)
+      | imp_monad_bind (v_ty `|=> (t, typ)) = v_ty `|=> (imp_monad_bind t, typ)
+      | imp_monad_bind (ICase { term = t, typ = ty, clauses = clauses, primitive = t0 }) =
+          ICase { term = imp_monad_bind t, typ = ty,
+            clauses = (map o apply2) imp_monad_bind clauses, primitive = imp_monad_bind t0 };
+
+  in (Code_Symbol.Graph.map o K o map_terms_stmt) imp_monad_bind end;
+
+in
+
+Code_Target.add_derived_target ("SML_imp", [("SML", imp_program)])
+#> Code_Target.add_derived_target ("OCaml_imp", [("OCaml", imp_program)])
+#> Code_Target.add_derived_target ("Scala_imp", [("Scala", imp_program)])
+
+end
+
+\<close>

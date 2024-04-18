@@ -1,0 +1,322 @@
+theory PDF_Compiler
+imports PDF_Compiler_Pred PDF_Target_Density_Contexts
+begin
+
+inductive expr_has_density_cexpr :: "cdens_ctxt \<Rightarrow> expr \<Rightarrow> cexpr \<Rightarrow> bool"
+      ("(1_/ \<turnstile>\<^sub>c/ (_ \<Rightarrow>/ _))" [50,0,50] 50) where
+  edc_val:     "countable_type (val_type v) \<Longrightarrow>
+                  (vs, vs', \<Gamma>, \<delta>)  \<turnstile>\<^sub>c Val v \<Rightarrow>
+                      map_vars Suc (branch_prob_cexpr (vs, vs', \<Gamma>, \<delta>)) *\<^sub>c \<langle>CVar 0 =\<^sub>c CVal v\<rangle>\<^sub>c"
+| edc_var:     "x \<in> set vs \<Longrightarrow> (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Var x \<Rightarrow> marg_dens_cexpr \<Gamma> vs x \<delta>"
+| edc_pair:    "x \<in> set vs \<Longrightarrow> y \<in> set vs \<Longrightarrow> x \<noteq> y \<Longrightarrow>
+                (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c <Var x, Var y> \<Rightarrow> marg_dens2_cexpr \<Gamma> vs x y \<delta>"
+| edc_fail:    "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Fail t \<Rightarrow> CReal 0"
+| edc_let:     "([], vs @ vs', \<Gamma>, CReal 1) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow>
+                  (shift_vars vs, map Suc vs', the (expr_type \<Gamma> e) \<cdot> \<Gamma>,
+                         map_vars Suc \<delta> *\<^sub>c f) \<turnstile>\<^sub>c e' \<Rightarrow> g \<Longrightarrow>
+                    (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c LET e IN e' \<Rightarrow> map_vars (\<lambda>x. x - 1) g"
+| edc_rand:    "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow>
+                  (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Random dst e \<Rightarrow>
+                    \<integral>\<^sub>c map_vars (case_nat 0 (\<lambda>x. x + 2)) f *\<^sub>c
+                           dist_dens_cexpr dst (CVar 0) (CVar 1) \<partial>dist_param_type dst"
+| edc_rand_det: "randomfree e \<Longrightarrow> free_vars e \<subseteq> set vs' \<Longrightarrow>
+                   (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Random dst e \<Rightarrow>
+                     map_vars Suc (branch_prob_cexpr (vs, vs', \<Gamma>, \<delta>)) *\<^sub>c
+                     dist_dens_cexpr dst (map_vars Suc (expr_rf_to_cexpr e)) (CVar 0)"
+| edc_if_det:   "randomfree b \<Longrightarrow>
+                 (vs, vs', \<Gamma>, \<delta> *\<^sub>c \<langle>expr_rf_to_cexpr b\<rangle>\<^sub>c) \<turnstile>\<^sub>c e1 \<Rightarrow> f1 \<Longrightarrow>
+                 (vs, vs', \<Gamma>, \<delta> *\<^sub>c \<langle>\<not>\<^sub>c expr_rf_to_cexpr b\<rangle>\<^sub>c) \<turnstile>\<^sub>c e2 \<Rightarrow> f2 \<Longrightarrow>
+                 (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c IF b THEN e1 ELSE e2 \<Rightarrow> f1 +\<^sub>c f2"
+| edc_if:       "([], vs @ vs', \<Gamma>, CReal 1) \<turnstile>\<^sub>c b \<Rightarrow> f \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta> *\<^sub>c cexpr_subst_val f TRUE) \<turnstile>\<^sub>c e1 \<Rightarrow> g1 \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta> *\<^sub>c cexpr_subst_val f FALSE) \<turnstile>\<^sub>c e2 \<Rightarrow> g2 \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c IF b THEN e1 ELSE e2 \<Rightarrow> g1 +\<^sub>c g2"
+| edc_op_discr: "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow> \<Gamma> \<turnstile> e : t \<Longrightarrow>
+                   op_type oper t = Some t' \<Longrightarrow> countable_type t' \<Longrightarrow>
+                      (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c oper $$ e \<Rightarrow>
+                          \<integral>\<^sub>c \<langle>(oper $$\<^sub>c (CVar 0)) =\<^sub>c CVar 1\<rangle>\<^sub>c *\<^sub>c  map_vars (case_nat 0 (\<lambda>x. x+2)) f \<partial>t"
+| edc_fst:      "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow> \<Gamma> \<turnstile> e : PRODUCT t t' \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Fst $$ e \<Rightarrow>
+                        \<integral>\<^sub>c (map_vars (case_nat 0 (\<lambda>x. x + 2)) f \<circ>\<^sub>c <CVar 1, CVar 0>\<^sub>c) \<partial>t'"
+| edc_snd:      "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow> \<Gamma> \<turnstile> e : PRODUCT t t' \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Snd $$ e \<Rightarrow>
+                        \<integral>\<^sub>c (map_vars (case_nat 0 (\<lambda>x. x + 2)) f \<circ>\<^sub>c <CVar 0, CVar 1>\<^sub>c) \<partial>t"
+| edc_neg:      "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Minus $$ e \<Rightarrow> f \<circ>\<^sub>c (\<lambda>\<^sub>cx. -\<^sub>c x)"
+| edc_addc:     "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow> randomfree e' \<Longrightarrow> free_vars e' \<subseteq> set vs' \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Add $$ <e, e'> \<Rightarrow>
+                         f \<circ>\<^sub>c (\<lambda>\<^sub>cx. x -\<^sub>c map_vars Suc (expr_rf_to_cexpr e'))"
+| edc_multc:    "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow> c \<noteq> 0 \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Mult $$ <e, Val (RealVal c)> \<Rightarrow>
+                         (f \<circ>\<^sub>c (\<lambda>\<^sub>cx. x *\<^sub>c CReal (inverse c))) *\<^sub>c CReal (inverse (abs c))"
+| edc_add:      "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow> \<Gamma> \<turnstile> e : PRODUCT t t \<Longrightarrow>
+                      (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Add $$ e \<Rightarrow>
+                       \<integral>\<^sub>c (map_vars (case_nat 0 (\<lambda>x. x+2)) f \<circ>\<^sub>c (\<lambda>\<^sub>cx. <x, CVar 1 -\<^sub>c x>\<^sub>c)) \<partial>t"
+| edc_inv:      "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Inverse $$ e \<Rightarrow>
+                         (f \<circ>\<^sub>c (\<lambda>\<^sub>cx. inverse\<^sub>c x)) *\<^sub>c (\<lambda>\<^sub>cx. (inverse\<^sub>c x) ^\<^sub>c CInt 2)"
+| edc_exp:      "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f \<Longrightarrow>
+                     (vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c Exp $$ e \<Rightarrow>
+                         (\<lambda>\<^sub>cx. IF\<^sub>c CReal 0 <\<^sub>c x THEN (f \<circ>\<^sub>c ln\<^sub>c x) *\<^sub>c inverse\<^sub>c x ELSE CReal 0)"
+
+code_pred expr_has_density_cexpr .
+
+
+
+
+lemma cdens_ctxt_invar_insert:
+  assumes inv: "cdens_ctxt_invar vs vs' \<Gamma> \<delta>"
+  assumes t : "\<Gamma> \<turnstile> e : t'"
+  assumes free_vars: "free_vars e \<subseteq> set vs \<union> set vs'"
+  assumes hd: "dens_ctxt_\<alpha> ([], vs @ vs', \<Gamma>, CReal 1) \<turnstile>\<^sub>d e \<Rightarrow> (\<lambda>x xa. ennreal (eval_cexpr f x xa))"
+  notes invar = cdens_ctxt_invarD[OF inv]
+  assumes wf1: "is_density_expr ([], vs @ vs', \<Gamma>, CReal 1) t' f"
+  shows "cdens_ctxt_invar (shift_vars vs) (map Suc vs') (t' \<cdot> \<Gamma>) (map_vars Suc \<delta> *\<^sub>c f)"
+proof (intro cdens_ctxt_invarI)
+  show t': "case_nat t' \<Gamma> \<turnstile>\<^sub>c map_vars Suc \<delta> *\<^sub>c f : REAL" using invar wf1
+    by (intro cet_op[where t = "PRODUCT REAL REAL"])
+       (auto intro!: cexpr_typing.intros cexpr_typing_map_vars simp: o_def dest: is_density_exprD)
+
+  let ?vs = "shift_var_set (set vs)" and ?vs' = "Suc ` set vs'" and ?\<Gamma> = "case_nat t' \<Gamma>" and
+      ?\<delta> = "insert_dens (set vs) (set vs') (\<lambda>\<sigma> x. ennreal (eval_cexpr f \<sigma> x))
+                        (\<lambda>x. ennreal (extract_real (cexpr_sem x \<delta>)))"
+  interpret density_context "set vs" "set vs'" \<Gamma> "\<lambda>\<sigma>. extract_real (cexpr_sem \<sigma> \<delta>)"
+    by (rule density_context_\<alpha>[OF inv])
+
+  have dc: "density_context {} (set vs \<union> set vs') \<Gamma> (\<lambda>_. 1)"
+    by (rule density_context_empty)
+  hence dens: "has_parametrized_subprob_density (state_measure (set vs \<union> set vs') \<Gamma>)
+                (\<lambda>\<rho>. dens_ctxt_measure ({}, set vs \<union> set vs', \<Gamma>, \<lambda>_. 1) \<rho> \<bind> (\<lambda>\<sigma>. expr_sem \<sigma> e))
+                (stock_measure t') (\<lambda>\<sigma> x. ennreal (eval_cexpr f \<sigma> x))"
+    using hd free_vars by (intro expr_has_density_sound_aux[OF _ t dc])
+      (auto simp: shift_var_set_def dens_ctxt_\<alpha>_def simp: extract_real_def one_ennreal_def)
+  from density_context.density_context_insert[OF density_context_\<alpha>[OF inv] this]
+    have "density_context ?vs ?vs' ?\<Gamma> ?\<delta>" .
+  have dc: "density_context (shift_var_set (set vs)) (Suc ` set vs') (case_nat t' \<Gamma>)
+                 (\<lambda>\<sigma>. extract_real (cexpr_sem \<sigma> (map_vars Suc \<delta> *\<^sub>c f)))"
+  proof (rule density_context_equiv)
+    show "density_context (shift_var_set (set vs)) (Suc ` set vs') (case_nat t' \<Gamma>) ?\<delta>" by fact
+    show "(\<lambda>x. ennreal (extract_real (cexpr_sem x (map_vars Suc \<delta> *\<^sub>c f))))
+            \<in> borel_measurable (state_measure (?vs \<union> ?vs') ?\<Gamma>)"
+      apply (rule measurable_compose[OF _ measurable_ennreal], rule measurable_compose[OF _ measurable_extract_real])
+      apply (rule measurable_cexpr_sem[OF t'])
+      apply (insert invar is_density_exprD[OF wf1], auto simp: shift_var_set_def)
+      done
+  next
+    fix \<sigma> assume \<sigma>: "\<sigma> \<in> space (state_measure (?vs \<union> ?vs') ?\<Gamma>)"
+    have [simp]: "case_nat (\<sigma> 0) (\<lambda>x. \<sigma> (Suc x)) = \<sigma>" by (intro ext) (simp split: nat.split)
+    from \<sigma> show "insert_dens (set vs) (set vs') (\<lambda>\<sigma> x. ennreal (eval_cexpr f \<sigma> x))
+                      (\<lambda>x. ennreal (extract_real (cexpr_sem x \<delta>))) \<sigma> =
+                   ennreal (extract_real (cexpr_sem \<sigma> (map_vars Suc \<delta> *\<^sub>c f)))"
+      unfolding insert_dens_def using invar is_density_exprD[OF wf1]
+      apply (subst ennreal_mult'[symmetric])
+      apply (erule nonneg_cexprD)
+      apply (rule measurable_space[OF measurable_remove_var[where t=t']])
+      apply simp
+      apply (subst cexpr_sem_Mult[of ?\<Gamma> _ _ _ "?vs \<union> ?vs'"])
+      apply (auto intro!: cexpr_typing_map_vars ennreal_mult'[symmetric]
+                  simp: o_def shift_var_set_def eval_cexpr_def
+                        cexpr_sem_map_vars remove_var_def)
+      done
+  qed
+
+  from subprob_imp_subprob_cexpr[OF this]
+    show "subprob_cexpr (set (shift_vars vs)) (set (map Suc vs')) (case_nat t' \<Gamma>)
+                        (map_vars Suc \<delta> *\<^sub>c f)" by simp
+
+  have "Suc -` shift_var_set (set vs \<union> set vs') = set vs \<union> set vs'"
+    by (auto simp: shift_var_set_def)
+  moreover have "nonneg_cexpr (shift_var_set (set vs \<union> set vs')) (case_nat t' \<Gamma>) f"
+    using wf1[THEN is_density_exprD_nonneg] by simp
+  ultimately show "nonneg_cexpr (set (shift_vars vs) \<union> set (map Suc vs')) (case_nat t' \<Gamma>) (map_vars Suc \<delta> *\<^sub>c f)"
+    using invar is_density_exprD[OF wf1]
+    by (intro nonneg_cexpr_Mult)
+        (auto intro!: cexpr_typing_map_vars nonneg_cexpr_map_vars
+              simp: o_def shift_var_set_def image_Un)
+qed (insert invar is_density_exprD[OF wf1],
+     auto simp: shift_vars_def shift_var_set_def distinct_map intro!: cexpr_typing_map_vars)
+
+lemma cdens_ctxt_invar_insert_bool:
+  assumes dens: "dens_ctxt_\<alpha> ([], vs @ vs', \<Gamma>, CReal 1) \<turnstile>\<^sub>d b \<Rightarrow> (\<lambda>\<rho> x. ennreal (eval_cexpr f \<rho> x))"
+  assumes wf: "is_density_expr ([], vs @ vs', \<Gamma>, CReal 1) BOOL f"
+  assumes t: "\<Gamma> \<turnstile> b : BOOL" and vars: "free_vars b \<subseteq> set vs \<union> set vs'"
+  assumes invar: "cdens_ctxt_invar vs vs' \<Gamma> \<delta>"
+  shows "cdens_ctxt_invar vs vs' \<Gamma> (\<delta> *\<^sub>c cexpr_subst_val f (BoolVal v))"
+proof (intro cdens_ctxt_invarI nonneg_cexpr_Mult nonneg_cexpr_subst_val)
+  note invar' = cdens_ctxt_invarD[OF invar] and wf' = is_density_exprD[OF wf]
+  show "\<Gamma> \<turnstile>\<^sub>c \<delta> *\<^sub>c cexpr_subst_val f (BoolVal v) : REAL" using invar' wf'
+    by (intro cet_op[where t = "PRODUCT REAL REAL"] cet_pair cexpr_typing_subst_val) simp_all
+  let ?M = "\<lambda>\<rho>. dens_ctxt_measure ({}, set vs \<union> set vs', \<Gamma>, \<lambda>_. 1) \<rho> \<bind> (\<lambda>\<sigma>. expr_sem \<sigma> b)"
+  have dens': "has_parametrized_subprob_density (state_measure (set vs \<union> set vs') \<Gamma>) ?M
+                 (stock_measure BOOL) (\<lambda>\<sigma> v. ennreal (eval_cexpr f \<sigma> v))"
+    using density_context_\<alpha>[OF invar] t vars dens unfolding dens_ctxt_\<alpha>_def
+    by (intro expr_has_density_sound_aux density_context.density_context_empty)
+       (auto simp: extract_real_def one_ennreal_def)
+  thus nonneg: "nonneg_cexpr (shift_var_set (set vs \<union> set vs')) (case_nat BOOL \<Gamma>) f"
+    using wf[THEN is_density_exprD_nonneg] by simp
+
+  show "subprob_cexpr (set vs) (set vs') \<Gamma> (\<delta> *\<^sub>c cexpr_subst_val f (BoolVal v))"
+  proof (intro subprob_cexprI)
+    fix \<rho> assume \<rho>: "\<rho> \<in> space (state_measure (set vs') \<Gamma>)"
+    let ?eval = "\<lambda>e \<sigma>. extract_real (cexpr_sem (merge (set vs) (set vs') (\<sigma>, \<rho>)) e)"
+    {
+      fix \<sigma> assume \<sigma> : "\<sigma> \<in> space (state_measure (set vs) \<Gamma>)"
+      have A: "?eval (\<delta> *\<^sub>c cexpr_subst_val f (BoolVal v)) \<sigma> =
+                  ?eval \<delta> \<sigma> * ?eval (cexpr_subst_val f (BoolVal v)) \<sigma>" using wf' invar' \<sigma> \<rho>
+        by (subst cexpr_sem_Mult[where \<Gamma> = \<Gamma> and V = "set vs \<union> set vs'"])
+           (auto intro: merge_in_state_measure simp: shift_var_set_def)
+      have "?eval \<delta> \<sigma> \<ge> 0" using \<sigma> \<rho> invar'
+        by (blast dest: nonneg_cexprD intro: merge_in_state_measure)
+      moreover have "?eval (cexpr_subst_val f (BoolVal v)) \<sigma> \<ge> 0" using \<sigma> \<rho> nonneg
+        by (intro nonneg_cexprD nonneg_cexpr_subst_val) (auto intro: merge_in_state_measure)
+      moreover have B: "ennreal (?eval (cexpr_subst_val f (BoolVal v)) \<sigma>) =
+                          ennreal (eval_cexpr f (merge (set vs) (set vs') (\<sigma>, \<rho>)) (BoolVal v))"
+                          (is "_ = ?f (BoolVal v)") by (simp add: eval_cexpr_def)
+      hence "ennreal (?eval (cexpr_subst_val f (BoolVal v)) \<sigma>) \<le> 1"
+        using \<sigma> \<rho> dens' unfolding has_parametrized_subprob_density_def
+        by (subst B, intro subprob_count_space_density_le_1[of _ _ ?f])
+           (auto intro: merge_in_state_measure simp: stock_measure.simps)
+      ultimately have "?eval (\<delta> *\<^sub>c cexpr_subst_val f (BoolVal v)) \<sigma> \<le> ?eval \<delta> \<sigma>"
+        by (subst A, intro mult_right_le_one_le) simp_all
+    }
+    hence "(\<integral>\<^sup>+\<sigma>. ?eval (\<delta> *\<^sub>c cexpr_subst_val f (BoolVal v)) \<sigma> \<partial>state_measure (set vs) \<Gamma>) \<le>
+              (\<integral>\<^sup>+\<sigma>. ?eval \<delta> \<sigma> \<partial>state_measure (set vs) \<Gamma>)" by (intro nn_integral_mono) (simp add: ennreal_leI)
+    also have "... \<le> 1" using invar' \<rho> by (intro subprob_cexprD)
+    finally show "(\<integral>\<^sup>+\<sigma>. ?eval (\<delta> *\<^sub>c cexpr_subst_val f (BoolVal v)) \<sigma> \<partial>state_measure (set vs) \<Gamma>) \<le> 1" .
+  qed
+qed (insert cdens_ctxt_invarD[OF invar] is_density_exprD[OF wf],
+     auto simp: shift_var_set_def)
+
+lemma space_state_measureD_shift:
+  "\<sigma> \<in> space (state_measure (shift_var_set V) (case_nat t \<Gamma>)) \<Longrightarrow>
+  \<exists>x \<sigma>'. x \<in> type_universe t \<and> \<sigma>' \<in> space (state_measure V \<Gamma>) \<and> \<sigma> = case_nat x \<sigma>' "
+  by (intro exI[of _ "\<sigma> 0"] exI[of _ "\<sigma> \<circ> Suc"])
+     (auto simp: fun_eq_iff PiE_iff space_state_measure extensional_def split: nat.split)
+
+lemma space_state_measure_shift_iff:
+  "\<sigma> \<in> space (state_measure (shift_var_set V) (case_nat t \<Gamma>)) \<longleftrightarrow>
+  (\<exists>x \<sigma>'. x \<in> type_universe t \<and> \<sigma>' \<in> space (state_measure V \<Gamma>) \<and> \<sigma> = case_nat x \<sigma>')"
+  by (auto dest!: space_state_measureD_shift)
+
+lemma nonneg_cexprI_shift:
+  assumes "\<And>x \<sigma>. x \<in> type_universe t \<Longrightarrow> \<sigma> \<in> space (state_measure V \<Gamma>) \<Longrightarrow>
+    0 \<le> extract_real (cexpr_sem (case_nat x \<sigma>) e)"
+  shows "nonneg_cexpr (shift_var_set V) (case_nat t \<Gamma>) e"
+  by (auto intro!: nonneg_cexprI assms dest!: space_state_measureD_shift)
+
+lemma nonneg_cexpr_shift_iff:
+  "nonneg_cexpr (shift_var_set V) (case_nat t \<Gamma>) (map_vars Suc e) \<longleftrightarrow> nonneg_cexpr V \<Gamma> e"
+  apply (auto simp: cexpr_sem_map_vars o_def nonneg_cexpr_def space_state_measure_shift_iff)
+  subgoal for \<sigma>
+    apply (drule bspec[of _ _ "case_nat (SOME x. x \<in> type_universe t) \<sigma>"])
+    using type_universe_nonempty[of t]
+    unfolding ex_in_conv[symmetric]
+    apply (auto intro!: case_nat_in_state_measure intro: someI)
+    done
+  done
+
+lemma case_nat_case_nat: "case_nat x n (case_nat y m i) = case_nat (case_nat x n y) (\<lambda>i'. case_nat x n (m i')) i"
+  by (rule nat.case_distrib)
+
+lemma nonneg_cexpr_shift_iff2:
+  "nonneg_cexpr (shift_var_set (shift_var_set V))
+    (case_nat t1 (case_nat t2 \<Gamma>)) (map_vars (case_nat 0 (\<lambda>x. Suc (Suc x))) e) \<longleftrightarrow>
+    nonneg_cexpr (shift_var_set V) (case_nat t1 \<Gamma>) e"
+  apply (auto simp: cexpr_sem_map_vars o_def nonneg_cexpr_def space_state_measure_shift_iff)
+  subgoal for x \<sigma>
+    apply (drule bspec[of _ _ "case_nat x (case_nat (SOME x. x \<in> type_universe t2) \<sigma>)"])
+    using type_universe_nonempty[of t2]
+    unfolding ex_in_conv[symmetric]
+    apply (auto simp: case_nat_case_nat cong: nat.case_cong
+                intro!: case_nat_in_state_measure  intro: someI_ex someI)
+    done
+  apply (erule bspec)
+  subgoal for x1 x2 \<sigma>
+    by (auto simp add: space_state_measure_shift_iff fun_eq_iff split: nat.split
+             intro!: exI[of _ x1] exI[of _ \<sigma>])
+  done
+
+lemma nonneg_cexpr_Add:
+  assumes "\<Gamma> \<turnstile>\<^sub>c e1 : REAL" "\<Gamma> \<turnstile>\<^sub>c e2 : REAL"
+  assumes "free_vars e1 \<subseteq> V" "free_vars e2 \<subseteq> V"
+  assumes N1: "nonneg_cexpr V \<Gamma> e1" and N2: "nonneg_cexpr V \<Gamma> e2"
+  shows "nonneg_cexpr V \<Gamma> (e1 +\<^sub>c e2)"
+proof (rule nonneg_cexprI)
+  fix \<sigma> assume \<sigma>: "\<sigma> \<in> space (state_measure V \<Gamma>)"
+  hence "extract_real (cexpr_sem \<sigma> (e1 +\<^sub>c e2)) = extract_real (cexpr_sem \<sigma> e1) + extract_real (cexpr_sem \<sigma> e2)"
+    using assms by (subst cexpr_sem_Add[of \<Gamma> _ _ _ V]) simp_all
+  also have "... \<ge> 0" using \<sigma> N1 N2 by (intro add_nonneg_nonneg nonneg_cexprD)
+  finally show "extract_real (cexpr_sem \<sigma> (e1 +\<^sub>c e2)) \<ge> 0" .
+qed
+
+lemma expr_has_density_cexpr_sound_aux:
+  assumes "\<Gamma> \<turnstile> e : t" "(vs, vs', \<Gamma>, \<delta>) \<turnstile>\<^sub>c e \<Rightarrow> f" "cdens_ctxt_invar vs vs' \<Gamma> \<delta>"
+          "free_vars e \<subseteq> set vs \<union> set vs'"
+  shows "dens_ctxt_\<alpha> (vs,vs',\<Gamma>,\<delta>) \<turnstile>\<^sub>d e \<Rightarrow> eval_cexpr f \<and> is_density_expr (vs,vs',\<Gamma>,\<delta>) t f"
+using assms(2,1,3,4)
+proof (induction arbitrary: t rule: expr_has_density_cexpr.induct[split_format (complete)])
+  case (edc_val v vs vs' \<Gamma> \<delta>)
+  from edc_val.prems have [simp]: "t = val_type v" by auto
+  note invar = cdens_ctxt_invarD[OF edc_val.prems(2)]
+  let ?e1 = "map_vars Suc (branch_prob_cexpr (vs, vs', \<Gamma>, \<delta>))" and ?e2 = "\<langle>CVar 0 =\<^sub>c CVal v\<rangle>\<^sub>c"
+  have ctype1: "case_nat t \<Gamma> \<turnstile>\<^sub>c ?e1 : REAL" and ctype2: "case_nat t \<Gamma> \<turnstile>\<^sub>c ?e2: REAL" using invar
+     by (auto intro!: cexpr_typing.intros cexpr_typing_map_vars simp: o_def)
+  hence ctype: "case_nat t \<Gamma> \<turnstile>\<^sub>c ?e1 *\<^sub>c ?e2 : REAL" by (auto intro!: cexpr_typing.intros)
+
+  {
+    fix \<rho> x assume x: "x \<in> type_universe (val_type v)"
+               and \<rho>: "\<rho> \<in> space (state_measure (set vs') \<Gamma>)"
+    hence "case_nat x \<rho> \<in> space (state_measure (shift_var_set (set vs')) (case_nat (val_type v) \<Gamma>))"
+      by (rule case_nat_in_state_measure)
+    hence "ennreal (eval_cexpr (?e1 *\<^sub>c ?e2) \<rho> x) =
+             ennreal (extract_real (cexpr_sem (case_nat x \<rho>)
+                 (map_vars Suc (branch_prob_cexpr (vs, vs', \<Gamma>, \<delta>))))) *
+             ennreal (extract_real (RealVal (bool_to_real (x = v))))" (is "_ = ?a * ?b")
+      using invar unfolding eval_cexpr_def
+      apply (subst ennreal_mult''[symmetric])
+      apply (simp add: bool_to_real_def)
+      apply (subst cexpr_sem_Mult[of "case_nat t \<Gamma>" _ _ _ "shift_var_set (set vs')"])
+      apply (insert invar ctype1 ctype2)
+      apply (auto simp: shift_var_set_def)
+      done
+    also have "?a = branch_prob (dens_ctxt_\<alpha> (vs,vs',\<Gamma>,\<delta>)) \<rho>"
+      by (subst cexpr_sem_map_vars, subst cexpr_sem_branch_prob) (simp_all add: o_def \<rho> edc_val.prems)
+    also have "?b = indicator {v} x"
+      by (simp add: extract_real_def bool_to_real_def split: split_indicator)
+    finally have "ennreal (eval_cexpr (?e1 *\<^sub>c ?e2) \<rho> x) =
+                     branch_prob (dens_ctxt_\<alpha> (vs,vs',\<Gamma>,\<delta>)) \<rho> * indicator {v} x" .
+  } note e = this
+
+  have meas: "(\<lambda>(\<sigma>, x). ennreal (eval_cexpr (?e1 *\<^sub>c ?e2) \<sigma> x))
+                 \<in> borel_measurable (state_measure (set vs') \<Gamma> \<Otimes>\<^sub>M stock_measure (val_type v))"
+    apply (subst measurable_split_conv, rule measurable_compose[OF _ measurable_ennreal])
+    apply (subst measurable_split_conv[symmetric], rule measurable_eval_cexpr)
+    apply (insert ctype invar, auto simp: shift_var_set_def)
+    done
+
+  have *: "Suc -` shift_var_set (set vs') = set vs'" "case_nat (val_type v) \<Gamma> \<circ> Suc = \<Gamma>"
+    by (auto simp: shift_var_set_def)
+
+  have nn: "nonneg_cexpr (shift_var_set (set vs')) (case_nat t \<Gamma>)
+      (map_vars Suc (branch_prob_cexpr (vs, vs', \<Gamma>, \<delta>)) *\<^sub>c \<langle>CVar 0 =\<^sub>c CVal v\<rangle>\<^sub>c)"
+    using invar ctype1 ctype2
+    by (fastforce intro!: nonneg_cexpr_Mult nonneg_indicator nonneg_cexpr_map_vars
+                          cexpr_typing.intros nonneg_cexpr_sem_integrate_vars'
+                  simp: branch_prob_cexpr_def *)
+(* Example from the paper by Bhat et.al. *)
+(* Simplification of constant expression yields:
+  \<integral>b. (IF 0 \<le> x - 1 \<and> x - 1 \<le> 1 THEN 1 ELSE 0) *
+      (IF 0 \<le> x - 1 \<and> x - 1 \<le> 1 THEN IF b THEN x - 1 ELSE 1 - (x - 1) ELSE 0) * \<langle>b\<rangle> +
+  \<integral>b. (IF 0 \<le> x \<and> x \<le> 1 THEN 1 ELSE 0) *
+      (IF 0 \<le> x \<and> x \<le> 1 THEN IF b THEN x ELSE 1 - x ELSE 0) * \<langle>\<not>b\<rangle>
+*)
+(* Further simplification yields:
+   (\<integral>b. \<langle>0 \<le> x-1 \<le> 1\<rangle> * (IF b THEN x-1 ELSE 2-x) * \<langle>b\<rangle>) +
+   (\<integral>b. \<langle>0 \<le> x \<le> 1\<rangle> * (IF b THEN x ELSE 1-x) * \<langle>\<not>b\<rangle>)
+*)
+(* Further simplification yields:
+  \<langle>1 \<le> x \<le> 2\<rangle>*(x-1) + \<langle>0 \<le> x \<le> 1\<rangle>*(1-x)
+*)
+(* Mathematica input:
+   Piecewise[{{x-1, 1 <= x && x <= 2}, {1-x, 0 <= x && x <= 1}}]
+*)

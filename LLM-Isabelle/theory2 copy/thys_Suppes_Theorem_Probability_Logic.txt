@@ -1,0 +1,337 @@
+theory Probability_Logic
+  imports
+    "Propositional_Logic_Class.Classical_Connectives"
+    HOL.Real
+    "HOL-Library.Countable"
+begin
+
+no_notation FuncSet.funcset (infixr "\<rightarrow>" 60)
+
+
+
+
+
+
+
+
+
+lemma (in probability_logic) probability_additivity:
+  assumes "\<turnstile> \<sim> (\<phi> \<sqinter> \<psi>)"
+  shows "\<P> (\<phi> \<squnion> \<psi>) = \<P> \<phi> + \<P> \<psi>"
+  using
+    assms
+  unfolding
+    conjunction_def
+    disjunction_def
+    negation_def
+  by (simp add: probability_implicational_additivity)
+
+lemma (in probability_logic) probability_alternate_additivity:
+  assumes "\<turnstile> \<phi> \<rightarrow> \<psi> \<rightarrow> \<bottom>"
+  shows "\<P> (\<phi> \<squnion> \<psi>) = \<P> \<phi> + \<P> \<psi>"
+  using assms
+  by (metis
+        probability_additivity
+        double_negation_converse
+        modus_ponens
+        conjunction_def
+        negation_def)
+
+lemma (in probability_logic) complementation:
+  "\<P> (\<sim> \<phi>) = 1 - \<P> \<phi>"
+  by (metis
+        probability_alternate_additivity
+        probability_unity
+        bivalence
+        negation_elimination
+        add.commute
+        add_diff_cancel_left')
+
+lemma (in probability_logic) unity_upper_bound:
+  "\<P> \<phi> \<le> 1"
+  by (metis
+        (no_types)
+        diff_ge_0_iff_ge
+        probability_non_negative
+        complementation)
+
+
+
+class gaines_weatherson_probability = classical_logic +
+  fixes \<P> :: "'a \<Rightarrow> real"
+  assumes gaines_weatherson_thesis:
+    "\<P> \<top> = 1"
+  assumes gaines_weatherson_antithesis:
+    "\<P> \<bottom> = 0"
+  assumes gaines_weatherson_monotonicity:
+    "\<turnstile> \<phi> \<rightarrow> \<psi> \<Longrightarrow> \<P> \<phi> \<le> \<P> \<psi>"
+  assumes gaines_weatherson_sum_rule:
+    "\<P> \<phi> + \<P> \<psi> = \<P> (\<phi> \<sqinter> \<psi>) + \<P> (\<phi> \<squnion> \<psi>)"
+
+sublocale gaines_weatherson_probability \<subseteq> probability_logic
+proof
+  fix \<phi>
+  have "\<turnstile> \<bottom> \<rightarrow> \<phi>"
+    by (simp add: ex_falso_quodlibet)
+  thus "0 \<le> \<P> \<phi>"
+    using
+      gaines_weatherson_antithesis
+      gaines_weatherson_monotonicity
+    by fastforce
+next
+  fix \<phi>
+  assume "\<turnstile> \<phi>"
+  thus "\<P> \<phi> = 1"
+    by (metis
+          gaines_weatherson_thesis
+          gaines_weatherson_monotonicity
+          eq_iff
+          axiom_k
+          ex_falso_quodlibet
+          modus_ponens
+          verum_def)
+next
+  fix \<phi> \<psi>
+  assume "\<turnstile> \<phi> \<rightarrow> \<psi> \<rightarrow> \<bottom>"
+  hence "\<turnstile> \<sim> (\<phi> \<sqinter> \<psi>)"
+    by (simp add: conjunction_def negation_def)
+  thus "\<P> ((\<phi> \<rightarrow> \<bottom>) \<rightarrow> \<psi>) = \<P> \<phi> + \<P> \<psi>"
+    by (metis
+          add.commute
+          add.right_neutral
+          eq_iff
+          disjunction_def
+          ex_falso_quodlibet
+          negation_def
+          gaines_weatherson_antithesis
+          gaines_weatherson_monotonicity
+          gaines_weatherson_sum_rule)
+qed
+
+lemma (in probability_logic) monotonicity:
+  "\<turnstile> \<phi> \<rightarrow> \<psi> \<Longrightarrow> \<P> \<phi> \<le> \<P> \<psi>"
+proof -
+  assume "\<turnstile> \<phi> \<rightarrow> \<psi>"
+  hence "\<turnstile> \<sim> (\<phi> \<sqinter> \<sim> \<psi>)"
+    unfolding negation_def conjunction_def
+    by (metis
+          conjunction_def
+          exclusion_contrapositive_equivalence
+          negation_def
+          weak_biconditional_weaken)
+  hence "\<P> (\<phi> \<squnion> \<sim> \<psi>) = \<P> \<phi> + \<P> (\<sim> \<psi>)"
+    by (simp add: probability_additivity)
+  hence "\<P> \<phi> + \<P> (\<sim> \<psi>) \<le> 1"
+    by (metis unity_upper_bound)
+  hence "\<P> \<phi> + 1 - \<P> \<psi> \<le> 1"
+    by (simp add: complementation)
+  thus ?thesis by linarith
+qed
+
+lemma (in probability_logic) biconditional_equivalence:
+  "\<turnstile> \<phi> \<leftrightarrow> \<psi> \<Longrightarrow> \<P> \<phi> = \<P> \<psi>"
+  by (meson
+        eq_iff
+        modus_ponens
+        biconditional_left_elimination
+        biconditional_right_elimination
+        monotonicity)
+
+lemma (in probability_logic) sum_rule:
+  "\<P> (\<phi> \<squnion> \<psi>) + \<P> (\<phi> \<sqinter> \<psi>) = \<P> \<phi> + \<P> \<psi>"
+proof -
+  have "\<turnstile> (\<phi> \<squnion> \<psi>) \<leftrightarrow> (\<phi> \<squnion> \<psi> \<setminus> (\<phi> \<sqinter> \<psi>))"
+  proof -
+    have "\<forall> \<MM>. \<MM> \<Turnstile>\<^sub>p\<^sub>r\<^sub>o\<^sub>p (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<squnion> \<^bold>\<langle>\<psi>\<^bold>\<rangle>) \<leftrightarrow> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<squnion> \<^bold>\<langle>\<psi>\<^bold>\<rangle> \<setminus> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>))"
+      unfolding
+        classical_logic_class.subtraction_def
+        classical_logic_class.negation_def
+        classical_logic_class.biconditional_def
+        classical_logic_class.conjunction_def
+        classical_logic_class.disjunction_def
+      by simp
+    hence "\<turnstile> \<^bold>\<lparr> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<squnion> \<^bold>\<langle>\<psi>\<^bold>\<rangle>) \<leftrightarrow> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<squnion> \<^bold>\<langle>\<psi>\<^bold>\<rangle> \<setminus> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>)) \<^bold>\<rparr>"
+      using propositional_semantics by blast
+    thus ?thesis by simp
+  qed
+  moreover have "\<turnstile> \<phi> \<rightarrow> (\<psi> \<setminus> (\<phi> \<sqinter> \<psi>)) \<rightarrow> \<bottom>"
+  proof -
+    have "\<forall> \<MM>. \<MM> \<Turnstile>\<^sub>p\<^sub>r\<^sub>o\<^sub>p \<^bold>\<langle>\<phi>\<^bold>\<rangle> \<rightarrow> (\<^bold>\<langle>\<psi>\<^bold>\<rangle> \<setminus> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>)) \<rightarrow> \<bottom>"
+      unfolding
+        classical_logic_class.subtraction_def
+        classical_logic_class.negation_def
+        classical_logic_class.biconditional_def
+        classical_logic_class.conjunction_def
+        classical_logic_class.disjunction_def
+      by simp
+    hence "\<turnstile> \<^bold>\<lparr> \<^bold>\<langle>\<phi>\<^bold>\<rangle> \<rightarrow> (\<^bold>\<langle>\<psi>\<^bold>\<rangle> \<setminus> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>)) \<rightarrow> \<bottom> \<^bold>\<rparr>"
+      using propositional_semantics by blast
+    thus ?thesis by simp
+  qed
+  hence "\<P> (\<phi> \<squnion> \<psi>) = \<P> \<phi> + \<P> (\<psi> \<setminus> (\<phi> \<sqinter> \<psi>))"
+    using
+      probability_alternate_additivity
+      biconditional_equivalence
+      calculation
+    by auto
+  moreover have "\<turnstile> \<psi> \<leftrightarrow> (\<psi> \<setminus> (\<phi> \<sqinter> \<psi>) \<squnion> (\<phi> \<sqinter> \<psi>))"
+  proof -
+    have "\<forall> \<MM>. \<MM> \<Turnstile>\<^sub>p\<^sub>r\<^sub>o\<^sub>p \<^bold>\<langle>\<psi>\<^bold>\<rangle> \<leftrightarrow> (\<^bold>\<langle>\<psi>\<^bold>\<rangle> \<setminus> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>) \<squnion> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>))"
+      unfolding
+        classical_logic_class.subtraction_def
+        classical_logic_class.negation_def
+        classical_logic_class.biconditional_def
+        classical_logic_class.conjunction_def
+        classical_logic_class.disjunction_def
+      by auto
+    hence "\<turnstile> \<^bold>\<lparr> \<^bold>\<langle>\<psi>\<^bold>\<rangle> \<leftrightarrow> (\<^bold>\<langle>\<psi>\<^bold>\<rangle> \<setminus> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>) \<squnion> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>)) \<^bold>\<rparr>"
+      using propositional_semantics by
+      blast
+    thus ?thesis by simp
+  qed
+  moreover have "\<turnstile> (\<psi> \<setminus> (\<phi> \<sqinter> \<psi>)) \<rightarrow> (\<phi> \<sqinter> \<psi>) \<rightarrow> \<bottom>"
+    unfolding
+      subtraction_def
+      negation_def
+      conjunction_def
+    using
+      conjunction_def
+      conjunction_right_elimination
+    by auto
+  hence "\<P> \<psi> = \<P> (\<psi> \<setminus> (\<phi> \<sqinter> \<psi>)) + \<P> (\<phi> \<sqinter> \<psi>)"
+    using
+      probability_alternate_additivity
+      biconditional_equivalence
+      calculation
+    by auto
+  ultimately show ?thesis
+    by simp
+qed
+
+sublocale probability_logic \<subseteq> gaines_weatherson_probability
+proof
+  show "\<P> \<top> = 1"
+    by (simp add: probability_unity)
+next
+  show "\<P> \<bottom> = 0"
+    by (metis
+          add_cancel_left_right
+          probability_additivity
+          ex_falso_quodlibet
+          probability_unity
+          bivalence
+          conjunction_right_elimination
+          negation_def)
+next
+  fix \<phi> \<psi>
+  assume "\<turnstile> \<phi> \<rightarrow> \<psi>"
+  thus "\<P> \<phi> \<le> \<P> \<psi>"
+    using monotonicity
+    by auto
+next
+  fix \<phi> \<psi>
+  show "\<P> \<phi> + \<P> \<psi> = \<P> (\<phi> \<sqinter> \<psi>) + \<P> (\<phi> \<squnion> \<psi>)"
+    by (metis sum_rule add.commute)
+qed
+
+sublocale probability_logic \<subseteq> consistent_classical_logic
+proof
+  show "\<not> \<turnstile> \<bottom>" using probability_unity gaines_weatherson_antithesis by auto
+qed
+
+lemma (in probability_logic) subtraction_identity:
+  "\<P> (\<phi> \<setminus> \<psi>) = \<P> \<phi> - \<P> (\<phi> \<sqinter> \<psi>)"
+proof -
+  have "\<turnstile> \<phi> \<leftrightarrow> ((\<phi> \<setminus> \<psi>) \<squnion> (\<phi> \<sqinter> \<psi>))"
+  proof -
+    have "\<forall> \<MM>. \<MM> \<Turnstile>\<^sub>p\<^sub>r\<^sub>o\<^sub>p \<^bold>\<langle>\<phi>\<^bold>\<rangle> \<leftrightarrow> ((\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<setminus> \<^bold>\<langle>\<psi>\<^bold>\<rangle>) \<squnion> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>))"
+      unfolding
+        classical_logic_class.subtraction_def
+        classical_logic_class.negation_def
+        classical_logic_class.biconditional_def
+        classical_logic_class.conjunction_def
+        classical_logic_class.disjunction_def
+      by (simp, blast)
+    hence "\<turnstile> \<^bold>\<lparr> \<^bold>\<langle>\<phi>\<^bold>\<rangle> \<leftrightarrow> ((\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<setminus> \<^bold>\<langle>\<psi>\<^bold>\<rangle>) \<squnion> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>)) \<^bold>\<rparr>"
+      using propositional_semantics by blast
+    thus ?thesis by simp
+  qed
+  hence "\<P> \<phi>  = \<P> ((\<phi> \<setminus> \<psi>) \<squnion> (\<phi> \<sqinter> \<psi>))"
+    using biconditional_equivalence
+    by simp
+  moreover have "\<turnstile> \<sim>((\<phi> \<setminus> \<psi>) \<sqinter> (\<phi> \<sqinter> \<psi>))"
+  proof -
+    have "\<forall> \<MM>. \<MM> \<Turnstile>\<^sub>p\<^sub>r\<^sub>o\<^sub>p \<sim>((\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<setminus> \<^bold>\<langle>\<psi>\<^bold>\<rangle>) \<sqinter> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>))"
+      unfolding
+        classical_logic_class.subtraction_def
+        classical_logic_class.negation_def
+        classical_logic_class.conjunction_def
+        classical_logic_class.disjunction_def
+      by simp
+    hence "\<turnstile> \<^bold>\<lparr> \<sim>((\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<setminus> \<^bold>\<langle>\<psi>\<^bold>\<rangle>) \<sqinter> (\<^bold>\<langle>\<phi>\<^bold>\<rangle> \<sqinter> \<^bold>\<langle>\<psi>\<^bold>\<rangle>)) \<^bold>\<rparr>"
+      using propositional_semantics by blast
+    thus ?thesis by simp
+  qed
+  ultimately show ?thesis
+    using probability_additivity
+    by auto
+qed
+
+
+lemma (in probability_logic) disjunction_sum_inequality:
+  "\<P> (\<phi> \<squnion> \<psi>) \<le> \<P> \<phi> + \<P> \<psi>"
+proof -
+  have "\<P> (\<phi> \<squnion> \<psi>) + \<P> (\<phi> \<sqinter> \<psi>) = \<P> \<phi> + \<P> \<psi>"
+       "0 \<le> \<P> (\<phi> \<sqinter> \<psi>)"
+    by (simp add: sum_rule, simp add: probability_non_negative)
+  thus ?thesis by linarith
+qed
+
+lemma (in probability_logic)
+  arbitrary_disjunction_list_summation_inequality:
+  "\<P> (\<Squnion> \<Phi>) \<le> (\<Sum>\<phi>\<leftarrow>\<Phi>. \<P> \<phi>)"
+proof (induct \<Phi>)
+  case Nil
+  then show ?case by (simp add: gaines_weatherson_antithesis)
+next
+  case (Cons \<phi> \<Phi>)
+  have "\<P> (\<Squnion> (\<phi> # \<Phi>)) \<le> \<P> \<phi> + \<P> (\<Squnion> \<Phi>)"
+    using disjunction_sum_inequality
+    by simp
+  with Cons have "\<P> (\<Squnion> (\<phi> # \<Phi>)) \<le> \<P> \<phi> + (\<Sum>\<phi>\<leftarrow>\<Phi>. \<P> \<phi>)" by linarith
+  then show ?case by simp
+qed
+
+lemma (in probability_logic) implication_list_summation_inequality:
+  assumes "\<turnstile> \<phi> \<rightarrow> \<Squnion> \<Psi>"
+  shows "\<P> \<phi> \<le> (\<Sum>\<psi>\<leftarrow>\<Psi>. \<P> \<psi>)"
+  using
+    assms
+    arbitrary_disjunction_list_summation_inequality
+    monotonicity
+    order_trans
+  by blast
+
+lemma (in probability_logic) arbitrary_disjunction_set_summation_inequality:
+  "\<P> (\<Squnion> \<Phi>) \<le> (\<Sum>\<phi> \<in> set \<Phi>. \<P> \<phi>)"
+  by (metis
+        arbitrary_disjunction_list_summation_inequality
+        arbitrary_disjunction_remdups
+        biconditional_equivalence
+        sum.set_conv_list)
+
+lemma (in probability_logic) implication_set_summation_inequality:
+  assumes "\<turnstile> \<phi> \<rightarrow> \<Squnion> \<Psi>"
+  shows "\<P> \<phi> \<le> (\<Sum>\<psi> \<in> set \<Psi>. \<P> \<psi>)"
+  using
+    assms
+    arbitrary_disjunction_set_summation_inequality
+    monotonicity
+    order_trans
+  by blast
+
+
+       give the set of all functions satisfying probability logic.\<close>
+text \<open> Traditionally, a Dirac measure is a function \<^term>\<open>\<delta>\<^sub>x\<close> where
+       \<^term>\<open>\<delta>\<^sub>x(S) = (1::real)\<close> if \<^term>\<open>x \<in> S\<close> and \<^term>\<open>\<delta>\<^sub>x(S) = (0::real)\<close>
+       ultrafilters on their underlying \<^term>\<open>\<sigma>\<close>-algebra which are

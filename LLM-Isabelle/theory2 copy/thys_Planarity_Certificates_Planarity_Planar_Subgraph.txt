@@ -1,0 +1,263 @@
+theory Planar_Subgraph
+imports
+  Graph_Genus
+  Permutations_2
+  "HOL-Library.FuncSet"
+  "HOL-Library.Simps_Case_Conv"
+begin
+
+
+lemma out_arcs_emptyD_dominates:
+  assumes "out_arcs G x = {}" shows "\<not>x \<rightarrow>\<^bsub>G\<^esub> y"
+  using assms by (auto simp: out_arcs_def)
+
+lemma (in wf_digraph) reachable_refl_iff: "u \<rightarrow>\<^sup>* u \<longleftrightarrow> u \<in> verts G"
+  by (auto simp: reachable_in_verts)
+
+context digraph_map begin
+
+  lemma face_cycle_set_succ[simp]: "face_cycle_set (face_cycle_succ a) = face_cycle_set a"
+    by (metis face_cycle_eq face_cycle_set_self face_cycle_succ_inD)
+
+  lemma face_cycle_succ_funpow_in[simp]:
+    "(face_cycle_succ ^^ n) a \<in> arcs G \<longleftrightarrow> a \<in> arcs G"
+    by (induct n) auto
+
+  lemma segment_face_cycle_x_x_eq:
+    "segment face_cycle_succ x x = face_cycle_set x - {x}"
+    unfolding face_cycle_set_def using face_cycle_succ_permutes finite_arcs permutation_permutes
+    by (intro segment_x_x_eq) blast
+
+  lemma fcs_x_eq_x: "face_cycle_succ x = x \<longleftrightarrow> face_cycle_set x = {x}" (is "?L \<longleftrightarrow> ?R")
+    unfolding face_cycle_set_def orbit_eq_singleton_iff ..
+
+end
+
+
+lemma (in bidirected_digraph) bidirected_digraph_del_arc:
+    "bidirected_digraph (pre_digraph.del_arc (pre_digraph.del_arc G (arev a)) a) (perm_restrict arev (arcs G - {a , arev a}))"
+proof unfold_locales
+  fix b assume A: "b \<in> arcs (pre_digraph.del_arc (del_arc (arev a)) a)"
+  have "arev b \<noteq> b \<Longrightarrow> b \<noteq> arev a \<Longrightarrow> b \<noteq> a \<Longrightarrow> perm_restrict arev (arcs G - {a, arev a}) (arev b) = b"
+    using bij_arev arev_dom by (subst perm_restrict_simps) (auto simp: bij_iff)
+  then show "perm_restrict arev (arcs G - {a, arev a}) (perm_restrict arev (arcs G - {a, arev a}) b) = b"
+    using A
+    by (auto simp: pre_digraph.del_arc_simps perm_restrict_simps arev_dom)
+qed (auto simp: pre_digraph.del_arc_simps perm_restrict_simps arev_dom)
+
+lemma (in bidirected_digraph) bidirected_digraph_del_vert: "bidirected_digraph (del_vert u) (perm_restrict arev (arcs (del_vert u)))"
+  by unfold_locales (auto simp: del_vert_simps perm_restrict_simps arev_dom)
+
+lemma (in pre_digraph) ends_del_arc: "arc_to_ends (del_arc u) = arc_to_ends G"
+  by (simp add: arc_to_ends_def fun_eq_iff)
+
+lemma (in pre_digraph) dominates_arcsD:
+  assumes "v \<rightarrow>\<^bsub>del_arc u\<^esub> w" shows "v \<rightarrow>\<^bsub>G\<^esub> w"
+  using assms by (auto simp: arcs_ends_def ends_del_arc)
+
+lemma (in wf_digraph) reachable_del_arcD:
+  assumes "v \<rightarrow>\<^sup>*\<^bsub>del_arc u\<^esub> w" shows "v \<rightarrow>\<^sup>*\<^bsub>G\<^esub> w"
+proof -
+  interpret H: wf_digraph "del_arc u" by (rule wf_digraph_del_arc)
+  from assms show ?thesis
+    by (induct) (auto dest: dominates_arcsD intro: adj_reachable_trans)
+qed
+
+lemma (in fin_digraph) finite_isolated_verts[intro!]: "finite isolated_verts"
+  by (auto simp: isolated_verts_def)
+
+lemma (in wf_digraph) isolated_verts_in_sccs:
+  assumes "u \<in> isolated_verts" shows "{u} \<in> sccs_verts"
+proof -
+  have "v = u" if "u \<rightarrow>\<^sup>*\<^bsub>G\<^esub> v" for v
+    using that assms by induct (auto simp: arcs_ends_def arc_to_ends_def isolated_verts_def)
+  with assms show ?thesis by (auto simp: sccs_verts_def isolated_verts_def)
+qed
+
+lemma (in digraph_map) in_face_cycle_sets:
+  "a \<in> arcs G \<Longrightarrow> face_cycle_set a \<in> face_cycle_sets"
+  by (auto simp: face_cycle_sets_def)
+
+lemma (in digraph_map) heads_face_cycle_set:
+  assumes "a \<in> arcs G"
+  shows "head G ` face_cycle_set a = tail G ` face_cycle_set a" (is "?L = ?R")
+proof (intro set_eqI iffI)
+  fix u assume "u \<in> ?L"
+  then obtain b where "b \<in> face_cycle_set a" "head G b = u" by blast
+  then have "face_cycle_succ b \<in> face_cycle_set a" "tail G (face_cycle_succ b) = u"
+    using assms by (auto simp: tail_face_cycle_succ face_cycle_succ_inI in_face_cycle_setD)
+  then show "u \<in> ?R" by auto
+next
+  fix u assume "u \<in> ?R"
+  then obtain b where "b \<in> face_cycle_set a" "tail G b = u" by blast
+  moreover
+  then obtain c where "b = face_cycle_succ c" by (metis face_cycle_succ_pred)
+  ultimately
+  have "c \<in> face_cycle_set a" "head G c = u" 
+    by (auto dest: face_cycle_succ_inD) (metis assms face_cycle_succ_no_arc in_face_cycle_setD tail_face_cycle_succ)
+  then show "u \<in> ?L" by auto
+qed
+
+lemma (in pre_digraph) casI_nth:
+  assumes "p \<noteq> []" "u = tail G (hd p)" "v = head G (last p)" "\<And>i. Suc i < length p \<Longrightarrow> head G (p ! i) = tail G (p ! Suc i)"
+  shows "cas u p v"
+  using assms
+proof (induct p arbitrary: u)
+  case Nil then show ?case by simp
+next
+  case (Cons a p)
+  have "cas (head G a) p v"
+  proof (cases "p = []")
+    case False then show ?thesis
+      using Cons.prems(1-3) Cons.prems(4)[of 0] Cons.prems(4)[of "Suc i" for i]
+      by (intro Cons) (simp_all add: hd_conv_nth)
+  qed (simp add: Cons)
+  with Cons show ?case by simp
+qed
+
+lemma (in digraph_map) obtain_trail_in_fcs:
+  assumes "a \<in> arcs G" "a0 \<in> face_cycle_set a" "an \<in> face_cycle_set a"
+  obtains p where "trail (tail G a0) p (head G an)" "p \<noteq> []" "hd p = a0"  "last p = an"
+    "set p \<subseteq> face_cycle_set a"
+proof -
+  have fcs_a: "face_cycle_set a = orbit face_cycle_succ a0"
+    using assms face_cycle_eq by (simp add: face_cycle_set_def)
+  have "a0 = (face_cycle_succ ^^ 0) a0" by simp
+  have "an = (face_cycle_succ ^^ funpow_dist face_cycle_succ a0 an) a0"
+    using assms by (simp add: fcs_a funpow_dist_prop)
+
+  define p where "p = map (\<lambda>n. (face_cycle_succ ^^ n) a0) [0..<Suc (funpow_dist face_cycle_succ a0 an)]"
+  have p_nth: "\<And>i. i < length p \<Longrightarrow> p ! i = (face_cycle_succ ^^ i) a0"
+    by (auto simp: p_def simp del: upt_Suc)
+
+  have P2: "p \<noteq> []" by (simp add: p_def)
+  have P5: "set p \<subseteq> face_cycle_set a"
+    unfolding p_def fcs_a orbit_altdef_permutation[OF permutation_face_cycle_succ] by auto
+
+  have P1: "trail (tail G a0) p (head G an)"
+  proof -
+    have "distinct p"
+    proof -
+      have "an \<in> orbit face_cycle_succ a0" using assms by (simp add: fcs_a)
+      then have "inj_on (\<lambda>n. (face_cycle_succ ^^ n) a0) {0..funpow_dist face_cycle_succ a0 an}"
+        by (rule inj_on_funpow_dist)
+      also have "{0..funpow_dist face_cycle_succ a0 an} = (set [0..<Suc (funpow_dist face_cycle_succ a0 an)])"
+        by auto
+      finally have "inj_on (\<lambda>n. (face_cycle_succ ^^ n) a0) (set [0..<Suc (funpow_dist face_cycle_succ a0 an)])" .
+      then show "distinct p" by (simp add: distinct_map p_def)
+    qed
+    moreover
+    have "a0 \<in> arcs G" by (metis assms(1-2) in_face_cycle_setD) 
+    then have "tail G a0 \<in> verts G" by simp
+    moreover
+    have "set p \<subseteq> arcs G" using P5
+      by (metis assms(1) in_face_cycle_setD subset_code(1)) 
+    moreover
+    then have "\<And>i. Suc i < length p \<Longrightarrow> p ! Suc i \<in> arcs G" by auto
+    then have "\<And>i. Suc i < length p \<Longrightarrow> head G (p ! i) = tail G (p ! Suc i)"
+      by (auto simp: p_nth tail_face_cycle_succ)
+    ultimately
+    show ?thesis
+      using P2 P3 P4 unfolding trail_def awalk_def by (auto intro: casI_nth)
+  qed
+
+  from P1 P2 P3 P4 P5 show ?thesis ..
+qed
+
+lemma (in digraph_map) obtain_trail_in_fcs':
+  assumes "a \<in> arcs G" "u \<in> tail G ` face_cycle_set a" "v \<in> tail G ` face_cycle_set a"
+  obtains p where "trail u p v" "set p \<subseteq> face_cycle_set a"
+proof -
+  from assms obtain a0 where "tail G a0 = u" "a0 \<in> face_cycle_set a" by auto
+  moreover
+  from assms obtain an where "head G an = v" "an \<in> face_cycle_set a"
+    by (auto simp: heads_face_cycle_set[symmetric])
+  ultimately obtain p where "trail u p v" "set p \<subseteq> face_cycle_set a"
+  then show ?thesis ..
+qed
+
+
+
+
+
+locale del_vert_props = digraph_map +
+  fixes u
+  assumes u_in: "u \<in> verts G"
+  assumes u_isolated: "out_arcs G u = {}"
+
+begin
+
+  lemma u_isolated_in: "in_arcs G u = {}"
+    using u_isolated by (simp add: in_arcs_eq)
+
+  lemma arcs_dv: "arcs (del_vert u) = arcs G" 
+    using u_isolated u_isolated_in by (auto simp: del_vert_simps)
+
+  lemma out_arcs_dv: "out_arcs (del_vert u) = out_arcs G"
+    by (auto simp: fun_eq_iff arcs_dv tail_del_vert)
+
+  lemma digraph_map_del_vert:
+    shows "digraph_map (del_vert u) M"
+  proof -
+    have "perm_restrict (edge_rev M) (arcs (del_vert u)) = edge_rev M"
+      using has_dom_arev arcs_dv by (auto simp: perm_restrict_dom_subset)
+    then interpret H: bidirected_digraph "del_vert u" "edge_rev M"
+      using bidirected_digraph_del_vert[of u] by simp  
+    show ?thesis
+      by unfold_locales (auto simp: arcs_dv edge_succ_permutes out_arcs_dv edge_succ_cyclic verts_del_vert)
+  qed
+
+end
+
+sublocale del_vert_props \<subseteq> H: digraph_map "del_vert u" M by (rule digraph_map_del_vert)
+
+context del_vert_props begin
+
+  lemma card_verts_dv: "card (verts G) = Suc (card (verts (del_vert u)))"
+    by (auto simp: verts_del_vert) (rule card.remove, auto simp: u_in)
+
+  lemma card_arcs_dv: "card (arcs (del_vert u)) = card (arcs G)"
+    using u_isolated by (auto simp add: arcs_dv in_arcs_eq)
+
+  lemma isolated_verts_dv: "H.isolated_verts = isolated_verts - {u}"
+    by (auto simp: isolated_verts_def H.isolated_verts_def verts_del_vert out_arcs_dv)
+
+  lemma u_in_isolated_verts: "u \<in> isolated_verts"
+    using u_in u_isolated by (auto simp: isolated_verts_def)
+
+  lemma card_isolated_verts_dv: "card isolated_verts = Suc (card H.isolated_verts)"
+    by (simp add: isolated_verts_dv) (rule card.remove, auto simp: u_in_isolated_verts)
+
+  lemma face_cycles_dv: "H.face_cycle_sets = face_cycle_sets"
+    unfolding H.face_cycle_sets_def face_cycle_sets_def arcs_dv ..
+
+  lemma euler_char_dv: "euler_char = 1 + H.euler_char"
+    by (auto simp: euler_char_def H.euler_char_def card_arcs_dv card_verts_dv face_cycles_dv)
+
+  lemma adj_dv: "v \<rightarrow>\<^bsub>del_vert u\<^esub> w \<longleftrightarrow> v \<rightarrow>\<^bsub>G\<^esub> w"
+    by (auto simp: arcs_ends_def arcs_dv ends_del_vert)
+
+  lemma reachable_del_vertD:
+    assumes "v \<rightarrow>\<^sup>*\<^bsub>del_vert u\<^esub> w" shows "v \<rightarrow>\<^sup>*\<^bsub>G\<^esub> w"
+    using assms by induct (auto simp: verts_del_vert adj_dv intro: adj_reachable_trans)
+
+  lemma reachable_del_vertI:
+    assumes "v \<rightarrow>\<^sup>*\<^bsub>G\<^esub> w" "u \<noteq> v \<or> u \<noteq> w" shows "v \<rightarrow>\<^sup>*\<^bsub>del_vert u\<^esub> w"
+    using assms
+  proof induct
+    case (step x y)
+    then have "a \<in> in_arcs G y" by auto
+    then have "y \<noteq> u" using u_isolated in_arcs_eq[of u] by auto
+    with step show ?case by (auto simp: adj_dv intro: H.adj_reachable_trans)
+  qed (auto simp: verts_del_vert)
+
+  lemma G_reach_conv: "v \<rightarrow>\<^sup>*\<^bsub>G\<^esub> w \<longleftrightarrow> v \<rightarrow>\<^sup>*\<^bsub>del_vert u\<^esub> w \<or> (v = u \<and> w = u)"
+    by (auto dest: reachable_del_vertI reachable_del_vertD intro: u_in)
+
+  lemma sccs_verts_dv: "H.sccs_verts = sccs_verts - {{u}}" (is "?L = ?R")
+  proof -
+    have *:"\<And>S x. S \<in> sccs_verts \<Longrightarrow> S \<notin> H.sccs_verts  \<Longrightarrow> x \<in> S \<Longrightarrow> x = u"
+      by (simp add: H.in_sccs_verts_conv_reachable in_sccs_verts_conv_reachable G_reach_conv)
+        (meson H.reachable_trans)
+    show ?thesis
+      by (auto dest: *) (auto simp: H.in_sccs_verts_conv_reachable in_sccs_verts_conv_reachable

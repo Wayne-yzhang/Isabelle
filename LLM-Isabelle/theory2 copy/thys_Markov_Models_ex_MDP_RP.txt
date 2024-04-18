@@ -1,0 +1,436 @@
+theory MDP_RP
+  imports "../Markov_Models"
+begin
+
+
+lemma INF_Union_eq: "(INF x\<in>\<Union>A. f x) = (INF a\<in>A. INF x\<in>a. f x)" for f :: "_ \<Rightarrow> 'a::complete_lattice"
+  by (auto intro!: antisym INF_greatest intro: INF_lower2)
+
+lemma lift_option_eq_None: "lift_option f A B = None \<longleftrightarrow> (A \<noteq> None \<longrightarrow> B = None)"
+  by (cases A; cases B; auto)
+
+lemma lift_option_eq_Some: "lift_option f A B = Some y \<longleftrightarrow> (\<exists>a b. A = Some a \<and> B = Some b \<and> y = f a b)"
+  by (cases A; cases B; auto)
+
+lemma ord_option_Some1_iff: "ord_option R (Some a) y \<longleftrightarrow> (\<exists>b. y = Some b \<and> R a b)"
+  by (cases y; auto)
+
+lemma ord_option_Some2_iff: "ord_option R x (Some b) \<longleftrightarrow> (\<forall>a. x = Some a \<longrightarrow> R a b)"
+  by (cases x; auto)
+
+lemma sym_Restr: "sym A \<Longrightarrow> sym (Restr A S)"
+  by (auto simp: sym_def)
+
+lemma trans_Restr: "trans A \<Longrightarrow> trans (Restr A S)"
+  by (auto simp: trans_def)
+
+lemma image_eq_singleton_iff: "inj_on f S \<Longrightarrow> f ` S = {y} \<longleftrightarrow> (\<exists>x. S = {x} \<and> y = f x)"
+  by (auto elim: inj_img_insertE)
+
+lemma quotient_eq_singleton: "equiv A r \<Longrightarrow> A // r = {B} \<Longrightarrow> B = A"
+  using Union_quotient[of A r] by auto
+
+lemma UN_singleton_image: "(\<Union>x\<in>A. {f x}) = f ` A"
+  by auto
+
+lemma image_eq_singeltonD: "f ` A = {x} \<Longrightarrow> \<forall>a\<in>A. f a = x"
+  by auto
+
+lemma fun_ord_refl: "reflp ord  \<Longrightarrow> reflp (fun_ord ord)"
+  by (auto simp: fun_ord_def reflp_def)
+
+lemma fun_ord_trans: "transp ord  \<Longrightarrow> transp (fun_ord ord)"
+  by (fastforce simp: fun_ord_def transp_def)
+
+lemma fun_ord_antisym: "antisymp ord  \<Longrightarrow> antisymp (fun_ord ord)"
+  by (fastforce simp: fun_ord_def antisymp_def)
+
+lemma fun_ord_combine:
+  "fun_ord ord a b \<Longrightarrow> fun_ord ord c d \<Longrightarrow> (\<And>s. ord (a s) (b s) \<Longrightarrow> ord (c s) (d s) \<Longrightarrow> ord (e s) (f s)) \<Longrightarrow> fun_ord ord e f"
+  by (auto simp: fun_ord_def)
+
+lemma not_all_eq: "~ (\<forall>y. x \<noteq> y)"
+  by auto
+
+lemma ball_vimage_iff: "(\<forall>x\<in>f -` X. P x) \<longleftrightarrow> (\<forall>x. f x \<in> X \<longrightarrow> P x)"
+  by auto
+
+lemma UN_If_cases: "(\<Union>x\<in>X. if P x then A x else B x) = (\<Union>x\<in>{x\<in>X. P x}. A x) \<union> (\<Union>x\<in>{x\<in>X. \<not> P x}. B x)"
+  by (auto split: if_splits)
+
+lemma (in Reachability_Problem) n_eq_0_closed:
+  assumes s: "s \<in> S'" and S': "S' \<subseteq> S" "S' \<inter> S2 = {}" and closed: "\<And>s. s \<in> S' \<Longrightarrow> \<exists>D\<in>K s. D \<subseteq> S'"
+  shows "n s = 0"
+proof -
+  from closed obtain ct where ct: "\<And>s. s \<in> S' \<Longrightarrow> ct s \<in> K s" "\<And>s. s \<in> S' \<Longrightarrow> ct s \<subseteq> S'"
+    by metis
+
+  define cfg where "cfg = memoryless_on (\<lambda>s. if s \<in> S' then ct s else arb_act s)"
+
+  have cfg_on: "cfg s \<in> cfg_on s" for s
+    unfolding cfg_def using ct by (intro memoryless_on_cfg_onI) auto
+
+  have state_cfg[simp]: "state (cfg s) = s" for s
+    unfolding cfg_def by (intro state_memoryless_on)
+  have action_cfg[simp]: "action (cfg s) = (if s \<in> S' then ct s else arb_act s)" for s
+    unfolding cfg_def by (intro action_memoryless_on)
+  have cont_cfg[simp]: "s \<in> S' \<Longrightarrow> t \<in> ct s \<Longrightarrow> cont (cfg s) t = cfg t" for s t
+    unfolding cfg_def by (intro cont_memoryless_on) auto
+
+  from s have "v (cfg s) = 0"
+  proof (coinduction arbitrary: s rule: v_eq_0_coinduct)
+    case (valid cfg') with cfg_on s S' show ?case
+      by (auto simp: valid_cfg_def)
+  next
+    case (nS2 cfg') with S' show ?case
+      by auto
+  next
+    case (cont cfg') with S' ct show ?case
+      by (force simp: set_K_cfg)
+  qed
+  show "n s = 0"
+  proof (rule n_eq_0)
+    show "s \<in> S" using s S' by auto
+  qed fact+
+qed
+
+lemma (in Reachability_Problem) n_lb_ennreal:
+  fixes x
+  assumes "s \<in> S"
+  assumes solution: "\<And>s D. s \<in> S1 \<Longrightarrow> D \<in> K s \<Longrightarrow> x s \<le> (\<Sum>t\<in>S. ennreal (pmf D t) * x t)"
+  assumes solution_n0: "\<And>s. s \<in> S \<Longrightarrow> n s = 0 \<Longrightarrow> x s = 0"
+  assumes solution_S2: "\<And>s. s \<in> S2 \<Longrightarrow> x s = 1"
+    and le_1:  "\<And>s. s \<in> S \<Longrightarrow> x s \<le> 1"
+  shows "x s \<le> n s" (is "_ \<le> ?y s")
+proof -
+  have x_less_top[simp]: "s \<in> S \<Longrightarrow> x s < top" for s
+    using le_1[of s] by (auto simp: less_top[symmetric] top_unique)
+
+  have "enn2real (x s) \<le> enn2real (n s)"
+    subgoal for s D
+      by (rule ennreal_le_iff[THEN iffD1])
+    apply (auto simp: solution_n0 solution_S2)
+    done
+    by (subst (asm) ennreal_le_iff[symmetric]) (simp_all add: real_n)
+qed
+
+lifting_forget pmf_as_function.pmf.lifting
+
+
+typedef 's mdpc = "UNIV :: ('s \<rightharpoonup> 's pmf set) set"
+  by auto
+
+setup_lifting type_definition_mdpc
+
+lift_definition states :: "'s mdpc \<Rightarrow> 's set"
+  is dom .
+
+declare [[coercion states]]
+
+lift_definition actions :: "'s mdpc \<Rightarrow> 's \<Rightarrow> 's pmf set"
+  is "\<lambda>f s. case f s of None \<Rightarrow> {} | Some a \<Rightarrow> a" .
+
+lemma in_states: "actions \<phi> s \<noteq> {} \<Longrightarrow> s \<in> states \<phi>"
+  by transfer auto
+
+lemma mdpc_eqI: "states \<phi> = states \<psi> \<Longrightarrow> (\<And>s. s \<in> states \<phi> \<Longrightarrow> actions \<phi> s = actions \<psi> s) \<Longrightarrow> \<phi> = \<psi>"
+  apply transfer
+  apply (rule ext)
+  subgoal premises prems for \<phi> \<psi> x
+    using prems(1) prems(2)[of x]
+    by (cases "x \<in> dom \<phi>") (auto simp: fun_eq_iff split: option.splits)
+  done
+
+lift_definition map_mdpc :: "('s \<Rightarrow> 't) \<Rightarrow> 's mdpc \<Rightarrow> 't mdpc"
+  is "\<lambda>m f s. if f ` (m -` {s}) \<subseteq> {None} then None else Some {map_pmf m d | d A t. m t = s \<and> f t = Some A \<and> d \<in> A}" .
+
+lemma states_map_mdpc: "states (map_mdpc f M) = f ` (states M)"
+  by (transfer fixing: f) (auto simp: subset_eq image_iff dom_def split: if_splits)
+
+lemma actions_map_mdpc_eq_Collect: "actions (map_mdpc f M) s = {map_pmf f d | d t. f t = s \<and> d \<in> actions M t}"
+  by transfer (force simp: subset_eq split: option.splits)
+
+lemma actions_map_mdpc: "actions (map_mdpc f M) s = map_pmf f ` (\<Union>t\<in>f -` {s}. actions M t)"
+  by (auto simp: actions_map_mdpc_eq_Collect)
+
+lemma map_mdpc_compose: "map_mdpc f (map_mdpc g M) = map_mdpc (f \<circ> g) M"
+  by (intro mdpc_eqI)
+     (auto simp add: states_map_mdpc image_comp actions_map_mdpc image_UN map_pmf_compose[symmetric]
+                     vimage_comp[symmetric])
+
+lemma map_mdpc_id: "map_mdpc id = id"
+  by (auto simp: fun_eq_iff states_map_mdpc actions_map_mdpc intro!: mdpc_eqI)
+
+lemma finite_states_map: "finite (states M) \<Longrightarrow> finite (map_mdpc f M)"
+  by (simp add: states_map_mdpc)
+
+lemma finite_actions_map:
+  assumes "finite (states M)" "\<And>s. finite (actions M s)" shows "finite (actions (map_mdpc f M) s)"
+proof -
+  have "(\<Union>x\<in>f -` {s}. actions M x) = (\<Union>x\<in>f -` {s} \<inter> states M. actions M x)"
+    using in_states[of M] by auto
+  with assms show ?thesis
+    by (auto simp add: actions_map_mdpc)
+qed
+
+lift_definition fix_loop :: "'s \<Rightarrow> 's mdpc \<Rightarrow> 's mdpc"
+  is "\<lambda>s M t. if s = t then Some {return_pmf s} else M t" .
+
+lemma states_fix_loop[simp]: "states (fix_loop s M) = insert s (states M)"
+  by transfer (auto simp: subset_eq image_iff dom_def split: if_splits)
+
+lemma actions_fix_loop[simp]: "actions (fix_loop s M) t = (if s = t then {return_pmf s} else actions M t)"
+  by transfer auto
+
+lemma fix_loop_idem: "fix_loop s (fix_loop s M) = fix_loop s M"
+  by (auto intro!: mdpc_eqI)
+
+lemma fix_loop_commute: "fix_loop s (fix_loop t M) = fix_loop t (fix_loop s M)"
+  by (auto intro!: mdpc_eqI)
+
+lemma map_fix_loop:
+  assumes f_s: "\<And>t. f s = f t \<Longrightarrow> t = s"
+  shows "map_mdpc f (fix_loop s M) = fix_loop (f s) (map_mdpc f M)"
+  by (auto simp: states_map_mdpc actions_map_mdpc_eq_Collect split: if_splits intro!: mdpc_eqI dest!: f_s f_s[OF sym]) force+
+
+lift_definition map_actions :: "('s \<Rightarrow> 's pmf set \<Rightarrow> 's pmf set) \<Rightarrow> 's mdpc \<Rightarrow> 's mdpc"
+  is "\<lambda>m f s. map_option (m s) (f s)" .
+
+lemma state_map_actions[simp]: "states (map_actions f \<phi>) = states \<phi>"
+  by transfer auto
+
+lemma actions_map_actions[simp]: "(s \<notin> states \<phi> \<Longrightarrow> f s {} = {}) \<Longrightarrow> actions (map_actions f \<phi>) s = f s (actions \<phi> s)"
+  by transfer (auto split: option.splits)
+
+lift_definition restrict_states :: "'s set \<Rightarrow> 's mdpc \<Rightarrow> 's mdpc"
+  is "\<lambda>S f s. if s \<in> S then f s else None" .
+
+lemma state_restrict_states[simp]: "states (restrict_states S \<phi>) = states \<phi> \<inter> S"
+  by transfer (auto split: if_splits)
+
+lemma actions_restrict_states[simp]: "actions (restrict_states S \<phi>) s = (if s \<in> S then actions \<phi> s else {})"
+  by transfer (auto split: if_splits)
+
+lemma restrict_states_idem: "states \<phi> \<subseteq> A \<Longrightarrow> restrict_states A \<phi> = \<phi>"
+  by transfer (force simp: fun_eq_iff subset_eq dom_def)
+
+instantiation mdpc :: (type) lattice
+begin
+
+lift_definition less_eq_mdpc :: "'s mdpc \<Rightarrow> 's mdpc \<Rightarrow> bool"
+  is "fun_ord (ord_option (\<subseteq>))" .
+
+definition less_mdpc :: "'s mdpc \<Rightarrow> 's mdpc \<Rightarrow> bool"
+  where "less_mdpc f g \<longleftrightarrow> (f \<le> g \<and> \<not> g \<le> f)"
+
+lift_definition inf_mdpc :: "'s mdpc \<Rightarrow> 's mdpc \<Rightarrow> 's mdpc"
+  is "\<lambda>f g s. lift_option (\<inter>) (f s) (g s)" .
+
+lift_definition sup_mdpc :: "'s mdpc \<Rightarrow> 's mdpc \<Rightarrow> 's mdpc"
+  is "\<lambda>f g s. combine_options (\<union>) (f s) (g s)" .
+
+instance
+proof
+  fix x y z :: "'s mdpc"
+  show "(x < y) = (x \<le> y \<and> \<not> y \<le> x)"
+    by (rule less_mdpc_def)
+  note ord =
+    fun_ord_refl[where 'b="'s", OF reflp_ord_option[where 'a="'s pmf set"], of "(\<subseteq>)"]
+    fun_ord_trans[where 'b="'s", OF transp_ord_option[where 'a="'s pmf set"], of "(\<subseteq>)"]
+    fun_ord_antisym[where 'b="'s", OF antisymp_ord_option[where 'a="'s pmf set"], of "(\<subseteq>)"]
+  show  "x \<le> x" "x \<le> y \<Longrightarrow> y \<le> z \<Longrightarrow> x \<le> z" "x \<le> y \<Longrightarrow> y \<le> x \<Longrightarrow> x = y"
+    by (transfer; insert ord; auto simp: transp_def antisymp_def reflp_def)+
+  show "x \<sqinter> y \<le> x" "x \<sqinter> y \<le> y"
+    by (transfer; auto simp: fun_ord_def ord_option.simps lift_option_def split: Option.bind_split)+
+  show "x \<le> y \<Longrightarrow> x \<le> z \<Longrightarrow> x \<le> y \<sqinter> z"
+    apply transfer
+    subgoal premises prems for a b c
+      using prems by (rule fun_ord_combine) (auto simp: ord_option.simps)
+    done
+  show "x \<le> x \<squnion> y" "y \<le> x \<squnion> y"
+    by (transfer; auto simp: fun_ord_def ord_option.simps combine_options_def not_all_eq split: option.splits)+
+  show "y \<le> x \<Longrightarrow> z \<le> x \<Longrightarrow> y \<squnion> z \<le> x"
+    apply transfer
+    subgoal premises prems for a b c
+      using prems by (rule fun_ord_combine) (auto simp: ord_option.simps)
+    done
+qed
+end
+
+instantiation mdpc :: (type) complete_lattice
+begin
+
+lift_definition bot_mdpc :: "'a mdpc" is "\<lambda>_. None" .
+
+lift_definition top_mdpc :: "'a mdpc" is "\<lambda>_. Some UNIV" .
+
+lift_definition Sup_mdpc :: "'a mdpc set \<Rightarrow> 'a mdpc"
+  is "\<lambda>M s. if \<exists>m\<in>M. m s \<noteq> None then Some (\<Union>{ d | m d. m \<in> M \<and> m s = Some d}) else None" .
+
+lift_definition Inf_mdpc :: "'a mdpc set \<Rightarrow> 'a mdpc"
+  is "\<lambda>M s. if \<exists>m\<in>M. m s = None then None else Some (\<Inter>{ d | m d. m \<in> M \<and> m s = Some d})" .
+
+instance
+proof
+  fix x :: "'a mdpc" and X :: "'a mdpc set"
+  show "x \<in> X \<Longrightarrow> \<Sqinter>X \<le> x" "x \<in> X \<Longrightarrow> x \<le> \<Squnion>X"
+    by (transfer; force simp: fun_ord_def ord_option_Some1_iff ord_option_Some2_iff)+
+  show "(\<And>y. y \<in> X \<Longrightarrow> x \<le> y) \<Longrightarrow> x \<le> \<Sqinter>X"
+    apply transfer
+    apply (clarsimp simp: fun_ord_def ord_option.simps)
+    subgoal premises P for X m x
+      using P[rule_format, of _ x]
+      by (cases "m x") fastforce+
+    done
+  show "(\<And>y. y \<in> X \<Longrightarrow> y \<le> x) \<Longrightarrow> \<Squnion>X \<le> x"
+    apply transfer
+    apply (clarsimp simp: fun_ord_def ord_option.simps)
+    subgoal premises P for X m x y z
+      using P(1)[rule_format, of _ x] P(1)[rule_format, of y x] P(2,3)
+      by auto force
+    done
+qed (transfer; auto)+
+end
+
+lemma states_sup[simp]: "states (\<phi> \<squnion> \<psi>) = states \<phi> \<union> states \<psi>"
+  by transfer (auto simp: combine_options_def split: option.splits)
+
+lemma states_SUP[simp]: "states (\<Squnion>A) = (\<Union>a\<in>A. states a)"
+  by transfer (auto simp: dom_def split: option.splits if_splits)
+
+lemma states_inf[simp]: "states (\<phi> \<sqinter> \<psi>) = states \<phi> \<inter> states \<psi>"
+  by transfer (auto simp: lift_option_eq_Some split: option.splits)
+
+lemma states_mono: "\<phi> \<le> \<psi> \<Longrightarrow> states \<phi> \<subseteq> states \<psi>"
+  using states_sup[of \<phi> \<psi>] by (auto simp del: states_sup simp add: sup_absorb2)
+
+lemma actions_sup[simp]: "actions (\<phi> \<squnion> \<psi>) = actions \<phi> \<squnion> actions \<psi>"
+  by transfer (auto simp: combine_options_def split: option.splits)
+
+lemma actions_SUP[simp]: "actions (\<Squnion>A) s = (\<Union>a\<in>A. actions a s)"
+  by transfer (auto simp: dom_def split: option.splits if_splits, blast)
+
+lemma actions_inf[simp]: "actions (\<phi> \<sqinter> \<psi>) = actions \<phi> \<sqinter> actions \<psi>"
+  by transfer (auto simp: fun_eq_iff split: option.splits)
+
+lemma actions_mono: assumes *: "\<phi> \<le> \<psi>" shows "actions \<phi> \<le> actions \<psi>"
+proof -
+  have "actions \<phi> \<le> actions \<phi> \<squnion> actions \<psi>"
+    by auto
+  also have "\<dots> = actions \<psi>"
+    using * actions_sup[of \<phi> \<psi>] by (auto simp add: sup_absorb2)
+  finally show ?thesis .
+qed
+
+lemma le_mdpcI: "states M \<subseteq> states N \<Longrightarrow> (\<And>s. s \<in> states M \<Longrightarrow> actions M s \<subseteq> actions N s) \<Longrightarrow> M \<le> N"
+  by transfer
+     (force simp: fun_ord_def ord_option.simps subset_eq split: option.splits)
+
+lemma le_mdpc_iff: "M \<le> N \<longleftrightarrow> states M \<subseteq> states N \<and> (\<forall>s. actions M s \<subseteq> actions N s)"
+  using states_mono[of M N] actions_mono[of M N] by (auto simp: le_fun_def intro!: le_mdpcI)
+
+lemma map_actions_le: "(\<And>s A. s \<in> states \<phi> \<Longrightarrow> f s A \<subseteq> A) \<Longrightarrow> map_actions f \<phi> \<le> \<phi>"
+  apply (intro le_mdpcI)
+  subgoal by auto
+  subgoal premises p for s using p(1)[of s] p(1)[of s "{}"] p(2) actions_map_actions by auto
+  done
+
+lemma restrict_states_mono: "A \<subseteq> B \<Longrightarrow> \<phi> \<le> \<psi> \<Longrightarrow> restrict_states A \<phi> \<le> restrict_states B \<psi>"
+  using states_mono[of \<phi> \<psi>] actions_mono[of \<phi> \<psi>] by (intro le_mdpcI) (auto simp: le_fun_def)
+
+lemma restrict_states_le: "restrict_states A M \<le> M"
+  by (intro le_mdpcI) auto
+
+lemma eq_bot_iff_states: "\<phi> = bot \<longleftrightarrow> states \<phi> = {}"
+  by transfer auto
+
+lemma fix_loop_neq_bot: "fix_loop s N \<noteq> bot"
+  unfolding eq_bot_iff_states by simp
+
+lemma
+  shows states_bot[simp]: "states bot = {}"
+    and actions_bot[simp]: "actions bot = (\<lambda>s. {})"
+  unfolding fun_eq_iff by (transfer; auto)+
+
+lemma inf_eq_bot_eq_disjnt_states: "A \<sqinter> B = bot \<longleftrightarrow> disjnt (states A) (states B)"
+  unfolding disjnt_def by transfer  (auto simp: fun_eq_iff lift_option_eq_None)
+
+definition en :: "'s mdpc \<Rightarrow> 's rel"
+  where "en \<phi> = {(s, t) | d s t. d \<in> actions \<phi> s \<and> t \<in> set_pmf d}"
+
+lemma en_sup[simp]: "en (\<phi> \<squnion> \<psi>) = en \<phi> \<union> en \<psi>"
+  by (auto simp: en_def)
+
+lemma en_SUP[simp]: "en (Sup A) = (\<Union>a\<in>A. en a)"
+  by (auto simp: en_def)
+
+lemma en_mono: "\<phi> \<le> \<psi> \<Longrightarrow> en \<phi> \<subseteq> en \<psi>"
+  unfolding en_def
+  apply transfer
+  apply (auto simp: fun_ord_def split: option.splits)
+  apply (auto simp add: ord_option.simps subset_iff)
+  apply force
+  done
+
+lemma en_states: "(s, t) \<in> en M \<Longrightarrow> s \<in> states M"
+  using in_states[of M s] by (auto simp: en_def)
+
+lemma en_bot[simp]: "en bot = {}"
+  by (simp add: en_def)
+
+lemma en_fix_loop[simp]: "en (fix_loop s M) = insert (s, s) (en M - {s} \<times> UNIV)"
+  by (force simp add: en_def )
+
+lift_definition trivial :: "'s \<Rightarrow> 's mdpc" is "\<lambda>s. (\<lambda>_. None)(s := Some {})" .
+
+lemma states_trivial[simp]: "states (trivial s) = {s}"
+  by transfer auto
+
+lemma actions_trivial[simp]: "actions (trivial s) = (\<lambda>_. {})"
+  by transfer (auto simp: fun_eq_iff)
+
+lemma en_trivial[simp]: "en (trivial s) = {}"
+  by (simp add: en_def)
+
+lemma trivial_le_iff: "trivial x \<le> \<phi> \<longleftrightarrow> x \<in> states \<phi>"
+  by transfer (auto simp: ord_option.simps fun_ord_def)
+
+lemma trivial_le: "x \<in> states \<phi> \<Longrightarrow> trivial x \<le> \<phi>"
+  unfolding trivial_le_iff .
+
+lemma trivial_neq_bot: "trivial x \<noteq> bot"
+  by transfer auto
+
+lift_definition loop :: "'s \<Rightarrow> 's mdpc"
+  is "\<lambda>s. (\<lambda>_. None)(s := Some {return_pmf s})" .
+
+lemma states_loop[simp]: "states (loop s) = {s}"
+  by transfer auto
+
+lemma actions_loop: "actions (loop s) = ((\<lambda>_. {})(s := {return_pmf s}))"
+  by transfer (auto simp: fun_eq_iff)
+
+lemma
+  shows actions_loop_self[simp]: "actions (loop s) s = {return_pmf s}"
+    and actions_loop_neq[simp]: "s \<noteq> t \<Longrightarrow> actions (loop s) t = {}"
+  by (simp_all add: actions_loop)
+
+lemma en_loop[simp]: "en (loop s) = {(s, s)}"
+  by (auto simp: en_def actions_loop)
+
+lemma loop_neq_bot: "loop s \<noteq> bot"
+  unfolding eq_bot_iff_states by simp
+
+lemma loop_le: "loop x \<le> M \<longleftrightarrow> (x \<in> states M \<and> return_pmf x \<in> actions M x)"
+  by (auto simp: le_mdpc_iff actions_loop)
+
+lemma le_loop: "M \<le> loop x \<longleftrightarrow> (states M \<subseteq> {x} \<and> actions M x \<subseteq> {return_pmf x})"
+  using in_states[of M] by (auto simp: le_mdpc_iff actions_loop)
+
+definition sc :: "'s mdpc \<Rightarrow> bool"
+  where "sc \<phi> \<longleftrightarrow> states \<phi> \<times> states \<phi> \<subseteq> (en \<phi>)\<^sup>*"
+
+lemma scD: "sc \<phi> \<Longrightarrow> x \<in> states \<phi> \<Longrightarrow> y \<in> states \<phi> \<Longrightarrow> (x, y) \<in> (en \<phi>)\<^sup>*"
+  by (auto simp: sc_def)
+
+lemma scI: "(\<And>x y. x \<in> states \<phi> \<Longrightarrow> y \<in> states \<phi> \<Longrightarrow> (x, y) \<in> (en \<phi>)\<^sup>*) \<Longrightarrow> sc \<phi>"

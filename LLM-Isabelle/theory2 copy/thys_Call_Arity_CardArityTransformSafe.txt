@@ -1,0 +1,179 @@
+theory CardArityTransformSafe
+imports ArityTransform CardinalityAnalysisSpec AbstractTransform Sestoft SestoftGC ArityEtaExpansionSafe ArityAnalysisStack  ArityConsistent
+begin
+
+context CardinalityPrognosisSafe
+begin
+  sublocale AbstractTransformBoundSubst
+    "\<lambda> a . inc\<cdot>a"
+    "\<lambda> a . pred\<cdot>a"
+    "\<lambda> \<Delta> e a . (a, Aheap \<Delta> e\<cdot>a)"
+    "fst"
+    "snd"
+    "\<lambda> _. 0"
+    "Aeta_expand"
+    "snd"
+  apply standard
+  apply (simp add: Aheap_subst)
+  apply (rule subst_Aeta_expand)
+  done
+
+  abbreviation ccTransform where "ccTransform \<equiv> transform"
+
+  lemma supp_transform: "supp (transform a e) \<subseteq> supp e"
+    by (induction rule: transform.induct)
+       (auto simp add: exp_assn.supp Let_supp dest!: subsetD[OF supp_map_transform] subsetD[OF supp_map_transform_step] )
+  interpretation supp_bounded_transform transform
+    by standard (auto simp add: fresh_def supp_transform) 
+
+  type_synonym tstate = "(AEnv \<times> (var \<Rightarrow> two) \<times> Arity \<times> Arity list \<times> var list)"
+
+  fun transform_alts :: "Arity list \<Rightarrow> stack \<Rightarrow> stack"
+    where 
+      "transform_alts _ [] = []"
+    | "transform_alts (a#as) (Alts e1 e2 # S) = (Alts (ccTransform a e1) (ccTransform a e2)) # transform_alts as S"
+    | "transform_alts as (x # S) = x # transform_alts as S"
+
+  lemma transform_alts_Nil[simp]: "transform_alts [] S = S"
+    by (induction  S) auto
+
+  lemma Astack_transform_alts[simp]:
+    "Astack (transform_alts as S) = Astack S"
+   by (induction rule: transform_alts.induct) auto
+
+  lemma fresh_star_transform_alts[intro]: "a \<sharp>* S \<Longrightarrow> a \<sharp>* transform_alts as S"
+   by (induction as S  rule: transform_alts.induct) (auto simp add: fresh_star_Cons)
+
+  fun a_transform :: "astate \<Rightarrow> conf \<Rightarrow> conf"
+  where "a_transform (ae, a, as) (\<Gamma>, e, S) =
+    (map_transform Aeta_expand ae (map_transform ccTransform ae \<Gamma>), 
+     ccTransform a e,
+     transform_alts as  S)"
+
+  fun restr_conf :: "var set \<Rightarrow> conf \<Rightarrow> conf"
+    where "restr_conf V (\<Gamma>, e, S) = (restrictA V \<Gamma>, e, restr_stack V S)"
+
+  fun add_dummies_conf :: "var list \<Rightarrow> conf \<Rightarrow> conf"
+    where "add_dummies_conf l (\<Gamma>, e, S) = (\<Gamma>, e, S @ map Dummy (rev l))"
+
+  fun conf_transform :: "tstate \<Rightarrow> conf \<Rightarrow> conf"
+  where "conf_transform (ae, ce, a, as, r) c = add_dummies_conf r ((a_transform (ae, a, as) (restr_conf (- set r) c)))"
+
+  inductive consistent :: "tstate \<Rightarrow> conf \<Rightarrow> bool" where
+    consistentI[intro!]: 
+    "a_consistent (ae, a, as) (restr_conf (- set r) (\<Gamma>, e, S))
+    \<Longrightarrow> edom ae = edom ce
+    \<Longrightarrow> prognosis ae as a (\<Gamma>, e, S) \<sqsubseteq> ce
+    \<Longrightarrow> (\<And> x. x \<in> thunks \<Gamma> \<Longrightarrow> many \<sqsubseteq> ce x \<Longrightarrow> ae x = up\<cdot>0)
+    \<Longrightarrow> set r \<subseteq> (domA \<Gamma> \<union> upds S) - edom ce
+    \<Longrightarrow> consistent (ae, ce, a, as, r) (\<Gamma>, e, S)"  
+  inductive_cases consistentE[elim!]: "consistent (ae, ce, a, as) (\<Gamma>, e, S)"
+
+  lemma closed_consistent:
+    assumes "fv e = ({}::var set)"
+    shows "consistent (\<bottom>, \<bottom>, 0, [], []) ([], e, [])"
+  proof-
+    from assms
+    have "edom (prognosis \<bottom> [] 0 ([], e, [])) = {}"
+     by (auto dest!: subsetD[OF edom_prognosis])
+    thus ?thesis
+      by (auto simp add: edom_empty_iff_bot closed_a_consistent[OF assms])
+  qed
+
+  lemma card_arity_transform_safe:
+    fixes c c'
+    assumes "c \<Rightarrow>\<^sup>* c'" and "\<not> boring_step c'" and "heap_upds_ok_conf c" and "consistent (ae,ce,a,as,r) c"
+    shows "\<exists>ae' ce' a' as' r'. consistent (ae',ce',a',as',r') c' \<and> conf_transform (ae,ce,a,as,r) c \<Rightarrow>\<^sub>G\<^sup>* conf_transform (ae',ce',a',as',r') c'"
+  using assms(1,2) heap_upds_ok_invariant assms(3-)
+  proof(induction c c' arbitrary: ae ce a as r rule:step_invariant_induction)
+  case (app\<^sub>1 \<Gamma> e x S)
+    have "prognosis ae as (inc\<cdot>a) (\<Gamma>, e, Arg x # S) \<sqsubseteq> prognosis ae as a (\<Gamma>, App e x, S)" by (rule prognosis_App)
+    with app\<^sub>1 have "consistent (ae, ce, inc\<cdot>a, as, r) (\<Gamma>, e, Arg x # S)"
+      by (auto intro: a_consistent_app\<^sub>1 elim: below_trans)
+    moreover
+    have "conf_transform (ae, ce, a, as, r) (\<Gamma>, App e x, S) \<Rightarrow>\<^sub>G conf_transform (ae, ce, inc\<cdot>a, as, r) (\<Gamma>, e, Arg x # S)"
+      by simp rule
+    ultimately
+    show ?case by (blast del: consistentI consistentE)
+  next
+  case (app\<^sub>2 \<Gamma> y e x S)
+    have "prognosis ae as (pred\<cdot>a) (\<Gamma>, e[y::=x], S) \<sqsubseteq> prognosis ae as a (\<Gamma>, (Lam [y]. e), Arg x # S)"
+       by (rule prognosis_subst_Lam)
+    then
+    have "consistent (ae, ce, pred\<cdot>a, as, r) (\<Gamma>, e[y::=x], S)" using app\<^sub>2
+      by (auto 4 3 intro: a_consistent_app\<^sub>2 elim: below_trans)
+    moreover
+    have "conf_transform (ae, ce, a, as, r) (\<Gamma>, Lam [y]. e, Arg x # S) \<Rightarrow>\<^sub>G conf_transform (ae, ce, pred \<cdot> a, as, r) (\<Gamma>, e[y::=x], S)" by (simp add: subst_transform[symmetric]) rule
+    ultimately
+    show ?case by (blast  del: consistentI consistentE)
+  next
+  case (thunk \<Gamma> x e S)
+    hence "x \<in> thunks \<Gamma>" by auto
+    hence [simp]: "x \<in> domA \<Gamma>" by (rule subsetD[OF thunks_domA])
+
+    from thunk have "prognosis ae as a (\<Gamma>, Var x, S) \<sqsubseteq> ce" by auto
+    from below_trans[OF prognosis_called fun_belowD[OF this] ]
+    have [simp]: "x \<in> edom ce" by (auto simp add: edom_def)
+    hence [simp]: "x \<notin> set r" using thunk by auto
+
+    have "x \<notin> upds S" by (auto dest!:  heap_upds_okE)
+
+    have "x \<in> edom ae" using thunk by auto
+    then obtain u where "ae x = up\<cdot>u" by (cases "ae x") (auto simp add: edom_def)
+  
+
+    show ?case
+    proof(cases "ce x" rule:two_cases)
+      case none
+      thus ?thesis..
+    next
+      case once
+
+      have "prognosis ae as a (\<Gamma>, Var x, S) x \<sqsubseteq> once"
+        using once by (metis (mono_tags) fun_belowD)
+      hence "x \<notin> ap S" using prognosis_ap[of ae as a \<Gamma> "(Var x)" S] by auto
+      
+  
+      have *: "prognosis ae as u (delete x \<Gamma>, e, Upd x # S) \<sqsubseteq> record_call x \<cdot> (prognosis ae as a (\<Gamma>, Var x, S))"
+        by (rule prognosis_Var_thunk)
+  
+      have "(record_call x \<cdot> (prognosis ae as a (\<Gamma>, Var x, S))) x = none"
+        by (simp add: two_pred_none)
+      hence **: "prognosis ae as u (delete x \<Gamma>, e, Upd x # S) x = none" using fun_belowD[OF *, where x = x] by auto
+
+      have eq: "prognosis (env_delete x ae) as u (delete x \<Gamma>, e, Upd x # S) = prognosis ae as u (delete x \<Gamma>, e, Upd x # S)"
+        by (rule prognosis_env_cong) simp
+
+      have [simp]: "restr_stack (- set r - {x}) S = restr_stack (- set r) S"
+    
+      have "prognosis (env_delete x ae) as u (delete x \<Gamma>, e, Upd x # S) \<sqsubseteq> env_delete x ce"
+        unfolding eq
+        by (rule below_env_deleteI)
+      moreover
+
+      have *: "a_consistent (env_delete x ae, u, as) (delete x (restrictA (- set r) \<Gamma>), e, restr_stack (- set r) S)"
+        by (auto intro!: a_consistent_thunk_once simp del: restr_delete)
+      ultimately
+
+      have "consistent (env_delete x ae, env_delete x ce, u, as, x # r) (delete x \<Gamma>, e, Upd x # S)" using thunk
+        by (auto simp add: restr_delete_twist Compl_insert elim:below_trans )
+      moreover
+
+      from *
+      have **: "Astack (transform_alts as (restr_stack (- set r) S) @ map Dummy (rev r) @ [Dummy x]) \<sqsubseteq> u" by (auto elim: a_consistent_stackD)
+      
+      {
+      have "map_of (map_transform Aeta_expand ae (map_transform ccTransform ae (restrictA (- set r) \<Gamma>))) x = Some (Aeta_expand u (transform u e))"
+        by (simp add: map_of_map_transform)
+      hence "conf_transform (ae, ce, a, as, r) (\<Gamma>, Var x, S) \<Rightarrow>\<^sub>G
+             add_dummies_conf r (delete x (map_transform Aeta_expand ae (map_transform ccTransform ae (restrictA (- set r) \<Gamma>))), Aeta_expand u (ccTransform u e), Upd x # transform_alts as (restr_stack (- set r) S))"
+          by (auto simp add:  map_transform_delete delete_map_transform_env_delete insert_absorb restr_delete_twist simp del: restr_delete)
+      also
+      have "\<dots> \<Rightarrow>\<^sub>G\<^sup>* add_dummies_conf (x # r) (delete x (map_transform Aeta_expand ae (map_transform ccTransform ae (restrictA (- set r) \<Gamma>))), Aeta_expand u (ccTransform u e), transform_alts as (restr_stack (- set r) S))"
+        apply (rule r_into_rtranclp)
+        apply (simp add: append_assoc[symmetric] del: append_assoc)
+        apply (rule dropUpd)
+        done
+      also
+      have "\<dots> \<Rightarrow>\<^sub>G\<^sup>* add_dummies_conf (x # r) (delete x (map_transform Aeta_expand ae (map_transform ccTransform ae  (restrictA (- set r) \<Gamma>))), ccTransform u e, transform_alts as (restr_stack (- set r) S))"
+        by simp (intro  normal_trans Aeta_expand_safe **)

@@ -1,0 +1,349 @@
+theory 
+  Lipschitz_Subdivisions_Refinements
+  imports 
+  Lipschitz_Interval_Extension
+  Multi_Interval_Preliminaries
+begin
+
+
+length, contiguous intervals.\<close>
+text \<open>The definition @{term "uniform_subdivision"} refers to definition 6.2 
+
+definition overlapping_ordered :: "'a::{preorder} interval list \<Rightarrow> bool" where
+"overlapping_ordered xs = (\<forall>i. i < length xs - 1 \<longrightarrow>  lower (xs ! (i + 1)) \<le> upper (xs ! i))"
+
+definition overlapping_non_zero_width :: "'a::{preorder, minus, zero, ord} interval list \<Rightarrow> bool" where
+"overlapping_non_zero_width xs = (\<forall> i < length xs - 1 . \<exists> e. e \<in>\<^sub>i (xs ! (i + 1)) \<and> e \<in>\<^sub>i (xs ! i) \<and> 0 < width (xs ! (i + 1)) \<and> 0 < width (xs ! i ) ) "
+
+definition overlapping :: "'a::{preorder} interval list \<Rightarrow> bool" where
+"overlapping xs = (\<forall> i < length xs - 1 . \<exists> e. e \<in>\<^sub>i (xs ! (i + 1)) \<and> e \<in>\<^sub>i (xs ! i)) "
+
+definition check_is_uniform_subdivision :: "'a::linordered_field interval \<Rightarrow> 'a interval list \<Rightarrow> bool" where
+"check_is_uniform_subdivision A xs = (let n = length xs in 
+                                      if n = 0 then True 
+                                      else 
+                                        let d = width A / of_nat n in
+                                        list_all (\<lambda> x. width x = d) xs \<and> 
+                                        contiguous xs \<and>
+                                        lower (hd xs) = lower A \<and> 
+                                        upper (last xs) = upper A)"
+
+lemma non_empty_subdivision:
+  assumes "0 < n"
+  shows "uniform_subdivision A n \<noteq> []"
+  unfolding uniform_subdivision_def using assms by simp
+
+lemma uniform_subdivision_id: "uniform_subdivision X 1 = [X]"
+  unfolding uniform_subdivision_def by simp
+
+lemma subdivision_length_n:
+  assumes "0 < n"
+  shows "length(uniform_subdivision A n) = n"
+  using assms
+proof(induction n rule:nat_induct_non_zero)
+  case 1
+  then show ?case unfolding uniform_subdivision_def by simp
+next
+  case (Suc n)
+  then show ?case unfolding uniform_subdivision_def by simp
+qed
+
+lemma contiguous_uniform_subdivision: "contiguous (uniform_subdivision A n)"
+proof -
+  have a0: "\<forall>i<length (uniform_subdivision A n) - 1. 
+            upper (uniform_subdivision A n ! i) = lower A + (upper A - lower A) * of_nat (i + 1) / of_nat n"
+    by (simp add: uniform_subdivision_def divide_right_mono mult_left_mono) 
+  have a1: "\<forall>i<length (uniform_subdivision A n) - 1.  
+            lower A + (upper A - lower A) * of_nat (i + 1) / of_nat n = lower (uniform_subdivision A n ! (i + 1))"
+    by (simp add: uniform_subdivision_def divide_right_mono mult_left_mono) 
+  have a2: "\<forall>i<length (uniform_subdivision A n) - 1. 
+            upper (uniform_subdivision A n ! i) = lower (uniform_subdivision A n ! (i + 1))"
+    using a0 a1 by simp
+  have a3: "contiguous (uniform_subdivision A n) = 
+            (\<forall>i<length (uniform_subdivision A n) - 1. 
+             upper (uniform_subdivision A n ! i) = lower (uniform_subdivision A n ! (i + 1)))"
+    unfolding contiguous_def by simp
+  show ?thesis using a0 a1 a2 a3 by simp
+qed
+
+
+
+lemma overlapping_ordered_uniform_subdivision:   
+  assumes "0 < n"
+  shows "overlapping_ordered (uniform_subdivision A n)"
+proof - 
+  have a0: "\<forall>i<length (uniform_subdivision A n) - 1. 
+            upper (uniform_subdivision A n ! i) \<ge> lower A + (upper A - lower A) * of_nat (i + 1) / of_nat n"
+    using assms 
+    by (simp add: uniform_subdivision_def divide_right_mono mult_left_mono) 
+  have a1: "\<forall>i<length (uniform_subdivision A n) - 1.  
+            lower A + (upper A - lower A) * of_nat (i + 1) / of_nat n \<ge> lower (uniform_subdivision A n ! (i + 1))"
+    using assms 
+    by (simp add: uniform_subdivision_def divide_right_mono mult_left_mono) 
+  have a2: "\<forall>i<length (uniform_subdivision A n) - 1. 
+            upper (uniform_subdivision A n ! i) \<ge> lower (uniform_subdivision A n ! (i + 1))"
+    using a0 a1 by force
+  have a3: "overlapping_ordered (uniform_subdivision A n) = 
+            (\<forall>i<length (uniform_subdivision A n) - 1. 
+             upper (uniform_subdivision A n ! i) \<ge> lower (uniform_subdivision A n ! (i + 1)))"
+    unfolding overlapping_ordered_def by simp
+  show ?thesis using a0 a1 a2 a3 by simp
+qed
+
+lemma overlapping_uniform_subdivision:
+  assumes "0 < N"
+  shows "overlapping (uniform_subdivision X N)"
+  using assms
+proof - 
+  let ?n = "length (uniform_subdivision X N) - 1"
+  have a0: "\<forall> i < ?n . lower (uniform_subdivision X N ! (i + 1)) = upper (uniform_subdivision X N ! i)"
+    using assms contiguous_uniform_subdivision unfolding contiguous_def by metis
+  have a1: "\<forall> i < ?n. upper (uniform_subdivision X N ! i) \<in>\<^sub>i uniform_subdivision X N ! i
+                    \<and> upper (uniform_subdivision X N ! i) \<in>\<^sub>i (uniform_subdivision X N ! (i + 1))"
+    using a0 in_intervalI lower_le_upper order.refl
+    by metis
+  have a2: "\<forall>i< ?n. \<exists>e. e \<in>\<^sub>i uniform_subdivision X N ! (i + 1) \<and> e \<in>\<^sub>i uniform_subdivision X N ! i" 
+    using a1 by auto[1]
+  show ?thesis using a2 unfolding overlapping_def by simp
+qed 
+
+lemma hd_lower_uniform_subdivision:
+  assumes "0 < n"
+  shows "lower ( hd (uniform_subdivision A n)) = lower A"
+proof -
+  have "lower ( hd (uniform_subdivision A n)) = lower A + (upper A - lower A) * of_nat 0 / of_nat n"
+    using assms
+    by (simp add: uniform_subdivision_def mk_interval' hd_map)  
+  also have "... = lower A"
+    by simp
+  finally show ?thesis .
+qed
+
+lemma last_upper_uniform_subdivision:
+  assumes "0 < n"
+  shows "upper ( last (uniform_subdivision A n)) = upper A"
+proof -
+  have "upper ( last (uniform_subdivision A n)) = lower A + (upper A - lower A) * of_nat n / of_nat n"
+    using assms
+    apply (auto simp add: uniform_subdivision_def mk_interval' last_map Let_def)[1] 
+    using One_nat_def Suc_pred' add.commute le_add_diff_inverse lower_le_upper 
+      nonzero_mult_div_cancel_right of_nat_0_less_iff of_nat_Suc order_less_irrefl apply metis
+    by ( simp add: divide_right_mono mult_left_mono) 
+    also have "... = upper A"
+    using assms by simp
+  finally show ?thesis .
+qed
+
+lemma uniform_subdivisions_width_single:
+  fixes A ::"'a::linordered_field interval"
+proof - 
+  have "lower A \<le> upper A " using lower_le_upper by simp
+  then have leq: "lower A + (upper A - lower A) *  x /  of_nat n \<le> 
+             lower A + (upper A - lower A) * ( x + 1) /  of_nat n"
+    by (simp add: divide_le_cancel linorder_not_less mult_le_cancel_left)
+    using upper_bounds leq by blast 
+    using lower_bounds leq by blast
+  then show ?thesis using U L add_diff_cancel_left add_diff_cancel_left' diff_divide_distrib 
+      mult.comm_neutral vector_space_over_itself.scale_right_diff_distrib unfolding width_def  
+    by metis
+qed
+
+lemma uniform_subdivisions_width:
+  assumes "0 < n" 
+  apply (simp add: uniform_subdivision_def mk_interval' o_def image_def width_def Let_def split: if_split)
+  apply auto[1]
+  apply (metis add_diff_cancel_left' diff_divide_distrib mult.right_neutral right_diff_distrib)
+  using assms uniform_subdivisions_width_single[simplified width_def] 
+  by (simp add: divide_right_mono mult_left_mono) 
+
+lemma uniform_subdivision_sum_width:
+proof -
+    using uniform_subdivisions_width using assms by blast
+  then have width: "\<forall> a . a \<in> set (map width (uniform_subdivision X n)) \<longrightarrow> a = width X / of_nat n"
+    unfolding width_def by auto[1]
+  then have width_list: "list_all (\<lambda> a . a = width X / of_nat n) (map width (uniform_subdivision X n)) "
+    unfolding width_def using list_all_iff by blast
+  then have length: "length (map width (uniform_subdivision X n)) = n "
+    unfolding uniform_subdivision_def by simp
+  then have "sum_list (map width (uniform_subdivision X n)) = (width X / of_nat n) * of_nat n"
+    using width_list by (metis list.map_ident_strong mult_of_nat_commute sum_list_triv width) 
+  then show ?thesis by (simp add: assms)
+qed
+
+lemma uniform_subdivisions_distinct:
+  assumes "0 < n" "0 < width A"
+  shows "distinct (uniform_subdivision A n)"
+proof -
+  have "\<forall>i< n. \<forall>j< n. i \<noteq> j \<longrightarrow> (uniform_subdivision A n) ! i \<noteq> (uniform_subdivision A n) ! j"
+  proof -
+      have f1: "\<forall>i< n. \<forall>j< n. i \<noteq> j \<longrightarrow> (upper A - lower A) * of_nat i / of_nat n \<noteq> (upper A - lower A) * of_nat j / of_nat n"
+        using assms(1) assms(2) divide_cancel_right less_numeral_extra(3) mult_cancel_left of_nat_eq_0_iff of_nat_eq_iff width_def 
+        by metis
+      have f2: "\<forall>i< n. \<forall>j< n. i \<noteq> j \<longrightarrow> lower A + (upper A - lower A) * of_nat (i + 1) / of_nat n \<noteq> lower A + (upper A - lower A) * of_nat (j + 1) / of_nat n"
+        using  assms(1) assms(2) unfolding width_def by simp
+      have f3: "\<forall>i<  n. lower ((uniform_subdivision A n) ! i) = lower A + (upper A - lower A) *  of_nat i / of_nat n"
+        using assms by (simp add: uniform_subdivision_def divide_right_mono mult_left_mono Let_def) 
+      have f5: "\<forall>i<n - 1. (upper ((uniform_subdivision A n) ! i)) = lower ((uniform_subdivision A n) ! Suc i)"
+        using assms by (simp add: uniform_subdivision_def divide_right_mono mult_left_mono)
+      have f6: "\<forall>j<n - 1. (upper ((uniform_subdivision A n) ! j)) = lower ((uniform_subdivision A n) ! Suc j)"
+        using assms(1) f5 contiguous_uniform_subdivision unfolding contiguous_def subdivision_length_n by blast
+      have "\<forall>i<n. \<forall>j<n. i \<noteq> j \<longrightarrow> lower ((uniform_subdivision A n) ! i) \<noteq> lower ((uniform_subdivision A n) ! j)"
+        using f1 f2 f3 by auto[1]
+    then show ?thesis by metis
+  qed
+  then show ?thesis using assms(1) distinct_conv_nth subdivision_length_n by metis
+qed
+
+lemma uniform_subdivisions_non_overlapping:
+  assumes "0 < n" 
+  shows "non_overlapping_sorted (uniform_subdivision A n)"
+proof -
+  have "\<forall>i<n. \<forall>j<n. i < j \<longrightarrow> upper ((uniform_subdivision A n) ! i) \<le> lower ((uniform_subdivision A n) ! j)"
+  proof -
+      have f2: "\<forall>i<n. upper ((uniform_subdivision A n) ! i) = lower A + (upper A - lower A) * of_nat (i + 1) / of_nat n"
+        using assms by (simp add: uniform_subdivision_def divide_right_mono mult_left_mono Let_def) 
+      have f3: "\<forall>j<n. lower ((uniform_subdivision A n) ! j) = lower A + (upper A - lower A) * of_nat j / of_nat n"
+        using assms by (simp add: uniform_subdivision_def divide_right_mono mult_left_mono Let_def) 
+      have f4: "\<forall>i<n. \<forall>j<n. i < j \<longrightarrow> lower A + (upper A - lower A) * of_nat (i + 1) / of_nat n \<le> lower A + (upper A - lower A) * of_nat j / of_nat n"
+        using assms divide_right_mono mult_left_mono Suc_eq_plus1 Suc_leI add_le_cancel_left 
+          interval_width_positive of_nat_0_le_iff of_nat_le_iff width_def
+        by metis
+      have "\<forall>i<n. \<forall>j<n. i < j \<longrightarrow> upper ((uniform_subdivision A n) ! i) \<le> lower ((uniform_subdivision A n) ! j)"
+        using f0 f2 f3 f4 by simp
+    then show ?thesis by auto[1]
+  qed
+  then show ?thesis 
+    unfolding non_overlapping_sorted_def cmp_non_overlapping_def 
+    by (simp add: assms(1) sorted_wrt_iff_nth_less subdivision_length_n)
+qed
+
+
+lemma uniform_subdivisions_valid_ainterval:
+  assumes "0 < n" "0 < width A"
+  shows "valid_mInterval_adj(uniform_subdivision A n)"
+  using assms 
+  unfolding valid_mInterval_adj_def 
+  apply safe 
+  subgoal using uniform_subdivisions_non_overlapping by blast
+  subgoal using uniform_subdivisions_distinct by blast
+  subgoal using non_empty_subdivision by blast
+  done
+
+lemma uniform_subdivisions_valid:
+  assumes "0 < n"
+  shows "check_is_uniform_subdivision A (uniform_subdivision A n)"
+  unfolding check_is_uniform_subdivision_def Let_def
+  apply (simp split: if_split) 
+  apply safe
+  subgoal using assms uniform_subdivisions_width subdivision_length_n 
+    by (metis (mono_tags, lifting) Ball_set) 
+  subgoal using assms contiguous_uniform_subdivision by blast
+  subgoal using assms hd_lower_uniform_subdivision by blast
+  subgoal using assms last_upper_uniform_subdivision by blast
+  done
+
+
+
+definition refinement :: "('a::{linordered_field,lattice} interval\<Rightarrow> 'a interval) \<Rightarrow> nat \<Rightarrow> 'a interval \<Rightarrow> 'a interval" where
+
+definition check_is_refinement where
+
+definition refinement_set :: "('a::{linordered_field,lattice} interval\<Rightarrow> 'a interval) \<Rightarrow> nat \<Rightarrow> 'a interval \<Rightarrow> 'a set" where
+
+
+
+definition "width_set s = Sup s - Inf s"
+
+lemma width_set_bounded:
+  using assms  sup_inf_dist_bounded
+  unfolding width_set_def 
+  by(simp)
+
+lemma width_inclusion_isotonic_approx:
+  assumes  "inclusion_isotonic F"  "F is_interval_extension_of f"
+  by (smt (verit, del_insts) assms(1) assms(2) inclusion_isotonic_inf 
+          inclusion_isotonic_sup width_def width_set_def)
+
+lemma diameter_width: 
+  by (simp add: assms linorder_not_less diameter_Sup_Inf width_set_def)
+
+lemma lipschitz_dist_diameter_limit:
+  using lipschitz_on_uniformly_continuous[of C S f, simplified assms]
+        bounded_uniformly_continuous_image[of S f, simplified assms]
+        diameter_bounded_bound[of "f ` S" x y]
+  by simp 
+
+definition excess_width_diameter :: "('a::preorder interval \<Rightarrow> real interval) \<Rightarrow> ('a \<Rightarrow> 'b::metric_space) \<Rightarrow> 'a interval \<Rightarrow> real" where
+
+definition excess_width_set :: "('a::{minus,linorder,Inf,Sup} interval \<Rightarrow> 'a set) \<Rightarrow> ('a \<Rightarrow> 'a) \<Rightarrow> 'a interval \<Rightarrow> 'a" where
+
+definition excess_width :: "('a::{minus,linorder,Inf,Sup} interval \<Rightarrow> 'a interval) \<Rightarrow> ('a \<Rightarrow> 'a) \<Rightarrow> 'a interval \<Rightarrow> 'a" where
+
+
+lemma  width_set_of: fixes X :: "real interval"
+  by (simp add: width_set_def set_of_eq)
+ 
+lemma width_set_dist:
+  fixes f :: "real \<Rightarrow> real"
+  shows "width_set ( set_of X) =  (dist (lower X) (upper X))"
+  by(simp add:set_of_eq width_set_def dist_real_def)
+
+lemma  diameter_of: fixes X :: "real interval"
+  by (simp add: linorder_not_less set_of_eq) 
+
+lemma diameter_dist:
+  fixes X :: "real interval"
+  shows "diameter ( set_of X) =  (dist (lower X) (upper X))"
+  unfolding set_of_eq dist_real_def abs_real_def 
+  using lower_le_upper[of X] diameter_closed_interval[of "lower X" "upper X"] 
+  by argo 
+
+lemma  bdd_below_f_set_of:
+  fixes f :: "real \<Rightarrow> real"
+  assumes "C-lipschitz_on X f"
+  using assms atLeastAtMost_iff bdd_below.unfold bounded_imp_bdd_below image_def 
+        lipschitz_bounded_image_real set_of_eq set_of_nonempty
+  by simp
+
+lemma  bdd_above_f_set_of:
+  fixes f :: "real \<Rightarrow> real"
+  assumes "C-lipschitz_on (X) f"  
+  using assms atLeastAtMost_iff bdd_above.unfold bounded_imp_bdd_above image_def 
+        lipschitz_bounded_image_real set_of_eq set_of_nonempty
+  by simp
+
+lemma diameter_image_dist: 
+  using assms compact_continuous_image[of "set_of X" f, simplified assms compact_set_of[of X]]  
+        lower_le_upper[of X] diameter_closed_interval[of "f (lower X)" "f(upper X)", symmetric] 
+        diameter_compact_attained[of "f ` set_of X"] set_f_nonempty[of f X] 
+  by fastforce 
+
+lemma excess_width_inf_diameter:
+      unfolding dist_real_def abs_real_def excess_width_diameter_def  width_def
+      using inclusion_isotonic_inf[of F f X, simplified assms]
+            inclusion_isotonic_sup[of F f X, simplified assms]
+            diameter_Sup_Inf[of "f ` set_of X", simplified assms lipschitz_on_continuous_on[of C "(set_of X)" f]
+                                                compact_img_set_of[of X f], simplified] 
+      by simp 
+
+lemma excess_width_inf:
+      unfolding dist_real_def abs_real_def excess_width_def  width_def
+      using inclusion_isotonic_inf[of F f X, simplified assms]
+            inclusion_isotonic_sup[of F f X, simplified assms]
+      by (simp add: width_set_def)
+
+
+lemma excess_width_sup_diameter:
+      unfolding dist_real_def abs_real_def excess_width_diameter_def  width_def
+      using inclusion_isotonic_inf[of F f X, simplified assms]
+            inclusion_isotonic_sup[of F f X, simplified assms]
+            diameter_Sup_Inf[of "f ` set_of X", simplified assms lipschitz_on_continuous_on[of C "(set_of X)" f]
+                                                compact_img_set_of[of X f], simplified] 
+      by (simp add: excess_width_def width_def width_set_def) 
+
+lemma excess_width_sup:
+      unfolding dist_real_def abs_real_def excess_width_def  width_def
+      using inclusion_isotonic_inf[of F f X, simplified assms]
+            inclusion_isotonic_sup[of F f X, simplified assms]
+      by (simp add: width_set_def) 
+

@@ -1,0 +1,107 @@
+theory VS imports VDM begin
+
+
+theorem VS_SOUND: "(t,c):VS_com \<Longrightarrow> SemCom t c"
+apply (subgoal_tac "(t=high \<longrightarrow> {} \<rhd> c : twiddle) \<and> (t=low \<longrightarrow> (\<exists> A . {} \<rhd> c : Sec A))")
+prefer 2 apply (erule VS_com_VDM)
+apply (case_tac t)
+apply clarsimp apply (drule VDM_Sound) apply (simp add: valid_def VDM_valid_def Ctxt_valid_def Sec_def)
+apply clarsimp apply (drule VDM_Sound) apply (simp add: valid_def VDM_valid_def Ctxt_valid_def) 
+done
+
+
+inductive_set Deriv ::"(VDMAssn set \<times> IMP \<times> VDMAssn) set"
+where
+D_CAST: 
+  "(G,c,twiddle):Deriv \<Longrightarrow> (G, c, Sec (\<lambda> (s,t) . s \<approx> t)) : Deriv"
+
+| D_SKIP: "(G, Skip, Sec (\<lambda> (s,t) . s \<approx> t)) : Deriv"
+
+| D_ASSIGN:
+  "(\<forall> s ss. s \<approx> ss \<longrightarrow> evalE e s = evalE e ss) \<Longrightarrow>
+   (G, Assign x e, Sec (\<lambda> (s, t) . s \<approx> (update t x (evalE e t)))):Deriv"
+
+| D_COMP: 
+  "\<lbrakk> (G, c1, Sec \<Phi>):Deriv; (G, c2, Sec \<Psi>):Deriv\<rbrakk> \<Longrightarrow>
+   (G, Comp c1 c2, Sec (\<lambda> (s,t) . \<exists> r . \<Phi>(r, t) \<and> 
+                           (\<forall> w . (r \<approx> w \<longrightarrow> \<Psi>(s, w))))):Deriv"
+
+| C_IFF:
+  "\<lbrakk> (\<forall> s ss. s \<approx> ss \<longrightarrow> evalB b s = evalB b ss);
+     (G, c1, Sec \<Phi>):Deriv; (G,c2, Sec \<Psi>):Deriv\<rbrakk> \<Longrightarrow>
+   (G, Iff b c1 c2, Sec (\<lambda> (s, t) . (evalB b t \<longrightarrow> \<Phi>(s,t)) \<and> 
+                                            ((\<not> evalB b t) \<longrightarrow> \<Psi>(s,t)))):Deriv"
+
+| D_WHILE:  
+  "\<lbrakk> (\<forall> s ss. s \<approx> ss \<longrightarrow> evalB b s = evalB b ss); 
+     (G, c, Sec \<Phi>):Deriv\<rbrakk> \<Longrightarrow>
+   (G, While b c, Sec (PhiWhile b \<Phi>)):Deriv"
+
+| D_CALL:
+  "\<lbrakk> ({Sec(FIX \<Phi>)} \<union> G, body, Sec(\<Phi>(FIX \<Phi>))):Deriv;
+      Monotone \<Phi>\<rbrakk> \<Longrightarrow>
+   (G, Call, Sec(FIX \<Phi>)):Deriv"
+
+| D_HighSKIP:"(G, Skip, twiddle):Deriv"
+
+| D_HighASSIGN:
+  "CONTEXT x = high \<Longrightarrow> (G,Assign x e, twiddle):Deriv"
+
+| D_HighCOMP:
+  "\<lbrakk> (G,c1,twiddle):Deriv; (G,c2,twiddle):Deriv\<rbrakk> \<Longrightarrow>
+   (G, Comp c1 c2, twiddle):Deriv"
+
+| D_HighIFF:
+  "\<lbrakk> (G,c1,twiddle):Deriv; (G,c2,twiddle):Deriv\<rbrakk> \<Longrightarrow>
+   (G, Iff b c1 c2, twiddle):Deriv"
+
+| D_HighWHILE:
+  "(G, c, twiddle):Deriv \<Longrightarrow> (G, While b c, twiddle):Deriv"
+
+| D_HighCALL:
+  "({twiddle} \<union> G, body, twiddle):Deriv \<Longrightarrow> (G, Call, twiddle):Deriv"
+
+definition DProp :: "VDMAssn \<Rightarrow> bool"
+where "DProp A = (\<exists> \<phi> . A =  Sec (\<phi> (FIX \<phi>)) \<and> Monotone \<phi>)"
+
+lemma DerivProp_Aux: "(X,c,A):Deriv \<Longrightarrow> DProp A"
+apply (erule Deriv.induct)
+apply (simp_all add: DProp_def)
+  apply clarsimp
+  apply (rule, rule) apply simp apply (simp add: Monotone_def)
+  apply clarsimp?
+  apply (rule, rule) apply simp apply (simp add: Monotone_def)
+  apply clarsimp?
+  apply (rule, rule) apply simp apply (simp add: Monotone_def)
+  apply clarsimp?
+  apply (rule, rule) apply simp apply (simp add: Monotone_def)
+  apply clarsimp?
+  apply (rule, rule) apply simp apply (simp add: Monotone_def)
+  apply clarsimp?
+  apply (rule, rule) apply simp apply (simp add: Monotone_def)
+  apply clarsimp ?
+  apply (rule, rule) apply simp apply (simp add: Monotone_def)
+  apply clarsimp?
+    apply (rule_tac x="\<lambda> \<Phi>. \<lambda> (s,t) . s \<approx> t" in exI)
+    apply (subgoal_tac "Monotone (\<lambda> \<Phi>. \<lambda> (s,t) . s \<approx> t)", simp) 
+      apply (drule Fix_lemma) apply (erule thin_rl)
+      apply (rule ext, rule ext, rule iffI)
+      apply (simp add: twiddle_def Sec_def)
+      apply (simp add: Sec_def) apply (simp only: twiddle_def) apply fast
+    apply (simp add: Monotone_def)
+  apply clarsimp?
+    apply (rule_tac x="\<lambda> \<Phi>. \<lambda> (s,t) . s \<approx> t" in exI)
+    apply (subgoal_tac "Monotone (\<lambda> \<Phi>. \<lambda> (s,t) . s \<approx> t)", simp) 
+      apply (drule Fix_lemma) apply (erule thin_rl)
+      apply (rule ext, rule ext, rule iffI)
+      apply (simp add: twiddle_def Sec_def)
+      apply (simp add: Sec_def) apply (simp only: twiddle_def) apply fast
+    apply (simp add: Monotone_def)
+done
+
+lemma DerivMono: 
+ "(X,c,A):Deriv \<Longrightarrow> \<exists> \<Phi> . A =  Sec (\<Phi> (FIX \<Phi>)) \<and> Monotone \<Phi>"
+by (drule DerivProp_Aux, simp add: DProp_def)
+
+derivable in the program logic.\<close>
+text\<open>End of theory VS\<close>

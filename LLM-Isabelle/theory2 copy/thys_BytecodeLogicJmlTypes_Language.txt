@@ -1,0 +1,303 @@
+theory Language imports AssocLists begin
+
+
+
+typedecl Var
+typedecl Class
+typedecl Field
+typedecl Method
+
+
+typedecl Addr 
+
+
+datatype Ref = Nullref | Loc Addr
+
+
+datatype Val = RVal Ref | IVal int
+
+
+type_synonym Label = int
+
+
+
+
+type_synonym Object = "Class \<times> (Field, Val) AssList"
+
+
+
+
+inductive_set
+  Step::"(Mbody \<times> Label \<times> State \<times> nat \<times> Label \<times> State) set"
+and
+  Exec::"(Mbody \<times> Label \<times> State \<times> nat \<times> Heap \<times> Val) set"
+where
+Const:"\<lbrakk>get_ins M l = Some (const v); NEXT = (v # os,s,h); ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(os,s,h), 1, ll, NEXT) : Step"
+|
+Dup:  "\<lbrakk>get_ins M l = Some dup; NEXT = (v # v # os,s,h); ll =l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(v # os,s,h), 1, ll, NEXT) : Step"
+|
+Pop:  "\<lbrakk>get_ins M l = Some pop; NEXT = (os,s,h); ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(v # os,s,h), 1, ll, NEXT) : Step"
+|
+Swap: "\<lbrakk>get_ins M l = Some swap; NEXT = (w # (v # os),s,h); ll= l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(v # (w # os),s,h), 1, ll, NEXT) : Step"
+|
+Load: "\<lbrakk>get_ins M l = Some (load x); s\<down>x = Some v;
+         NEXT = (v # os,s,h); ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(os,s,h), 1, ll,NEXT) : Step"
+|
+Store:"\<lbrakk>get_ins M l = Some (store x); NEXT = (os,s[x\<mapsto>v],h); ll= l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(v # os,s,h), 1, ll, NEXT) : Step"
+|
+Binop:"\<lbrakk>get_ins M l = Some (binop f); NEXT = ((f v w) # os,s,h); ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(v # (w # os),s,h), 1, ll,NEXT) : Step"
+|
+Unop: "\<lbrakk>get_ins M l = Some (unop f); NEXT = ((f v) # os,s,h);ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(v # os,s,h), 1, ll, NEXT) : Step"
+|
+New:  "\<lbrakk>get_ins M l = Some (new d); newobj = (d, emp); a=nextLoc h; 
+         NEXT = ((RVal (Loc a)) # os,s,h[a\<mapsto>newobj]); ll = l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(os,s,h), 1, ll,NEXT) : Step"
+|
+Get:  "\<lbrakk>get_ins M l = Some (getfield d F); h\<down>a = Some (d, Flds);
+         Flds\<down>F = Some v; NEXT = (v # os,s,h); ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,((RVal (Loc a)) # os,s,h), 1, ll,NEXT) : Step"
+|
+Put:  "\<lbrakk>get_ins M l = Some (putfield d F); h\<down>a = Some (d, Flds);
+         newobj = (d, Flds[F\<mapsto>v]); NEXT = (os,s,h[a\<mapsto>newobj]); ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(v # ((RVal (Loc a)) # os),s,h), 1, ll, NEXT) : Step"
+|
+Cast: "\<lbrakk>get_ins M l = Some (checkcast d); h\<down>a = Some (d, Flds);
+         NEXT = ((RVal (Loc a)) # os,s,h); ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,((RVal (Loc a)) # os,s,h), 1, ll,NEXT) : Step"
+|
+Goto: "\<lbrakk>get_ins M l = Some (goto pc)\<rbrakk> \<Longrightarrow> (M,l,S, 1, pc,S) : Step"
+|
+IfT:  "\<lbrakk>get_ins M l = Some (iftrue pc); NEXT = (os,s,h)\<rbrakk>
+       \<Longrightarrow> (M,l,(TRUE # os,s,h), 1, pc, NEXT) : Step"
+|
+IfF:  "\<lbrakk>get_ins M l = Some (iftrue pc); v \<noteq> TRUE; NEXT = (os,s,h); ll=l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(v # os,s,h), 1, ll, NEXT) : Step"
+|
+InvS: "\<lbrakk>get_ins M l = Some (invokeS C m); mbody_is C m (par,code,l0);
+         ((par,code,l0),l0,([], S,h), n, hh, v): Exec; 
+         (ops,par,S,os) : Frame; NEXT = (v # os,s,hh); ll = l+1\<rbrakk>
+       \<Longrightarrow> (M,l,(ops,s,h), Suc n, ll, NEXT) : Step"
+|
+Vret: "\<lbrakk>get_ins M l = Some vreturn\<rbrakk> \<Longrightarrow> (M,l,(v # os,s,h), 1, h, v) : Exec"
+|
+Run:  "\<lbrakk>(M,l,s,n,ll,t):Step; (M,ll,t,m,h,v):Exec; k = (max n m) +1 \<rbrakk>
+       \<Longrightarrow> (M,l,s,k,h,v) : Exec"
+
+
+definition Opsem::"Mbody \<Rightarrow> Label \<Rightarrow> State \<Rightarrow> Heap \<Rightarrow> Val \<Rightarrow> bool"
+where "Opsem M l s h v = (\<exists> n . (M,l,s,n,h,v):Exec)"
+
+
+
+inductive_cases eval_cases: 
+ "(M,l,s,n,ll,t) : Step"
+ "(M,l,s,n,h,v) : Exec"
+lemma no_zero_height_derivsAux[rule_format]: 
+"\<forall>n . ((M,l,s,n,ll,t) : Step \<longrightarrow> (n=0 \<longrightarrow> False)) \<and> ((MM,lll,ss,m,h,v):Exec \<longrightarrow> (m=0 \<longrightarrow> False))"
+by (rule allI, rule Step_Exec.induct, simp_all)
+
+lemma no_zero_height_derivsAux2: "((M,l,s,0,ll,t):Step \<longrightarrow> False) \<and> ((MM,lll,ss,0,h,v):Exec \<longrightarrow> False)"
+by (insert no_zero_height_derivsAux, fast)
+lemma no_zero_height_Step_derivs: "(M,l,s,0,ll,t):Step \<Longrightarrow> False"
+lemma no_zero_height_Step_derivs1: "(M,l,(os,S,H),0,ll,t):Step \<Longrightarrow> False"
+by (insert no_zero_height_derivsAux2, fast)
+
+lemma no_zero_height_Exec_derivs: "(M,l,s,0,h,v):Exec \<Longrightarrow> False"
+lemma no_zero_height_Exec_derivs1: "(M,l,(os,S,H),0,h,v):Exec \<Longrightarrow> False"
+by (insert no_zero_height_derivsAux2, fast)
+
+lemma ConstElim1:"\<lbrakk>(M, l, (os, S, h), n, ll,t) \<in> Step; get_ins M l = Some (const v)\<rbrakk> 
+               \<Longrightarrow> n = Suc 0 \<and> t = (v # os, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma DupElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l =  Some dup\<rbrakk> 
+               \<Longrightarrow> \<exists> v ops . os = v # ops \<and> n = Suc 0 \<and> t = (v # os, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma PopElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l =  Some pop\<rbrakk> 
+               \<Longrightarrow> \<exists> v ops . os = v # ops \<and> n = Suc 0 \<and> t = (ops, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma SwapElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some swap\<rbrakk>
+              \<Longrightarrow> \<exists> v w ops . os = v # w # ops \<and> n = Suc 0 \<and> t = (w # v # ops, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma LoadElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (load x)\<rbrakk>
+                 \<Longrightarrow> \<exists> v . S\<down>x = Some v \<and> n = Suc 0 \<and> t = (v # os, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma StoreElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (store x)\<rbrakk>
+                  \<Longrightarrow> \<exists> v ops . os = v # ops \<and> n = Suc 0 \<and> t = (ops, S[x\<mapsto>v], h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma BinopElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (binop f)\<rbrakk>
+                  \<Longrightarrow> \<exists> v w ops . os = v # w # ops \<and> n = Suc 0 \<and> t = (f v w # ops, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all) 
+
+lemma UnopElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (unop f)\<rbrakk>
+                 \<Longrightarrow> \<exists> v ops . os = v # ops \<and> n = Suc 0 \<and> t = (f v # ops, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma NewElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (new d)\<rbrakk>
+               \<Longrightarrow> \<exists> a . a = nextLoc h \<and> n = Suc 0 \<and> t = (RVal (Loc a) # os, S, h[a\<mapsto>(d, emp)]) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma GetElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (getfield d F)\<rbrakk>
+               \<Longrightarrow> \<exists> a Flds v ops. h\<down>a = Some (d, Flds) \<and> Flds\<down>F = Some v \<and> 
+                                   os = RVal (Loc a) # ops \<and> n = Suc 0 \<and> t = (v # ops, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma PutElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (putfield d F)\<rbrakk>
+                \<Longrightarrow> \<exists> a Flds v ops. h\<down>a = Some (d, Flds) \<and> os = v # RVal (Loc a) # ops \<and>
+                                   n = Suc 0 \<and> t = (ops, S, h[a\<mapsto>(d, Flds[F\<mapsto>v])]) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma CastElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (checkcast d)\<rbrakk>
+                \<Longrightarrow> \<exists> a Flds ops . h\<down>a = Some (d, Flds) \<and> os = RVal (Loc a) # ops \<and> n = Suc 0 \<and> 
+                                   t = (RVal (Loc a) # ops, S, h) \<and> ll = l+1"
+by (erule eval_cases, simp_all)
+
+lemma GotoElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (goto pc)\<rbrakk>
+                \<Longrightarrow> n = Suc 0 \<and> t = (os, S, h) \<and> ll = pc"
+by (erule eval_cases, simp_all)
+
+lemma IfElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (iftrue pc)\<rbrakk>
+              \<Longrightarrow> (\<exists> ops . os = TRUE # ops \<and> n = Suc 0 \<and> t = (ops, S, h) \<and> ll = pc) \<or> 
+                  (\<exists> v ops . v \<noteq> TRUE \<and> os = v # ops \<and> n = Suc 0 \<and> t = (ops, S, h) \<and> ll = l+1)"
+by (erule eval_cases, simp_all)
+
+lemma InvokeElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (invokeS C m)\<rbrakk>
+                   \<Longrightarrow> \<exists> code l0 v ops hh u k R par. 
+                           mbody_is C m (par,code, l0) \<and> (os,par,R,ops):Frame \<and> 
+                           ((par,code,l0), l0, ([], R, h), k, hh, v) \<in> Exec \<and> 
+                           n = Suc k \<and> t = (v # ops, S, hh) \<and> ll = l+1"
+by (erule eval_cases, simp_all, fastforce)
+lemma InvokeElim: "\<lbrakk>(M, l, s, n, ll, t) \<in> Step; get_ins M l = Some (invokeS C m)\<rbrakk>
+                   \<Longrightarrow> \<exists> code l0 v ops hh u k R par. 
+                           mbody_is C m (par,code, l0) \<and> (fst s,par,R,ops):Frame \<and> 
+                           ((par,code,l0), l0, ([], R, snd(snd s)), k, hh, v) \<in> Exec \<and> 
+                           n = Suc k \<and> t = (v # ops, fst (snd s), hh) \<and> ll = l+1"
+by (erule eval_cases, simp_all, fastforce)
+
+lemma RetElim1: "\<lbrakk>(M, l, (os, S, h), n, ll, t) \<in> Step; get_ins M l = Some (vreturn)\<rbrakk> \<Longrightarrow> False"
+by (erule eval_cases, simp_all)
+
+lemma ExecElim1: "\<lbrakk>(M,l,(os,S,H),k,h,v):Exec\<rbrakk>
+      \<Longrightarrow> (get_ins M l = Some vreturn \<and> (\<exists> ops . os = v # ops \<and> k = Suc 0 \<and> h=H)) \<or>
+          (\<exists> n m t ll. (M, l,(os,S,H), n, ll,t) \<in> Step \<and> (M, ll, t, m, h, v) \<in> Exec \<and> k = Suc (max n m))"
+apply (erule eval_cases, simp_all)
+apply (rule disjI2)
+  apply clarsimp
+  apply (rule, rule, rule, rule) apply (rule, rule, rule) apply assumption
+  apply (rule, assumption) apply simp
+done
+
+lemma InstrElimNext:
+ "\<lbrakk>(M, l, s, n, ll, t) \<in> Step;
+   get_ins M l = Some I;
+   I = const c \<or> I = dup \<or> I = pop \<or> I = swap \<or> I = load x \<or>
+   I = store x \<or> I = binop f \<or> I = unop g \<or> I = new d \<or>
+   I = getfield d F \<or> I = putfield d F \<or> I = checkcast d\<rbrakk>
+  \<Longrightarrow> ll = l+1"
+apply (drule eval_cases, simp_all)
+apply clarsimp 
+apply clarsimp
+done
+
+
+lemma StepExec_determ_Aux[rule_format]:
+"(\<forall> n1 l M s l1 t . n1 \<le> n \<longrightarrow> (M, l, s, n1, l1, t) \<in> Step \<longrightarrow>
+       (\<forall> n2 l2 r. (M,l,s,n2,l2,r):Step \<longrightarrow> (n1=n2 \<and> t=r \<and> l1=l2))) \<and>
+ (\<forall> n1 l M s h v . n1 \<le> n \<longrightarrow> (M, l, s, n1, h, v) \<in> Exec \<longrightarrow>
+      (\<forall> n2 k w . (M,l,s,n2,k,w):Exec \<longrightarrow> (n1=n2 \<and> h=k \<and> v=w)))"
+supply [[simproc del: defined_all]]
+apply (induct n)
+apply clarsimp apply rule apply clarsimp apply (drule no_zero_height_Step_derivs1, simp)
+   apply clarsimp apply (drule no_zero_height_Exec_derivs1, simp)
+apply clarsimp
+apply rule
+  apply clarsimp 
+apply (erule Step.cases)
+  apply clarsimp apply (drule ConstElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule DupElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule PopElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule SwapElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule LoadElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule StoreElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule BinopElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule UnopElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule NewElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule GetElim1) apply fastforce apply clarsimp
+  apply clarsimp apply (drule PutElim1) apply fastforce apply clarsimp
+  apply clarsimp apply (drule CastElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule GotoElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule IfElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule IfElim1) apply simp apply clarsimp
+  apply clarsimp apply (drule InvokeElim1) apply simp apply clarsimp
+    apply (erule thin_rl)
+    apply (simp add: mbody_is_def, clarsimp)
+    apply (drule Frame_deterministic, assumption, clarsimp)
+apply clarsimp
+  apply (erule Exec.cases)
+  apply clarsimp apply (erule Exec.cases)
+    apply clarsimp
+    apply clarsimp apply (drule RetElim1, simp, simp)
+  apply clarsimp apply (drule ExecElim1)
+    apply clarsimp
+    apply (erule disjE, clarsimp) apply (drule RetElim1, simp, simp)
+    apply clarsimp
+      apply (erule_tac x=na in allE, rotate_tac -1, clarsimp)
+      apply (erule_tac x=la in allE, rotate_tac -1)
+      apply (erule_tac x=ad in allE, rotate_tac -1)
+      apply (erule_tac x=ae in allE, rotate_tac -1)
+      apply (erule_tac x=bb in allE, rotate_tac -1)
+      apply (erule_tac x=af in allE, rotate_tac -1)
+      apply (erule_tac x=ag in allE, rotate_tac -1)
+      apply (erule_tac x=bc in allE, rotate_tac -1)
+      apply (erule_tac x=ll in allE, rotate_tac -1)
+      apply (erule_tac x=ah in allE, rotate_tac -1)
+      apply (erule_tac x=ai in allE, rotate_tac -1)
+      apply (erule_tac x=bd in allE, clarsimp)
+      apply (rotate_tac -1)
+      apply (erule_tac x=nb in allE, rotate_tac -1) 
+      apply (erule_tac x=lla in allE, rotate_tac -1)
+      apply (erule_tac x=a in allE, rotate_tac -1)
+      apply (erule_tac x=aa in allE, rotate_tac -1)
+      apply (erule_tac x=b in allE, clarsimp)
+      apply (erule_tac x=m in allE, rotate_tac -1, clarsimp)
+      apply (erule_tac x=lla in allE, rotate_tac -1)
+      apply (erule_tac x=ad in allE, rotate_tac -1)
+      apply (erule_tac x=ae in allE, rotate_tac -1)
+      apply (erule_tac x=bb in allE, rotate_tac -1)
+      apply (erule_tac x=a in allE, rotate_tac -1)
+      apply (erule_tac x=aa in allE, rotate_tac -1)
+      apply (erule_tac x=b in allE, rotate_tac -1)
+      apply (erule_tac x=ha in allE, rotate_tac -1)
+      apply (erule_tac x=va in allE, rotate_tac -1, clarsimp)
+done
+
+lemma Step_determ:
+ "\<lbrakk>(M,l,s,n,l1,t) \<in> Step; (M,l,s,m,l2,r):Step\<rbrakk> \<Longrightarrow> n=m \<and> t=r \<and> l1=l2"
+apply (insert StepExec_determ_Aux[of n])
+apply (erule conjE)
+apply (rotate_tac -1, erule thin_rl)
+apply fast
+done
+
+lemma Exec_determ:
+ "\<lbrakk>(M,l,s,n,h,v) \<in> Exec; (M,l,s,m,k,w):Exec\<rbrakk> \<Longrightarrow> n=m \<and> h=k \<and> v=w"
+apply (insert StepExec_determ_Aux[of n])
+apply (erule conjE)
+apply (rotate_tac -2, erule thin_rl)
+apply fast
+done
+
+end

@@ -1,0 +1,302 @@
+theory EPIC_L1_BA
+  imports
+    "../Parametrized_Dataplane_3_directed"
+    "../infrastructure/Keys"
+begin
+
+locale epic_l1_defs = network_assums_direct _ _ _ auth_seg0 
+  for auth_seg0 :: "(msgterm \<times> ahi list) set"
+begin
+
+type_synonym EPIC_HF = "(unit, msgterm) HF"
+type_synonym UINFO = "nat"
+
+fun hf_valid :: "msgterm \<Rightarrow> UINFO
+    \<Rightarrow> EPIC_HF
+    \<Rightarrow> EPIC_HF option \<Rightarrow> bool" where 
+  "hf_valid (Num ts) tspkt \<lparr>AHI = ahi, UHI = uhi, HVF = x\<rparr> (Some \<lparr>AHI = ahi2, UHI = uhi2, HVF = x2\<rparr>) \<longleftrightarrow> 
+    (\<exists>\<sigma> upif downif. \<sigma> = Mac[macKey (ASID ahi)] (L [Num ts, upif, downif, uhi2]) \<and>
+          ASIF (DownIF ahi) downif \<and> ASIF (UpIF ahi) upif \<and> uhi = Hash \<sigma> \<and> x = Mac[\<sigma>] \<langle>Num ts, Num tspkt\<rangle>)"
+| "hf_valid (Num ts) tspkt \<lparr>AHI = ahi, UHI = uhi, HVF = x\<rparr> None \<longleftrightarrow> 
+    (\<exists>\<sigma> upif downif. \<sigma> = Mac[macKey (ASID ahi)] (L [Num ts, upif, downif]) \<and>
+          ASIF (DownIF ahi) downif \<and> ASIF (UpIF ahi) upif \<and> uhi = Hash \<sigma> \<and> x = Mac[\<sigma>] \<langle>Num ts, Num tspkt\<rangle>)"
+| "hf_valid _ _ _ _ = False"
+
+definition upd_uinfo :: "nat \<Rightarrow> EPIC_HF \<Rightarrow> nat" where
+  "upd_uinfo uinfo hf \<equiv> uinfo"
+
+fun extrUhi :: "msgterm \<Rightarrow> ahi list" where
+  "extrUhi (Hash (Mac[macKey asid] (L [ts, upif, downif, uhi2])))
+ = \<lparr>UpIF = term2if upif, DownIF = term2if downif, ASID = asid\<rparr> # extrUhi uhi2"
+| "extrUhi (Hash (Mac[macKey asid] (L [ts, upif, downif])))
+ = [\<lparr>UpIF = term2if upif, DownIF = term2if downif, ASID = asid\<rparr>]"
+| "extrUhi _ = []"
+
+fun extr :: "msgterm \<Rightarrow> ahi list" where
+  "extr (Mac[\<sigma>] _) = extrUhi (Hash \<sigma>)" 
+   | "extr _ = []"
+
+fun extr_ainfo :: "msgterm \<Rightarrow> msgterm" where 
+  "extr_ainfo (Mac[Mac[macKey asid] (L (Num ts # xs))] _) = Num ts"
+| "extr_ainfo _ = \<epsilon>"
+
+abbreviation term_ainfo :: "msgterm \<Rightarrow> msgterm" where
+  "term_ainfo \<equiv> id"
+
+fun terms_hf :: "EPIC_HF \<Rightarrow> msgterm set" where 
+  "terms_hf hf = {HVF hf, UHI hf}"
+
+abbreviation terms_uinfo :: "UINFO \<Rightarrow> msgterm set" where 
+  "terms_uinfo x \<equiv> {}"
+
+definition auth_restrict where 
+  "auth_restrict ainfo uinfo l \<equiv> (\<exists>ts. ainfo = Num ts)"
+
+abbreviation no_oracle where "no_oracle \<equiv> (\<lambda> _ _. True)"
+
+lemma hf_valid_invert:
+  "hf_valid tsn uinfo hf mo \<longleftrightarrow>
+   ((\<exists>ahi ahi2 \<sigma> ts upif downif asid x upif2 downif2 asid2 uhi uhi2 x2.
+     hf = \<lparr>AHI = ahi, UHI = uhi, HVF = x\<rparr> \<and>
+     ASID ahi = asid \<and> ASIF (DownIF ahi) downif \<and> ASIF (UpIF ahi) upif \<and>
+     mo = Some \<lparr>AHI = ahi2, UHI = uhi2, HVF = x2\<rparr> \<and>
+     ASID ahi2 = asid2 \<and> ASIF (DownIF ahi2) downif2 \<and> ASIF (UpIF ahi2) upif2 \<and>
+     \<sigma> = Mac[macKey asid] (L [tsn, upif, downif, uhi2]) \<and>
+     tsn = Num ts \<and>
+     uhi = Hash \<sigma> \<and>
+     x = Mac[\<sigma>] \<langle>tsn, Num uinfo\<rangle>)
+ \<or> (\<exists>ahi \<sigma> ts upif downif asid uhi x.
+     hf = \<lparr>AHI = ahi, UHI = uhi, HVF = x\<rparr> \<and>
+     ASID ahi = asid \<and> ASIF (DownIF ahi) downif \<and> ASIF (UpIF ahi) upif \<and>
+     mo = None \<and>
+     \<sigma> = Mac[macKey asid] (L [tsn, upif, downif]) \<and>
+     tsn = Num ts \<and>
+     uhi = Hash \<sigma> \<and>
+     x = Mac[\<sigma>] \<langle>tsn, Num uinfo\<rangle>)
+    )"
+  apply(auto elim!: hf_valid.elims) using option.exhaust ASIF.simps by metis+
+
+lemma hf_valid_auth_restrict[dest]: "hf_valid ainfo uinfo hf z \<Longrightarrow> auth_restrict ainfo uinfo l"
+  by(auto simp add: hf_valid_invert auth_restrict_def)
+
+lemma auth_restrict_ainfo[dest]: "auth_restrict ainfo uinfo l \<Longrightarrow> \<exists>ts. ainfo = Num ts"
+  by(auto simp add: auth_restrict_def)
+
+lemma info_hvf: 
+  assumes "hf_valid ainfo uinfo m z" "HVF m = Mac[\<sigma>] \<langle>ainfo', Num uinfo'\<rangle> \<or> hf_valid ainfo' uinfo' m z'" 
+  shows "uinfo = uinfo'" "ainfo' = ainfo"
+  using assms by(auto simp add: hf_valid_invert)
+
+
+
+print_locale dataplane_3_directed_defs 
+sublocale dataplane_3_directed_defs _ _ _ auth_seg0 hf_valid auth_restrict extr extr_ainfo term_ainfo 
+                 terms_hf terms_uinfo upd_uinfo no_oracle
+  by unfold_locales
+
+declare TWu.holds_set_list[dest]
+declare TWu.holds_takeW_is_identity[simp]
+declare parts_singleton[dest]
+
+
+definition ik_add :: "msgterm set" where
+  "ik_add \<equiv> { \<sigma> | ainfo uinfo l hf \<sigma>.  
+                 (ainfo, l) \<in> auth_seg2 uinfo \<and> hf \<in> set l \<and> HVF hf = Mac[\<sigma>] \<langle>ainfo, Num uinfo\<rangle> }"
+
+lemma ik_addI:
+  "\<lbrakk>(ainfo, l) \<in> auth_seg2 uinfo; hf \<in> set l; HVF hf = Mac[\<sigma>] \<langle>ainfo, Num uinfo\<rangle>\<rbrakk> \<Longrightarrow> \<sigma> \<in> ik_add"
+  by(auto simp add: ik_add_def)
+
+lemma ik_add_form: "t \<in> ik_add \<Longrightarrow> \<exists> asid l . t = Mac[macKey asid] l"
+  by(auto simp add: ik_add_def auth_seg2_def hf_valid_invert dest!: TWu.holds_set_list)
+
+lemma parts_ik_add[simp]: "parts ik_add = ik_add"
+  by (auto intro!: parts_Hash dest: ik_add_form)
+
+abbreviation ik_oracle :: "msgterm set" where "ik_oracle \<equiv> {}"
+
+sublocale
+  dataplane_3_directed_ik_defs _ _ _ auth_seg0 terms_uinfo no_oracle hf_valid auth_restrict extr extr_ainfo term_ainfo 
+                  terms_hf upd_uinfo ik_add ik_oracle 
+  by unfold_locales
+
+lemma ik_hfs_form: "t \<in> parts ik_hfs \<Longrightarrow> \<exists> t' . t = Hash t'"
+  by(auto 3 4 simp add: auth_seg2_def hf_valid_invert)
+
+declare ik_hfs_def[simp del]
+
+lemma parts_ik_hfs[simp]: "parts ik_hfs = ik_hfs"
+  by (auto intro!: parts_Hash ik_hfs_form)
+
+lemma ik_hfs_simp: 
+  "t \<in> ik_hfs \<longleftrightarrow> (\<exists>t' . t = Hash t') \<and> (\<exists>hf . (t = HVF hf \<or> t = UHI hf)
+                    \<and> (\<exists>hfs. hf \<in> set hfs \<and> (\<exists>ainfo uinfo. (ainfo, hfs) \<in> auth_seg2 uinfo
+                    \<and> (\<exists> nxt. hf_valid ainfo uinfo hf nxt))))" (is "?lhs \<longleftrightarrow> ?rhs")
+proof 
+  assume asm: "?lhs" 
+  then obtain ainfo uinfo hf hfs where 
+    dfs: "hf \<in> set hfs" "(ainfo, hfs) \<in> auth_seg2 uinfo" "t = HVF hf \<or> t = UHI hf"
+    by(auto simp add: ik_hfs_def)
+  then have "hfs_valid_None ainfo uinfo hfs"  "(ainfo, AHIS hfs) \<in> auth_seg0"
+    by(auto simp add: auth_seg2_def)
+  then show "?rhs" using asm dfs
+    using upd_uinfo_def 
+    by (auto 3 4 simp add: auth_seg2_def intro!: ik_hfs_form exI[of _ hf] exI[of _ hfs] 
+                     dest: TWu.holds_set_list_no_update)
+qed(auto simp add: ik_hfs_def)
+
+lemma auth_ainfo[dest]: "\<lbrakk>(ainfo, hfs) \<in> auth_seg2 uinfo\<rbrakk> \<Longrightarrow> \<exists> ts . ainfo = Num ts"
+  by(auto simp add: auth_seg2_def)
+
+lemma Num_ik[intro]: "Num ts \<in> ik"
+  by(auto simp add: ik_def auth_seg2_def auth_restrict_def TWu.holds.simps intro!: exI[of _ "[]"])
+
+lemma analz_parts_ik[simp]: "analz ik = parts ik"
+  apply(rule no_crypt_analz_is_parts)
+  by(auto simp add: ik_def auth_seg2_def)
+    (auto 3 4 simp add: ik_add_def auth_seg2_def hf_valid_invert ik_hfs_simp)
+
+lemma parts_ik[simp]: "parts ik = ik"
+  by(auto 3 4 simp add: ik_def auth_seg2_def auth_restrict_def dest!: parts_singleton_set)
+
+lemma key_ik_bad: "Key (macK asid) \<in> ik \<Longrightarrow> asid \<in> bad"
+  by(auto simp add: ik_def)
+    (auto 3 4 simp add: auth_seg2_def ik_hfs_simp ik_add_def hf_valid_invert)
+
+fun uinfo_change_hf :: "UINFO \<Rightarrow> EPIC_HF \<Rightarrow> EPIC_HF" where
+  "uinfo_change_hf new_uinfo hf = 
+    (case HVF hf of Mac[\<sigma>] \<langle>ainfo, uinfo\<rangle> \<Rightarrow> hf\<lparr>HVF := Mac[\<sigma>] \<langle>ainfo, Num new_uinfo\<rangle>\<rparr> | _ \<Rightarrow> hf)"
+
+fun uinfo_change :: "UINFO \<Rightarrow> EPIC_HF list \<Rightarrow> EPIC_HF list" where 
+  "uinfo_change new_uinfo hfs = map (uinfo_change_hf new_uinfo) hfs"
+
+lemma uinfo_change_valid: 
+  "hfs_valid ainfo uinfo l nxt \<Longrightarrow> hfs_valid ainfo new_uinfo (uinfo_change new_uinfo l) nxt"
+  apply(induction l nxt rule: TWu.holds.induct[where ?upd=upd_uinfo])
+  apply auto
+  subgoal for info x y ys nxt
+    by(cases "map (uinfo_change_hf new_uinfo) ys")
+      (cases info, auto 3 4 simp add: TWu.holds_split_tail hf_valid_invert upd_uinfo_def)+
+  by(auto 3 4 simp add: TWu.holds_split_tail hf_valid_invert TWu.holds.simps upd_uinfo_def)
+
+lemma uinfo_change_hf_AHI: "AHI (uinfo_change_hf new_uinfo hf) = AHI hf"
+  apply(cases "HVF hf") apply auto
+  subgoal for x apply(cases x) apply auto
+    subgoal for x1 x2 apply(cases x2) by auto
+    done
+  done
+
+lemma uinfo_change_hf_AHIS[simp]: "AHIS (map (uinfo_change_hf new_uinfo) l) = AHIS l"
+  apply(induction l) using uinfo_change_hf_AHI by auto
+
+lemma uinfo_change_auth_seg2:
+  assumes "hf_valid ainfo uinfo m z" "\<sigma> = Mac[Key (macK asid)] j"
+          "HVF m = Mac[\<sigma>] \<langle>ainfo, Num uinfo'\<rangle>" "\<sigma> \<in> ik_add"
+  shows "\<exists>hfs. m \<in> set hfs \<and> (\<exists>uinfo''. (ainfo, hfs) \<in> auth_seg2 uinfo'')"
+proof-
+  from assms(4) obtain ainfo_add uinfo_add l_add hf_add where
+    "(ainfo_add, l_add) \<in> auth_seg2 uinfo_add" "hf_add \<in> set l_add" "HVF hf_add = Mac[\<sigma>] \<langle>ainfo_add, Num uinfo_add\<rangle>"
+    by(auto simp add: ik_add_def)
+  then have add: "m \<in> set (uinfo_change uinfo l_add)" "(ainfo_add, (uinfo_change uinfo l_add)) \<in> auth_seg2 uinfo"
+    using assms(1-3) apply(auto simp add: auth_seg2_def simp del: AHIS_def)
+    apply(auto simp add: hf_valid_invert intro!: image_eqI dest!: TWu.holds_set_list)[1]
+    by(auto simp add: auth_restrict_def intro!: exI elim: ahi_eq dest: uinfo_change_valid simp del: AHIS_def)
+  then have "ainfo_add = ainfo" 
+    using assms(1) by(auto simp add: auth_seg2_def dest!: TWu.holds_set_list dest: info_hvf)
+  then show ?thesis using add by fastforce
+qed
+
+lemma MAC_synth_helper:
+"\<lbrakk>hf_valid ainfo uinfo m z; 
+  HVF m = Mac[\<sigma>] \<langle>ainfo, Num uinfo\<rangle>; \<sigma> = Mac[Key (macK asid)] j; \<sigma> \<in> ik \<or> HVF m \<in> ik\<rbrakk>
+       \<Longrightarrow> \<exists>hfs. m \<in> set hfs \<and> (\<exists>uinfo'. (ainfo, hfs) \<in> auth_seg2 uinfo')"
+  apply(auto simp add: ik_def ik_hfs_simp dest: ik_add_form)
+  prefer 3 subgoal by(auto elim!: uinfo_change_auth_seg2)
+  prefer 3 subgoal by(auto elim!: uinfo_change_auth_seg2 intro: ik_addI dest: info_hvf HOL.sym)
+  by(auto simp add: hf_valid_invert)
+
+definition mac_format :: "msgterm \<Rightarrow> as \<Rightarrow> bool" where 
+  "mac_format m asid \<equiv> \<exists> j ts uinfo . m = Mac[Mac[macKey asid] j] \<langle>Num ts, uinfo\<rangle>"
+
+lemma MAC_synth:
+  assumes "hf_valid ainfo uinfo m z" "HVF m \<in> synth ik" "mac_format (HVF m) asid"
+    "asid \<notin> bad"
+  shows "\<exists>hfs . m \<in> set hfs \<and> (\<exists>uinfo'. (ainfo, hfs) \<in> auth_seg2 uinfo')"
+  using assms
+  apply(auto simp add: mac_format_def elim!: MAC_synth_helper dest!: key_ik_bad)
+  using assms(1) by(auto dest: info_hvf simp add: hf_valid_invert)
+
+
+lemma COND_honest_hf_analz:
+  assumes "ASID (AHI hf) \<notin> bad" "hf_valid ainfo uinfo hf nxt" "terms_hf hf \<subseteq> synth (analz ik)"
+    "no_oracle ainfo uinfo"
+    shows "terms_hf hf \<subseteq> analz ik"
+proof-
+  let ?asid = "ASID (AHI hf)"
+  from assms(3) have hf_synth_ik: "HVF hf \<in> synth ik" "UHI hf \<in> synth ik" by auto
+  from assms(2) have "mac_format (HVF hf) ?asid"
+    by(auto simp add: mac_format_def hf_valid_invert)
+  then obtain hfs uinfo where "hf \<in> set hfs" "(ainfo, hfs) \<in> auth_seg2 uinfo"
+    using assms(1,2,4) hf_synth_ik by(auto dest!: MAC_synth)
+  then have "HVF hf \<in> ik" "UHI hf \<in> ik" 
+    using assms(2)
+    by(auto simp add: ik_hfs_def intro!: ik_ik_hfs intro!: exI) 
+  then show ?thesis by auto
+qed
+
+lemma COND_terms_hf: 
+  assumes "hf_valid ainfo uinfo hf z" and "HVF hf \<in> ik" and "no_oracle ainfo uinfo"
+  shows "\<exists>hfs. hf \<in> set hfs \<and> (\<exists>uinfo . (ainfo, hfs) \<in> auth_seg2 uinfo)"
+proof-
+  obtain hfs ainfo where hfs_def: "hf \<in> set hfs" "(ainfo, hfs) \<in> auth_seg2 uinfo"
+  using assms by(auto 3 4 simp add: hf_valid_invert ik_hfs_simp ik_def dest: ahi_eq
+                             dest!: ik_add_form)
+  then obtain hfs ainfo where hfs_def: "hf \<in> set hfs" "(ainfo, hfs) \<in> auth_seg2 uinfo" by auto
+  show ?thesis 
+    using hfs_def apply (auto simp add: auth_seg2_def dest!: TWu.holds_set_list)
+    using hfs_def assms(1) by (auto simp add: auth_seg2_def dest: info_hvf)
+qed
+
+lemma COND_extr_prefix_path:
+  "\<lbrakk>hfs_valid ainfo uinfo l nxt; nxt = None\<rbrakk> \<Longrightarrow> prefix (extr_from_hd l) (AHIS l)"
+  by(induction l nxt rule: TWu.holds.induct[where ?upd=upd_uinfo])
+    (auto simp add: upd_uinfo_def TWu.holds_split_tail TWu.holds.simps(1) hf_valid_invert,
+     auto split: list.split_asm simp add: hf_valid_invert intro!: ahi_eq elim: ASIF.elims)
+
+lemma COND_path_prefix_extr:
+  "prefix (AHIS (hfs_valid_prefix ainfo uinfo l nxt))
+          (extr_from_hd l)"
+  apply(induction l nxt rule: TWu.takeW.induct[where ?Pa="hf_valid ainfo",where ?upd=upd_uinfo])
+  by(auto simp add: upd_uinfo_def TWu.takeW_split_tail TWu.takeW.simps(1))
+    (auto 3 4 simp add: hf_valid_invert intro!: ahi_eq elim: ASIF.elims)
+
+lemma COND_hf_valid_uinfo:
+  "\<lbrakk>hf_valid ainfo uinfo hf nxt; hf_valid ainfo' uinfo' hf nxt'\<rbrakk> \<Longrightarrow> uinfo' = uinfo"
+  by(auto dest: info_hvf)
+
+lemma COND_upd_uinfo_ik: 
+    "\<lbrakk>terms_uinfo uinfo \<subseteq> synth (analz ik); terms_hf hf \<subseteq> synth (analz ik)\<rbrakk> 
+    \<Longrightarrow> terms_uinfo (upd_uinfo uinfo hf) \<subseteq> synth (analz ik)"
+  by (auto simp add: upd_uinfo_def)
+
+lemma COND_upd_uinfo_no_oracle: 
+  "no_oracle ainfo uinfo \<Longrightarrow> no_oracle ainfo (upd_uinfo uinfo fld)"
+  by (auto simp add: upd_uinfo_def)
+
+lemma COND_auth_restrict_upd:
+      "auth_restrict ainfo uinfo (x#y#hfs) 
+   \<Longrightarrow> auth_restrict ainfo (upd_uinfo uinfo y) (y#hfs)"
+  by (auto simp add: auth_restrict_def upd_uinfo_def)
+
+print_locale dataplane_3_directed
+sublocale
+  dataplane_3_directed _ _ _ auth_seg0 terms_uinfo terms_hf hf_valid auth_restrict extr extr_ainfo term_ainfo 
+            upd_uinfo ik_add 
+            ik_oracle no_oracle
+  apply unfold_locales
+  using COND_terms_hf COND_honest_hf_analz COND_extr_prefix_path
+  COND_path_prefix_extr COND_hf_valid_uinfo COND_upd_uinfo_ik COND_upd_uinfo_no_oracle 
+  COND_auth_restrict_upd by auto
+
+end
+end

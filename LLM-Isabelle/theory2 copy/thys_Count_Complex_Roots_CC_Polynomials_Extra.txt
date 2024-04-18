@@ -1,0 +1,260 @@
+theory CC_Polynomials_Extra imports 
+  Winding_Number_Eval.Missing_Algebraic
+  Winding_Number_Eval.Missing_Transcendental
+  Sturm_Tarski.PolyMisc
+  Budan_Fourier.BF_Misc
+begin
+
+
+lemma poly_linepath_comp': 
+  fixes a::"'a::{real_normed_vector,comm_semiring_0,real_algebra_1}"
+  shows "poly p (linepath a b t) = poly (p \<circ>\<^sub>p [:a, b-a:]) (of_real t)"
+  by (auto simp add:poly_pcompose linepath_def scaleR_conv_of_real algebra_simps)
+
+lemma path_poly_comp[intro]:
+  fixes p::"'a::real_normed_field poly"
+  shows "path g \<Longrightarrow> path (poly p o g)"
+  apply (elim path_continuous_image)
+  by (auto intro:continuous_intros)
+
+lemma cindex_poly_noroot:
+  assumes "a<b" "\<forall>x. a<x \<and> x<b \<longrightarrow> poly p x\<noteq>0"
+  shows "cindex_poly a b q p = 0" 
+  unfolding cindex_poly_def
+  apply (rule sum.neutral)
+  using assms by (auto intro:jump_poly_not_root)
+
+
+interpretation of_real_poly_hom:map_poly_inj_idom_hom of_real ..
+
+interpretation Re_poly_hom:map_poly_comm_monoid_add_hom Re 
+  by unfold_locales simp_all
+
+interpretation Im_poly_hom:map_poly_comm_monoid_add_hom Im
+  by unfold_locales simp_all
+
+
+lemma order_normalize[simp]:"order x (normalize p) = order x p"      
+  by (metis dvd_normalize_iff normalize_eq_0_iff order_1 order_2 order_unique_lemma)
+
+lemma order_gcd:
+  assumes "p\<noteq>0" "q\<noteq>0"
+  shows "order x (gcd p q) = min (order x p) (order x q)"
+proof -
+  define xx op oq where "xx=[:- x, 1:]" and "op = order x p" and "oq = order x q"
+  obtain pp where pp:"p = xx ^ op * pp" "\<not> xx dvd pp"
+  obtain qq where qq:"q = xx ^ oq * qq" "\<not> xx dvd qq"
+  define pq where "pq = gcd pp qq"
+
+  have p_unfold:"p = (pq * xx ^ (min op oq)) * ((pp div pq) * xx ^ (op - min op oq))"
+        and [simp]:"coprime xx (pp div pq)" and "pp\<noteq>0"
+  proof -
+    have "xx ^ op = xx ^ (min op oq) * xx ^ (op - min op oq)" 
+      by (simp flip:power_add)
+    moreover have "pp = pq * (pp div pq)" 
+      unfolding pq_def by simp
+    ultimately show "p = (pq * xx ^ (min op oq)) * ((pp div pq) * xx ^ (op - min op oq))"
+      unfolding pq_def pp by(auto simp:algebra_simps)
+    show "coprime xx (pp div pq)" 
+      apply (rule prime_elem_imp_coprime[OF 
+                    prime_elem_linear_poly[of 1 "-x",simplified],folded xx_def])
+  have q_unfold:"q = (pq * xx ^ (min op oq)) * ((qq div pq) * xx ^ (oq - min op oq))"
+         and [simp]:"coprime xx (qq div pq)" 
+  proof -
+    have "xx ^ oq = xx ^ (min op oq) * xx ^ (oq - min op oq)" 
+      by (simp flip:power_add)
+    moreover have "qq = pq * (qq div pq)" 
+      unfolding pq_def by simp
+    ultimately show "q = (pq * xx ^ (min op oq)) * ((qq div pq) * xx ^ (oq - min op oq))"
+      unfolding pq_def qq by(auto simp:algebra_simps)
+    show "coprime xx (qq div pq)" 
+      apply (rule prime_elem_imp_coprime[OF 
+                    prime_elem_linear_poly[of 1 "-x",simplified],folded xx_def])
+  qed
+
+  have "gcd p q=normalize (pq * xx ^ (min op oq))"
+  proof -
+    have "coprime (pp div pq * xx ^ (op - min op oq)) (qq div pq * xx ^ (oq - min op oq))"
+    proof (cases "op>oq")
+      case True
+      then have "oq - min op oq = 0" by auto
+      moreover have "coprime (xx ^ (op - min op oq)) (qq div pq)" by auto
+      moreover have "coprime (pp div pq) (qq div pq)"
+        apply (rule div_gcd_coprime[of pp qq,folded pq_def])
+      ultimately show ?thesis by auto
+    next
+      case False
+      then have "op - min op oq = 0" by auto
+      moreover have "coprime (pp div pq) (xx ^ (oq - min op oq))" 
+        by (auto simp:coprime_commute)
+      moreover have "coprime (pp div pq) (qq div pq)"
+        apply (rule div_gcd_coprime[of pp qq,folded pq_def])
+      ultimately show ?thesis by auto
+    qed 
+    then show ?thesis unfolding p_unfold q_unfold
+      apply (subst gcd_mult_left)
+      by auto
+  qed
+  then have "order x (gcd p q) = order x pq + order x (xx ^ (min op oq))"
+    apply simp
+    apply (subst order_mult)
+    using assms(1) p_unfold by auto
+  also have "... = order x (xx ^ (min op oq))"
+    using pp(2) qq(2) unfolding pq_def xx_def 
+    by (auto simp add: order_0I poly_eq_0_iff_dvd)
+  also have "... = min op oq"
+    unfolding xx_def by (rule order_power_n_n)
+  also have "... = min (order x p) (order x q)" unfolding op_def oq_def by simp
+  finally show ?thesis .
+qed
+
+lemma pderiv_power: "pderiv (p ^ n) = smult (of_nat n) (p ^ (n-1)) * pderiv p"
+  apply (cases n)
+  using pderiv_power_Suc by auto
+
+lemma order_pderiv:
+  fixes p::"'a::{idom,semiring_char_0} poly"
+  assumes "p\<noteq>0" "poly p x=0"
+  shows "order x p = Suc (order x (pderiv p))" using assms
+proof -
+  define xx op where "xx=[:- x, 1:]" and "op = order x p"
+  have "op \<noteq>0" unfolding op_def using assms order_root by blast
+  obtain pp where pp:"p = xx ^ op * pp" "\<not> xx dvd pp"
+  have p_der:"pderiv p = smult (of_nat op) (xx^(op -1)) * pp + xx^op*pderiv pp"
+    unfolding pp(1) by (auto simp:pderiv_mult pderiv_power xx_def algebra_simps pderiv_pCons)
+  have "xx^(op -1) dvd (pderiv p)"
+    unfolding p_der 
+    by (metis One_nat_def Suc_pred assms(1) assms(2) dvd_add dvd_mult_right dvd_triv_left 
+        neq0_conv op_def order_root power_Suc smult_dvd_cancel)
+  moreover have "\<not> xx^op dvd (pderiv p)"
+  proof 
+    assume "xx ^ op dvd pderiv p"
+    then have "xx ^ op dvd smult (of_nat op) (xx^(op -1) * pp)"
+      unfolding p_der by (simp add: dvd_add_left_iff)
+    then have "xx ^ op dvd (xx^(op -1)) * pp"
+      apply (elim dvd_monic[rotated])
+    then have "xx ^ (op-1) * xx dvd (xx^(op -1))"
+    then have "xx dvd 1" 
+      using assms(1) pp(1) by auto
+    then show False unfolding xx_def by (meson assms(1) dvd_trans one_dvd order_decomp)
+  qed
+  ultimately have "op - 1 = order x (pderiv p)"
+    by auto
+qed
+
+
+lemma rsquarefree_0[simp]: "\<not> rsquarefree 0"
+  unfolding rsquarefree_def by simp
+
+lemma rsquarefree_times:
+  assumes "rsquarefree (p*q)"
+  shows "rsquarefree q" using assms
+proof (induct p rule:poly_root_induct_alt)
+  case 0
+  then show ?case by simp
+next
+  case (no_proots p)
+  then have [simp]:"p\<noteq>0" "q\<noteq>0" "\<And>a. order a p = 0" 
+    using order_0I by auto
+  have "order a (p * q) = 0 \<longleftrightarrow> order a q = 0"
+       "order a (p * q) = 1 \<longleftrightarrow> order a q = 1"
+       for a
+    subgoal by (subst order_mult) auto
+    subgoal by (subst order_mult) auto
+    done
+    unfolding rsquarefree_def by simp
+next
+  case (root a p)
+  define pq aa where "pq = p * q" and "aa = [:- a, 1:]"
+  have [simp]:"pq\<noteq>0" "aa\<noteq>0" "order a aa=1"
+    subgoal using pq_def root.prems by auto
+    subgoal by (simp add: aa_def)
+    subgoal by (metis aa_def order_power_n_n power_one_right)
+    done
+  have "rsquarefree (aa * pq)"
+    unfolding aa_def pq_def using root(2) by (simp add:algebra_simps)
+  then have "rsquarefree pq"
+    unfolding rsquarefree_def by (auto simp add:order_mult)
+  from root(1)[OF this[unfolded pq_def]] show ?case .
+qed
+
+lemma rsquarefree_smult_iff:
+  assumes "s\<noteq>0"
+  shows "rsquarefree (smult s p) \<longleftrightarrow> rsquarefree p"
+  unfolding rsquarefree_def using assms by (auto simp add:order_smult)
+
+lemma card_proots_within_rsquarefree:
+  assumes "rsquarefree p"
+  shows "proots_count p s = card (proots_within p s)" using assms
+proof (induct rule:poly_root_induct[of _ "\<lambda>x. x\<in>s"])
+  case 0
+  then have False by simp
+  then show ?case by simp
+next
+  case (no_roots p)
+  then show ?case 
+    by (metis all_not_in_conv card.empty proots_count_def proots_within_iff sum.empty)
+next
+  case (root a p)
+  have "proots_count ([:a, - 1:] * p) s = 1 + proots_count p s"
+    apply (subst proots_count_times)
+    subgoal using root.prems rsquarefree_def by blast
+    subgoal by (metis (no_types, opaque_lifting) add.inverse_inverse add.inverse_neutral 
+                  minus_pCons proots_count_pCons_1_iff proots_count_uminus root.hyps(1))  
+    done
+  also have "... = 1 + card (proots_within p s)"
+  proof -
+      by (elim rsquarefree_times)
+    from root(2)[OF this] show ?thesis by simp
+  qed
+  also have "... = card (proots_within ([:a, - 1:] * p) s)" unfolding proots_within_times 
+  proof (subst card_Un_disjoint)
+    have [simp]:"p\<noteq>0" using root.prems by auto
+    show "finite (proots_within [:a, - 1:] s)" "finite (proots_within p s)"
+      by auto
+    show " 1 + card (proots_within p s) = card (proots_within [:a, - 1:] s)
+               + card (proots_within p s)"
+      apply (subst proots_within_pCons_1_iff)
+      by simp
+    have "poly p a\<noteq>0" 
+    proof (rule ccontr)
+      assume "\<not> poly p a \<noteq> 0"
+      then have "order a p >0" by (simp add: order_root)
+      moreover have "order a [:a,-1:] = 1"
+        by (metis (no_types, opaque_lifting) add.inverse_inverse add.inverse_neutral minus_pCons 
+            order_power_n_n order_uminus power_one_right)
+      ultimately have "order a  ([:a, - 1:] * p) > 1"
+        apply (subst order_mult)
+        subgoal using root.prems by auto
+        subgoal by auto
+        done
+        unfolding rsquarefree_def using gr_implies_not0 less_not_refl2 by blast
+    qed
+    then show " proots_within [:a, - 1:] s \<inter> proots_within p s = {}"
+      using proots_within_pCons_1_iff(2) by auto
+  qed
+  finally show ?case .
+qed
+
+lemma rsquarefree_gcd_pderiv:
+  fixes p::"'a::{factorial_ring_gcd,semiring_gcd_mult_normalize,semiring_char_0} poly"
+  assumes "p\<noteq>0"
+  shows "rsquarefree (p div (gcd p (pderiv p)))"
+proof (cases "pderiv p = 0")
+  case True
+  have "poly (unit_factor p) x \<noteq>0" for x 
+    by (meson assms dvd_trans order_decomp poly_eq_0_iff_dvd unit_factor_dvd)
+  then have "order x (unit_factor p) = 0" for x
+    using order_0I by blast
+next
+  case False
+  define q where "q = p div (gcd p (pderiv p))"
+  have "q\<noteq>0" unfolding q_def by (simp add: assms dvd_div_eq_0_iff)
+
+  have order_pq:"order x p = order x q + min (order x p) (order x (pderiv p))"
+    for x
+  proof -
+    have *:"p = q * gcd p (pderiv p)"
+      unfolding q_def by simp
+    show ?thesis
+      apply (subst *)

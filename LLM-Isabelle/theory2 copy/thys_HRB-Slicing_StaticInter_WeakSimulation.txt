@@ -1,0 +1,92 @@
+theory WeakSimulation imports Slice begin
+
+context SDG begin
+
+lemma call_node_notin_slice_return_node_neither:
+  assumes "call_of_return_node n n'" and "n' \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+  shows "n \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+proof -
+    and "valid_edge a" and "n' = sourcenode a"
+    and "valid_edge a'" and "a' \<in> get_return_edges a" 
+    and "n = targetnode a'" by(fastforce simp:call_of_return_node_def)
+    where "kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs" by(fastforce dest!:only_call_get_return_edges)
+    by(fastforce dest!:call_return_edges)
+  have "CFG_node (sourcenode a) s-p\<rightarrow>\<^bsub>sum\<^esub> CFG_node (targetnode a')"
+    by(fastforce intro:sum_SDG_call_summary_edge)
+  show ?thesis
+  proof
+    assume "n \<in> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+      by(simp add:SDG_to_CFG_set_def)
+    hence "CFG_node (sourcenode a) \<in> HRB_slice S"
+    proof(induct "CFG_node (targetnode a')" rule:HRB_slice_cases)
+      case (phase1 nx)
+      show ?case by(fastforce intro:combine_SDG_slices.combSlice_refl sum_slice1 
+                              simp:HRB_slice_def)
+    next
+      case (phase2 nx n' n'' p')
+      have "CFG_node (sourcenode a) \<in> sum_SDG_slice2 n'"
+        by(fastforce intro:sum_slice2)
+      show ?case by(fastforce intro:combine_SDG_slices.combSlice_Return_parent_node
+                              simp:HRB_slice_def)
+    qed
+      by(simp add:SDG_to_CFG_set_def HRB_slice_def)
+  qed
+qed
+
+
+lemma edge_obs_intra_slice_eq:
+assumes "valid_edge a" and "intra_kind (kind a)" and "sourcenode a \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+  shows "obs_intra (targetnode a) \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub> = 
+         obs_intra (sourcenode a) \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+proof -
+  from assms have "obs_intra (targetnode a) \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub> \<subseteq>
+                   obs_intra (sourcenode a) \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+    by(rule edge_obs_intra_subset)
+  { fix x assume "x \<in> obs_intra (sourcenode a) \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+    and "obs_intra (targetnode a) \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub> = {}"
+    have "\<exists>as. targetnode a -as\<rightarrow>\<^sub>\<iota>* x"
+    proof(cases "method_exit x")
+      case True
+      then obtain asx where "targetnode a -asx\<rightarrow>\<^sub>\<surd>* (_Exit_)" 
+        by(fastforce dest:Exit_path)
+      then obtain as pex where "targetnode a -as\<rightarrow>\<^sub>\<iota>* pex" and "method_exit pex"
+        by -(erule valid_Exit_path_intra_path)
+      hence "get_proc pex = get_proc (targetnode a)"
+        by -(rule intra_path_get_procs[THEN sym])
+      have "\<dots> = get_proc (sourcenode a)"
+        by -(rule get_proc_intra[THEN sym])
+      have "\<dots> = get_proc x"
+        by(fastforce elim:obs_intraE intro:intra_path_get_procs)
+        by -(rule method_exit_unique)
+    next
+      case False
+      have "x postdominates (sourcenode a)" by(rule obs_intra_postdominate)
+      have "x postdominates (targetnode a)"
+        by(fastforce elim:postdominate_inner_path_targetnode path_edge obs_intraE 
+                    simp:intra_path_def sourcenodes_def)
+      thus ?thesis by(fastforce elim:postdominate_implies_inner_path)
+    qed
+    then obtain as where "targetnode a -as\<rightarrow>\<^sub>\<iota>* x" by blast
+    have "x \<in> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>" by -(erule obs_intraE)
+    have "\<exists>x' \<in> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>. \<exists>as'. targetnode a -as'\<rightarrow>\<^sub>\<iota>* x' \<and> 
+      (\<forall>a' \<in> set (sourcenodes as'). a' \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>)"
+    proof(cases "\<exists>a' \<in> set (sourcenodes as). a' \<in> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>")
+      case True
+      then obtain zs z zs' where "sourcenodes as = zs@z#zs'"
+        and "z \<in> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>" and "\<forall>z' \<in> set zs. z' \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+        by(erule split_list_first_propE)
+      then obtain ys y ys'
+        where "sourcenodes ys = zs" and "as = ys@y#ys'"
+        and "sourcenode y = z"
+        by(fastforce elim:map_append_append_maps simp:sourcenodes_def)
+      have "targetnode a -ys@y#ys'\<rightarrow>* x" and "\<forall>y' \<in> set ys. intra_kind (kind y')"
+        by(simp_all add:intra_path_def)
+        by(rule path_split)
+      show ?thesis by(fastforce simp:intra_path_def)
+    next
+      case False
+      show ?thesis by fastforce
+    qed
+    hence "\<exists>y. y \<in> obs_intra (targetnode a) \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+      by(fastforce intro:obs_intra_elem)
+    have False by simp }

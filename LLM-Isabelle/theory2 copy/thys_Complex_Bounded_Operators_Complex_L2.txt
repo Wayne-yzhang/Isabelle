@@ -1,0 +1,287 @@
+theory Complex_L2
+  imports 
+    Complex_Bounded_Linear_Function
+
+    "HOL-Analysis.L2_Norm"
+    "HOL-Library.Rewrite"
+    "HOL-Analysis.Infinite_Sum"
+begin
+
+unbundle lattice_syntax
+unbundle cblinfun_notation
+unbundle no_notation_blinfun_apply
+
+
+
+  by (simp add: has_ell2_norm_def abs_summable_iff_bdd_above)
+
+lemma has_ell2_norm_L2_set: "has_ell2_norm x = bdd_above (L2_set (norm o x) ` Collect finite)"
+proof (rule iffI)
+    using monoI real_sqrt_le_mono by blast
+    by (subst (asm) has_ell2_norm_bdd_above)
+    by (auto simp: image_image)
+    by (auto simp: L2_set_def norm_power)
+next
+    by (simp add: monoI p2_def)
+    by (smt (verit) L2_set_def L2_set_nonneg p2_def power2_less_0 real_sqrt_pow2 sum.cong sum_nonneg)
+    by auto
+    apply (simp add: image_image has_ell2_norm_def abs_summable_iff_bdd_above)
+    by (simp add: norm_power)
+qed
+
+
+lemma ell2_norm_SUP:
+  shows "ell2_norm x = sqrt (SUP F\<in>{F. finite F}. sum (\<lambda>i. norm (x i)^2) F)"
+  using assms apply (auto simp add: ell2_norm_def has_ell2_norm_def)
+  apply (subst infsum_nonneg_is_SUPREMUM_real)
+  by (auto simp: norm_power)
+
+lemma ell2_norm_L2_set: 
+  assumes "has_ell2_norm x"
+  shows "ell2_norm x = (SUP F\<in>{F. finite F}. L2_set (norm o x) F)"
+proof-
+  have "sqrt (\<Squnion> (sum (\<lambda>i. (cmod (x i))\<^sup>2) ` Collect finite)) =
+      (SUP F\<in>{F. finite F}. sqrt (\<Sum>i\<in>F. (cmod (x i))\<^sup>2))"
+  proof (subst continuous_at_Sup_mono)
+    show "mono sqrt"
+      by (simp add: mono_def)      
+    show "continuous (at_left (\<Squnion> (sum (\<lambda>i. (cmod (x i))\<^sup>2) ` Collect finite))) sqrt"
+      using continuous_at_split isCont_real_sqrt by blast    
+    show "sum (\<lambda>i. (cmod (x i))\<^sup>2) ` Collect finite \<noteq> {}"
+      by auto      
+    show "bdd_above (sum (\<lambda>i. (cmod (x i))\<^sup>2) ` Collect finite)"
+      using has_ell2_norm_bdd_above[THEN iffD1, OF assms] by (auto simp: norm_power)
+    show "\<Squnion> (sqrt ` sum (\<lambda>i. (cmod (x i))\<^sup>2) ` Collect finite) = (SUP F\<in>Collect finite. sqrt (\<Sum>i\<in>F. (cmod (x i))\<^sup>2))"
+      by (metis image_image)      
+  qed  
+  thus ?thesis 
+    using assms by (auto simp: ell2_norm_SUP L2_set_def)
+qed
+
+lemma has_ell2_norm_finite[simp]: "has_ell2_norm (f::'a::finite\<Rightarrow>_)"
+  unfolding has_ell2_norm_def by simp
+
+lemma ell2_norm_finite: 
+  "ell2_norm (f::'a::finite\<Rightarrow>complex) = sqrt (\<Sum>x\<in>UNIV. (norm (f x))^2)"
+  by (simp add: ell2_norm_def)
+
+lemma ell2_norm_finite_L2_set: "ell2_norm (x::'a::finite\<Rightarrow>complex) = L2_set (norm o x) UNIV"
+  by (simp add: ell2_norm_finite L2_set_def)
+
+  unfolding ell2_norm_def
+  apply (subst real_sqrt_pow2)
+  by (simp_all add: infsum_nonneg)
+
+lemma ell2_ket:
+  fixes a
+proof -
+    apply (rule summable_on_finite) by simp
+    unfolding has_ell2_norm_def
+    apply (rule summable_on_cong_neutral[THEN iffD1, rotated -1])
+    unfolding f_def by auto
+
+    apply (subst infsum_finite)
+    by (auto simp: f_def)
+    unfolding ell2_norm_def
+    by (auto simp: f_def)
+qed
+
+  by (auto simp: ell2_norm_def intro!: infsum_nonneg)
+
+lemma ell2_norm_point_bound:
+proof -
+    by (simp add: norm_power)
+    by auto
+    by (rule infsum_finite[symmetric], simp)
+    apply (rule infsum_mono_neutral)
+    using assms by (auto simp: has_ell2_norm_def)
+    by (metis (no_types, lifting) ell2_norm_def ell2_norm_geq0 infsum_cong norm_power real_sqrt_eq_iff real_sqrt_unique)
+  finally show ?thesis
+    using ell2_norm_geq0 power2_le_imp_le by blast
+qed
+
+lemma ell2_norm_0:
+  assumes "has_ell2_norm x"
+  shows "ell2_norm x = 0 \<longleftrightarrow> x = (\<lambda>_. 0)"
+proof
+  assume u1: "x = (\<lambda>_. 0)"
+  have u2: "(SUP x::'a set\<in>Collect finite. (0::real)) = 0"
+    if "x = (\<lambda>_. 0)"
+    by (metis cSUP_const empty_Collect_eq finite.emptyI)
+  show "ell2_norm x = 0"
+    unfolding ell2_norm_def
+    using u1 u2 by auto 
+next
+  assume norm0: "ell2_norm x = 0"
+  show "x = (\<lambda>_. 0)"
+  proof
+    fix i
+      using assms by (rule ell2_norm_point_bound)
+      by (fact norm0)
+    finally show "x i = 0" by auto
+  qed
+qed
+
+
+lemma ell2_norm_smult:
+  assumes "has_ell2_norm x"
+  shows "has_ell2_norm (\<lambda>i. c * x i)" and "ell2_norm (\<lambda>i. c * x i) = cmod c * ell2_norm x"
+proof -
+  have L2_set_mul: "L2_set (cmod \<circ> (\<lambda>i. c * x i)) F = cmod c * L2_set (cmod \<circ> x) F" for F
+  proof-
+    have "L2_set (cmod \<circ> (\<lambda>i. c * x i)) F = L2_set (\<lambda>i. (cmod c * (cmod o x) i)) F"
+      by (metis comp_def norm_mult)
+    also have "\<dots> = cmod c * L2_set (cmod o x) F"
+      by (metis norm_ge_zero L2_set_right_distrib)
+    finally show ?thesis .
+  qed
+
+  from assms obtain M where M: "M \<ge> L2_set (cmod o x) F" if "finite F" for F
+    unfolding has_ell2_norm_L2_set bdd_above_def by auto
+  hence "cmod c * M \<ge> L2_set (cmod o (\<lambda>i. c * x i)) F" if "finite F" for F
+    unfolding L2_set_mul
+    by (simp add: ordered_comm_semiring_class.comm_mult_left_mono that) 
+  thus has: "has_ell2_norm (\<lambda>i. c * x i)"
+    unfolding has_ell2_norm_L2_set bdd_above_def using L2_set_mul[symmetric] by auto
+  have "ell2_norm (\<lambda>i. c * x i) = (SUP F \<in> Collect finite. (L2_set (cmod \<circ> (\<lambda>i. c * x i)) F))"
+    by (simp add: ell2_norm_L2_set has)
+  also have "\<dots> = (SUP F \<in> Collect finite. (cmod c * L2_set (cmod \<circ> x) F))"
+    using L2_set_mul by auto   
+  also have "\<dots> = cmod c * ell2_norm x" 
+  proof (subst ell2_norm_L2_set)
+    show "has_ell2_norm x"
+      by (simp add: assms)      
+    show "(SUP F\<in>Collect finite. cmod c * L2_set (cmod \<circ> x) F) = cmod c * \<Squnion> (L2_set (cmod \<circ> x) ` Collect finite)"
+    proof (subst continuous_at_Sup_mono [where f = "\<lambda>x. cmod c * x"])
+        by (simp add: mono_def ordered_comm_semiring_class.comm_mult_left_mono)
+      proof (rule continuous_mult)
+        show "continuous (at_left (\<Squnion> (L2_set (cmod \<circ> x) ` Collect finite))) (\<lambda>x. cmod c)"
+          by simp
+        show "continuous (at_left (\<Squnion> (L2_set (cmod \<circ> x) ` Collect finite))) (\<lambda>x. x)"
+          by simp
+      qed    
+      show "L2_set (cmod \<circ> x) ` Collect finite \<noteq> {}"
+        by auto        
+      show "bdd_above (L2_set (cmod \<circ> x) ` Collect finite)"
+        by (meson assms has_ell2_norm_L2_set)        
+        by (metis image_image)        
+    qed   
+  qed     
+  finally show "ell2_norm (\<lambda>i. c * x i) = cmod c * ell2_norm x".
+qed
+
+
+lemma ell2_norm_triangle:
+  assumes "has_ell2_norm x" and "has_ell2_norm y"
+  shows "has_ell2_norm (\<lambda>i. x i + y i)" and "ell2_norm (\<lambda>i. x i + y i) \<le> ell2_norm x + ell2_norm y"
+proof -
+  have triangle: "L2_set (cmod \<circ> (\<lambda>i. x i + y i)) F \<le> L2_set (cmod \<circ> x) F + L2_set (cmod \<circ> y) F" 
+    (is "?lhs\<le>?rhs") 
+    if "finite F" for F
+  proof -
+    have "?lhs \<le> L2_set (\<lambda>i. (cmod o x) i + (cmod o y) i) F"
+    proof (rule L2_set_mono)
+      show "(cmod \<circ> (\<lambda>i. x i + y i)) i \<le> (cmod \<circ> x) i + (cmod \<circ> y) i"
+        if "i \<in> F"
+        for i :: 'a
+        using that norm_triangle_ineq by auto 
+      show "0 \<le> (cmod \<circ> (\<lambda>i. x i + y i)) i"
+        if "i \<in> F"
+        for i :: 'a
+        using that
+        by simp 
+    qed
+    also have "\<dots> \<le> ?rhs"
+      by (rule L2_set_triangle_ineq)
+    finally show ?thesis .
+  qed
+  obtain Mx My where Mx: "Mx \<ge> L2_set (cmod o x) F" and My: "My \<ge> L2_set (cmod o y) F" 
+    if "finite F" for F
+    using assms unfolding has_ell2_norm_L2_set bdd_above_def by auto
+  hence MxMy: "Mx + My \<ge> L2_set (cmod \<circ> x) F + L2_set (cmod \<circ> y) F" if "finite F" for F
+    using that by fastforce
+  hence bdd_plus: "bdd_above ((\<lambda>xa. L2_set (cmod \<circ> x) xa + L2_set (cmod \<circ> y) xa) ` Collect finite)"
+    unfolding bdd_above_def by auto
+  from MxMy have MxMy': "Mx + My \<ge> L2_set (cmod \<circ> (\<lambda>i. x i + y i)) F" if "finite F" for F 
+    using triangle that by fastforce
+  thus has: "has_ell2_norm (\<lambda>i. x i + y i)"
+    unfolding has_ell2_norm_L2_set bdd_above_def by auto
+  have SUP_plus: "(SUP x\<in>A. f x + g x) \<le> (SUP x\<in>A. f x) + (SUP x\<in>A. g x)" 
+    if notempty: "A\<noteq>{}" and bddf: "bdd_above (f`A)"and bddg: "bdd_above (g`A)"
+    for f g :: "'a set \<Rightarrow> real" and A
+  proof-
+    have xleq: "x \<le> (SUP x\<in>A. f x) + (SUP x\<in>A. g x)" if x: "x \<in> (\<lambda>x. f x + g x) ` A" for x
+    proof -
+      obtain a where aA: "a:A" and ax: "x = f a + g a"
+        using x by blast
+      have fa: "f a \<le> (SUP x\<in>A. f x)"
+        by (simp add: bddf aA cSUP_upper)
+      moreover have "g a \<le> (SUP x\<in>A. g x)"
+        by (simp add: bddg aA cSUP_upper)
+      ultimately have "f a + g a \<le> (SUP x\<in>A. f x) + (SUP x\<in>A. g x)" by simp
+      with ax show ?thesis by simp
+    qed
+    have "(\<lambda>x. f x + g x) ` A \<noteq> {}"
+      using notempty by auto        
+    moreover have "x \<le> \<Squnion> (f ` A) + \<Squnion> (g ` A)"
+      if "x \<in> (\<lambda>x. f x + g x) ` A"
+      for x :: real
+      using that
+      by (simp add: xleq) 
+    ultimately show ?thesis
+      by (meson bdd_above_def cSup_le_iff)      
+  qed
+  have a2: "bdd_above (L2_set (cmod \<circ> x) ` Collect finite)"
+    by (meson assms(1) has_ell2_norm_L2_set)    
+  have a3: "bdd_above (L2_set (cmod \<circ> y) ` Collect finite)"
+    by (meson assms(2) has_ell2_norm_L2_set)    
+  have a1: "Collect finite \<noteq> {}"
+    by auto    
+  have a4: "\<Squnion> (L2_set (cmod \<circ> (\<lambda>i. x i + y i)) ` Collect finite)
+    \<le> (SUP xa\<in>Collect finite.
+           L2_set (cmod \<circ> x) xa + L2_set (cmod \<circ> y) xa)"
+    by (metis (mono_tags, lifting) a1 bdd_plus cSUP_mono mem_Collect_eq triangle)    
+  have "\<forall>r. \<Squnion> (L2_set (cmod \<circ> (\<lambda>a. x a + y a)) ` Collect finite) \<le> r \<or> \<not> (SUP A\<in>Collect finite. L2_set (cmod \<circ> x) A + L2_set (cmod \<circ> y) A) \<le> r"
+    using a4 by linarith
+  hence "\<Squnion> (L2_set (cmod \<circ> (\<lambda>i. x i + y i)) ` Collect finite)
+    \<le> \<Squnion> (L2_set (cmod \<circ> x) ` Collect finite) +
+       \<Squnion> (L2_set (cmod \<circ> y) ` Collect finite)"
+    by (metis (no_types) SUP_plus a1 a2 a3)
+  hence "\<Squnion> (L2_set (cmod \<circ> (\<lambda>i. x i + y i)) ` Collect finite) \<le> ell2_norm x + ell2_norm y"
+    by (simp add: assms(1) assms(2) ell2_norm_L2_set)
+  thus "ell2_norm (\<lambda>i. x i + y i) \<le> ell2_norm x + ell2_norm y"
+    by (simp add: ell2_norm_L2_set has)  
+qed
+
+lemma ell2_norm_uminus:
+  assumes "has_ell2_norm x"
+  using assms by (auto simp: has_ell2_norm_def ell2_norm_def)
+
+
+  unfolding has_ell2_norm_def by (rule exI[of _ "\<lambda>_.0"], auto)
+setup_lifting type_definition_ell2
+
+instantiation ell2 :: (type)complex_vector begin
+lift_definition zero_ell2 :: "'a ell2" is "\<lambda>_. 0" by (auto simp: has_ell2_norm_def)
+lift_definition uminus_ell2 :: "'a ell2 \<Rightarrow> 'a ell2" is uminus by (simp add: has_ell2_norm_def)
+  by (rule ell2_norm_triangle) 
+lift_definition minus_ell2 :: "'a ell2 \<Rightarrow> 'a ell2 \<Rightarrow> 'a ell2" is "\<lambda>f g x. f x - g x"
+  apply (subst add_uminus_conv_diff[symmetric])
+  apply (rule ell2_norm_triangle)
+  by (auto simp add: ell2_norm_uminus)
+lift_definition scaleR_ell2 :: "real \<Rightarrow> 'a ell2 \<Rightarrow> 'a ell2" is "\<lambda>r f x. complex_of_real r * f x"
+  by (rule ell2_norm_smult)
+  by (rule ell2_norm_smult)
+
+instance
+proof
+  fix a b c :: "'a ell2"
+
+    apply (rule cspan_butterfly_UNIV)
+    by auto
+qed
+
+proof -
+    by auto
+  show ?thesis
+    apply (subst *)

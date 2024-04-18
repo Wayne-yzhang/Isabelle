@@ -1,0 +1,127 @@
+theory Lens_Laws
+imports
+  Two Interp
+begin
+
+  
+
+locale vwb_lens = wb_lens + mwb_lens
+begin
+
+  lemma source_determination:
+    assumes "get \<sigma> = get \<rho>" "put \<sigma> v = put \<rho> v"
+    shows "\<sigma> = \<rho>"
+    by (metis assms get_put put_put)
+    
+ lemma put_eq:
+   assumes "get \<sigma> = k" "put \<sigma> u = put \<rho> v"
+   shows "put \<rho> k = \<sigma>"
+   using assms weak_put_eq[of \<sigma> k u \<rho> v] by (simp)
+
+
+  lemma get_via_put: "get s = (THE v. put s v = s)"
+    by (simp add: weak_get_via_put)
+
+  lemma get_surj: "surj get"
+    by (metis put_get surjI)
+
+
+  lemma lens_obs_equiv: "equivp (\<simeq>)"
+  proof (rule equivpI)
+    show "reflp (\<simeq>)"
+      by (rule reflpI, simp add: lens_obs_eq_def get_put)
+    show "symp (\<simeq>)"
+      by (rule sympI, simp add: lens_obs_eq_def, metis get_put put_put)
+    show "transp (\<simeq>)"
+      by (rule transpI, simp add: lens_obs_eq_def, metis put_put)
+  qed
+
+end
+
+abbreviation (input) "total_lens \<equiv> vwb_lens"
+
+lemma vwb_lens_wb [simp]: "vwb_lens x \<Longrightarrow> wb_lens x"
+  by (simp add: vwb_lens_def)
+
+lemma vwb_lens_mwb [simp]: "vwb_lens x \<Longrightarrow> mwb_lens x"
+  using vwb_lens_def by auto
+
+lemma mwb_UNIV_src_is_vwb_lens: 
+  "\<lbrakk> mwb_lens X; \<S>\<^bsub>X\<^esub> = UNIV \<rbrakk> \<Longrightarrow> vwb_lens X"
+  using vwb_lens_def wb_lens_axioms_def wb_lens_def by fastforce
+
+
+lemma vwb_lens_iff_mwb_UNIV_src: 
+  "vwb_lens X \<longleftrightarrow> (mwb_lens X \<and> \<S>\<^bsub>X\<^esub> = UNIV)"
+  by (meson mwb_UNIV_src_is_vwb_lens vwb_lens_def wb_lens.source_UNIV)
+
+
+
+locale ief_lens = weak_lens +
+  assumes put_inef: "put \<sigma> v = \<sigma>"
+begin
+
+lemma ief_then_vwb: "vwb_lens x"
+proof
+  fix \<sigma> v u
+  show "put \<sigma> (get \<sigma>) = \<sigma>"
+    by (simp add: put_inef)
+  show "put (put \<sigma> v) u = put \<sigma> u"
+    by (simp add: put_inef)
+qed
+
+sublocale vwb_lens by (fact ief_then_vwb)
+
+lemma ineffectual_const_get:
+  "\<exists> v.  \<forall> \<sigma>\<in>\<S>. get \<sigma> = v"
+  using put_get put_inef by auto
+
+end
+
+declare ief_lens.ief_then_vwb [simp]
+
+
+lemma no_ief_two_view:
+  assumes "ief_lens (x :: 'a::two \<Longrightarrow> 's)"
+  shows "False"
+proof -
+  obtain x y :: "'a::two" where "x \<noteq> y"
+    using two_diff by auto
+  with assms show ?thesis
+    by (metis (full_types) ief_lens.axioms(1) ief_lens.put_inef weak_lens.put_get)
+qed
+
+abbreviation "eff_lens X \<equiv> (weak_lens X \<and> (\<not> ief_lens X))"
+
+
+locale pbij_lens = weak_lens +
+  assumes put_det: "put \<sigma> v = put \<rho> v"
+begin
+
+  sublocale mwb_lens
+  proof
+    fix \<sigma> v u
+    show "put (put \<sigma> v) u = put \<sigma> u"
+      using put_det by blast
+  qed
+  
+  lemma put_is_create: "put \<sigma> v = create v"
+    by (simp add: lens_create_def put_det)
+
+  lemma partial_get_put: "\<rho> \<in> \<S> \<Longrightarrow> put \<sigma> (get \<rho>) = \<rho>"
+    by (metis put_det weak_get_put)
+
+end
+
+lemma pbij_lens_weak [simp]:
+  "pbij_lens x \<Longrightarrow> weak_lens x"
+  by (simp_all add: pbij_lens_def)
+
+lemma pbij_lens_mwb [simp]: "pbij_lens x \<Longrightarrow> mwb_lens x"
+  by (simp add: mwb_lens_axioms.intro mwb_lens_def pbij_lens.put_is_create)
+
+lemma pbij_alt_intro:
+  "\<lbrakk> weak_lens X; \<And> s. s \<in> \<S>\<^bsub>X\<^esub> \<Longrightarrow> create\<^bsub>X\<^esub> (get\<^bsub>X\<^esub> s) = s \<rbrakk> \<Longrightarrow> pbij_lens X"
+  by (metis pbij_lens_axioms_def pbij_lens_def weak_lens.put_closure weak_lens.put_get)
+
+

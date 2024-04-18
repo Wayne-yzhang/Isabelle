@@ -1,0 +1,2509 @@
+theory TemporalOrderOnPath
+imports Minkowski "HOL-Library.Disjoint_Sets"
+begin
+
+
+
+section "Preliminary Results for Primitives"
+
+context MinkowskiPrimitive begin
+
+lemma cross_once_notin:
+  assumes "Q \<in> \<P>"
+      and "R \<in> \<P>"
+      and "a \<in> Q"
+      and "b \<in> Q"
+      and "b \<in> R"
+      and "a \<noteq> b"
+      and "Q \<noteq> R"
+  shows "a \<notin> R"
+using assms paths_cross_once eq_paths by meson
+
+lemma paths_cross_at:
+  assumes path_Q: "Q \<in> \<P>" and path_R: "R \<in> \<P>"
+      and Q_neq_R: "Q \<noteq> R"
+      and QR_nonempty: "Q \<inter> R \<noteq> {}"
+      and x_inQ: "x \<in> Q" and x_inR: "x \<in> R"
+  shows "Q \<inter> R = {x}"
+proof (rule equalityI)
+  show "Q \<inter> R \<subseteq> {x}"
+  proof (rule subsetI, rule ccontr)
+    fix y
+    assume y_in_QR: "y \<in> Q \<inter> R"
+       and y_not_in_just_x: "y \<notin> {x}"
+    then have y_neq_x: "y \<noteq> x" by simp
+    then have "\<not> (\<exists>z. Q \<inter> R = {z})"
+        by (meson Q_neq_R path_Q path_R x_inQ x_inR y_in_QR cross_once_notin IntD1 IntD2)
+    thus False using paths_cross_once by (meson QR_nonempty Q_neq_R path_Q path_R)
+  qed
+  show "{x} \<subseteq> Q \<inter> R" using x_inQ x_inR by simp
+qed
+
+lemma events_distinct_paths:
+  assumes a_event: "a \<in> \<E>"
+      and b_event: "b \<in> \<E>"
+      and a_neq_b: "a \<noteq> b"
+  shows "\<exists>R\<in>\<P>. \<exists>S\<in>\<P>. a \<in> R \<and> b \<in> S \<and> (R \<noteq> S \<longrightarrow> (\<exists>!c\<in>\<E>. R \<inter> S = {c}))"
+  by (metis events_paths assms paths_cross_once)
+
+context MinkowskiBetweenness begin
+
+lemma assumes "[a;b;c]" shows "\<exists>f. local_long_ch_by_ord f {a,b,c}"
+  using abc_abc_neq[OF assms] unfolding chain_defs
+  by (simp add: assms ord_ordered_loc)
+
+lemma between_chain: "[a;b;c] \<Longrightarrow> ch {a,b,c}"
+proof -
+  assume "[a;b;c]"
+  hence "\<exists>f. local_ordering f betw {a,b,c}"
+    by (simp add: abc_abc_neq ord_ordered_loc)
+  hence "\<exists>f. local_long_ch_by_ord f {a,b,c}"
+  thus ?thesis
+    by (simp add: chain_defs)
+qed
+
+
+
+section "3.1 Order on a finite chain"
+context MinkowskiBetweenness begin
+
+theorem theorem1 [no_atp]:
+  assumes abc: "[a;b;c]"
+  shows "[c;b;a] \<and> \<not> [b;c;a] \<and> \<not> [c;a;b]" 
+proof -
+  have part_i: "[c;b;a]" using abc abc_sym by simp
+  have part_ii: "\<not> [b;c;a]"
+  proof (rule notI)
+    assume "[b;c;a]"
+    then have "[a;b;a]" using abc abc_bcd_abd by blast
+    thus False using abc_ac_neq by blast
+  qed
+  have part_iii: "\<not> [c;a;b]"
+  proof (rule notI)
+    assume "[c;a;b]"
+    then have "[c;a;c]" using abc abc_bcd_abd by blast
+    thus False using abc_ac_neq by blast
+  qed
+  thus ?thesis using part_i part_ii part_iii by auto
+qed
+
+
+
+lemma thm2_ind1:
+  assumes chX: "local_long_ch_by_ord f X"
+      and finiteX: "finite X"
+    shows "\<forall>j i. ((i::nat) < j \<and> j < card X - 1) \<longrightarrow> [f i; f j; f (j + 1)]"
+proof (rule allI)+
+  let ?P = "\<lambda> i j. [f i; f j; f (j+1)]"
+  fix i j
+  show "(i<j \<and> j<card X -1) \<longrightarrow> ?P i j"
+  proof (induct j)
+    show ?case by blast
+  next
+    case (Suc j)
+    show ?case
+    proof (clarify)
+      assume asm: "i<Suc j" "Suc j<card X -1"
+      have pj: "?P j (Suc j)"
+        using asm(2) chX less_diff_conv local_long_ch_by_ord_def local_ordering_def
+        by (metis Suc_eq_plus1)
+      have "i<j \<or> i=j" using asm(1)
+        by linarith
+      thus "?P i (Suc j)"
+      proof
+        assume "i=j"
+        hence "Suc i = Suc j \<and> Suc (Suc j) = Suc (Suc j)"
+          by simp
+        thus "?P i (Suc j)"
+          using pj by auto
+      next
+        assume "i<j"
+        have "j < card X - 1"
+          using asm(2) by linarith
+        thus "?P i (Suc j)"
+          by presburger 
+      qed
+    qed
+  qed
+qed
+
+lemma thm2_ind2:
+  assumes chX: "local_long_ch_by_ord f X"
+      and finiteX: "finite X"
+    shows "\<forall>m l. (0<(l-m) \<and> (l-m) < l \<and> l < card X) \<longrightarrow> [f (l-m-1); f (l-m); (f l)]"
+proof (rule allI)+
+  fix l m
+  let ?P = "\<lambda> k l. [f (k-1); f k; f l]"
+  let ?n = "card X"
+  let ?k = "(l::nat)-m"
+  show "0 < ?k \<and> ?k < l \<and> l < ?n \<longrightarrow> ?P ?k l"
+  proof (induct m)
+    show ?case by simp
+  next
+    case (Suc m)
+    show ?case
+    proof (clarify)
+      assume asm: "0 < l - Suc m" "l - Suc m < l" "l < ?n"
+      have "Suc m = 1 \<or> Suc m > 1" by linarith
+      thus "[f (l - Suc m - 1); f (l - Suc m); f l]" (is ?goal)
+      proof
+        assume "Suc m = 1"
+        show ?goal
+        proof -
+          have "l - Suc m < card X"
+            using asm(2) asm(3) less_trans by blast
+          then show ?thesis
+            using Suc_eq_plus1 add_diff_inverse_nat diff_Suc_less
+                  gr_implies_not_zero less_one plus_1_eq_Suc
+            by (smt local_long_ch_by_ord_def ordering_ord_ijk_loc)
+        qed
+      next
+        assume "Suc m > 1"
+        show ?goal
+          apply (rule_tac a="f l" and c="f(l - Suc m - 1)" in abc_sym)
+          apply (rule_tac a="f l" and c="f(l-Suc m)" and d="f(l-Suc m-1)" and b="f(l-m)" in abc_bcd_acd)
+        proof -
+          have "[f(l-m-1); f(l-m); f l]"
+          thus "[f l; f(l - m); f(l - Suc m)]"
+            using abc_sym One_nat_def diff_zero minus_nat.simps(2)
+            by metis
+          have "Suc(l - Suc m - 1) = l - Suc m" "Suc(l - Suc m) = l-m"
+            using Suc_pred asm(1) by presburger+
+          hence "[f(l - Suc m - 1); f(l - Suc m); f(l - m)]"
+            using chX unfolding local_long_ch_by_ord_def local_ordering_def
+            by (metis asm(2,3) less_trans_Suc)
+          thus "[f(l - m); f(l - Suc m); f(l - Suc m - 1)]"
+            using abc_sym by blast
+        qed
+      qed
+    qed
+  qed
+qed
+
+lemma thm2_ind2b:
+  assumes chX: "local_long_ch_by_ord f X"
+      and finiteX: "finite X"
+      and ordered_nats: "0<k \<and> k<l \<and> l < card X"
+    shows "[f (k-1); f k; f l]"
+  using thm2_ind2 finiteX chX ordered_nats
+  by (metis diff_diff_cancel less_imp_le)
+
+
+  assumes chX: "local_long_ch_by_ord f X"
+      and finiteX: "finite X"
+      and ordered_nats: "0 \<le> (i::nat) \<and> i < j \<and> j < l \<and> l < card X"
+    shows "[f i; f j; f l]"
+proof -
+  let ?n = "card X - 1"
+  have ord1: "0\<le>i \<and> i<j \<and> j<?n"
+    using ordered_nats by linarith
+  have e2: "[f i; f j; f (j+1)]" using thm2_ind1
+    using Suc_eq_plus1 chX finiteX ord1
+    by presburger
+  have e3: "\<forall>k. 0<k \<and> k<l \<longrightarrow> [f (k-1); f k; f l]"
+    using thm2_ind2b chX finiteX ordered_nats
+    by blast
+  have "j<l-1 \<or> j=l-1"
+    using ordered_nats by linarith
+  thus ?thesis
+  proof
+    assume "j<l-1"
+    have  "[f j; f (j+1); f l]"
+      using e3 abc_abc_neq ordered_nats
+    thus ?thesis
+      using e2 abc_bcd_abd
+      by blast
+  next
+    assume "j=l-1"
+    thus ?thesis using e2
+      using ordered_nats by auto
+  qed
+qed
+
+
+  assumes chX: "[f\<leadsto>X]"
+      and finiteX: "finite X"
+      and ordered_nats: "0 \<le> (i::nat) \<and> i < j \<and> j < l \<and> l < card X"
+    shows "[f i; f j; f l]"
+proof -
+  have "card X > 2" using ordered_nats by (simp add: eval_nat_numeral)
+  thus ?thesis using order_finite_chain chain_defs short_ch_card(1) by (metis assms nat_neq_iff)
+qed
+
+
+  fixes i::nat and j::nat
+  assumes chX: "local_long_ch_by_ord f X"
+      and finiteX: "finite X"
+      and indices: "i<j" "j<card X"
+    shows "f i \<noteq> f j"
+proof (cases)
+  assume "Suc i < j"
+  then have "[f i; f (Suc(i)); f j]"
+    using order_finite_chain chX finiteX indices(2) by blast
+  then show ?thesis
+    using abc_abc_neq by blast
+next
+  assume "\<not>Suc i < j"
+  hence "Suc i = j"
+    using Suc_lessI indices(1) by blast
+  show ?thesis
+  proof (cases)
+    assume "Suc j = card X"
+    then have "0<i"
+    proof -
+      have "card X \<ge> 3"
+        using assms(1) finiteX long_chain_card_geq by blast
+      thus ?thesis
+    qed
+    then have "[f 0; f i; f j]"
+      using assms order_finite_chain by blast
+    thus ?thesis
+      using abc_abc_neq by blast
+  next
+    assume "\<not>Suc j = card X"
+    then have "Suc j < card X"
+      using Suc_lessI indices(2) by blast
+    then have "[f i; f j; f(Suc j)]"
+      using chX finiteX indices(1) order_finite_chain by blast
+    thus ?thesis
+      using abc_abc_neq by blast
+  qed
+qed
+
+  fixes i::nat and j::nat
+  assumes chX: "[f\<leadsto>X]"
+      and finiteX: "finite X"
+      and indices: "i<j" "j<card X"
+    shows "f i \<noteq> f j"
+  using assms(1) unfolding ch_by_ord_def
+proof (rule disjE)
+  assume asm: "short_ch_by_ord f X"
+  hence "card X = 2" using short_ch_card(1) by simp
+  hence "j=1" "i=0" using indices plus_1_eq_Suc by auto
+  thus ?thesis using asm unfolding chain_defs by force
+next
+  assume "local_long_ch_by_ord f X" thus ?thesis using index_injective assms by presburger
+qed
+
+
+corollary index_bij_betw:
+  assumes chX: "local_long_ch_by_ord f X"
+    and finiteX: "finite X"
+  shows "bij_betw f {0..<card X} X"
+proof (unfold bij_betw_def, (rule conjI))
+  show "inj_on f {0..<card X}"
+    using index_injective[OF assms] by (metis (mono_tags) atLeastLessThan_iff inj_onI nat_neq_iff)
+  {
+    fix n assume "n \<in> {0..<card X}"
+    then have "f n \<in> X"
+      using assms unfolding chain_defs local_ordering_def by auto
+  } moreover {
+    fix x assume "x \<in> X"
+    then have "\<exists>n \<in> {0..<card X}. f n = x"
+      using assms unfolding chain_defs local_ordering_def
+      using atLeastLessThan_iff bot_nat_0.extremum by blast
+  } ultimately show "f ` {0..<card X} = X" by blast
+qed
+
+corollary index_bij_betw2:
+  assumes chX: "[f\<leadsto>X]"
+    and finiteX: "finite X"
+  shows "bij_betw f {0..<card X} X"
+  using assms(1) unfolding ch_by_ord_def
+proof (rule disjE)
+  assume "local_long_ch_by_ord f X"
+  thus "bij_betw f {0..<card X} X" using index_bij_betw assms by presburger
+next
+  assume asm: "short_ch_by_ord f X"
+  show "bij_betw f {0..<card X} X"
+  proof (unfold bij_betw_def, (rule conjI))
+    show "inj_on f {0..<card X}"
+      using index_injective2[OF assms] by (metis (mono_tags) atLeastLessThan_iff inj_onI nat_neq_iff)
+    {
+      fix n assume asm2: "n \<in> {0..<card X}"
+      have "f n \<in> X"
+        using asm asm2 short_ch_card(1) apply (simp add: eval_nat_numeral)
+        by (metis One_nat_def less_Suc0 less_antisym short_ch_ord_in)
+    } moreover {
+      fix x assume asm2: "x \<in> X"
+      have "\<exists>n \<in> {0..<card X}. f n = x"
+        using short_ch_card(1) short_ch_by_ord_def asm asm2 atLeast0_lessThan_Suc by (auto simp: eval_nat_numeral)[1]
+    } ultimately show "f ` {0..<card X} = X" by blast
+  qed
+qed
+
+subsection "Additional lemmas about chains"
+
+lemma first_neq_last:
+  assumes "[f\<leadsto>Q|x..z]"
+  shows "x\<noteq>z"
+  apply (cases rule: finite_chain_with_cases[OF assms])
+  using chain_defs apply (metis Suc_1 card_2_iff diff_Suc_1)
+  using index_injective[of f Q 0 "card Q - 1"]
+  by (metis card.infinite diff_is_0_eq diff_less gr0I le_trans less_imp_le_nat
+    less_numeral_extra(1) numeral_le_one_iff semiring_norm(70))
+
+lemma index_middle_element:
+  assumes "[f\<leadsto>X|a..b..c]"
+  shows "\<exists>n. 0<n \<and> n<(card X - 1) \<and> f n = b"
+proof -
+  obtain n where n_def: "n < card X" "f n = b"
+    using local_ordering_def assms chain_defs by (metis two_ordered_loc)
+  have "0<n \<and> n<(card X - 1) \<and> f n = b"
+    using assms chain_defs n_def
+    by (metis (no_types, lifting) Suc_pred' gr_implies_not0 less_SucE not_gr_zero)
+  thus ?thesis by blast
+qed
+
+corollary fin_ch_betw: "[f\<leadsto>X|a..b..c] \<Longrightarrow> [a;b;c]"
+  using order_finite_chain2 index_middle_element
+  using finite_chain_def finite_chain_with_def finite_long_chain_with_def
+  by (metis (no_types, lifting) card_gt_0_iff diff_less empty_iff le_eq_less_or_eq less_one)
+
+
+lemma long_chain_2_imp_3: "\<lbrakk>[f\<leadsto>X|a..c]; card X > 2\<rbrakk> \<Longrightarrow> \<exists>b. [f\<leadsto>X|a..b..c]"
+  using points_in_chain first_neq_last finite_long_chain_with_def
+  by (metis card_2_iff' numeral_less_iff semiring_norm(75,78))
+
+
+lemma finite_chain2_betw: "\<lbrakk>[f\<leadsto>X|a..c]; card X > 2\<rbrakk> \<Longrightarrow> \<exists>b. [a;b;c]"
+  using fin_ch_betw long_chain_2_imp_3 by metis
+
+
+lemma finite_long_chain_with_alt [chain_alts]: "[f\<leadsto>Q|x..y..z] \<longleftrightarrow> [f\<leadsto>Q|x..z] \<and> [x;y;z] \<and> y\<in>Q"
+proof
+  { 
+    assume "[f\<leadsto>Q|x .. z] \<and> [x;y;z] \<and> y\<in>Q"
+    thus "[f\<leadsto>Q|x..y..z]"
+      using abc_abc_neq finite_long_chain_with_def by blast
+  } {
+    assume asm: "[f\<leadsto>Q|x..y..z]"
+    show "[f\<leadsto>Q|x .. z] \<and> [x;y;z] \<and> y\<in>Q"
+    using asm fin_ch_betw finite_long_chain_with_def by blast
+  }
+qed
+
+
+lemma finite_long_chain_with_card: "[f\<leadsto>Q|x..y..z] \<Longrightarrow> card Q \<ge> 3"
+  unfolding chain_defs numeral_3_eq_3 by fastforce
+
+
+lemma finite_long_chain_with_alt2:
+  assumes "finite Q" "local_long_ch_by_ord f Q" "f 0 = x" "f (card Q - 1) = z" "[x;y;z] \<and> y\<in>Q"
+  shows "[f\<leadsto>Q|x..y..z]"
+  using assms finite_chain_alt finite_chain_with_def finite_long_chain_with_alt by blast
+
+
+lemma finite_long_chain_with_alt3:
+  assumes "finite Q" "local_long_ch_by_ord f Q" "f 0 = x" "f (card Q - 1) = z" "y\<noteq>x \<and> y\<noteq>z \<and> y\<in>Q"
+  shows "[f\<leadsto>Q|x..y..z]"
+  using assms finite_chain_alt finite_chain_with_def finite_long_chain_with_def by auto
+
+
+lemma chain_sym_obtain:
+  assumes "[f\<leadsto>X|a..b..c]"
+  obtains g where "[g\<leadsto>X|c..b..a]" and "g=(\<lambda>n. f (card X - 1 - n))"
+  using ordering_sym_loc[of betw X f] abc_sym assms unfolding chain_defs
+  using  first_neq_last points_in_long_chain(3)
+  by (metis assms diff_self_eq_0 empty_iff finite_long_chain_with_def insert_iff minus_nat.diff_0)
+
+lemma chain_sym:
+  assumes "[f\<leadsto>X|a..b..c]"
+    shows "[\<lambda>n. f (card X - 1 - n)\<leadsto>X|c..b..a]"
+  using chain_sym_obtain [where f=f and a=a and b=b and c=c and X=X]
+  using assms(1) by blast
+
+lemma chain_sym2:
+  assumes "[f\<leadsto>X|a..c]"
+    shows "[\<lambda>n. f (card X - 1 - n)\<leadsto>X|c..a]"
+proof -
+  {
+    assume asm: "a = f 0" "c = f (card X - 1)"
+      and asm_short: "short_ch_by_ord f X"
+    hence cardX: "card X = 2"
+      using short_ch_card(1) by auto
+    hence ac: "f 0 = a" "f 1 = c"
+      by (simp add: asm)+
+    have "n=1 \<or> n=0" if "n<card X" for n
+      using cardX that by linarith
+    hence fn_eq: "(\<lambda>n. if n = 0 then f 1 else f 0) = (\<lambda>n. f (card X - Suc n))" if "n<card X" for n
+      by (metis One_nat_def Zero_not_Suc ac(2) asm(2) not_gr_zero old.nat.inject zero_less_diff)
+    have "c = f (card X - 1 - 0)" and "a = f (card X - 1 - (card X - 1))"
+    and "short_ch_by_ord (\<lambda>n. f (card X - 1 - n)) X"
+      apply (simp add: asm)+
+  }
+  consider "short_ch_by_ord f X"|"\<exists>b. [f\<leadsto>X|a..b..c]"
+    using assms long_chain_2_imp_3 finite_chain_with_alt by fastforce
+  thus ?thesis
+    apply cases
+      assms finite_chain_alt finite_chain_with_def apply auto[1]
+    using chain_sym finite_long_chain_with_alt by blast
+qed
+
+lemma chain_sym_obtain2:
+  assumes "[f\<leadsto>X|a..c]"
+  obtains g where "[g\<leadsto>X|c..a]" and "g=(\<lambda>n. f (card X - 1 - n))"
+  using assms chain_sym2 by auto
+
+
+
+
+section "Preliminary Results for Kinematic Triangles and Paths/Betweenness"
+
+
+
+context MinkowskiPrimitive begin
+
+lemma triangle_permutes [no_atp]:
+  assumes "\<triangle> a b c" 
+  shows "\<triangle> a c b" "\<triangle> b a c" "\<triangle> b c a" "\<triangle> c a b" "\<triangle> c b a"
+  using assms by (auto simp add: kinematic_triangle_def)+
+
+lemma triangle_paths [no_atp]:
+  assumes tri_abc: "\<triangle> a b c"
+  shows "path_ex a b" "path_ex a c" "path_ex b c"
+using tri_abc by (auto simp add: kinematic_triangle_def)+
+
+
+lemma triangle_paths_unique:
+  assumes tri_abc: "\<triangle> a b c"
+  shows "\<exists>!ab. path ab a b"      
+  using path_unique tri_abc triangle_paths(1) by auto
+
+
+lemma triangle_diff_paths:
+  assumes tri_abc: "\<triangle> a b c"
+  shows "\<not> (\<exists>Q\<in>\<P>. a \<in> Q \<and> b \<in> Q \<and> c \<in> Q)"
+proof (rule notI)
+  assume not_thesis: "\<exists>Q\<in>\<P>. a \<in> Q \<and> b \<in> Q \<and> c \<in> Q"
+  then obtain abc where path_abc: "abc \<in> \<P> \<and> a \<in> abc \<and> b \<in> abc \<and> c \<in> abc" by auto
+  have abc_neq: "a \<noteq> b \<and> a \<noteq> c \<and> b \<noteq> c" using tri_abc kinematic_triangle_def by simp
+  have "\<exists>ab\<in>\<P>. \<exists>ac\<in>\<P>. ab \<noteq> ac \<and> a \<in> ab \<and> b \<in> ab \<and> a \<in> ac \<and> c \<in> ac"
+    using tri_abc kinematic_triangle_def by metis
+  then obtain ab ac where ab_ac_relate: "ab \<in> \<P> \<and> ac \<in> \<P> \<and> ab \<noteq> ac \<and> {a,b} \<subseteq> ab \<and> {a,c} \<subseteq> ac"
+    by blast
+  have "\<exists>!ab\<in>\<P>. a \<in> ab \<and> b \<in> ab" using tri_abc triangle_paths_unique by blast
+  then have ab_eq_abc: "ab = abc" using path_abc ab_ac_relate by auto
+  have "\<exists>!ac\<in>\<P>. a \<in> ac \<and> b \<in> ac" using tri_abc triangle_paths_unique by blast
+  then have ac_eq_abc: "ac = abc" using path_abc ab_ac_relate eq_paths abc_neq by auto
+  have "ab = ac" using ab_eq_abc ac_eq_abc by simp
+  thus False using ab_ac_relate by simp
+qed
+
+lemma tri_three_paths [elim]:
+  assumes tri_abc: "\<triangle> a b c"
+  shows "\<exists>ab bc ca. path ab a b \<and> path bc b c \<and> path ca c a \<and> ab \<noteq> bc \<and> ab \<noteq> ca \<and> bc \<noteq> ca"
+using tri_abc triangle_diff_paths triangle_paths(2,3) triangle_paths_unique
+by fastforce
+
+lemma triangle_paths_neq:
+  assumes tri_abc: "\<triangle> a b c"
+      and path_ab: "path ab a b"
+      and path_ac: "path ac a c"
+  shows "ab \<noteq> ac"
+using assms triangle_diff_paths by blast
+
+context MinkowskiBetweenness begin
+
+lemma abc_ex_path_unique:
+  assumes abc: "[a;b;c]"
+  shows "\<exists>!Q\<in>\<P>. a \<in> Q \<and> b \<in> Q \<and> c \<in> Q"
+proof -
+  have a_neq_c: "a \<noteq> c" using abc_ac_neq abc by simp
+  have "\<exists>Q\<in>\<P>. a \<in> Q \<and> b \<in> Q \<and> c \<in> Q" using abc_ex_path abc by simp
+  then obtain P Q where path_P: "P \<in> \<P>" and abc_inP: "a \<in> P \<and> b \<in> P \<and> c \<in> P"
+                    and path_Q: "Q \<in> \<P>" and abc_in_Q: "a \<in> Q \<and> b \<in> Q \<and> c \<in> Q" by auto
+  then have "P = Q" using a_neq_c eq_paths by blast
+  thus ?thesis using eq_paths a_neq_c using abc_inP path_P by auto
+qed
+
+lemma betw_c_in_path:
+  assumes abc: "[a;b;c]"
+      and path_ab: "path ab a b"
+  shows "c \<in> ab"
+using eq_paths abc_ex_path assms by blast
+
+lemma betw_b_in_path:
+  assumes abc: "[a;b;c]"
+      and path_ab: "path ac a c"
+  shows "b \<in> ac"
+using assms abc_ex_path_unique path_unique by blast
+
+lemma betw_a_in_path:
+  assumes abc: "[a;b;c]"
+      and path_ab: "path bc b c"
+  shows "a \<in> bc"
+using assms abc_ex_path_unique path_unique by blast
+
+lemma triangle_not_betw_abc:
+  assumes tri_abc: "\<triangle> a b c"
+  shows "\<not> [a;b;c]"
+using tri_abc abc_ex_path triangle_diff_paths by blast
+
+lemma triangle_not_betw_acb:
+  assumes tri_abc: "\<triangle> a b c"
+  shows "\<not> [a;c;b]"
+by (simp add: tri_abc triangle_not_betw_abc triangle_permutes(1))
+
+lemma triangle_not_betw_bac:
+  assumes tri_abc: "\<triangle> a b c"
+  shows "\<not> [b;a;c]"
+by (simp add: tri_abc triangle_not_betw_abc triangle_permutes(2))
+
+lemma triangle_not_betw_any:
+  assumes tri_abc: "\<triangle> a b c"
+  shows "\<not> (\<exists>d\<in>{a,b,c}. \<exists>e\<in>{a,b,c}. \<exists>f\<in>{a,b,c}. [d;e;f])"
+  by (metis abc_ex_path abc_abc_neq empty_iff insertE tri_abc triangle_diff_paths)
+
+
+
+section "3.2 First collinearity theorem"
+
+  assumes tri_abc: "\<triangle> a b c"
+      and path_de: "path de d e"
+      and path_ab: "path ab a b"
+      and bcd: "[b;c;d]"
+      and cea: "[c;e;a]"
+  shows "\<exists>f\<in>de\<inter>ab. [a;f;b]"
+proof -
+  have "\<exists>f\<in>ab \<inter> de. \<exists>X ord. [ord\<leadsto>X|a..f..b]"
+  proof -
+    have "path_ex a c" using tri_abc triangle_paths(2) by auto
+    then obtain ac where path_ac: "path ac a c" by auto
+    have "path_ex b c" using tri_abc triangle_paths(3) by auto
+    then obtain bc where path_bc: "path bc b c" by auto
+    have ab_neq_ac: "ab \<noteq> ac" using triangle_paths_neq path_ab path_ac tri_abc by fastforce
+    have ab_neq_bc: "ab \<noteq> bc" using eq_paths ab_neq_ac path_ab path_ac path_bc by blast
+    have ac_neq_bc: "ac \<noteq> bc" using eq_paths ab_neq_bc path_ab path_ac path_bc by blast
+    have d_in_bc: "d \<in> bc" using bcd betw_c_in_path path_bc by blast
+    have e_in_ac: "e \<in> ac" using betw_b_in_path cea path_ac by blast 
+    show ?thesis
+      using O6_old [where Q = ab and R = ac and S = bc and T = de and a = a and b = b and c = c] 
+            ab_neq_ac ab_neq_bc ac_neq_bc path_ab path_bc path_ac path_de bcd cea d_in_bc e_in_ac
+      by auto
+  qed
+  thus ?thesis using fin_ch_betw by blast
+qed
+
+
+  assumes tri_abc: "\<triangle> a b c"
+      and path_de: "path de d e"
+      and bcd: "[b;c;d]"
+      and cea: "[c;e;a]"
+  shows "\<exists>ab. path ab a b \<and> (\<exists>f\<in>de\<inter>ab. [a;f;b])"
+proof -
+  have ex_path_ab: "path_ex a b"
+    using tri_abc triangle_paths_unique by blast
+  then obtain ab where path_ab: "path ab a b"
+    by blast
+  have "\<exists>f\<in>ab \<inter> de. \<exists>X g. [g\<leadsto>X|a..f..b]"
+  proof -
+    have "path_ex a c" using tri_abc triangle_paths(2) by auto
+    then obtain ac where path_ac: "path ac a c" by auto
+    have "path_ex b c" using tri_abc triangle_paths(3) by auto
+    then obtain bc where path_bc: "path bc b c" by auto
+    have ab_neq_ac: "ab \<noteq> ac" using triangle_paths_neq path_ab path_ac tri_abc by fastforce
+    have ab_neq_bc: "ab \<noteq> bc" using eq_paths ab_neq_ac path_ab path_ac path_bc by blast
+    have ac_neq_bc: "ac \<noteq> bc" using eq_paths ab_neq_bc path_ab path_ac path_bc by blast
+    have d_in_bc: "d \<in> bc" using bcd betw_c_in_path path_bc by blast
+    have e_in_ac: "e \<in> ac" using betw_b_in_path cea path_ac by blast 
+    show ?thesis
+      using O6_old [where Q = ab and R = ac and S = bc and T = de and a = a and b = b and c = c] 
+            ab_neq_ac ab_neq_bc ac_neq_bc path_ab path_bc path_ac path_de bcd cea d_in_bc e_in_ac
+      by auto
+  qed
+  thus ?thesis using fin_ch_betw path_ab by fastforce
+qed
+
+
+  assumes tri_abc: "\<triangle> a b c"
+      and path_de: "path de d e"
+      and bcd: "[b;c;d]"
+      and cea: "[c;e;a]"
+    shows "(\<exists>f\<in>de\<inter>(path_of a b). [a;f;b])"
+proof - 
+  let ?ab = "path_of a b"
+  have path_ab: "path ?ab a b"
+    using tri_abc theI' [OF triangle_paths_unique] by blast
+  have "\<exists>f\<in>?ab \<inter> de. \<exists>X ord. [ord\<leadsto>X|a..f..b]"
+  proof -
+    have "path_ex a c" using tri_abc triangle_paths(2) by auto
+    then obtain ac where path_ac: "path ac a c" by auto
+    have "path_ex b c" using tri_abc triangle_paths(3) by auto
+    then obtain bc where path_bc: "path bc b c" by auto
+    have ab_neq_ac: "?ab \<noteq> ac" using triangle_paths_neq path_ab path_ac tri_abc by fastforce
+    have ab_neq_bc: "?ab \<noteq> bc" using eq_paths ab_neq_ac path_ab path_ac path_bc by blast
+    have ac_neq_bc: "ac \<noteq> bc" using eq_paths ab_neq_bc path_ab path_ac path_bc by blast
+    have d_in_bc: "d \<in> bc" using bcd betw_c_in_path path_bc by blast
+    have e_in_ac: "e \<in> ac" using betw_b_in_path cea path_ac by blast 
+    show ?thesis
+      using O6_old [where Q = ?ab and R = ac and S = bc and T = de and a = a and b = b and c = c] 
+            ab_neq_ac ab_neq_bc ac_neq_bc path_ab path_bc path_ac path_de bcd cea d_in_bc e_in_ac
+            IntI Int_commute
+      by (metis (no_types, lifting))
+  qed
+  thus ?thesis using fin_ch_betw by blast
+qed
+
+
+section "Additional results for Paths and Unreachables"
+
+context MinkowskiPrimitive begin
+
+lemma big_bang:
+  assumes no_paths: "\<P> = {}"
+  shows "\<exists>a. \<E> = {a}"
+proof -
+  have "\<exists>a. a \<in> \<E>" using nonempty_events by blast
+  then obtain a where a_event: "a \<in> \<E>" by auto
+  have "\<not> (\<exists>b\<in>\<E>. b \<noteq> a)"
+  proof (rule notI)
+    assume "\<exists>b\<in>\<E>. b \<noteq> a"
+    then have "\<exists>Q. Q \<in> \<P>" using events_paths a_event by auto
+    thus False using no_paths by simp
+  qed
+  then have "\<forall>b\<in>\<E>. b = a" by simp
+  thus ?thesis using a_event by auto
+qed
+
+lemma two_events_then_path:
+  assumes two_events: "\<exists>a\<in>\<E>. \<exists>b\<in>\<E>. a \<noteq> b"
+  shows "\<exists>Q. Q \<in> \<P>"
+proof -
+  have "(\<forall>a. \<E> \<noteq> {a}) \<longrightarrow> \<P> \<noteq> {}" using big_bang by blast
+  then have "\<P> \<noteq> {}" using two_events by blast
+  thus ?thesis by blast
+qed
+
+lemma paths_are_events: "\<forall>Q\<in>\<P>. \<forall>a\<in>Q. a \<in> \<E>"
+  by simp
+
+lemma same_empty_unreach:
+  "\<lbrakk>Q \<in> \<P>; a \<in> Q\<rbrakk> \<Longrightarrow> unreach-on Q from a = {}"
+apply (unfold unreachable_subset_def)
+by simp
+
+lemma same_path_reachable:
+  "\<lbrakk>Q \<in> \<P>; a \<in> Q; b \<in> Q\<rbrakk> \<Longrightarrow> a \<in> Q - unreach-on Q from b"
+by (simp add: same_empty_unreach)
+
+
+lemma same_path_reachable2:
+  "\<lbrakk>Q \<in> \<P>; R \<in> \<P>; a \<in> Q; a \<in> R; b \<in> Q\<rbrakk> \<Longrightarrow> a \<in> R - unreach-on R from b"
+  unfolding unreachable_subset_def by blast
+
+lemma cross_in_reachable:
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+      and b_inQ: "b \<in> Q"
+      and b_inR: "b \<in> R"
+  shows "b \<in> R - unreach-on R from a"
+unfolding unreachable_subset_def using a_inQ b_inQ b_inR path_Q by auto
+
+lemma reachable_path:
+  assumes path_Q: "Q \<in> \<P>"
+      and b_event: "b \<in> \<E>"
+      and a_reachable: "a \<in> Q - unreach-on Q from b"
+  shows "\<exists>R\<in>\<P>. a \<in> R \<and> b \<in> R"
+proof -
+  have a_inQ: "a \<in> Q" using a_reachable by simp
+  have "Q \<notin> \<P> \<or> b \<notin> \<E> \<or> b \<in> Q \<or> (\<exists>R\<in>\<P>. b \<in> R \<and> a \<in> R)"
+      using a_reachable unreachable_subset_def by auto
+  then have "b \<in> Q \<or> (\<exists>R\<in>\<P>. b \<in> R \<and> a \<in> R)" using path_Q b_event by simp
+  thus ?thesis
+  proof (rule disjE)
+    assume "b \<in> Q"
+    thus ?thesis using a_inQ path_Q by auto
+  next
+    assume "\<exists>R\<in>\<P>. b \<in> R \<and> a \<in> R"
+    thus ?thesis using conj_commute by simp
+  qed
+qed
+
+context MinkowskiBetweenness begin
+
+
+lemma ord_path_of:
+  assumes "[a;b;c]"
+  shows "a \<in> path_of b c" "b \<in> path_of a c" "c \<in> path_of a b"
+    and "path_of a b = path_of a c" "path_of a b = path_of b c"
+proof -
+  show "a \<in> path_of b c"
+    using betw_a_in_path[of a b c "path_of b c"] path_of_ex abc_ex_path_unique abc_abc_neq assms
+    by (smt (z3) betw_a_in_path the1_equality)
+  show "b \<in> path_of a c"
+    using betw_b_in_path[of a b c "path_of a c"] path_of_ex abc_ex_path_unique abc_abc_neq assms
+    by (smt (z3) betw_b_in_path the1_equality)
+  show "c \<in> path_of a b"
+    using betw_c_in_path[of a b c "path_of a b"] path_of_ex abc_ex_path_unique abc_abc_neq assms
+    by (smt (z3) betw_c_in_path the1_equality)
+  show "path_of a b = path_of a c"
+    by (metis (mono_tags) abc_ac_neq assms betw_b_in_path betw_c_in_path ends_notin_segment seg_betw)
+  show "path_of a b = path_of b c"
+    by (metis (mono_tags) assms betw_a_in_path betw_c_in_path ends_notin_segment seg_betw)
+qed
+
+
+lemma obtain_index_fin_chain:
+  assumes "[f\<leadsto>X]" "x\<in>X" "finite X"
+  obtains i where "f i = x" "i<card X"
+proof -
+  have "\<exists>i<card X. f i = x"
+    using assms(1) unfolding ch_by_ord_def
+  proof (rule disjE)
+    assume asm: "short_ch_by_ord f X"
+    hence "card X = 2"
+      using short_ch_card(1) by auto
+    thus "\<exists>i<card X. f i = x"
+      using asm assms(2) unfolding chain_defs by force
+  next
+    assume asm: "local_long_ch_by_ord f X"
+    thus "\<exists>i<card X. f i = x"
+      using asm assms(2,3) unfolding chain_defs local_ordering_def by blast
+  qed
+  thus ?thesis using that by blast
+qed
+
+lemma obtain_index_inf_chain:
+  assumes "[f\<leadsto>X]" "x\<in>X" "infinite X"
+  obtains i where "f i = x"
+  using assms unfolding chain_defs local_ordering_def by blast
+
+
+lemma fin_chain_on_path2:
+  assumes "[f\<leadsto>X]" "finite X"
+  shows "\<exists>P\<in>\<P>. X\<subseteq>P"
+  using assms(1) unfolding ch_by_ord_def
+proof (rule disjE)
+  assume "short_ch_by_ord f X"
+  thus ?thesis
+    using short_ch_by_ord_def by auto
+next
+  assume asm: "local_long_ch_by_ord f X"
+  have "[f 0;f 1;f 2]"
+    using order_finite_chain asm assms(2) local_long_ch_by_ord_def by auto
+  then obtain P where "P\<in>\<P>" "{f 0,f 1,f 2} \<subseteq> P"
+    by (meson abc_ex_path empty_subsetI insert_subset)
+  then have "path P (f 0) (f 1)"
+  { 
+    fix x assume "x\<in>X"
+    then obtain i where i: "f i = x" "i<card X"
+      using obtain_index_fin_chain assms by blast
+    consider "i=0\<or>i=1"|"i>1" by linarith
+    hence "x\<in>P"
+    proof (cases)
+      case 1 thus ?thesis
+    next
+      case 2
+      hence "[f 0;f 1;f i]"
+        using assms i(2) order_finite_chain2 by auto
+      hence "{f 0,f 1,f i}\<subseteq>P"
+      thus ?thesis by (simp add: i(1))
+    qed
+  }
+  thus ?thesis
+qed
+
+
+lemma fin_chain_on_path:
+  assumes "[f\<leadsto>X]" "finite X"
+  shows "\<exists>!P\<in>\<P>. X\<subseteq>P"
+proof -
+  obtain P where P: "P\<in>\<P>" "X\<subseteq>P"
+    using fin_chain_on_path2[OF assms] by auto
+  obtain a b where ab: "a\<in>X" "b\<in>X" "a\<noteq>b"
+    using assms(1) unfolding chain_defs by (metis assms(2) insertCI three_in_set3)
+  thus ?thesis using P ab by (meson eq_paths in_mono)
+qed
+
+
+lemma fin_chain_on_path3:
+  assumes "[f\<leadsto>X]" "finite X" "a\<in>X" "b\<in>X" "a\<noteq>b"
+  shows "X \<subseteq> path_of a b"
+proof -
+  let ?ab = "path_of a b"
+  obtain P where P: "P\<in>\<P>" "X\<subseteq>P" using fin_chain_on_path2[OF assms(1,2)] by auto
+  have "path P a b" using P assms(3-5) by auto
+  then have "path ?ab a b" using path_of_ex by blast
+  thus "X \<subseteq> path_of a b" using P by simp
+qed
+
+
+context MinkowskiUnreachable begin
+
+
+lemma no_empty_paths [simp]:
+  assumes "Q\<in>\<P>"
+  shows "Q\<noteq>{}"
+proof -
+  obtain a where "a\<in>\<E>" using nonempty_events by blast
+  have "a\<in>Q \<or> a\<notin>Q" by auto
+  thus ?thesis
+  proof
+    assume "a\<in>Q"
+    thus ?thesis by blast
+  next
+    assume "a\<notin>Q"
+    then obtain b where "b\<in>unreach-on Q from a"
+      by blast
+    thus ?thesis
+      using unreachable_subset_def by auto
+  qed
+qed
+
+lemma events_ex_path:
+  assumes ge1_path: "\<P> \<noteq> {}"
+  shows "\<forall>x\<in>\<E>. \<exists>Q\<in>\<P>. x \<in> Q"
+proof
+  fix x
+  assume x_event: "x \<in> \<E>"
+  have "\<exists>Q. Q \<in> \<P>" using ge1_path using ex_in_conv by blast
+  then obtain Q where path_Q: "Q \<in> \<P>" by auto
+  then have "\<exists>y. y \<in> Q" using no_empty_paths by blast
+  then obtain y where y_inQ: "y \<in> Q" by auto
+  then have y_event: "y \<in> \<E>" using in_path_event path_Q by simp
+  have "\<exists>P\<in>\<P>. x \<in> P"
+  proof cases
+    assume "x = y"
+    thus ?thesis using y_inQ path_Q by auto
+  next
+    assume "x \<noteq> y"
+    thus ?thesis using events_paths x_event y_event by auto
+  qed
+  thus "\<exists>Q\<in>\<P>. x \<in> Q" by simp
+qed
+
+lemma unreach_ge2_then_ge2:
+  assumes "\<exists>x\<in>unreach-on Q from b. \<exists>y\<in>unreach-on Q from b. x \<noteq> y"
+  shows "\<exists>x\<in>Q. \<exists>y\<in>Q. x \<noteq> y"
+using assms unreachable_subset_def by auto
+
+
+
+lemma chain_on_path_I6:
+  assumes path_Q: "Q\<in>\<P>"
+      and event_b: "b\<notin>Q" "b\<in>\<E>"
+      and unreach: "Q\<^sub>x \<in> unreach-on Q from b" "Q\<^sub>z \<in> unreach-on Q from b" "Q\<^sub>x \<noteq> Q\<^sub>z"
+      and X_def: "[f\<leadsto>X|Q\<^sub>x..Q\<^sub>z]"
+            "(\<forall>i\<in>{1 .. card X - 1}. (f i) \<in> unreach-on Q from b \<and> (\<forall>Q\<^sub>y\<in>\<E>. [(f(i-1)); Q\<^sub>y; f i] \<longrightarrow> Q\<^sub>y \<in> unreach-on Q from b))"
+  shows "X\<subseteq>Q"
+proof -
+  have 1: "path Q Q\<^sub>x Q\<^sub>z" using unreachable_subset_def unreach path_Q by simp
+  then have 2: "Q = path_of Q\<^sub>x Q\<^sub>z" using path_of_ex[of Q\<^sub>x Q\<^sub>z] by (meson eq_paths)
+  have "X\<subseteq>path_of Q\<^sub>x Q\<^sub>z"
+  proof (rule fin_chain_on_path3[of f])
+    from unreach(3) show "Q\<^sub>x \<noteq> Q\<^sub>z" by simp
+    from X_def chain_defs show "[f\<leadsto>X]" "finite X" by metis+
+    from assms(7) points_in_chain show "Q\<^sub>x \<in> X" "Q\<^sub>z \<in> X" by auto
+  qed
+  thus ?thesis using 2 by simp
+qed
+
+
+
+section "Results about Paths as Sets"
+
+
+context MinkowskiPrimitive begin
+
+lemma distinct_paths:
+  assumes "Q \<in> \<P>"
+      and "R \<in> \<P>"
+      and "d \<notin> Q"
+      and "d \<in> R"
+  shows "R \<noteq> Q"
+using assms by auto
+
+lemma distinct_paths2:
+  assumes "Q \<in> \<P>"
+      and "R \<in> \<P>"
+      and "\<exists>d. d \<notin> Q \<and> d \<in> R"
+  shows "R \<noteq> Q"
+using assms by auto
+
+lemma external_events_neq:
+  "\<lbrakk>Q \<in> \<P>; a \<in> Q; b \<in> \<E>; b \<notin> Q\<rbrakk> \<Longrightarrow> a \<noteq> b"
+by auto
+
+lemma notin_cross_events_neq:
+  "\<lbrakk>Q \<in> \<P>; R \<in> \<P>; Q \<noteq> R; a \<in> Q; b \<in> R; a \<notin> R\<inter>Q\<rbrakk> \<Longrightarrow> a \<noteq> b"
+by blast
+
+lemma nocross_events_neq:
+  "\<lbrakk>Q \<in> \<P>; R \<in> \<P>; a \<in> Q; b \<in> R; R\<inter>Q = {}\<rbrakk> \<Longrightarrow> a \<noteq> b"
+by auto
+
+lemma external_path:
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+      and d_notinQ: "d \<notin> Q"
+      and d_event: "d \<in> \<E>"
+  shows "\<exists>R\<in>\<P>. d \<in> R"
+proof -
+  have a_neq_d: "a \<noteq> d" using a_inQ d_notinQ by auto
+  thus "\<exists>R\<in>\<P>. d \<in> R" using events_paths by (meson a_inQ d_event in_path_event path_Q)
+qed
+
+lemma distinct_path:
+  assumes "Q \<in> \<P>"
+      and "a \<in> Q"
+      and "d \<notin> Q"
+      and "d \<in> \<E>"
+  shows "\<exists>R\<in>\<P>. R \<noteq> Q"
+using assms external_path by metis
+
+lemma external_distinct_path:
+  assumes "Q \<in> \<P>"
+      and "a \<in> Q"
+      and "d \<notin> Q"
+      and "d \<in> \<E>"
+  shows "\<exists>R\<in>\<P>. R \<noteq> Q \<and> d \<in> R"
+  using assms external_path by fastforce
+
+
+
+section "3.3 Boundedness of the unreachable set"
+
+
+  assumes path_Q: "Q \<in> \<P>"
+      and b_nin_Q: "b \<notin> Q"
+      and b_event: "b \<in> \<E>"
+      and Qx_reachable: "Qx \<in> Q - unreach-on Q from b"
+      and Qy_unreachable: "Qy \<in> unreach-on Q from b"
+  shows "\<exists>Qz\<in>Q - unreach-on Q from b. [Qx;Qy;Qz] \<and> Qx \<noteq> Qz"
+  using assms I7_old finite_long_chain_with_def fin_ch_betw
+  by (metis first_neq_last)
+
+lemma (in MinkowskiUnreachable) only_one_path:
+  assumes path_Q: "Q \<in> \<P>"
+      and all_inQ: "\<forall>a\<in>\<E>. a \<in> Q"
+      and path_R: "R \<in> \<P>"
+  shows "R = Q"
+proof (rule ccontr)
+  assume "\<not> R = Q"
+  then have R_neq_Q: "R \<noteq> Q" by simp
+  have "\<E> = Q"
+    by (simp add: all_inQ antisym path_Q path_sub_events subsetI)
+  hence "R\<subset>Q"
+    using R_neq_Q path_R path_sub_events by auto
+  obtain c where "c\<notin>R" "c\<in>Q"
+  then obtain a b where "path R a b"
+  have "a\<in>Q" "b\<in>Q"
+  thus False using eq_paths
+qed
+
+context MinkowskiSpacetime begin
+
+lemma external_event:
+  assumes path_Q: "Q \<in> \<P>"
+  shows "\<exists>d\<in>\<E>. d \<notin> Q"
+proof (rule ccontr)
+  assume "\<not> (\<exists>d\<in>\<E>. d \<notin> Q)"
+  then have all_inQ: "\<forall>d\<in>\<E>. d \<in> Q" by simp
+  then have only_one_path: "\<forall>P\<in>\<P>. P = Q" by (simp add: only_one_path path_Q) 
+  thus False using ex_3SPRAY three_SPRAY_ge4 four_paths by auto
+qed
+
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+  shows "\<exists>b\<in>Q. b \<noteq> a"
+proof -
+  have d_notinQ: "\<exists>d\<in>\<E>. d \<notin> Q" using path_Q external_event by blast 
+  then obtain d where "d \<in> \<E>" and "d \<notin> Q" by auto
+  thus ?thesis using two_in_unreach [where Q = Q and b = d] path_Q unreach_ge2_then_ge2 by metis
+qed
+
+lemma ge2_events_lax:
+  assumes path_Q: "Q \<in> \<P>"
+  shows "\<exists>a\<in>Q. \<exists>b\<in>Q. a \<noteq> b"
+proof -
+  have "\<exists>a\<in>\<E>. a \<in> Q" using path_Q no_empty_paths by (meson ex_in_conv in_path_event)
+  thus ?thesis using path_Q ge2_events by blast
+qed
+
+lemma ex_crossing_path:
+  assumes path_Q: "Q \<in> \<P>"
+  shows "\<exists>R\<in>\<P>. R \<noteq> Q \<and> (\<exists>c. c \<in> R \<and> c \<in> Q)"
+proof -
+  obtain a where a_inQ: "a \<in> Q" using ge2_events_lax path_Q by blast
+  obtain d where d_event: "d \<in> \<E>"
+             and d_notinQ: "d \<notin> Q" using external_event path_Q by auto
+  then have "a \<noteq> d" using a_inQ by auto
+  then have ex_through_d: "\<exists>R\<in>\<P>. \<exists>S\<in>\<P>. a \<in> R \<and> d \<in> S \<and> R \<inter> S \<noteq> {}"
+      using events_paths [where a = a and b = d]
+            path_Q a_inQ in_path_event d_event by simp
+  then obtain R S where path_R: "R \<in> \<P>"
+                    and path_S: "S \<in> \<P>"
+                    and a_inR: "a \<in> R"
+                    and d_inS: "d \<in> S"
+                    and R_crosses_S: "R \<inter> S \<noteq> {}" by auto
+  have S_neq_Q: "S \<noteq> Q" using d_notinQ d_inS by auto
+  show ?thesis
+  proof cases
+    assume "R = Q"
+    then have "Q \<inter> S \<noteq> {}" using R_crosses_S by simp
+    thus ?thesis using S_neq_Q path_S by blast
+  next
+    assume "R \<noteq> Q"
+    thus ?thesis using a_inQ a_inR path_R by blast
+  qed
+qed
+
+
+lemma path_past_unreach:
+  assumes path_Q: "Q \<in> \<P>"
+      and path_R: "R \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+      and b_inQ: "b \<in> Q"
+      and b_inR: "b \<in> R"
+      and Q_neq_R: "Q \<noteq> R"
+      and a_neq_b: "a \<noteq> b"
+  shows "\<exists>S\<in>\<P>. S \<noteq> Q \<and> a \<in> S \<and> (\<exists>c. c \<in> S \<and> c \<in> R)"
+proof -
+  obtain d where d_event: "d \<in> \<E>"
+             and d_notinR: "d \<notin> R" using external_event path_R by blast
+  have b_reachable: "b \<in> R - unreach-on R from a" using cross_in_reachable path_R a_inQ b_inQ b_inR path_Q by simp
+  have a_notinR: "a \<notin> R" using cross_once_notin
+                               Q_neq_R a_inQ a_neq_b b_inQ b_inR path_Q path_R by blast
+  then obtain u where "u \<in> unreach-on R from a"
+      using two_in_unreach a_inQ in_path_event path_Q path_R by blast
+  then obtain c where c_reachable: "c \<in> R - unreach-on R from a"
+                  and c_neq_b: "b \<noteq> c" using unreachable_set_bounded
+                                        [where Q = R and Qx = b and b = a and Qy = u]
+                                        path_R d_event d_notinR
+      using a_inQ a_notinR b_reachable in_path_event path_Q by blast
+  then obtain S where S_facts: "S \<in> \<P> \<and> a \<in> S \<and> (c \<in> S \<and> c \<in> R)" using reachable_path
+      by (metis Diff_iff a_inQ in_path_event path_Q path_R)
+  then have "S \<noteq> Q" using Q_neq_R b_inQ b_inR c_neq_b eq_paths path_R by blast
+  thus ?thesis using S_facts by auto
+qed
+
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+  shows "\<exists>ac\<in>\<P>. ac \<noteq> Q \<and> (\<exists>c. c \<notin> Q \<and> a \<in> ac \<and> c \<in> ac)"
+proof -
+  obtain b where b_inQ: "b \<in> Q"
+             and a_neq_b: "a \<noteq> b" using a_inQ ge2_events path_Q by blast
+  have "\<exists>R\<in>\<P>. R \<noteq> Q \<and> (\<exists>e. e \<in> R \<and> e \<in> Q)" by (simp add: ex_crossing_path path_Q)
+  then obtain R e where path_R: "R \<in> \<P>"
+                    and R_neq_Q: "R \<noteq> Q"
+                    and e_inR: "e \<in> R"
+                    and e_inQ: "e \<in> Q" by auto
+  thus ?thesis
+  proof cases
+    assume e_eq_a: "e = a"
+    then have "\<exists>c. c \<in> unreach-on R from b" using R_neq_Q a_inQ a_neq_b b_inQ e_inR path_Q path_R
+                                    two_in_unreach path_unique in_path_event by metis
+    thus ?thesis using R_neq_Q e_eq_a e_inR path_Q path_R
+                       eq_paths ge2_events_lax by metis
+  next
+    assume e_neq_a: "e \<noteq> a"
+    then have "\<exists>S\<in>\<P>. S \<noteq> Q \<and> a \<in> S \<and> (\<exists>c. c \<in> S \<and> c \<in> R)"
+        using path_past_unreach
+              R_neq_Q a_inQ e_inQ e_inR path_Q path_R by auto
+    thus ?thesis by (metis R_neq_Q e_inR e_neq_a eq_paths path_Q path_R) 
+  qed
+qed
+
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+    shows "\<exists>ac. \<exists>c. path ac a c \<and> ac \<noteq> Q \<and> c \<notin> Q"
+  using ex_crossing_at assms by fastforce
+
+
+
+section "3.4 Prolongation"
+context MinkowskiSpacetime begin
+
+lemma (in MinkowskiPrimitive) unreach_on_path:
+  "a \<in> unreach-on Q from b \<Longrightarrow> a \<in> Q"
+using unreachable_subset_def by simp
+
+lemma (in MinkowskiUnreachable) unreach_equiv:
+  "\<lbrakk>Q \<in> \<P>; R \<in> \<P>; a \<in> Q; b \<in> R; a \<in> unreach-on Q from b\<rbrakk> \<Longrightarrow> b \<in> unreach-on R from a"
+  unfolding unreachable_subset_def by auto
+
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+      and b_inQ: "b \<in> Q"
+      and ab_neq: "a \<noteq> b"
+  shows "\<exists>c\<in>\<E>. [a;b;c]"
+proof -
+  obtain e ae where e_event: "e \<in> \<E>"
+                and e_notinQ: "e \<notin> Q"
+                and path_ae: "path ae a e"
+    using ex_crossing_at a_inQ path_Q in_path_event by blast
+  have "b \<notin> ae" using a_inQ ab_neq b_inQ e_notinQ eq_paths path_Q path_ae by blast
+  then obtain f where f_unreachable: "f \<in> unreach-on ae from b"
+    using two_in_unreach b_inQ in_path_event path_Q path_ae by blast
+  then have b_unreachable: "b \<in> unreach-on Q from f" using unreach_equiv
+      by (metis (mono_tags, lifting) CollectD b_inQ path_Q unreachable_subset_def)
+  have a_reachable: "a \<in> Q - unreach-on Q from f"
+      using same_path_reachable2 [where Q = ae and R = Q and a = a and b = f]
+            path_ae a_inQ path_Q f_unreachable unreach_on_path by blast
+  thus ?thesis
+      using unreachable_set_bounded [where Qy = b and Q = Q and b = f and Qx = a]
+            b_unreachable unreachable_subset_def by auto
+qed
+
+lemma (in MinkowskiSpacetime) prolong_betw2:
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+      and b_inQ: "b \<in> Q"
+      and ab_neq: "a \<noteq> b"
+  shows "\<exists>c\<in>Q. [a;b;c]"
+  by (metis assms betw_c_in_path prolong_betw)
+
+lemma (in MinkowskiSpacetime) prolong_betw3:
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+      and b_inQ: "b \<in> Q"
+      and ab_neq: "a \<noteq> b"
+  shows "\<exists>c\<in>Q. \<exists>d\<in>Q. [a;b;c] \<and> [a;b;d] \<and> c\<noteq>d"
+  by (metis (full_types) abc_abc_neq abc_bcd_abd a_inQ ab_neq b_inQ path_Q prolong_betw2)
+
+lemma finite_path_has_ends:
+  assumes "Q \<in> \<P>"
+      and "X \<subseteq> Q"
+      and "finite X"
+      and "card X \<ge> 3"
+    shows "\<exists>a\<in>X. \<exists>b\<in>X. a \<noteq> b \<and> (\<forall>c\<in>X. a \<noteq> c \<and> b \<noteq> c \<longrightarrow> [a;c;b])"
+using assms
+proof (induct "card X - 3" arbitrary: X)
+  case 0
+  then have "card X = 3"
+    by linarith
+  then obtain a b c where X_eq: "X = {a, b, c}"
+    by (metis card_Suc_eq numeral_3_eq_3)
+  then have abc_neq: "a \<noteq> b" "a \<noteq> c" "b \<noteq> c"
+  then consider "[a;b;c]" | "[b;c;a]" | "[c;a;b]"
+    using some_betw [of Q a b c] "0.prems"(1) "0.prems"(2) X_eq by auto
+  thus ?case
+  proof (cases)
+    assume "[a;b;c]"
+      using X_eq abc_neq(2) by blast
+  next
+    assume "[b;c;a]"
+    thus ?thesis
+      by (simp add: X_eq abc_neq(1))
+  next
+    assume "[c;a;b]"
+    thus ?thesis
+      using X_eq abc_neq(3) by blast
+  qed
+next
+  case IH: (Suc n)
+  obtain Y x where X_eq: "X = insert x Y" and "x \<notin> Y"
+    by (meson IH.prems(4) Set.set_insert three_in_set3)
+  then have "card Y - 3 = n" "card Y \<ge> 3"
+  then obtain a b where ab_Y: "a \<in> Y" "b \<in> Y" "a \<noteq> b"
+                    and Y_ends: "\<forall>c\<in>Y. (a \<noteq> c \<and> b \<noteq> c) \<longrightarrow> [a;c;b]"
+    using IH(1) [of Y] IH.prems(1-3) X_eq by auto
+  consider "[a;x;b]" | "[x;b;a]" | "[b;a;x]"
+  thus ?case
+  proof (cases)
+    assume "[a;x;b]"
+    thus ?thesis
+      using Y_ends X_eq ab_Y by auto
+  next
+    assume "[x;b;a]"
+    { fix c
+      assume "c \<in> X" "x \<noteq> c" "a \<noteq> c"
+      then have "[x;c;a]"
+    }
+    thus ?thesis
+  next
+    assume "[b;a;x]"
+    { fix c
+      assume "c \<in> X" "b \<noteq> c" "x \<noteq> c"
+      then have "[b;c;x]"
+    }
+    thus ?thesis
+  qed
+qed
+
+
+lemma obtain_fin_path_ends:
+  assumes path_X: "X\<in>\<P>"
+      and fin_Q: "finite Q"
+      and card_Q: "card Q \<ge> 3"
+      and events_Q: "Q\<subseteq>X"
+  obtains a b where "a\<noteq>b" and "a\<in>Q" and "b\<in>Q" and "\<forall>c\<in>Q. (a\<noteq>c \<and> b\<noteq>c) \<longrightarrow> [a;c;b]"
+proof -
+  obtain n where "n\<ge>0" and "card Q = n+3"
+    using card_Q nat_le_iff_add
+    by auto
+  then obtain a b where "a\<noteq>b" and "a\<in>Q" and "b\<in>Q" and "\<forall>c\<in>Q. (a\<noteq>c \<and> b\<noteq>c) \<longrightarrow> [a;c;b]"
+    by metis
+  thus ?thesis
+    using that by auto
+qed
+
+
+lemma path_card_nil:
+  assumes "Q\<in>\<P>"
+  shows "card Q = 0"
+proof (rule ccontr)
+  assume "card Q \<noteq> 0"
+  obtain n where "n = card Q"
+    by auto
+  hence "n\<ge>1"
+  then consider (n1) "n=1" | (n2) "n=2" | (n3) "n\<ge>3"
+    by linarith
+  thus False
+  proof (cases)
+    case n1
+    thus ?thesis
+      using One_nat_def card_Suc_eq ge2_events_lax singletonD assms(1)
+  next
+    case n2
+    then obtain a b where "a\<noteq>b" and "a\<in>Q" and "b\<in>Q"
+      using ge2_events_lax assms(1) by blast
+    then obtain c where "c\<in>Q" and "c\<noteq>a" and "c\<noteq>b"
+      using prolong_betw2 by (metis abc_abc_neq assms(1))
+    hence "card Q \<noteq> 2"
+    thus False
+  next
+    case n3
+    have fin_Q: "finite Q"
+    proof -
+      have "(0::nat) \<noteq> 1"
+        by simp
+      then show ?thesis
+    qed
+    have card_Q: "card Q \<ge> 3"
+    have "Q\<subseteq>Q" by simp 
+    then obtain a b where "a\<in>Q" and "b\<in>Q" and "a\<noteq>b"
+        and acb: "\<forall>c\<in>Q. (c\<noteq>a \<and> c\<noteq>b) \<longrightarrow> [a;c;b]"
+      using obtain_fin_path_ends card_Q fin_Q assms(1)
+      by metis
+    then obtain x where "[a;b;x]" and "x\<in>Q"
+      using prolong_betw2 assms(1) by blast
+    thus False
+      by (metis acb abc_abc_neq abc_only_cba(2))
+  qed
+qed
+
+
+  assumes "P\<in>\<P>"
+  shows "infinite P"
+proof
+  assume fin_P: "finite P"
+  have "P\<noteq>{}"
+    by (simp add: assms)
+  hence "card P \<noteq> 0"
+    by (simp add: fin_P)
+  moreover have "\<not>(card P \<ge> 1)"
+    using path_card_nil
+    by (simp add: assms)
+  ultimately show False
+    by simp
+qed
+
+
+
+
+section "3.5 Second collinearity theorem"
+
+
+lemma (in MinkowskiBetweenness) some_betw2:
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+      and b_inQ: "b \<in> Q"
+      and c_inQ: "c \<in> Q"
+  shows "a = b \<or> a = c \<or> b = c \<or> [a;b;c] \<or> [b;c;a] \<or> [c;a;b]"
+  using a_inQ b_inQ c_inQ path_Q some_betw by blast
+
+lemma (in MinkowskiPrimitive) paths_tri:
+  assumes path_ab: "path ab a b"
+      and path_bc: "path bc b c"
+      and path_ca: "path ca c a"
+      and a_notin_bc: "a \<notin> bc"
+  shows "\<triangle> a b c"
+proof -
+  have abc_events: "a \<in> \<E> \<and> b \<in> \<E> \<and> c \<in> \<E>"
+    using path_ab path_bc path_ca in_path_event by auto
+  have abc_neq: "a \<noteq> b \<and> a \<noteq> c \<and> b \<noteq> c"
+    using path_ab path_bc path_ca by auto
+  have paths_neq: "ab \<noteq> bc \<and> ab \<noteq> ca \<and> bc \<noteq> ca"
+    using a_notin_bc cross_once_notin path_ab path_bc path_ca by blast
+  show ?thesis
+    unfolding kinematic_triangle_def
+    using abc_events abc_neq paths_neq path_ab path_bc path_ca
+    by auto
+qed
+
+lemma (in MinkowskiPrimitive) paths_tri2:
+  assumes path_ab: "path ab a b"
+      and path_bc: "path bc b c"
+      and path_ca: "path ca c a"
+      and ab_neq_bc: "ab \<noteq> bc"
+  shows "\<triangle> a b c"
+by (meson ab_neq_bc cross_once_notin path_ab path_bc path_ca paths_tri)
+
+
+  assumes tri_abc: "\<triangle> a b c"
+      and bcd: "[b;c;d]"
+      and cea: "[c;e;a]"
+      and path_de: "path de d e"
+  shows "\<exists>f. [a;f;b] \<and> [d;e;f]"
+proof -
+  obtain ab where path_ab: "path ab a b" using tri_abc triangle_paths_unique by blast
+  then obtain f where afb: "[a;f;b]"
+                  and f_in_de: "f \<in> de" using collinearity tri_abc path_de path_ab bcd cea by blast
+  obtain af where path_af: "path af a f" using abc_abc_neq afb betw_b_in_path path_ab by blast
+  have "[d;e;f]"
+  proof -
+    have def_in_de: "d \<in> de \<and> e \<in> de \<and> f \<in> de" using path_de f_in_de by simp
+    then have five_poss:"f = d \<or> f = e \<or> [e;f;d] \<or> [f;d;e] \<or> [d;e;f]"
+        using path_de some_betw2 by blast
+    have "f = d \<or> f = e \<longrightarrow> (\<exists>Q\<in>\<P>. a \<in> Q \<and> b \<in> Q \<and> c \<in> Q)"
+        by (metis abc_abc_neq afb bcd betw_a_in_path betw_b_in_path cea path_ab)
+    then have f_neq_d_e: "f \<noteq> d \<and> f \<noteq> e" using tri_abc
+        using triangle_diff_paths by simp
+    then consider "[e;f;d]" | "[f;d;e]" | "[d;e;f]" using five_poss by linarith
+    thus ?thesis
+    proof (cases)
+      assume efd: "[e;f;d]"
+      obtain dc where path_dc: "path dc d c" using abc_abc_neq abc_ex_path bcd by blast
+      obtain ce where path_ce: "path ce c e" using abc_abc_neq abc_ex_path cea by blast
+      have "dc\<noteq>ce"
+        using bcd betw_a_in_path betw_c_in_path cea path_ce path_dc tri_abc triangle_diff_paths
+        by blast
+      hence "\<triangle> d c e"
+        using paths_tri2 path_ce path_dc path_de by blast
+      then obtain x where x_in_af: "x \<in> af"
+                      and dxc: "[d;x;c]"
+          using collinearity
+                [where a = d and b = c and c = e and d = a and e = f and de = af]
+                cea efd path_dc path_af by blast
+      then have x_in_dc: "x \<in> dc" using betw_b_in_path path_dc by blast
+      then have "x = b" using eq_paths by (metis path_af path_dc afb bcd tri_abc x_in_af
+                                            betw_a_in_path betw_c_in_path triangle_diff_paths)
+      then have "[d;b;c]" using dxc by simp
+      then have "False" using bcd abc_only_cba [where a = b and b = c and c = d] by simp
+      thus ?thesis by simp
+    next
+      assume fde: "[f;d;e]"
+      obtain bd where path_bd: "path bd b d" using abc_abc_neq abc_ex_path bcd by blast
+      obtain ea where path_ea: "path ea e a" using abc_abc_neq abc_ex_path_unique cea by blast
+      obtain fe where path_fe: "path fe f e" using f_in_de f_neq_d_e path_de by blast
+      have "fe\<noteq>ea"
+        using tri_abc afb cea path_ea path_fe
+        by (metis abc_abc_neq betw_a_in_path betw_c_in_path triangle_paths_neq)
+      hence "\<triangle> e a f"
+        by (metis path_unique path_af path_ea path_fe paths_tri2)
+      then obtain y where y_in_bd: "y \<in> bd"
+                      and eya: "[e;y;a]" thm collinearity
+          using collinearity
+                [where a = e and b = a and c = f and d = b and e = d and de = bd]
+                afb fde path_bd path_ea by blast
+      then have "y = c" by (metis (mono_tags, lifting)
+                                  afb bcd cea path_bd tri_abc
+                                  abc_ac_neq betw_b_in_path path_unique triangle_paths(2)
+                                    triangle_paths_neq)
+      then have "[e;c;a]" using eya by simp
+      then have "False" using cea abc_only_cba [where a = c and b = e and c = a] by simp
+      thus ?thesis by simp
+    next
+      assume "[d;e;f]"
+      thus ?thesis by assumption
+    qed
+  qed
+  thus ?thesis using afb f_in_de by blast
+qed
+
+
+
+section "3.6 Order on a path - Theorems 8 and 9"
+context MinkowskiSpacetime begin
+
+
+  assumes tri_abc: "\<triangle> a b c"
+      and ab'c: "[a; b'; c]"
+      and bc'a: "[b; c'; a]"
+      and ca'b: "[c; a'; b]"
+  shows "\<not> (\<exists>Q\<in>\<P>. a' \<in> Q \<and> b' \<in> Q \<and> c' \<in> Q)"
+proof -
+  have abc_a'b'c'_neq: "a \<noteq> a' \<and> a \<noteq> b' \<and> a \<noteq> c'
+                      \<and> b \<noteq> a' \<and> b \<noteq> b' \<and> b \<noteq> c'
+                      \<and> c \<noteq> a' \<and> c \<noteq> b' \<and> c \<noteq> c'"
+      using abc_ac_neq
+      by (metis ab'c abc_abc_neq bc'a ca'b tri_abc triangle_not_betw_abc triangle_permutes(4))
+
+  have tri_betw_no_path_single_case: False
+    if a'b'c': "[a'; b'; c']" and tri_abc: "\<triangle> a b c"
+      and ab'c: "[a; b'; c]" and bc'a: "[b; c'; a]" and ca'b: "[c; a'; b]"
+    for a b c a' b' c'
+  proof -
+    have abc_a'b'c'_neq: "a \<noteq> a' \<and> a \<noteq> b' \<and> a \<noteq> c'
+                        \<and> b \<noteq> a' \<and> b \<noteq> b' \<and> b \<noteq> c'
+                        \<and> c \<noteq> a' \<and> c \<noteq> b' \<and> c \<noteq> c'"
+      using abc_abc_neq that by (metis triangle_not_betw_abc triangle_permutes(4))
+    have c'b'a': "[c'; b'; a']" using abc_sym a'b'c' by simp
+    have nopath_a'c'b: "\<not> (\<exists>Q\<in>\<P>. a' \<in> Q \<and> c' \<in> Q \<and> b \<in> Q)"
+    proof (rule notI)
+      assume "\<exists>Q\<in>\<P>. a' \<in> Q \<and> c' \<in> Q \<and> b \<in> Q"
+      then obtain Q where path_Q: "Q \<in> \<P>"
+                      and a'_inQ: "a' \<in> Q"
+                      and c'_inQ: "c' \<in> Q"
+                      and b_inQ: "b \<in> Q" by blast
+      then have ac_inQ: "a \<in> Q \<and> c \<in> Q" using eq_paths
+          by (metis abc_a'b'c'_neq ca'b bc'a betw_a_in_path betw_c_in_path)
+      thus False using b_inQ path_Q tri_abc triangle_diff_paths by blast
+    qed
+    then have tri_a'bc': "\<triangle> a' b c'"
+        by (smt bc'a ca'b a'b'c' paths_tri abc_ex_path_unique)
+    obtain ab' where path_ab': "path ab' a b'" using ab'c abc_a'b'c'_neq abc_ex_path by blast
+    obtain a'b where path_a'b: "path a'b a' b" using tri_a'bc' triangle_paths(1) by blast
+    then have "\<exists>x\<in>a'b. [a'; x; b] \<and> [a; b'; x]"
+        using collinearity2 [where a = a' and b = b and c = c' and e = b' and d = a and de = ab']
+              bc'a betw_b_in_path c'b'a' path_ab' tri_a'bc' by blast
+    then obtain x where x_in_a'b: "x \<in> a'b"
+                    and a'xb: "[a'; x; b]"
+                    and ab'x: "[a; b'; x]" by blast
+    have c_in_ab': "c \<in> ab'" using ab'c betw_c_in_path path_ab' by auto
+    have c_in_a'b: "c \<in> a'b" using ca'b betw_a_in_path path_a'b by auto 
+    have ab'_a'b_distinct: "ab' \<noteq> a'b"
+        using c_in_a'b path_a'b path_ab' tri_abc triangle_diff_paths by blast
+    have "ab' \<inter> a'b = {c}"
+        using paths_cross_at ab'_a'b_distinct c_in_a'b c_in_ab' path_a'b path_ab' by auto
+    then have "x = c" using ab'x path_ab' x_in_a'b betw_c_in_path by auto
+    then have "[a'; c; b]" using a'xb by auto
+    thus ?thesis using ca'b abc_only_cba by blast
+  qed
+
+  show ?thesis
+  proof (rule notI)
+    assume path_a'b'c': "\<exists>Q\<in>\<P>. a' \<in> Q \<and> b' \<in> Q \<and> c' \<in> Q"
+    consider "[a'; b'; c']" | "[b'; c'; a']" | "[c'; a'; b']" using some_betw
+        by (smt abc_a'b'c'_neq path_a'b'c' bc'a ca'b ab'c tri_abc
+                abc_ex_path cross_once_notin triangle_diff_paths)
+    thus False
+      apply (cases)
+      using tri_betw_no_path_single_case[of a' b' c'] ab'c bc'a ca'b tri_abc apply blast
+      using tri_betw_no_path_single_case ab'c bc'a ca'b tri_abc triangle_permutes abc_sym by blast+
+  qed
+qed
+
+
+lemma unreachable_bounded_path_only:
+  assumes d'_def: "d'\<notin> unreach-on ab from e" "d'\<in>ab" "d'\<noteq>e"
+      and e_event: "e \<in> \<E>"
+      and path_ab: "ab \<in> \<P>"
+      and e_notin_S: "e \<notin> ab"
+  shows "\<exists>d'e. path d'e d' e"
+proof (rule ccontr)
+  assume "\<not>(\<exists>d'e. path d'e d' e)"
+  hence "\<not>(\<exists>R\<in>\<P>. d'\<in>R \<and> e\<in>R \<and> d'\<noteq>e)"
+    by blast
+  hence "\<not>(\<exists>R\<in>\<P>.  e\<in>R \<and> d'\<in>R)"
+    using d'_def(3) by blast
+  moreover have "ab\<in>\<P> \<and> e\<in>\<E> \<and> e\<notin>ab"
+    by (simp add: e_event e_notin_S path_ab)
+  ultimately have "d'\<in> unreach-on ab from e"
+    unfolding unreachable_subset_def using d'_def(2)
+    by blast
+  thus False
+    using d'_def(1) by auto
+qed
+
+lemma unreachable_bounded_path:
+  assumes S_neq_ab: "S \<noteq> ab"
+      and a_inS: "a \<in> S"
+      and e_inS: "e \<in> S"
+      and e_neq_a: "e \<noteq> a"
+      and path_S: "S \<in> \<P>"
+      and path_ab: "path ab a b"
+      and path_be: "path be b e"
+      and no_de: "\<not>(\<exists>de. path de d e)"
+      and abd:"[a;b;d]"
+    obtains d' d'e where "d'\<in>ab \<and> path d'e d' e \<and> [b; d; d']"
+proof -
+  have e_event: "e\<in>\<E>"
+    using e_inS path_S by auto
+  have "e\<notin>ab"
+    using S_neq_ab a_inS e_inS e_neq_a eq_paths path_S path_ab by auto
+  have "ab\<in>\<P> \<and> e\<notin>ab"
+    using S_neq_ab a_inS e_inS e_neq_a eq_paths path_S path_ab
+    by auto
+  have "b \<in> ab - unreach-on ab from e"
+    using cross_in_reachable path_ab path_be
+    by blast
+  have "d \<in> unreach-on ab from e"
+      betw_c_in_path unreachable_bounded_path_only
+    by blast
+  have  "\<exists>d' d'e. d'\<in>ab \<and> path d'e d' e \<and> [b; d; d']"
+  proof -
+    obtain d' where "[b; d; d']" "d'\<in>ab" "d'\<notin> unreach-on ab from e" "b\<noteq>d'" "e\<noteq>d'"
+      by (metis DiffE)
+    then obtain d'e where "path d'e d' e"
+      by blast
+    thus ?thesis
+      by blast
+  qed
+  thus ?thesis
+    using that by blast
+qed
+
+lemma exist_c'd'_alt:
+  assumes abc: "[a;b;c]"
+      and abd: "[a;b;d]"
+      and c_neq_d: "c \<noteq> d"
+      and path_ab: "path ab a b"
+      and path_S: "S \<in> \<P>"
+      and a_inS: "a \<in> S"
+      and e_inS: "e \<in> S"
+      and e_neq_a: "e \<noteq> a"
+      and S_neq_ab: "S \<noteq> ab"
+      and path_be: "path be b e"
+  shows "\<exists>c' d'. \<exists>d'e c'e. c'\<in>ab \<and> d'\<in>ab
+                        \<and> [a; b; d'] \<and> [c'; b; a] \<and> [c'; b; d']
+                        \<and> path d'e d' e \<and> path c'e c' e"
+proof (cases)
+  assume "\<exists>de. path de d e"
+  then obtain de where "path de d e"
+    by blast
+  hence "[a;b;d] \<and> d\<in>ab"
+    using abd betw_c_in_path path_ab by blast
+  thus ?thesis
+  proof (cases)
+    assume "\<exists>ce. path ce c e"
+    then obtain ce where "path ce c e" by blast
+    have "c \<in> ab"
+      using abc betw_c_in_path path_ab by blast
+    thus ?thesis
+      by blast
+  next
+    assume "\<not>(\<exists>ce. path ce c e)"
+    obtain c' c'e where "c'\<in>ab \<and> path c'e c' e \<and> [b; c; c']"
+      using unreachable_bounded_path [where ab=ab and e=e and b=b and d=c and a=a and S=S and be=be]
+    by (metis (mono_tags, lifting))
+    hence "[a; b; c'] \<and> [d; b; c']"
+      using abc dbc by blast
+    hence "[c'; b; a] \<and> [c'; b; d]"
+      using theorem1 by blast
+    thus ?thesis
+      by blast
+  qed
+next
+  assume "\<not> (\<exists>de. path de d e)"
+  obtain d' d'e where d'_in_ab: "d' \<in> ab"
+                   and bdd': "[b; d; d']"
+                   and "path d'e d' e"
+    using unreachable_bounded_path [where ab=ab and e=e and b=b and d=d and a=a and S=S and be=be]
+    by (metis (mono_tags, lifting))
+  hence "[a; b; d']" using abd by blast
+  thus ?thesis
+  proof (cases)
+    assume "\<exists>ce. path ce c e"
+    then obtain ce where "path ce c e" by blast
+    have "c \<in> ab"
+      using abc betw_c_in_path path_ab by blast
+    thus ?thesis
+      by (meson abc_bcd_acd bdd')
+  next
+    assume "\<not>(\<exists>ce. path ce c e)"
+    obtain c' c'e where "c'\<in>ab \<and> path c'e c' e \<and> [b; c; c']"
+      using unreachable_bounded_path [where ab=ab and e=e and b=b and d=c and a=a and S=S and be=be]
+    by (metis (mono_tags, lifting))
+    hence "[a; b; c'] \<and> [d; b; c']"
+      using abc dbc by blast
+    hence "[c'; b; a] \<and> [c'; b; d]"
+      using theorem1 by blast
+    thus ?thesis
+      by blast
+  qed
+qed
+
+lemma exist_c'd':
+  assumes abc: "[a;b;c]"
+      and abd: "[a;b;d]"
+      and path_S: "path S a e"
+      and path_be: "path be b e"
+      and S_neq_ab: "S \<noteq> path_of a b"
+    shows "\<exists>c' d'. [a; b; d'] \<and> [c'; b; a] \<and> [c'; b; d'] \<and>
+                   path_ex d' e \<and> path_ex c' e"
+proof (cases "path_ex d e")
+  let ?ab = "path_of a b"
+  have "path_ex a b"
+    using abc abc_abc_neq abc_ex_path by blast
+  hence path_ab: "path ?ab a b" using path_of_ex by simp
+  have "c\<noteq>d" using abc_ac_neq dbc by blast
+  {
+    case True
+    then obtain de where "path de d e"
+      by blast
+    hence "[a;b;d] \<and> d\<in>?ab"
+      using abd betw_c_in_path path_ab by blast
+    thus ?thesis
+    proof (cases "path_ex c e")
+      case True
+      then obtain ce where "path ce c e" by blast
+      have "c \<in> ?ab"
+        using abc betw_c_in_path path_ab by blast
+      thus ?thesis
+        by blast
+    next
+      case False
+      obtain c' c'e where "c'\<in>?ab \<and> path c'e c' e \<and> [b; c; c']"
+        using unreachable_bounded_path [where ab="?ab" and e=e and b=b and d=c and a=a and S=S and be=be]
+      by (metis (mono_tags, lifting))
+      hence "[a; b; c'] \<and> [d; b; c']"
+        using abc dbc by blast
+      hence "[c'; b; a] \<and> [c'; b; d]"
+        using theorem1 by blast
+      thus ?thesis
+        by blast
+    qed
+  } {
+    case False
+    obtain d' d'e where d'_in_ab: "d' \<in> ?ab"
+                     and bdd': "[b; d; d']"
+                     and "path d'e d' e"
+      using unreachable_bounded_path [where ab="?ab" and e=e and b=b and d=d and a=a and S=S and be=be]
+      by (metis (mono_tags, lifting))
+    hence "[a; b; d']" using abd by blast
+    thus ?thesis
+    proof (cases "path_ex c e")
+      case True
+      then obtain ce where "path ce c e" by blast
+      have "c \<in> ?ab"
+        using abc betw_c_in_path path_ab by blast
+      thus ?thesis
+        by (meson abc_bcd_acd bdd')
+    next
+      case False
+      obtain c' c'e where "c'\<in>?ab \<and> path c'e c' e \<and> [b; c; c']"
+        using unreachable_bounded_path [where ab="?ab" and e=e and b=b and d=c and a=a and S=S and be=be]
+      by (metis (mono_tags, lifting))
+      hence "[a; b; c'] \<and> [d; b; c']"
+        using abc dbc by blast
+      hence "[c'; b; a] \<and> [c'; b; d]"
+        using theorem1 by blast
+      thus ?thesis
+        by blast
+    qed
+  }
+qed
+
+
+lemma exist_f'_alt:
+  assumes path_ab: "path ab a b"
+      and path_S: "S \<in> \<P>"
+      and a_inS: "a \<in> S"
+      and e_inS: "e \<in> S"
+      and e_neq_a: "e \<noteq> a"
+      and f_def: "[e; c'; f]" "f\<in>c'e"
+      and S_neq_ab: "S \<noteq> ab"
+      and c'd'_def: "c'\<in>ab \<and> d'\<in>ab
+            \<and> [a; b; d'] \<and> [c'; b; a] \<and> [c'; b; d']
+            \<and> path d'e d' e \<and> path c'e c' e"
+    shows "\<exists>f'. \<exists>f'b. [e; c'; f'] \<and> path f'b f' b"
+proof (cases)
+  assume "\<exists>bf. path bf b f"
+  thus ?thesis
+next
+  assume "\<not>(\<exists>bf. path bf b f)"
+  hence "f \<in> unreach-on c'e from b"
+    using assms(1-5,7-9) abc_abc_neq betw_events eq_paths unreachable_bounded_path_only
+    by metis
+  moreover have "c' \<in> c'e - unreach-on c'e from b"
+    using c'd'_def cross_in_reachable path_ab by blast
+  moreover have "b\<in>\<E> \<and> b\<notin>c'e"
+  ultimately obtain f' where f'_def: "[c'; f; f']" "f'\<in>c'e" "f'\<notin> unreach-on c'e from b" "c'\<noteq>f'" "b\<noteq>f'"
+    using unreachable_set_bounded c'd'_def
+    by (metis DiffE)
+  hence "[e; c'; f']"
+  moreover obtain f'b where "path f'b f' b"
+    by blast
+  ultimately show ?thesis by blast
+qed
+
+lemma exist_f':
+  assumes path_ab: "path ab a b"
+      and path_S: "path S a e"
+      and f_def: "[e; c'; f]"
+      and S_neq_ab: "S \<noteq> ab"
+      and c'd'_def: "[a; b; d']" "[c'; b; a]" "[c'; b; d']"
+            "path d'e d' e" "path c'e c' e"
+    shows "\<exists>f'. [e; c'; f'] \<and> path_ex f' b"
+proof (cases)
+  assume "path_ex b f"
+  thus ?thesis
+    using f_def by blast
+next
+  assume no_path: "\<not>(path_ex b f)"
+  have path_S_2: "S \<in> \<P>" "a \<in> S" "e \<in> S" "e \<noteq> a"
+    using path_S by auto
+  have "f\<in>c'e"
+    using betw_c_in_path f_def c'd'_def(5) by blast
+  have "c'\<in> ab" "d'\<in> ab"
+    using betw_a_in_path betw_c_in_path c'd'_def(1,2) path_ab by blast+
+  have "f \<in> unreach-on c'e from b"
+      abc_abc_neq betw_events eq_paths unreachable_bounded_path_only
+    by metis
+  moreover have "c' \<in> c'e - unreach-on c'e from b"
+  moreover have "b\<in>\<E> \<and> b\<notin>c'e"
+  ultimately obtain f' where f'_def: "[c'; f; f']" "f'\<in>c'e" "f'\<notin> unreach-on c'e from b" "c'\<noteq>f'" "b\<noteq>f'"
+    using unreachable_set_bounded c'd'_def
+    by (metis DiffE)
+  hence "[e; c'; f']"
+  moreover obtain f'b where "path f'b f' b"
+    by blast
+  ultimately show ?thesis by blast
+qed
+
+
+lemma abc_abd_bcdbdc:
+  assumes abc: "[a;b;c]"
+      and abd: "[a;b;d]"
+      and c_neq_d: "c \<noteq> d"
+  shows "[b;c;d] \<or> [b;d;c]"
+proof -
+  have "\<not> [d;b;c]"
+  proof (rule notI)
+    assume dbc: "[d;b;c]"
+    obtain ab where path_ab: "path ab a b"
+      using abc_abc_neq abc_ex_path_unique abc by blast
+    obtain S where path_S: "S \<in> \<P>" 
+               and S_neq_ab: "S \<noteq> ab"
+               and a_inS: "a \<in> S"
+      using ex_crossing_at path_ab
+      by auto
+    have "\<exists>e\<in>S. e \<noteq> a \<and> (\<exists>be\<in>\<P>. path be b e)"
+    proof -
+      have b_notinS: "b \<notin> S" using S_neq_ab a_inS path_S path_ab path_unique by blast
+      then obtain x y z where x_in_unreach: "x \<in> unreach-on S from b"
+                        and y_in_unreach: "y \<in> unreach-on S from b"
+                        and x_neq_y: "x \<noteq> y"
+                        and z_in_reach: "z \<in> S - unreach-on S from b"
+        using two_in_unreach [where Q = S and b = b]
+          in_path_event path_S path_ab a_inS cross_in_reachable
+        by blast
+      then obtain w where w_in_reach: "w \<in> S - unreach-on S from b"
+                      and w_neq_z: "w \<noteq> z"
+          using unreachable_set_bounded [where Q = S and b = b and Qx = z and Qy = x]
+                b_notinS in_path_event path_S path_ab by blast
+      thus ?thesis by (metis DiffD1 b_notinS in_path_event path_S path_ab reachable_path z_in_reach)
+    qed
+    then obtain e be where e_inS: "e \<in> S"
+                       and e_neq_a: "e \<noteq> a"
+                       and path_be: "path be b e"
+      by blast
+    have path_ae: "path S a e"
+      using a_inS e_inS e_neq_a path_S by auto
+    have S_neq_ab_2: "S \<noteq> path_of a b"
+      using S_neq_ab cross_once_notin path_ab path_of_ex by blast
+
+    have "\<exists>c' d'.
+              c'\<in>ab \<and> d'\<in>ab
+            \<and> [a; b; d'] \<and> [c'; b; a] \<and> [c'; b; d']
+            \<and> path_ex d' e \<and> path_ex c' e"
+      using exist_c'd' [where a=a and b=b and c=c and d=d and e=e and be=be and S=S]
+      using assms(1-2) dbc e_neq_a path_ae path_be S_neq_ab_2
+      using abc_sym betw_a_in_path path_ab by blast
+    then obtain c' d' d'e c'e
+      where c'd'_def: "c'\<in>ab \<and> d'\<in>ab
+            \<and> [a; b; d'] \<and> [c'; b; a] \<and> [c'; b; d']
+            \<and> path d'e d' e \<and> path c'e c' e"
+      by blast
+
+    obtain f where f_def: "f\<in>c'e" "[e; c'; f]"
+      using c'd'_def prolong_betw2 by blast
+    then obtain f' f'b where f'_def: "[e; c'; f'] \<and> path f'b f' b"
+      using exist_f'
+        [where e=e and c'=c' and b=b and f=f and S=S and ab=ab and d'=d' and a=a and c'e=c'e]
+      using path_ab path_S a_inS e_inS e_neq_a f_def S_neq_ab c'd'_def
+      by blast
+
+    obtain ae where path_ae: "path ae a e" using a_inS e_inS e_neq_a path_S by blast
+    have tri_aec: "\<triangle> a e c'"
+        by (smt cross_once_notin S_neq_ab a_inS abc abc_abc_neq abc_ex_path
+                e_inS e_neq_a path_S path_ab c'd'_def paths_tri)
+    then obtain h where h_in_f'b: "h \<in> f'b"
+                    and ahe: "[a;h;e]"
+                    and f'bh: "[f'; b; h]"
+        using collinearity2 [where a = a and b = e and c = c' and d = f' and e = b and de = f'b]
+              f'_def c'd'_def f'_def betw_c_in_path by blast
+    have tri_dec: "\<triangle> d' e c'"
+        using cross_once_notin S_neq_ab a_inS abc abc_abc_neq abc_ex_path
+                e_inS e_neq_a path_S path_ab c'd'_def paths_tri by smt
+    then obtain g where g_in_f'b: "g \<in> f'b"
+                    and d'ge: "[d'; g; e]"
+                    and f'bg: "[f'; b; g]"
+        using collinearity2 [where a = d' and b = e and c = c' and d = f' and e = b and de = f'b]
+              f'_def c'd'_def betw_c_in_path by blast
+    have "\<triangle> e a d'" by (smt betw_c_in_path paths_tri2 S_neq_ab a_inS abc_ac_neq
+                           abd e_inS e_neq_a c'd'_def path_S path_ab)
+    thus False
+      using tri_betw_no_path [where a = e and b = a and c = d' and b' = g and a' = b and c' = h]
+        f'_def c'd'_def h_in_f'b g_in_f'b abd d'ge ahe abc_sym
+      by blast
+  qed
+  thus ?thesis
+    by (smt abc abc_abc_neq abc_ex_path abc_sym abd c_neq_d cross_once_notin some_betw)
+qed
+
+
+lemma abc_abd_acdadc:
+  assumes abc: "[a;b;c]"
+      and abd: "[a;b;d]"
+      and c_neq_d: "c \<noteq> d"
+  shows "[a;c;d] \<or> [a;d;c]"
+proof -
+  have cba: "[c;b;a]" using abc_sym abc by simp
+  have dba: "[d;b;a]" using abc_sym abd by simp
+  have dcb_over_cba: "[d;c;b] \<and> [c;b;a] \<Longrightarrow> [d;c;a]" by auto
+  have cdb_over_dba: "[c;d;b] \<and> [d;b;a] \<Longrightarrow> [c;d;a]" by auto
+
+  have bcdbdc: "[b;c;d] \<or> [b;d;c]" using abc abc_abd_bcdbdc abd c_neq_d by auto
+  then have dcb_or_cdb: "[d;c;b] \<or> [c;d;b]" using abc_sym by blast
+  then have "[d;c;a] \<or> [c;d;a]" using abc_only_cba dcb_over_cba cdb_over_dba cba dba by blast
+  thus ?thesis using abc_sym by auto
+qed
+
+lemma abc_acd_bcd:
+  assumes abc: "[a;b;c]"
+      and acd: "[a;c;d]"
+  shows "[b;c;d]"
+proof -
+  have path_abc: "\<exists>Q\<in>\<P>. a \<in> Q \<and> b \<in> Q \<and> c \<in> Q" using abc by (simp add: abc_ex_path)
+  have path_acd: "\<exists>Q\<in>\<P>. a \<in> Q \<and> c \<in> Q \<and> d \<in> Q" using acd by (simp add: abc_ex_path)
+  then have "\<exists>Q\<in>\<P>. b \<in> Q \<and> c \<in> Q \<and> d \<in> Q" using path_abc abc_abc_neq acd cross_once_notin by metis
+  then have bcd3: "[b;c;d] \<or> [b;d;c] \<or> [c;b;d]" by (metis abc abc_only_cba(1,2) acd some_betw2)
+  show ?thesis
+  proof (rule ccontr)
+    assume "\<not> [b;c;d]"
+    then have "[b;d;c] \<or> [c;b;d]" using bcd3 by simp
+    thus False
+    proof (rule disjE)
+      assume "[b;d;c]"
+      then have "[c;d;b]" using abc_sym by simp
+      then have "[a;c;b]" using acd abc_bcd_abd by blast
+      thus False using abc abc_only_cba by blast
+    next
+      assume cbd: "[c;b;d]"
+      have cba: "[c;b;a]" using abc abc_sym by blast
+      have a_neq_d: "a \<noteq> d" using abc_ac_neq acd by auto
+      then have "[c;a;d] \<or> [c;d;a]" using abc_abd_acdadc cbd cba by simp
+      thus False using abc_only_cba acd by blast
+    qed
+  qed
+qed
+
+lemma abd_bcd_abc:
+  assumes abd: "[a;b;d]"
+      and bcd: "[b;c;d]"
+  shows "[a;b;c]"
+proof -
+  have dcb: "[d;c;b]" using abc_sym bcd by simp
+  have dba: "[d;b;a]" using abc_sym abd by simp
+  have "[c;b;a]" using abc_acd_bcd dcb dba by blast
+  thus ?thesis using abc_sym by simp
+qed
+
+lemma abc_acd_abd:
+  assumes abc: "[a;b;c]"
+      and acd: "[a;c;d]"
+    shows "[a;b;d]"
+  using abc abc_acd_bcd acd by blast
+
+lemma abd_acd_abcacb:
+  assumes abd: "[a;b;d]"
+      and acd: "[a;c;d]"
+      and bc: "b\<noteq>c"
+    shows "[a;b;c] \<or> [a;c;b]"
+proof -
+  obtain P where P_def: "P\<in>\<P>" "a\<in>P" "b\<in>P" "d\<in>P"
+    using abd abc_ex_path by blast
+  hence "c\<in>P"
+    using acd abc_abc_neq betw_b_in_path by blast
+  have "\<not>[b;a;c]"
+    using abc_only_cba abd acd by blast
+  thus ?thesis
+qed
+
+lemma abe_ade_bcd_ace:
+  assumes abe: "[a;b;e]"
+      and ade: "[a;d;e]"
+      and bcd: "[b;c;d]"
+    shows "[a;c;e]"
+proof -
+  have abdadb: "[a;b;d] \<or> [a;d;b]"
+    using abc_ac_neq abd_acd_abcacb abe ade bcd by auto
+  thus ?thesis
+  proof
+    assume "[a;b;d]" thus ?thesis
+      by (meson abc_acd_abd abc_sym ade bcd)
+  next assume "[a;d;b]" thus ?thesis
+      by (meson abc_acd_abd abc_sym abe bcd)
+  qed
+qed
+
+
+lemma (in MinkowskiBetweenness) chain3:
+  assumes path_Q: "Q \<in> \<P>"
+      and a_inQ: "a \<in> Q"
+      and b_inQ: "b \<in> Q"
+      and c_inQ: "c \<in> Q"
+      and abc_neq: "a \<noteq> b \<and> a \<noteq> c \<and> b \<noteq> c"
+  shows "ch {a,b,c}"
+proof -
+  have abc_betw: "[a;b;c] \<or> [a;c;b] \<or> [b;a;c]"
+    using assms by (meson in_path_event abc_sym some_betw insert_subset)
+  have ch1: "[a;b;c] \<longrightarrow> ch {a,b,c}"
+    using abc_abc_neq ch_by_ord_def ch_def ord_ordered_loc between_chain by auto
+  have ch2: "[a;c;b] \<longrightarrow> ch {a,c,b}"
+    using abc_abc_neq ch_by_ord_def ch_def ord_ordered_loc between_chain by auto
+  have ch3: "[b;a;c] \<longrightarrow> ch {b,a,c}"
+    using abc_abc_neq ch_by_ord_def ch_def ord_ordered_loc between_chain by auto
+  show ?thesis
+    using abc_betw ch1 ch2 ch3 by (metis insert_commute)
+qed
+
+lemma overlap_chain: "\<lbrakk>[a;b;c]; [b;c;d]\<rbrakk> \<Longrightarrow> ch {a,b,c,d}"
+proof -
+  assume "[a;b;c]" and "[b;c;d]"
+  have "\<exists>f. local_ordering f betw {a,b,c,d}"
+  proof -
+    have f1: "[a;b;d]"
+    have "[a;c;d]"
+    then show ?thesis
+  qed
+  hence "\<exists>f. local_long_ch_by_ord f {a,b,c,d}"
+    apply (simp add: chain_defs eval_nat_numeral)
+      finite.insertI insertE insert_absorb insert_not_empty)
+  thus ?thesis
+    by (simp add: chain_defs)
+qed
+
+
+  assumes path_Q: "Q \<in> \<P>"
+      and inQ: "a \<in> Q" "b \<in> Q" "c \<in> Q" "d \<in> Q"
+      and abcd_neq: "a \<noteq> b \<and> a \<noteq> c \<and> a \<noteq> d \<and> b \<noteq> c \<and> b \<noteq> d \<and> c \<noteq> d"
+    shows "ch {a,b,c,d}"
+proof -
+  obtain a' b' c' where a'_pick: "a' \<in> {a,b,c,d}"
+                    and b'_pick: "b' \<in> {a,b,c,d}"
+                    and c'_pick: "c' \<in> {a,b,c,d}"
+                    and a'b'c': "[a'; b'; c']"
+      using some_betw by (metis inQ(1,2,4) abcd_neq insert_iff path_Q)
+  then obtain d' where d'_neq: "d' \<noteq> a' \<and> d' \<noteq> b' \<and> d' \<noteq> c'"
+                   and d'_pick: "d' \<in> {a,b,c,d}"
+    using insert_iff abcd_neq by metis
+  have all_picked_on_path: "a'\<in>Q" "b'\<in>Q" "c'\<in>Q" "d'\<in>Q"
+    using a'_pick b'_pick c'_pick d'_pick inQ by blast+
+  consider "[d'; a'; b']" | "[a'; d'; b']" | "[a'; b'; d']"
+    using some_betw abc_only_cba all_picked_on_path(1,2,4)
+    by (metis a'b'c' d'_neq path_Q)
+  then have picked_chain: "ch {a',b',c',d'}"
+  proof (cases)
+    assume "[d'; a'; b']"
+    thus ?thesis using a'b'c' overlap_chain by (metis (full_types) insert_commute)
+  next
+    assume a'd'b': "[a'; d'; b']"
+    then have "[d'; b'; c']" using abc_acd_bcd a'b'c' by blast
+    thus ?thesis using a'd'b' overlap_chain by (metis (full_types) insert_commute)
+  next
+    assume a'b'd': "[a'; b'; d']"
+    then have two_cases: "[b'; c'; d'] \<or> [b'; d'; c']" using abc_abd_bcdbdc a'b'c' d'_neq by blast
+    have case1: "[b'; c'; d'] \<Longrightarrow> ?thesis" using a'b'c' overlap_chain by blast
+    have case2: "[b'; d'; c'] \<Longrightarrow> ?thesis"
+        using abc_only_cba abc_acd_bcd a'b'd' overlap_chain
+        by (metis (full_types) insert_commute)
+    show ?thesis using two_cases case1 case2 by blast
+  qed
+  have "{a',b',c',d'} = {a,b,c,d}"
+  proof (rule Set.set_eqI, rule iffI)
+    fix x
+    assume "x \<in> {a',b',c',d'}"
+    thus "x \<in> {a,b,c,d}" using a'_pick b'_pick c'_pick d'_pick by auto
+  next
+    fix x
+    assume x_pick: "x \<in> {a,b,c,d}"
+    have "a' \<noteq> b' \<and> a' \<noteq> c' \<and> a' \<noteq> d' \<and> b' \<noteq> c' \<and> c' \<noteq> d'"
+        using a'b'c' abc_abc_neq d'_neq by blast
+    thus "x \<in> {a',b',c',d'}"
+        using a'_pick b'_pick c'_pick d'_pick x_pick d'_neq by auto
+  qed
+  thus ?thesis using picked_chain by simp
+qed
+
+  assumes path_Q: "Q \<in> \<P>"
+      and abcd_inQ: "{a,b,c,d} \<subseteq> Q"
+      and abcd_distinct: "card {a,b,c,d} = 4"
+    shows "ch {a,b,c,d}"
+proof -
+  have abcd_neq: "a \<noteq> b \<and> a \<noteq> c \<and> a \<noteq> d \<and> b \<noteq> c \<and> b \<noteq> d \<and> c \<noteq> d"
+    using abcd_distinct numeral_3_eq_3
+    by (smt (z3) card_1_singleton_iff card_2_iff card_3_dist insert_absorb2 insert_commute numeral_1_eq_Suc_0 numeral_eq_iff semiring_norm(85) semiring_norm(88) verit_eq_simplify(8))
+  have inQ: "a \<in> Q" "b \<in> Q" "c \<in> Q" "d \<in> Q"
+    using abcd_inQ by auto
+  show ?thesis using chain4[OF assms(1) inQ] abcd_neq by simp
+qed
+
+
+
+
+section "Interlude - Chains, segments, rays"
+
+context MinkowskiBetweenness begin
+
+subsection "General results for chains"
+
+lemma inf_chain_is_long:
+  assumes "[f\<leadsto>X|x..]"
+  shows "local_long_ch_by_ord f X \<and> f 0 = x \<and> infinite X"
+  using chain_defs by (metis assms infinite_chain_alt)
+
+lemma long_inf_chain_is_semifin:
+  assumes "local_long_ch_by_ord f X \<and> infinite X"
+  shows "\<exists> x. [f\<leadsto>X|x..]"
+  using assms infinite_chain_with_def chain_alts by auto
+
+lemma endpoint_in_semifin:
+  assumes  "[f\<leadsto>X|x..]"
+  shows "x\<in>X"
+  using zero_into_ordering_loc by (metis assms empty_iff inf_chain_is_long local_long_ch_by_ord_alt)
+
+
+corollary all_aligned_on_fin_chain:
+  assumes "[f\<leadsto>X]" "finite X"
+  and x: "x\<in>X" and y: "y\<in>X" and z:"z\<in>X" and xy: "x\<noteq>y" and xz: "x\<noteq>z" and yz: "y\<noteq>z" 
+  shows "[x;y;z] \<or> [x;z;y] \<or> [y;x;z]"
+proof -
+  have "card X \<ge> 3" using assms(2-5) three_subset[OF xy xz yz] by blast
+  hence 1: "local_long_ch_by_ord f X"
+    using assms(1,3-) chain_defs by (metis short_ch_alt(1) short_ch_card(1) short_ch_card_2)
+  obtain i j k where ijk: "x=f i" "i<card X" "y=f j" "j<card X" "z=f k" "k<card X"
+    using obtain_index_fin_chain assms(1-5) by metis
+  have 2: "[f i;f j;f k]" if "i<j \<and> j<k" "k<card X" for i j k
+    using assms order_finite_chain2 that(1,2) by auto
+  consider "i<j \<and> j<k"|"i<k \<and> k<j"|"j<i \<and> i<k"|"i>j \<and> j>k"|"i>k \<and> k>j"|"j>i \<and> i>k"
+    using xy xz yz ijk(1,3,5) by (metis linorder_neqE_nat)
+  thus ?thesis
+    apply cases using 2 abc_sym ijk by presburger+
+qed
+
+lemma (in MinkowskiPrimitive) card2_either_elt1_or_elt2:
+  assumes "card X = 2" and "x\<in>X" and "y\<in>X" and "x\<noteq>y"
+    and "z\<in>X" and "z\<noteq>x"
+  shows "z=y"
+by (metis assms card_2_iff')
+
+lemma get_fin_long_ch_bounds:
+  assumes "local_long_ch_by_ord f X"
+    and "finite X"
+  shows "\<exists>x\<in>X. \<exists>y\<in>X. \<exists>z\<in>X. [f\<leadsto>X|x..y..z]"
+proof (rule bexI)+
+  show 1:"[f\<leadsto>X|f 0..f 1..f (card X - 1)]"
+    using assms unfolding finite_long_chain_with_def using index_injective
+    by (auto simp: finite_chain_with_alt local_long_ch_by_ord_def local_ordering_def)
+  show "f (card X - 1) \<in> X"
+    using 1 points_in_long_chain(3) by auto
+  show "f 0 \<in> X" "f 1 \<in> X"
+    using "1" points_in_long_chain by auto
+qed
+
+lemma get_fin_long_ch_bounds2:
+  assumes "local_long_ch_by_ord f X"
+    and "finite X"
+  obtains x y z n\<^sub>x n\<^sub>y n\<^sub>z
+  where "x\<in>X" "y\<in>X" "z\<in>X" "[f\<leadsto>X|x..y..z]" "f n\<^sub>x = x" "f n\<^sub>y = y" "f n\<^sub>z = z"
+  using get_fin_long_ch_bounds assms
+  by (meson finite_chain_with_def finite_long_chain_with_alt index_middle_element)
+
+lemma long_ch_card_ge3:
+  assumes "ch_by_ord f X" "finite X"
+  shows "local_long_ch_by_ord f X \<longleftrightarrow> card X \<ge> 3"
+  using assms ch_by_ord_def local_long_ch_by_ord_def short_ch_card(1) by auto
+
+lemma fin_ch_betw2:
+  assumes "[f\<leadsto>X|a..c]" and "b\<in>X"
+  obtains "b=a"|"b=c"|"[a;b;c]"
+  by (metis assms finite_long_chain_with_alt finite_long_chain_with_def)
+
+lemma chain_bounds_unique:
+  assumes "[f\<leadsto>X|a..c]" "[g\<leadsto>X|x..z]"
+  shows "(a=x \<and> c=z) \<or> (a=z \<and> c=x)"
+  using assms points_in_chain abc_abc_neq abc_bcd_acd abc_sym
+  by (metis (full_types) fin_ch_betw2 )
+
+
+
+subsection "Results for segments, rays and (sub)chains"
+
+
+context MinkowskiBetweenness begin
+
+lemma inside_not_bound:
+  assumes "[f\<leadsto>X|a..c]"
+      and "j<card X"
+    shows "j>0 \<Longrightarrow> f j \<noteq> a" "j<card X - 1 \<Longrightarrow> f j \<noteq> c"
+  using index_injective2 assms finite_chain_def finite_chain_with_def apply metis
+  using index_injective2 assms finite_chain_def finite_chain_with_def by auto
+
+
+lemma (in MinkowskiBetweenness) order_finite_chain_indices:
+  assumes chX: "local_long_ch_by_ord f X" "finite X"
+    and abc: "[a;b;c]"
+    and ijk: "f i = a" "f j = b" "f k = c" "i<card X" "j<card X" "k<card X"
+  shows "i<j \<and> j<k \<or> k<j \<and> j<i"
+  by (metis abc_abc_neq abc_only_cba(1,2,3) assms bot_nat_0.extremum linorder_neqE_nat order_finite_chain)
+
+
+lemma order_finite_chain_indices2:
+  assumes "[f\<leadsto>X|a..c]"
+    and "f j = b" "j<card X"
+  obtains "0<j \<and> j<(card X - 1)"|"j=(card X - 1) \<and> b=c"|"j=0 \<and> b=a"
+proof -
+  have finX: "finite X"
+    using assms(3) card.infinite gr_implies_not0 by blast
+  have "b\<in>X"
+    using assms unfolding chain_defs local_ordering_def
+    by (metis One_nat_def card_2_iff insertI1 insert_commute less_2_cases)
+  have a: "f 0 = a" and c: "f (card X - 1) = c"
+    using assms(1) finite_chain_with_def by auto
+
+  have "0<j \<and> j<(card X - 1) \<or> j=(card X - 1) \<and> b=c \<or> j=0 \<and> b=a"
+  proof (cases "short_ch_by_ord f X")
+    case True
+    hence "X={a,c}"
+      using a assms(1) first_neq_last points_in_chain short_ch_by_ord_def by fastforce
+    then consider "b=a"|"b=c"
+    thus ?thesis
+      apply cases using assms(2,3) a c le_less by fastforce+
+  next
+    case False
+    hence chX: "local_long_ch_by_ord f X"
+      using assms(1) unfolding finite_chain_with_alt using chain_defs by meson
+    consider "[a;b;c]"|"b=a"|"b=c"
+    thus ?thesis apply cases
+      using a c assms chX finX index_injective linorder_neqE_nat inside_not_bound(2) by metis
+  qed
+  thus ?thesis using that by blast
+qed
+
+
+lemma index_bij_betw_subset:
+  assumes chX: "[f\<leadsto>X|a..b..c]" "f i = b" "card X > i"
+  shows "bij_betw f {0<..<i} {e\<in>X. [a;e;b]}"
+proof (unfold bij_betw_def, intro conjI)
+  have chX2: "local_long_ch_by_ord f X" "finite X"
+    using assms unfolding chain_defs apply (metis chX(1)
+      abc_ac_neq fin_ch_betw points_in_long_chain(1,3) short_ch_alt(1) short_ch_path)
+    using assms unfolding chain_defs by simp
+  from index_bij_betw[OF this] have 1: "bij_betw f {0..<card X} X" .
+  have "{0<..<i} \<subset> {0..<card X}"
+    using assms(1,3) unfolding chain_defs by fastforce
+  show "inj_on f {0<..<i}"
+    using 1 assms(3) unfolding bij_betw_def
+    by (smt (z3) atLeastLessThan_empty_iff2 atLeastLessThan_iff empty_iff greaterThanLessThan_iff
+      inj_on_def less_or_eq_imp_le)
+  show "f ` {0<..<i} = {e \<in> X. [a;e;b]}"
+  proof
+    show "f ` {0<..<i} \<subseteq> {e \<in> X. [a;e;b]}"
+    proof (auto simp add: image_subset_iff conjI)
+      fix j assume asm: "j>0" "j<i"
+      hence "j < card X" using chX(3) less_trans by blast
+      thus "f j \<in> X" "[a;f j;b]"
+        using chX(1) asm(1) unfolding chain_defs local_ordering_def
+        apply (metis chX2(1) chX(1) fin_chain_card_geq_2 short_ch_card_2 short_xor_long(2)
+          le_antisym set_le_two finite_chain_def finite_chain_with_def finite_long_chain_with_alt)
+        using chX asm chX2(1) order_finite_chain unfolding chain_defs local_ordering_def by force
+    qed
+    show "{e \<in> X. [a;e;b]} \<subseteq> f ` {0<..<i}"
+    proof (auto)
+      fix e assume e: "e \<in> X" "[a;e;b]"
+      obtain j where "f j = e" "j<card X"
+        using e chX2 unfolding chain_defs local_ordering_def by blast
+      show "e \<in> f ` {0<..<i}"
+      proof
+        have "0<j\<and>j<i \<or> i<j\<and>j<0"
+          using order_finite_chain_indices chX chain_defs
+        hence "j<i" by simp
+        thus "j\<in>{0<..<i}" "e = f j"
+      qed
+    qed
+  qed
+qed
+
+
+lemma bij_betw_extend:
+  assumes "bij_betw f A B"
+    and "f a = b" "a\<notin>A" "b\<notin>B"
+  shows "bij_betw f (insert a A) (insert b B)"
+  by (smt (verit, ccfv_SIG) assms(1) assms(2) assms(4) bij_betwI' bij_betw_iff_bijections insert_iff)
+
+
+lemma insert_iff2:
+  assumes "a\<in>X" shows "insert a {x\<in>X. P x} = {x\<in>X. P x \<or> x=a}"
+  using insert_iff assms by blast
+
+
+lemma index_bij_betw_subset2:
+  assumes chX: "[f\<leadsto>X|a..b..c]" "f i = b" "card X > i"
+  shows "bij_betw f {0..i} {e\<in>X. [a;e;b]\<or>a=e\<or>b=e}"
+proof -
+  have "bij_betw f {0<..<i} {e\<in>X. [a;e;b]}" using index_bij_betw_subset[OF assms] .
+  moreover have "0\<notin>{0<..<i}" "i\<notin>{0<..<i}" by simp+
+  moreover have "a\<notin>{e\<in>X. [a;e;b]}" "b\<notin>{e\<in>X. [a;e;b]}" using abc_abc_neq by auto+
+  moreover have "f 0 = a" "f i = b" using assms unfolding chain_defs by simp+
+  moreover have "(insert b (insert a {e\<in>X. [a;e;b]})) = {e\<in>X. [a;e;b]\<or>a=e\<or>b=e}"
+  proof -
+    have 1: "(insert a {e\<in>X. [a;e;b]}) = {e\<in>X. [a;e;b]\<or>a=e}"
+      using insert_iff2[OF points_in_long_chain(1)[OF chX(1)]] by auto
+    have "b\<notin>{e\<in>X. [a;e;b]\<or>a=e}"
+      using abc_abc_neq chX(1) fin_ch_betw by fastforce
+    thus "(insert b (insert a {e\<in>X. [a;e;b]})) = {e\<in>X. [a;e;b]\<or>a=e\<or>b=e}"
+      using 1 insert_iff2 points_in_long_chain(2)[OF chX(1)] by auto
+  qed
+  moreover have "(insert i (insert 0 {0<..<i})) = {0..i}" using image_Suc_lessThan by auto
+  ultimately show ?thesis using bij_betw_extend[of f]
+    by (metis (no_types, lifting) chX(1) finite_long_chain_with_def insert_iff)
+qed
+
+
+lemma chain_shortening:
+  assumes "[f\<leadsto>X|a..b..c]"
+  shows "[f \<leadsto> {e\<in>X. [a;e;b] \<or> e=a \<or> e=b} |a..b]"
+proof (unfold finite_chain_with_def finite_chain_def, (intro conjI))
+
+  show "f 0 = a" using assms unfolding chain_defs by simp
+  have chX: "local_long_ch_by_ord f X"
+    using assms first_neq_last points_in_long_chain(1,3) short_ch_card(1) chain_defs
+    by (metis card2_either_elt1_or_elt2)
+  have finX: "finite X"
+    by (meson assms chain_defs)
+
+  let ?Y = "{e\<in>X. [a;e;b] \<or> e=a \<or> e=b}"
+  show finY: "finite ?Y"
+    using assms finite_chain_def finite_chain_with_def finite_long_chain_with_alt by auto
+  have "a\<noteq>b" "a\<in>?Y" "b\<in>?Y" "c\<notin>?Y"
+    using assms finite_long_chain_with_def apply simp
+    using assms points_in_long_chain(1,2) apply auto[1]
+    using assms points_in_long_chain(2) apply auto[1]
+    using abc_ac_neq abc_only_cba(2) assms fin_ch_betw by fastforce
+  from this(1-3) finY have cardY: "card ?Y \<ge> 2"
+    by (metis (no_types, lifting) card_le_Suc0_iff_eq not_less_eq_eq numeral_2_eq_2)
+
+  obtain i where i: "i<card X" "f i=b"
+    using assms unfolding chain_defs local_ordering_def using Suc_leI diff_le_self by force
+  hence "i<card X - 1"
+    using assms unfolding chain_defs
+    by (metis Suc_lessI diff_Suc_Suc diff_Suc_eq_diff_pred minus_nat.diff_0 zero_less_diff)
+  have card01: "i+1 = card {0..i}" by simp
+  have bb: "bij_betw f {0..i} ?Y" using index_bij_betw_subset2[OF assms i(2,1)] Collect_cong by smt
+  hence i_eq: "i = card ?Y - 1" using bij_betw_same_card by force
+  thus "f (card ?Y - 1) = b" using i(2) by simp
+
+  obtain P where P_def: "P\<in>\<P>" "X\<subseteq>P" "\<And>Q. Q\<in>\<P> \<and> X\<subseteq>Q \<Longrightarrow> Q=P"
+    using fin_chain_on_path[of f X] assms unfolding chain_defs by force
+  have "a\<in>P" "b\<in>P" using P_def by (meson assms in_mono points_in_long_chain)+
+
+  thus "[f\<leadsto>?Y]"
+  proof (cases)
+    case eq_1
+    hence "{0..i}={0,1}" by auto
+    hence "bij_betw f {0,1} ?Y" using bb by auto
+    from bij_betw_imp_surj_on[OF this] show ?thesis
+  next
+    case gt_1
+    have 1: "3\<le>card ?Y" using gt_1 cardY i_eq by linarith
+    {
+      fix n assume "n < card ?Y"
+      hence "n<card X"
+      have "f n \<in> ?Y"
+      proof (simp, intro conjI)
+        show "f n \<in> X"
+        consider "0<n \<and> n<card ?Y - 1"|"n=card ?Y - 1"|"n=0"
+        thus "[a;f n;b] \<or> f n = a \<or> f n = b"
+      qed
+    } moreover {
+      fix x assume "x\<in>?Y" hence "x\<in>X" by simp
+      obtain i\<^sub>x where i\<^sub>x: "i\<^sub>x < card X" "f i\<^sub>x = x"
+      have "i\<^sub>x < card ?Y"
+      proof -
+        hence "(i\<^sub>x<i \<or> i\<^sub>x<0) \<or> i\<^sub>x=0 \<or> i\<^sub>x=i"
+          apply cases
+          by (metis chX finX i(2) i\<^sub>x index_injective linorder_neqE_nat)
+        thus ?thesis using gt_1 i_eq by linarith
+      qed
+      hence "\<exists>n. n < card ?Y \<and> f n = x" using i\<^sub>x(2) by blast
+    } moreover {
+      fix n assume "Suc (Suc n) < card ?Y"
+      hence "Suc (Suc n) < card X"
+        using i(1) i_eq by linarith
+      hence "[f n; f (Suc n); f (Suc (Suc n))]"
+        using assms unfolding chain_defs local_ordering_def by auto
+    }
+    ultimately have 2: "local_ordering f betw ?Y"
+      by (simp add: local_ordering_def finY)
+    show ?thesis using 1 2 chain_defs by blast
+  qed
+qed
+
+
+corollary ord_fin_ch_right:
+  assumes "[f\<leadsto>X|a..f i..c]" "j\<ge>i" "j<card X"
+  shows "[f i;f j;c] \<or> j = card X - 1 \<or> j = i"
+proof -
+  consider (inter)"j>i \<and> j<card X - 1"|(left)"j=i"|(right)"j=card X - 1"
+    using assms(3,2) by linarith
+  thus ?thesis
+    apply cases
+    using assms(1) chain_defs order_finite_chain2 apply force
+    by simp+
+qed
+
+lemma f_img_is_subset:
+  assumes "[f\<leadsto>X|(f 0) ..]" "i\<ge>0" "j>i" "Y=f`{i..j}"
+  shows "Y\<subseteq>X"
+proof
+  fix x assume "x\<in>Y"
+  then obtain n where "n\<in>{i..j}" "f n = x"
+    using assms(4) by blast
+  hence "f n \<in> X"
+    by (metis local_ordering_def assms(1) inf_chain_is_long local_long_ch_by_ord_def)
+  thus "x\<in>X"
+qed
+
+
+lemma i_le_j_events_neq:
+  assumes "[f\<leadsto>X|a..b..c]"
+    and "i<j" "j<card X"
+  shows "f i \<noteq> f j"
+  using chain_defs by (meson assms index_injective2)
+
+lemma indices_neq_imp_events_neq:
+  assumes "[f\<leadsto>X|a..b..c]"
+      and "i\<noteq>j" "j<card X" "i<card X"
+    shows "f i \<noteq> f j"
+  by (metis assms i_le_j_events_neq less_linear)
+
+
+context MinkowskiSpacetime begin
+
+lemma bound_on_path:
+  assumes "Q\<in>\<P>" "[f\<leadsto>X|(f 0)..]" "X\<subseteq>Q" "is_bound_f b X f"
+  shows "b\<in>Q"
+proof -
+  obtain a c where "a\<in>X" "c\<in>X" "[a;c;b]"
+    using assms(4)
+    by (metis local_ordering_def inf_chain_is_long is_bound_f_def local_long_ch_by_ord_def zero_less_one)
+  thus ?thesis
+    using abc_abc_neq assms(1) assms(3) betw_c_in_path by blast
+qed
+
+lemma pro_basis_change:
+  assumes "[a;b;c]"
+  shows "prolongation a c = prolongation b c" (is "?ac=?bc")
+proof
+  show "?ac \<subseteq> ?bc"
+  proof
+    fix x assume "x\<in>?ac"
+    hence "[a;c;x]"
+      by (simp add: pro_betw)
+    hence "[b;c;x]"
+      using assms abc_acd_bcd by blast
+    thus "x\<in>?bc"
+      using abc_abc_neq pro_betw by blast
+  qed
+  show "?bc \<subseteq> ?ac"
+  proof
+    fix x assume "x\<in>?bc"
+    hence "[b;c;x]"
+      by (simp add: pro_betw)
+    hence "[a;c;x]"
+      using assms abc_bcd_acd by blast
+    thus "x\<in>?ac"
+      using abc_abc_neq pro_betw by blast
+  qed
+qed
+
+lemma adjoining_segs_exclusive:
+  assumes "[a;b;c]"
+  shows "segment a b \<inter> segment b c = {}"
+proof (cases)
+  assume "segment a b = {}" thus ?thesis by blast
+next
+  assume "segment a b \<noteq> {}"
+  have "x\<in>segment a b \<longrightarrow> x\<notin>segment b c" for x
+  proof
+    fix x assume "x\<in>segment a b"
+    hence "[a;x;b]" by (simp add: seg_betw)
+    have "\<not>[b;x;c]"
+    thus "x\<notin>segment b c"
+      by (simp add: seg_betw)
+  qed
+  thus ?thesis by blast
+qed
+
+
+section "3.6 Order on a path - Theorems 10 and 11"
+
+context MinkowskiSpacetime begin
+
+
+lemma (in MinkowskiBetweenness) two_event_chain:
+  assumes finiteX: "finite X"
+      and path_Q: "Q \<in> \<P>"
+      and events_X: "X \<subseteq> Q"
+      and card_X: "card X = 2"
+    shows "ch X"
+proof -
+  obtain a b where X_is: "X={a,b}"
+    using card_le_Suc_iff numeral_2_eq_2
+    by (meson card_2_iff card_X)
+  have no_c: "\<not>(\<exists>c\<in>{a,b}. c\<noteq>a \<and> c\<noteq>b)"
+    by blast
+  have "a\<noteq>b \<and> a\<in>Q & b\<in>Q"
+    using X_is card_X events_X by force
+  hence "short_ch {a,b}"
+    using path_Q no_c by (meson short_ch_intros(2))
+  thus ?thesis
+    by (simp add: X_is chain_defs)
+qed
+
+lemma (in MinkowskiBetweenness) three_event_chain:
+  assumes finiteX: "finite X"
+      and path_Q: "Q \<in> \<P>"
+      and events_X: "X \<subseteq> Q"
+      and card_X: "card X = 3"
+    shows "ch X"
+proof -
+  obtain a b c where X_is: "X={a,b,c}"
+    using numeral_3_eq_3 card_X by (metis card_Suc_eq)
+  then have all_neq: "a\<noteq>b \<and> a\<noteq>c \<and> b\<noteq>c"
+    using card_X numeral_2_eq_2 numeral_3_eq_3
+    by (metis Suc_n_not_le_n insert_absorb2 insert_commute set_le_two)
+  have in_path: "a\<in>Q \<and> b\<in>Q \<and> c\<in>Q"
+    using X_is events_X by blast
+  hence "[a;b;c] \<or> [b;c;a] \<or> [c;a;b]"
+    using some_betw all_neq path_Q by auto
+  thus "ch X"
+    using between_chain X_is all_neq chain3 in_path path_Q by auto
+qed
+
+
+  assumes long_ch_Y: "[f\<leadsto>Y|a\<^sub>1..a..a\<^sub>n]"
+      and bY: "[b; a\<^sub>1; a\<^sub>n]"
+    fixes g defines g_def: "g \<equiv> (\<lambda>j::nat. if j\<ge>1 then f (j-1) else b)"
+    shows "[g\<leadsto>(insert b Y)|b .. a\<^sub>1 .. a\<^sub>n]"
+proof -
+  let ?X = "insert b Y"
+  have ord_fY: "local_ordering f betw Y" using long_ch_Y finite_long_chain_with_card chain_defs
+    by (meson long_ch_card_ge3)
+  have "b\<notin>Y"
+    using abc_ac_neq abc_only_cba(1) assms by (metis fin_ch_betw2 finite_long_chain_with_alt)
+  have bound_indices: "f 0 = a\<^sub>1 \<and> f (card Y - 1) = a\<^sub>n"
+    using long_ch_Y by (simp add: chain_defs)
+  have fin_Y: "card Y \<ge> 3"
+    using finite_long_chain_with_def long_ch_Y numeral_2_eq_2 points_in_long_chain
+    by (metis abc_abc_neq bY card2_either_elt1_or_elt2 fin_chain_card_geq_2 leI le_less_Suc_eq numeral_3_eq_3)
+  hence num_ord: "0 \<le> (0::nat) \<and> 0<(1::nat) \<and> 1 < card Y - 1 \<and> card Y - 1 < card Y"
+    by linarith
+  hence "[a\<^sub>1; f 1; a\<^sub>n]"
+    using order_finite_chain chain_defs long_ch_Y
+    by auto

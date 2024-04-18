@@ -1,0 +1,128 @@
+theory Termination
+  imports "../Dict_Construction"
+begin
+
+
+fun f :: "nat \<Rightarrow> nat" where
+"f 0 = 0" |
+"f (Suc n) = f n"
+
+lemma [code]: "f x = f x" ..
+
+
+
+fun sum_list :: "'a::{plus,zero} list \<Rightarrow> 'a" where
+"sum_list [] = 0" |
+"sum_list (x # xs) = x + sum_list xs"
+
+
+function sum_list' where
+"sum_list' d_plus d_zero [] = Groups_zero__class_zero__field d_zero" |
+"sum_list' d_plus d_zero (x # xs) = Groups_plus__class_plus__field d_plus x (sum_list' d_plus d_zero xs)"
+by pat_completeness auto
+
+
+thm sum_list'_rel.intros
+
+
+thm sum_list_rel.intros
+
+
+context
+  notes [[show_sorts]]
+begin
+
+term sum_list_rel
+
+term sum_list'_rel
+
+end
+
+
+thm wfP_simulate_simple[where
+  r = sum_list_rel and
+  r' = sum_list'_rel and
+  g = "map (\<lambda>_. undefined) \<circ> snd \<circ> snd"]
+
+
+termination sum_list'
+proof -
+  have "wfP sum_list'_rel"
+  proof (rule wfP_simulate_simple)
+    show "wfP sum_list_rel"
+      apply (rule accp_wfPI)
+      done
+
+    define g :: "'b Groups_plus__dict \<times> 'b Groups_zero__dict \<times> 'b list \<Rightarrow> 'c::{plus,zero} list" where
+      "g = map (\<lambda>_. undefined) \<circ> snd \<circ> snd"
+
+    show "sum_list_rel (g x) (g y)" if "sum_list'_rel x y" for x y
+      using that
+      proof (induction x y rule: sum_list'_rel.induct)
+        case (1 d_plus d_zero x xs)
+        show ?case
+          apply (simp only: g_def comp_apply snd_conv list.map)
+          apply (rule sum_list_rel.intros(1))
+          done
+      qed
+  qed
+
+  then show "\<forall>x. sum_list'_dom x"
+    by (rule wfP_implies_dom)
+qed
+
+
+experiment
+begin
+
+termination sum_list'
+  done
+
+end
+
+
+locale foo =
+  fixes A :: "nat"
+  assumes "A > 0"
+begin
+
+fun f where
+"f 0 = A" |
+"f (Suc n) = Suc (f n)"
+
+lemma f_total: "wfP f_rel"
+apply (rule accp_wfPI)
+done
+
+end
+
+interpretation dummy: foo 1 by standard simp
+
+function f' where
+"f' A 0 = A" |
+"f' A (Suc n) = Suc (f' A n)"
+by pat_completeness auto
+
+termination f'
+  apply (rule wfP_implies_dom)
+  apply (rule wfP_simulate_simple[where g = "snd"])
+   apply (rule dummy.f_total)
+  subgoal for x y
+    apply (induction x y rule: f'_rel.induct)
+    subgoal
+     apply (simp only: snd_conv)
+     apply (rule dummy.f_rel.intros)
+     done
+    done
+  done
+
+
+experiment
+begin
+
+termination f'
+  done
+
+end
+
+end

@@ -1,0 +1,125 @@
+theory "Axioms" 
+imports
+  Ordinary_Differential_Equations.ODE_Analysis
+  "Ids"
+  "Lib"
+  "Syntax"
+  "Denotational_Semantics"
+begin context ids begin
+
+named_theorems axiom_defs "Axiom definitions"
+
+definition assign_axiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"assign_axiom \<equiv>
+  ([[vid1 := ($f fid1 empty)]] (Prop vid1 (singleton (Var vid1))))
+    \<leftrightarrow> Prop vid1 (singleton ($f fid1 empty))"
+
+definition diff_assign_axiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"diff_assign_axiom \<equiv>
+  ([[DiffAssign vid1  ($f fid1 empty)]] (Prop vid1 (singleton (DiffVar vid1))))
+    \<leftrightarrow> Prop vid1 (singleton ($f fid1 empty))"
+
+definition loop_iterate_axiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"loop_iterate_axiom \<equiv> ([[$\<alpha> vid1**]]Predicational pid1)
+  \<leftrightarrow> ((Predicational pid1) && ([[$\<alpha> vid1]][[$\<alpha> vid1**]]Predicational pid1))"
+
+definition test_axiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"test_axiom \<equiv>
+  ([[?($\<phi> vid2 empty)]]$\<phi> vid1 empty) \<leftrightarrow> (($\<phi> vid2 empty) \<rightarrow> ($\<phi> vid1 empty))"
+
+definition box_axiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"box_axiom \<equiv> (\<langle>$\<alpha> vid1\<rangle>Predicational pid1) \<leftrightarrow> !([[$\<alpha> vid1]]!(Predicational pid1))"
+
+definition choice_axiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"choice_axiom \<equiv> ([[$\<alpha> vid1 \<union>\<union> $\<alpha> vid2]]Predicational pid1)
+  \<leftrightarrow> (([[$\<alpha> vid1]]Predicational pid1) && ([[$\<alpha> vid2]]Predicational pid1))"
+
+definition compose_axiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"compose_axiom \<equiv> ([[$\<alpha> vid1 ;; $\<alpha> vid2]]Predicational pid1) \<leftrightarrow> 
+  ([[$\<alpha> vid1]][[ $\<alpha> vid2]]Predicational pid1)"
+  
+definition Kaxiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"Kaxiom \<equiv> ([[$\<alpha> vid1]]((Predicational pid1) \<rightarrow> (Predicational pid2)))
+  \<rightarrow> ([[$\<alpha> vid1]]Predicational pid1) \<rightarrow> ([[$\<alpha> vid1]]Predicational pid2)"
+
+
+definition Iaxiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"Iaxiom \<equiv> 
+([[($\<alpha> vid1)**]](Predicational pid1 \<rightarrow> ([[$\<alpha> vid1]]Predicational pid1)))
+  \<rightarrow>((Predicational pid1 \<rightarrow> ([[($\<alpha> vid1)**]]Predicational pid1)))"
+
+definition Vaxiom :: "('sf, 'sc, 'sz) formula"
+where [axiom_defs]:"Vaxiom \<equiv> ($\<phi> vid1 empty) \<rightarrow> ([[$\<alpha> vid1]]($\<phi> vid1 empty))"
+
+theorem test_valid: "valid test_axiom"
+  by (auto simp add: valid_def test_axiom_def)  
+
+lemma assign_lem1:
+"dterm_sem I (if i = vid1 then Var vid1 else (Const 0))
+                   (vec_lambda (\<lambda>y. if vid1 = y then Functions I fid1
+  (vec_lambda (\<lambda>i. dterm_sem I (empty i) \<nu>)) else  vec_nth (fst \<nu>) y), snd \<nu>)
+=
+ dterm_sem I (if i = vid1 then $f fid1 empty else (Const 0)) \<nu>"
+  by (cases "i = vid1") (auto simp: proj_sing1)
+
+lemma diff_assign_lem1:
+"dterm_sem I (if i = vid1 then DiffVar vid1 else (Const 0))
+                   (fst \<nu>, vec_lambda (\<lambda>y. if vid1 = y then Functions I fid1 (vec_lambda (\<lambda>i. dterm_sem I (empty i) \<nu>)) else  vec_nth (snd \<nu>) y))
+=
+ dterm_sem I (if i = vid1 then $f fid1 empty else (Const 0)) \<nu>
+"
+  by (cases "i = vid1") (auto simp: proj_sing1)
+
+theorem assign_valid: "valid assign_axiom"
+  unfolding  valid_def assign_axiom_def
+  by (simp add: assign_lem1) 
+
+theorem diff_assign_valid: "valid diff_assign_axiom"
+  unfolding  valid_def diff_assign_axiom_def
+  by (simp add: diff_assign_lem1) 
+
+lemma mem_to_nonempty: "\<omega> \<in> S \<Longrightarrow> (S \<noteq> {})"
+  by (auto)
+
+lemma loop_forward: "\<nu> \<in> fml_sem I ([[$\<alpha> id1**]]Predicational pid1)
+  \<longrightarrow> \<nu> \<in> fml_sem I (Predicational pid1&&[[$\<alpha> id1]][[$\<alpha> id1**]]Predicational pid1)"
+  by (cases \<nu>) (auto intro: converse_rtrancl_into_rtrancl simp add: box_sem)
+
+lemma loop_backward:
+ "\<nu> \<in> fml_sem I (Predicational pid1 && [[$\<alpha> id1]][[$\<alpha> id1**]]Predicational pid1)
+  \<longrightarrow> \<nu> \<in> fml_sem I ([[$\<alpha> id1**]]Predicational pid1)"
+  by (auto elim: converse_rtranclE simp add: box_sem)
+
+theorem loop_valid: "valid loop_iterate_axiom"
+  apply(simp only: valid_def loop_iterate_axiom_def)
+  apply(simp only: iff_sem)
+  apply(simp only: HOL.iff_conv_conj_imp)
+  apply(rule allI | rule impI)+
+  apply(rule conjI)
+  apply(rule loop_forward)
+  apply(rule loop_backward)
+done
+
+theorem box_valid: "valid box_axiom"
+  unfolding valid_def box_axiom_def by(auto)
+
+theorem choice_valid: "valid choice_axiom"
+  unfolding valid_def choice_axiom_def by (auto)
+
+theorem compose_valid: "valid compose_axiom"
+  unfolding valid_def compose_axiom_def by (auto)
+    
+theorem K_valid: "valid Kaxiom"
+  unfolding valid_def Kaxiom_def by (auto)
+
+lemma I_axiom_lemma:
+  fixes I::"('sf,'sc,'sz) interp" and \<nu>
+  assumes "is_interp I"
+  assumes IS:"\<nu> \<in> fml_sem I ([[$\<alpha> vid1**]](Predicational pid1 \<rightarrow>
+                            [[$\<alpha> vid1]]Predicational pid1))"
+  assumes BC:"\<nu> \<in> fml_sem I (Predicational pid1)"
+  shows "\<nu> \<in> fml_sem I ([[$\<alpha> vid1**]](Predicational pid1))"
+proof -
+  have IS':"\<And>\<nu>2. (\<nu>, \<nu>2) \<in> (prog_sem I ($\<alpha> vid1))\<^sup>* \<Longrightarrow> \<nu>2 \<in> fml_sem I (Predicational pid1 \<rightarrow> [[$\<alpha> vid1]](Predicational pid1))"
+    using IS by (auto simp add: box_sem)
+  have res:"\<And>\<nu>3. ((\<nu>, \<nu>3) \<in> (prog_sem I ($\<alpha> vid1))\<^sup>*) \<Longrightarrow> \<nu>3 \<in> fml_sem I (Predicational pid1)"

@@ -1,0 +1,775 @@
+theory AF_Stream_Exec
+imports AF_Stream "List-Infinite.ListInf_Prefix" "List-Infinite.SetIntervalStep"
+begin
+
+
+
+type_synonym ('a, 'in) Port_Input_Value = "'a \<Rightarrow> 'in message_af"
+
+type_synonym ('comp, 'out) Port_Output_Value = "'comp \<Rightarrow> 'out message_af"
+
+type_synonym ('comp, 'state) Comp_Local_State = "'comp \<Rightarrow> 'state"
+
+type_synonym ('comp, 'input) Comp_Trans_Fun = "'input \<Rightarrow> 'comp \<Rightarrow> 'comp"
+
+
+primrec f_Exec_Comp :: "('comp, 'input) Comp_Trans_Fun \<Rightarrow> 'input list \<Rightarrow> 'comp \<Rightarrow> 'comp"
+where
+  f_Exec_Nil:  "f_Exec_Comp trans_fun [] c = c"
+| f_Exec_Cons: "f_Exec_Comp trans_fun (x#xs) c = f_Exec_Comp trans_fun xs (trans_fun x c)"
+
+definition f_Exec_Comp_N :: "('comp, 'input) Comp_Trans_Fun \<Rightarrow> nat \<Rightarrow> 'input list \<Rightarrow> 'comp \<Rightarrow> 'comp"
+  where "f_Exec_Comp_N trans_fun n xs c \<equiv> f_Exec_Comp trans_fun (xs \<down> n) c"
+
+primrec f_Exec_Comp_Stream :: "('comp, 'input) Comp_Trans_Fun \<Rightarrow> 'input list \<Rightarrow> 'comp \<Rightarrow> 'comp list"
+where
+  f_Exec_Stream_Nil:  "f_Exec_Comp_Stream trans_fun [] c = []"
+| f_Exec_Stream_Cons: "f_Exec_Comp_Stream trans_fun (x # xs) c =
+    (trans_fun x c) # ( f_Exec_Comp_Stream trans_fun xs (trans_fun x c) )"
+
+primrec f_Exec_Comp_Stream_Init ::
+  "('comp, 'input) Comp_Trans_Fun \<Rightarrow> 'input list \<Rightarrow> 'comp \<Rightarrow> 'comp list"
+where
+  f_Exec_Stream_Init_Nil:  "f_Exec_Comp_Stream_Init trans_fun [] c = [c]"
+| f_Exec_Stream_Init_Cons: "f_Exec_Comp_Stream_Init trans_fun (x # xs) c =
+    c # ( f_Exec_Comp_Stream_Init trans_fun xs (trans_fun x c) )"
+
+definition i_Exec_Comp_Stream ::
+    "('comp, 'input) Comp_Trans_Fun \<Rightarrow> 'input ilist \<Rightarrow> 'comp \<Rightarrow> 'comp ilist"
+  where "i_Exec_Comp_Stream \<equiv> \<lambda>trans_fun input c n. f_Exec_Comp trans_fun (input \<Down> Suc n) c"
+
+definition i_Exec_Comp_Stream_Init ::
+    "('comp, 'input) Comp_Trans_Fun \<Rightarrow> 'input ilist \<Rightarrow> 'comp \<Rightarrow> 'comp ilist"
+  where "i_Exec_Comp_Stream_Init \<equiv> \<lambda>trans_fun input c n. f_Exec_Comp trans_fun (input \<Down> n) c"
+
+
+
+lemma f_Exec_one: "f_Exec_Comp trans_fun [m] c = trans_fun m c"
+by simp
+
+lemma f_Exec_Stream_length[rule_format, simp]:"
+  \<forall>c. length (f_Exec_Comp_Stream trans_fun xs c) = length xs"
+by (induct xs, simp_all)
+
+lemma f_Exec_Stream_empty_conv:"
+  (f_Exec_Comp_Stream trans_fun xs c = []) = (xs = [])"
+by (simp add: length_0_conv[symmetric] del: length_0_conv)
+
+lemma f_Exec_Stream_not_empty_conv:"
+  (f_Exec_Comp_Stream trans_fun xs c \<noteq> []) = (xs \<noteq> [])"
+by (simp add: f_Exec_Stream_empty_conv)
+
+lemma f_Exec_eq_f_Exec_Stream_last[rule_format]:"
+  \<forall>c. f_Exec_Comp trans_fun xs c = last (c # (f_Exec_Comp_Stream trans_fun xs c))"
+by (induct xs, simp_all)
+
+corollary f_Exec_eq_f_Exec_Stream_last2[rule_format]: "
+  xs \<noteq> [] \<Longrightarrow>
+  f_Exec_Comp trans_fun xs c = last (f_Exec_Comp_Stream trans_fun xs c)"
+by (simp add: f_Exec_eq_f_Exec_Stream_last f_Exec_Stream_empty_conv[symmetric, of xs trans_fun c])
+
+corollary f_Exec_eq_f_Exec_Stream_last_if: "
+  f_Exec_Comp trans_fun xs c = (if xs = [] then c else last (f_Exec_Comp_Stream trans_fun xs c))"
+by (simp add: f_Exec_eq_f_Exec_Stream_last2)
+
+corollary f_Exec_take_eq_last_f_Exec_Stream_take:"
+  \<lbrakk> xs \<noteq> []; 0 < n \<rbrakk> \<Longrightarrow>
+  f_Exec_Comp trans_fun (xs \<down> n) c =
+  last (f_Exec_Comp_Stream trans_fun (xs \<down> n) c)"
+by (simp add: f_Exec_eq_f_Exec_Stream_last2 take_not_empty_conv)
+
+corollary f_Exec_N_eq_last_f_Exec_Stream_take:"
+  \<lbrakk> xs \<noteq> []; 0 < n \<rbrakk> \<Longrightarrow>
+    f_Exec_Comp_N trans_fun n xs c =
+    last (f_Exec_Comp_Stream trans_fun (xs \<down> n) c)"
+by (simp add: f_Exec_Comp_N_def f_Exec_take_eq_last_f_Exec_Stream_take)
+
+lemma f_Exec_Stream_nth: "
+  \<And>n c. n < length xs \<Longrightarrow>
+  f_Exec_Comp_Stream trans_fun xs c ! n = f_Exec_Comp trans_fun (xs \<down> Suc n) c"
+apply (induct xs, simp)
+apply (simp add: nth_Cons')
+done
+
+lemma f_Exec_Stream_nth2: "
+  n \<le> length xs \<Longrightarrow>
+  (c # f_Exec_Comp_Stream trans_fun xs c) ! n = f_Exec_Comp trans_fun (xs \<down> n) c"
+by (simp add: nth_Cons' f_Exec_Stream_nth)
+
+lemma f_Exec_N_all:"
+  length xs \<le> n \<Longrightarrow>
+    f_Exec_Comp_N trans_fun n xs c = f_Exec_Comp trans_fun xs c"
+by (simp add: f_Exec_Comp_N_def)
+
+lemma f_Exec_Stream_append[rule_format]:"\<forall>c.
+  f_Exec_Comp_Stream trans_fun (xs @ ys) c =
+    (f_Exec_Comp_Stream trans_fun xs c) @
+    (f_Exec_Comp_Stream trans_fun ys (f_Exec_Comp trans_fun xs c))"
+by (induct xs, simp_all)
+
+corollary f_Exec_Stream_append_last_Cons[rule_format]:"
+  f_Exec_Comp_Stream trans_fun (xs @ ys) c =
+    (f_Exec_Comp_Stream trans_fun xs c) @
+    (f_Exec_Comp_Stream trans_fun ys (last (c # (f_Exec_Comp_Stream  trans_fun xs c))))"
+by (simp add: f_Exec_Stream_append f_Exec_eq_f_Exec_Stream_last)
+
+corollary f_Exec_Stream_append_last[rule_format]:"
+  xs \<noteq> [] \<Longrightarrow>
+  f_Exec_Comp_Stream trans_fun (xs @ ys) c =
+    (f_Exec_Comp_Stream trans_fun xs c) @
+    (f_Exec_Comp_Stream trans_fun ys (last (f_Exec_Comp_Stream  trans_fun xs c)))"
+by (simp add: f_Exec_Stream_append_last_Cons f_Exec_Stream_empty_conv)
+
+corollary f_Exec_Stream_append_if:"
+  f_Exec_Comp_Stream trans_fun (xs @ ys) c =
+    (f_Exec_Comp_Stream trans_fun xs c) @
+    (f_Exec_Comp_Stream trans_fun ys (
+      if xs = [] then c else last (f_Exec_Comp_Stream trans_fun xs c)))"
+by (simp add: f_Exec_Stream_append f_Exec_eq_f_Exec_Stream_last_if)
+corollary f_Exec_append:"
+  f_Exec_Comp trans_fun (xs @ ys) c =
+  f_Exec_Comp trans_fun ys (f_Exec_Comp trans_fun xs c)"
+by (simp add: f_Exec_eq_f_Exec_Stream_last f_Exec_Stream_append_if f_Exec_Stream_empty_conv)
+
+corollary f_Exec_Stream_Cons_rev: "
+  xs \<noteq> [] \<Longrightarrow>
+  (trans_fun (hd xs) c) #
+  f_Exec_Comp_Stream trans_fun (tl xs) (trans_fun (hd xs) c) =
+  f_Exec_Comp_Stream trans_fun xs c"
+by (subst f_Exec_Stream_Cons[symmetric], simp)
+
+lemma f_Exec_Stream_snoc: "
+  f_Exec_Comp_Stream trans_fun (xs @ [x]) c =
+    f_Exec_Comp_Stream trans_fun xs c @
+    [trans_fun x (f_Exec_Comp trans_fun xs c)]"
+by (simp add: f_Exec_Stream_append)
+
+lemma f_Exec_snoc: "
+  f_Exec_Comp trans_fun (xs @ [x]) c =
+  trans_fun x (f_Exec_Comp trans_fun xs c)"
+by (simp add: f_Exec_append)
+
+
+lemma f_Exec_N_append[rule_format]:"
+  f_Exec_Comp_N trans_fun (a + b) xs c =
+  f_Exec_Comp_N trans_fun b (xs \<up> a) (f_Exec_Comp_N trans_fun a xs c)"
+apply (simp add: f_Exec_Comp_N_def f_Exec_append[symmetric])
+apply (simp add: take_drop add.commute[of b])
+apply (rule subst[of "xs \<down> (a + b) \<down> a" "xs \<down> a" ], simp add: min_eqL)
+apply (subst append_take_drop_id, simp)
+done
+
+corollary f_Exec_N_Suc[rule_format]:"
+  f_Exec_Comp_N trans_fun (Suc n) xs c =
+  f_Exec_Comp_N trans_fun (Suc 0) (xs \<up> n) (f_Exec_Comp_N trans_fun n xs c)"
+by (simp add: f_Exec_N_append[symmetric])
+
+corollary f_Exec_N_Suc2[rule_format]:"
+  n < length xs \<Longrightarrow>
+  f_Exec_Comp_N trans_fun (Suc n) xs c =
+  trans_fun (xs ! n) (f_Exec_Comp_N trans_fun n xs c)"
+by (simp add: f_Exec_Comp_N_def take_Suc_conv_app_nth f_Exec_append)
+
+theorem f_Exec_Stream_take:"
+  (f_Exec_Comp_Stream trans_fun xs c) \<down> n =
+  f_Exec_Comp_Stream trans_fun (xs \<down> n) c"
+apply (case_tac "length xs \<le> n", simp)
+apply (rule subst[OF append_take_drop_id, of _ n xs])
+apply (simp add: f_Exec_Stream_append del: append_take_drop_id)
+done
+
+theorem f_Exec_Stream_drop:"
+  (f_Exec_Comp_Stream trans_fun xs c) \<up> n =
+  f_Exec_Comp_Stream trans_fun (xs \<up> n)
+    (f_Exec_Comp trans_fun (xs \<down> n) c)"
+apply (case_tac "length xs \<le> n", simp)
+apply (rule subst[OF append_take_drop_id, of _ n xs])
+apply (simp add: f_Exec_Stream_append del: append_take_drop_id)
+done
+
+lemma i_Exec_Stream_nth: "
+  i_Exec_Comp_Stream trans_fun input c n = f_Exec_Comp trans_fun (input \<Down> Suc n) c"
+by (simp add: i_Exec_Comp_Stream_def)
+
+lemma i_Exec_Stream_nth_Suc: "
+  i_Exec_Comp_Stream trans_fun input c (Suc n) =
+  trans_fun (input (Suc n)) (i_Exec_Comp_Stream trans_fun input c n)"
+by (simp add: i_Exec_Stream_nth i_take_Suc_conv_app_nth f_Exec_append)
+
+lemma i_Exec_Stream_nth_Suc_first: "
+  i_Exec_Comp_Stream trans_fun input c (Suc n) =
+  (i_Exec_Comp_Stream trans_fun (input \<Up> Suc 0) (trans_fun (input 0) c) n)"
+by (simp add: i_Exec_Stream_nth i_take_Suc)
+
+lemma f_Exec_Stream_nth_eq_i_Exec_Stream_nth: "
+  n < n' \<Longrightarrow>
+  f_Exec_Comp_Stream trans_fun (input \<Down> n') c ! n =
+  i_Exec_Comp_Stream trans_fun input c n"
+by (simp add: f_Exec_Stream_nth i_Exec_Stream_nth min_eqR)
+
+
+lemma i_Exec_Stream_append: "
+  i_Exec_Comp_Stream trans_fun (xs \<frown> input) c =
+  f_Exec_Comp_Stream trans_fun xs c \<frown>
+  i_Exec_Comp_Stream trans_fun input (f_Exec_Comp trans_fun xs c)"
+by (simp add: ilist_eq_iff i_Exec_Stream_nth f_Exec_Stream_nth f_Exec_append i_append_nth Suc_diff_le)
+
+lemma i_Exec_Stream_append_last_Cons: "
+  i_Exec_Comp_Stream trans_fun (xs \<frown> input) c =
+  f_Exec_Comp_Stream trans_fun xs c \<frown>
+  i_Exec_Comp_Stream trans_fun input (
+    last (c # f_Exec_Comp_Stream trans_fun xs c))"
+by (simp add: f_Exec_eq_f_Exec_Stream_last i_Exec_Stream_append)
+
+lemma i_Exec_Stream_append_last: "
+  xs \<noteq> [] \<Longrightarrow>
+  i_Exec_Comp_Stream trans_fun (xs \<frown> input) c =
+  f_Exec_Comp_Stream trans_fun xs c \<frown>
+  i_Exec_Comp_Stream trans_fun input (
+    last (f_Exec_Comp_Stream trans_fun xs c))"
+by (simp add: f_Exec_Stream_empty_conv i_Exec_Stream_append_last_Cons)
+
+lemma i_Exec_Stream_append_if: "
+  i_Exec_Comp_Stream trans_fun (xs \<frown> input) c =
+  f_Exec_Comp_Stream trans_fun xs c \<frown>
+  i_Exec_Comp_Stream trans_fun input (
+    if xs = [] then c
+    else last (f_Exec_Comp_Stream trans_fun xs c))"
+by (simp add: i_Exec_Stream_append_last)
+
+corollary i_Exec_Stream_Cons: "
+  i_Exec_Comp_Stream trans_fun ([x] \<frown> input) c =
+  [trans_fun x c] \<frown> i_Exec_Comp_Stream trans_fun input (trans_fun x c)"
+by (simp add: i_Exec_Stream_append)
+
+corollary i_Exec_Stream_Cons_rev: "
+  [trans_fun (input 0) c] \<frown>
+  i_Exec_Comp_Stream trans_fun (input \<Up> Suc 0) (trans_fun (input 0) c) =
+  i_Exec_Comp_Stream trans_fun input c"
+apply (insert i_Exec_Stream_append[of trans_fun "[input 0]" "input \<Up> Suc 0" c])
+apply (simp add: i_drop_Suc_conv_tl)
+done
+
+theorem i_Exec_Stream_take:"
+  (i_Exec_Comp_Stream trans_fun input c) \<Down> n =
+  f_Exec_Comp_Stream trans_fun (input \<Down> n) c"
+by (simp add: list_eq_iff f_Exec_Stream_nth i_Exec_Stream_nth min_eqR)
+
+theorem i_Exec_Stream_drop:"
+  (i_Exec_Comp_Stream trans_fun input c) \<Up> n =
+  i_Exec_Comp_Stream trans_fun (input \<Up> n) (f_Exec_Comp trans_fun (input \<Down> n) c)"
+apply (rule subst[OF i_append_i_take_i_drop_id, of _ n input])
+apply (simp add: i_Exec_Stream_append  i_drop_def del: i_append_i_take_i_drop_id)
+done
+
+lemma f_Exec_Stream_expand_aggregate_map_take: "
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c)) k ag \<down> n =
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun ((xs \<down> n) \<odot>\<^sub>f k) c)) k ag"
+by (simp add: f_aggregate_take_mult[symmetric] take_map f_Exec_Stream_take f_expand_take_mult)
+
+corollary f_Exec_Stream_expand_aggregate_take: "
+  f_aggregate (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c) k ag \<down> n =
+  f_aggregate (f_Exec_Comp_Stream trans_fun ((xs \<down> n) \<odot>\<^sub>f k) c) k ag"
+by (insert f_Exec_Stream_expand_aggregate_map_take[of n id trans_fun xs k c ag], simp add: map_id)
+
+lemma i_Exec_Stream_expand_aggregate_map_take: "
+  0 < k \<Longrightarrow>
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c)) k ag \<Down> n =
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun ((input \<Down> n) \<odot>\<^sub>f k) c)) k ag"
+by (simp add: i_aggregate_i_take_mult[symmetric] i_Exec_Stream_take i_expand_i_take_mult)
+
+corollary i_Exec_Stream_expand_aggregate_take: "
+  0 < k \<Longrightarrow>
+  i_aggregate (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c) k ag \<Down> n =
+  f_aggregate (f_Exec_Comp_Stream trans_fun ((input \<Down> n) \<odot>\<^sub>f k) c) k ag"
+by (drule i_Exec_Stream_expand_aggregate_map_take[of k n id trans_fun input c ag], simp add: map_id)
+
+lemma f_Exec_Stream_expand_aggregate_map_drop: "
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c)) k ag \<up> n =
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun ((xs \<up> n) \<odot>\<^sub>f k) (
+    f_Exec_Comp trans_fun ((xs \<down> n) \<odot>\<^sub>f k) c))) k ag"
+by (simp add: f_aggregate_drop_mult[symmetric] drop_map f_Exec_Stream_drop f_expand_take_mult f_expand_drop_mult)
+
+corollary f_Exec_Stream_expand_aggregate_drop: "
+  f_aggregate (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c) k ag \<up> n =
+  f_aggregate (f_Exec_Comp_Stream trans_fun ((xs \<up> n) \<odot>\<^sub>f k) (
+    f_Exec_Comp trans_fun ((xs \<down> n) \<odot>\<^sub>f k) c)) k ag"
+by (insert f_Exec_Stream_expand_aggregate_map_drop[of n id trans_fun xs k c ag], simp add: map_id)
+
+lemma i_Exec_Stream_expand_aggregate_map_drop: "
+  0 < k \<Longrightarrow>
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c)) k ag \<Up> n =
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun ((input \<Up> n) \<odot>\<^sub>i k) (
+    f_Exec_Comp trans_fun ((input \<Down> n) \<odot>\<^sub>f k) c))) k ag"
+by (simp add: i_aggregate_i_drop_mult[symmetric] i_Exec_Stream_drop i_expand_i_take_mult i_expand_i_drop_mult)
+
+corollary i_Exec_Stream_expand_aggregate_drop: "
+  0 < k \<Longrightarrow>
+  i_aggregate (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c) k ag \<Up> n =
+  i_aggregate (i_Exec_Comp_Stream trans_fun ((input \<Up> n) \<odot>\<^sub>i k) (
+    f_Exec_Comp trans_fun ((input \<Down> n) \<odot>\<^sub>f k) c)) k ag"
+by (drule i_Exec_Stream_expand_aggregate_map_drop[of k n id trans_fun input c ag], simp)
+
+
+lemma f_Exec_Stream_expand_aggregate_map_nth_eq_i_nth: "
+  \<lbrakk> 0 < k; n < n' \<rbrakk> \<Longrightarrow>
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (input \<Down> n' \<odot>\<^sub>f k) c)) k ag ! n =
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c)) k ag n"
+apply (simp add: f_aggregate_nth i_aggregate_nth f_Exec_Stream_take f_Exec_Stream_drop i_Exec_Stream_take i_Exec_Stream_drop drop_map take_map)
+apply (simp add: f_expand_take_mod i_expand_i_take_mod f_expand_drop_mod i_expand_i_drop_mod i_drop_i_take_1 drop_take_1 min_eqR)
+done
+
+corollary f_Exec_Stream_expand_aggregate_map_nth_eq_i_nth': "
+  0 < k \<Longrightarrow>
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (input \<Down> Suc n \<odot>\<^sub>f k) c)) k ag ! n =
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c)) k ag n"
+by (simp add: f_Exec_Stream_expand_aggregate_map_nth_eq_i_nth)
+
+corollary f_Exec_Stream_expand_aggregate_nth_eq_i_nth: "
+  \<lbrakk> 0 < k; n < n' \<rbrakk> \<Longrightarrow>
+  f_aggregate (f_Exec_Comp_Stream trans_fun (input \<Down> n' \<odot>\<^sub>f k) c) k ag ! n =
+  i_aggregate (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c) k ag n"
+by (drule f_Exec_Stream_expand_aggregate_map_nth_eq_i_nth[where f=id], simp_all add: map_id)
+
+corollary f_Exec_Stream_expand_aggregate_nth_eq_i_nth': "
+  0 < k \<Longrightarrow>
+  f_aggregate (f_Exec_Comp_Stream trans_fun (input \<Down> Suc n \<odot>\<^sub>f k) c) k ag ! n =
+  i_aggregate (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c) k ag n"
+by (simp add: f_Exec_Stream_expand_aggregate_nth_eq_i_nth)
+
+
+lemma f_Exec_Stream_expand_shrink_last_map_nth_eq_f_Exec_Comp: "
+  \<lbrakk> 0 < k; n < length xs \<rbrakk> \<Longrightarrow>
+  map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c) \<div>\<^bsub>fl\<^esub> k ! n =
+  f (f_Exec_Comp trans_fun ((xs \<down> Suc n) \<odot>\<^sub>f k) c)"
+apply (simp add: f_shrink_last_map f_shrink_last_length f_shrink_last_nth)
+apply (subgoal_tac "n * k + k - Suc 0 < length xs * k")
+ prefer 2
+ apply (drule Suc_leI[of n])
+ apply (drule mult_le_mono1[of _ _ k], simp)
+apply (simp add: f_Exec_Stream_nth add.commute[of k] f_expand_take_mult[symmetric])
+done
+
+corollary f_Exec_Stream_expand_shrink_last_nth_eq_f_Exec_Comp: "
+  \<lbrakk> 0 < k; n < length xs \<rbrakk> \<Longrightarrow>
+  f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c \<div>\<^bsub>fl\<^esub> k ! n =
+  f_Exec_Comp trans_fun ((xs \<down> Suc n) \<odot>\<^sub>f k) c"
+by (drule f_Exec_Stream_expand_shrink_last_map_nth_eq_f_Exec_Comp[where f=id], simp_all add: map_id)
+
+lemma f_Exec_Stream_expand_aggregate_map_nth: "
+  \<lbrakk> 0 < k; n < length xs \<rbrakk> \<Longrightarrow>
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c)) k ag ! n =
+  ag (map f (f_Exec_Comp_Stream trans_fun (xs ! n # \<NoMsg>\<^bsup>k - Suc 0\<^esup>)
+    (f_Exec_Comp trans_fun (xs \<down> n \<odot>\<^sub>f k) c)))"
+apply (simp add: f_aggregate_nth take_map drop_map)
+apply (simp add: take_map drop_map f_Exec_Stream_drop f_Exec_Stream_take f_expand_take_mod f_expand_drop_mod drop_take_1)
+done
+
+corollary f_Exec_Stream_expand_aggregate_nth: "
+  \<lbrakk> 0 < k; n < length xs \<rbrakk> \<Longrightarrow>
+  f_aggregate (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c) k ag ! n =
+  ag (f_Exec_Comp_Stream trans_fun (xs ! n # \<NoMsg>\<^bsup>k - Suc 0\<^esup>)
+    (f_Exec_Comp trans_fun (xs \<down> n \<odot>\<^sub>f k) c))"
+by (drule f_Exec_Stream_expand_aggregate_map_nth[where f=id], simp_all add: map_id)
+
+corollary f_Exec_Stream_expand_shrink_map_nth: "
+  \<lbrakk> 0 < k; n < length xs \<rbrakk> \<Longrightarrow>
+  (map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c)) \<div>\<^sub>f k ! n =
+  last_message (map f (f_Exec_Comp_Stream trans_fun (xs ! n # \<NoMsg>\<^bsup>k - Suc 0\<^esup>)
+    (f_Exec_Comp trans_fun (xs \<down> n \<odot>\<^sub>f k) c)))"
+by (simp add: f_shrink_def f_Exec_Stream_expand_aggregate_map_nth)
+
+lemma i_Exec_Stream_expand_aggregate_map_nth: "
+  0 < k \<Longrightarrow>
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c)) k ag n =
+  ag (map f (f_Exec_Comp_Stream trans_fun (input n # \<NoMsg>\<^bsup>k - Suc 0\<^esup>)
+    (f_Exec_Comp trans_fun ((input \<Down> n) \<odot>\<^sub>f k) c)))"
+by (simp add: i_aggregate_nth i_Exec_Stream_drop i_Exec_Stream_take i_expand_i_take_mod i_expand_i_drop_mod i_drop_i_take_1)
+
+corollary i_Exec_Stream_expand_aggregate_nth: "
+  0 < k \<Longrightarrow>
+  i_aggregate (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c) k ag n =
+  ag (f_Exec_Comp_Stream trans_fun (input n # \<NoMsg>\<^bsup>k - Suc 0\<^esup>)
+    (f_Exec_Comp trans_fun ((input \<Down> n) \<odot>\<^sub>f k) c))"
+by (drule i_Exec_Stream_expand_aggregate_map_nth[where f=id], simp add: map_id)
+
+corollary i_Exec_Stream_expand_shrink_map_nth: "
+  0 < k \<Longrightarrow>
+  ((f \<circ> (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) c)) \<div>\<^sub>i k) n =
+  last_message (map f (f_Exec_Comp_Stream trans_fun (input n # \<NoMsg>\<^bsup>k - Suc 0\<^esup>)
+    (f_Exec_Comp trans_fun (input \<Down> n \<odot>\<^sub>f k) c)))"
+by (simp add: i_shrink_def i_Exec_Stream_expand_aggregate_map_nth)
+
+lemma f_Exec_Stream_expand_snoc: "
+  \<lbrakk> 0 < k; n < length xs \<rbrakk> \<Longrightarrow>
+  f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c \<up> (n * k) \<down> k =
+  f_Exec_Comp_Stream trans_fun (xs ! n # \<NoMsg>\<^bsup>k - Suc 0\<^esup>)
+    (f_Exec_Comp trans_fun (xs \<down> n \<odot>\<^sub>f k) c)"
+by (simp add: f_Exec_Stream_drop f_Exec_Stream_take f_expand_take_mod f_expand_drop_mod drop_take_1)
+
+lemma f_Exec_Stream_expand_map_aggregate_append: "
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun ((xs @ ys) \<odot>\<^sub>f k) c)) k ag =
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c)) k ag @
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (ys \<odot>\<^sub>f k) (
+    f_Exec_Comp trans_fun (xs \<odot>\<^sub>f k) c))) k ag"
+by (simp add: f_Exec_Stream_append f_aggregate_append_mod)
+
+lemma i_Exec_Stream_expand_map_aggregate_append: "
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun ((xs \<frown> input) \<odot>\<^sub>i k) c)) k ag =
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c)) k ag \<frown>
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) (
+    f_Exec_Comp trans_fun (xs \<odot>\<^sub>f k) c))) k ag"
+by (simp add: i_expand_i_append i_Exec_Stream_append i_aggregate_i_append_mod)
+
+lemma f_Exec_Stream_expand_map_aggregate_Cons: "
+  0 < k \<Longrightarrow>
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun ((x # xs) \<odot>\<^sub>f k) c)) k ag =
+  ag (map f (f_Exec_Comp_Stream trans_fun (x # \<NoMsg>\<^bsup>k - Suc 0\<^esup>) c)) #
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) (
+    f_Exec_Comp trans_fun (x # \<NoMsg>\<^bsup>k - Suc 0\<^esup>) c))) k ag"
+apply (subst append_eq_Cons[of x xs, symmetric])
+apply (subst f_Exec_Stream_expand_map_aggregate_append)
+apply (simp add: f_aggregate_one)
+done
+
+lemma f_Exec_Stream_expand_map_aggregate_snoc: "
+  0 < k \<Longrightarrow>
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun ((xs @ [x]) \<odot>\<^sub>f k) c)) k ag =
+  f_aggregate (map f (f_Exec_Comp_Stream trans_fun (xs \<odot>\<^sub>f k) c)) k ag @
+  [ag (map f (f_Exec_Comp_Stream trans_fun (x # \<NoMsg>\<^bsup>k - Suc 0\<^esup>) (
+    f_Exec_Comp trans_fun (xs \<odot>\<^sub>f k) c)))]"
+apply (subst f_Exec_Stream_expand_map_aggregate_append)
+apply (simp add: f_aggregate_one)
+done
+
+lemma i_Exec_Stream_expand_map_aggregate_Cons: "
+  0 < k \<Longrightarrow>
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun (([x] \<frown> input) \<odot>\<^sub>i k) c)) k ag =
+  [ag (map f (f_Exec_Comp_Stream trans_fun (x # \<NoMsg>\<^bsup>k - Suc 0\<^esup>) c))] \<frown>
+  i_aggregate (f \<circ> (i_Exec_Comp_Stream trans_fun (input \<odot>\<^sub>i k) (
+    f_Exec_Comp trans_fun (x # \<NoMsg>\<^bsup>k - Suc 0\<^esup>) c))) k ag"
+apply (subst i_Exec_Stream_expand_map_aggregate_append)
+apply (simp add: f_aggregate_one)
+done
+
+lemma f_Exec_N_eq_f_Exec_Stream_nth:"
+  n \<le> length xs \<Longrightarrow>
+  f_Exec_Comp_N trans_fun n xs c = (c # f_Exec_Comp_Stream trans_fun xs c) ! n"
+by (simp add: f_Exec_Comp_N_def f_Exec_Stream_nth2)
+
+theorem f_Exec_Stream_causal: "
+  xs \<down> n = ys \<down> n \<Longrightarrow>
+  (f_Exec_Comp_Stream trans_fun xs c) \<down> n = (f_Exec_Comp_Stream trans_fun ys c) \<down> n"
+by (simp add: f_Exec_Stream_take)
+theorem i_Exec_Stream_causal: "
+  input1 \<Down> n = input2 \<Down> n \<Longrightarrow>
+  (i_Exec_Comp_Stream trans_fun input1 c) \<Down> n = (i_Exec_Comp_Stream trans_fun input2 c) \<Down> n"
+by (simp add: i_Exec_Stream_take)
+
+
+
+
+lemma f_Exec_Stream_Init_length[rule_format, simp]:"
+  \<forall>c. length (f_Exec_Comp_Stream_Init trans_fun xs c) = Suc (length xs)"
+by (induct xs, simp_all)
+
+lemma f_Exec_Stream_Init_not_empty:"
+  (f_Exec_Comp_Stream_Init trans_fun xs c \<noteq> [])"
+by (simp add: length_0_conv[symmetric] del: length_0_conv)
+
+lemma f_Exec_eq_f_Exec_Stream_Init_last[rule_format]:"
+  \<forall>c. f_Exec_Comp trans_fun xs c = last (f_Exec_Comp_Stream_Init trans_fun xs c)"
+by (induct xs, simp_all add: f_Exec_Stream_Init_not_empty)
+
+lemma f_Exec_Stream_Init_eq_f_Exec_Stream_Cons[rule_format]: "
+  \<forall>c. f_Exec_Comp_Stream_Init trans_fun xs c = c # f_Exec_Comp_Stream trans_fun xs c"
+by (induct xs, simp_all)
+
+corollary f_Exec_Stream_Init_eq_f_Exec_Stream_Cons_output: "
+  output_fun c = \<NoMsg> \<Longrightarrow>
+  map output_fun (f_Exec_Comp_Stream_Init trans_fun xs c) =
+  \<NoMsg> # map output_fun (f_Exec_Comp_Stream trans_fun xs c)"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons)
+
+corollary f_Exec_Stream_Init_tl_eq_f_Exec_Stream: "
+  tl (f_Exec_Comp_Stream_Init trans_fun xs c) = f_Exec_Comp_Stream trans_fun xs c"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons)
+
+lemma f_Exec_N_eq_last_f_Exec_Stream_Init_take:"
+  f_Exec_Comp_N trans_fun n xs c =
+  last (f_Exec_Comp_Stream_Init trans_fun (xs \<down> n) c)"
+by (simp add: f_Exec_Comp_N_def f_Exec_eq_f_Exec_Stream_Init_last)
+
+lemma f_Exec_Stream_Init_nth: "
+  n \<le> length xs \<Longrightarrow>
+  f_Exec_Comp_Stream_Init trans_fun xs c ! n = f_Exec_Comp trans_fun (xs \<down> n) c"
+apply (subst f_Exec_Stream_Init_eq_f_Exec_Stream_Cons)
+apply (case_tac n, simp)
+apply (simp add: f_Exec_Stream_nth)
+done
+
+lemma f_Exec_Stream_Init_nth_0: "f_Exec_Comp_Stream_Init trans_fun xs c ! 0 = c"
+by (simp add: f_Exec_Stream_Init_nth)
+
+lemma f_Exec_Stream_Init_hd: "hd (f_Exec_Comp_Stream_Init trans_fun xs c) = c"
+by (simp add: hd_conv_nth f_Exec_Stream_Init_not_empty f_Exec_Stream_Init_nth_0)
+
+lemma f_Exec_Stream_Init_nth_Suc_eq_f_Exec_Stream_nth: "
+  f_Exec_Comp_Stream_Init trans_fun xs c ! (Suc n) = f_Exec_Comp_Stream trans_fun xs c ! n"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons)
+
+lemma f_Exec_Stream_Init_append:"
+  f_Exec_Comp_Stream_Init trans_fun (xs @ ys) c =
+    (f_Exec_Comp_Stream_Init trans_fun xs c) @
+    tl (f_Exec_Comp_Stream_Init trans_fun ys (f_Exec_Comp trans_fun xs c))"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons f_Exec_Stream_append)
+
+corollary f_Exec_Stream_Init_append_last:"
+  f_Exec_Comp_Stream_Init trans_fun (xs @ ys) c =
+    (f_Exec_Comp_Stream_Init trans_fun xs c) @
+    tl (f_Exec_Comp_Stream_Init trans_fun ys (last (f_Exec_Comp_Stream_Init trans_fun xs c)))"
+by (simp add: f_Exec_Stream_Init_append f_Exec_eq_f_Exec_Stream_Init_last)
+
+lemma f_Exec_Stream_Init_f_Exec_Stream_append:"
+  f_Exec_Comp_Stream_Init trans_fun (xs @ ys) c =
+    (f_Exec_Comp_Stream_Init trans_fun xs c) @
+    (f_Exec_Comp_Stream trans_fun ys (f_Exec_Comp trans_fun xs c))"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons f_Exec_Stream_append)
+
+lemma f_Exec_Stream_Init_take:"
+  (f_Exec_Comp_Stream_Init trans_fun xs c) \<down> Suc n =
+  f_Exec_Comp_Stream_Init trans_fun (xs \<down> n) c"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons f_Exec_Stream_take)
+
+lemma f_Exec_Stream_Init_drop:"
+  n \<le> length xs \<Longrightarrow>
+  (f_Exec_Comp_Stream_Init trans_fun xs c) \<up> n =
+  f_Exec_Comp_Stream_Init trans_fun (xs \<up> n)
+    (f_Exec_Comp trans_fun (xs \<down> n) c)"
+apply (case_tac n, simp)
+apply (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons f_Exec_Stream_drop)
+apply (simp add: take_Suc_conv_app_nth f_Exec_append Cons_nth_drop_Suc[symmetric])
+done
+
+lemma f_Exec_Stream_Init_drop_geq_not_valid:"
+  length xs \<le> n \<Longrightarrow>
+  (f_Exec_Comp_Stream_Init trans_fun xs c) \<up> Suc n \<noteq>
+  f_Exec_Comp_Stream_Init trans_fun arbitrary_input arbitrary_comp"
+by (simp add: f_Exec_Stream_Init_not_empty[symmetric])
+
+lemma i_Exec_Stream_Init_nth: "
+  i_Exec_Comp_Stream_Init trans_fun input c n = f_Exec_Comp trans_fun (input \<Down> n) c"
+by (simp add: i_Exec_Comp_Stream_Init_def)
+
+lemma i_Exec_Stream_Init_nth_0: "
+  i_Exec_Comp_Stream_Init trans_fun input c 0 = c"
+by (simp add: i_Exec_Stream_Init_nth)
+
+lemma i_Exec_Stream_Init_nth_Suc_eq_i_Exec_Stream_nth: "
+  i_Exec_Comp_Stream_Init trans_fun input c (Suc n) = i_Exec_Comp_Stream trans_fun input c n"
+by (simp add: i_Exec_Stream_Init_nth i_Exec_Stream_nth)
+
+lemma i_Exec_Stream_Init_eq_i_Exec_Stream_Cons: "
+  i_Exec_Comp_Stream_Init trans_fun input c = [c] \<frown> i_Exec_Comp_Stream trans_fun input c"
+by (simp add: ilist_eq_iff i_Exec_Stream_Init_nth i_append_nth i_Exec_Stream_nth)
+
+corollary i_Exec_Stream_Init_eq_i_Exec_Stream_Cons_output: "
+  output_fun c = \<NoMsg> \<Longrightarrow>
+  output_fun \<circ> i_Exec_Comp_Stream_Init trans_fun input c =
+  [\<NoMsg>] \<frown> (output_fun \<circ> i_Exec_Comp_Stream trans_fun input c)"
+by (simp add: i_Exec_Stream_Init_eq_i_Exec_Stream_Cons)
+
+lemma i_Exec_Stream_Init_append:"
+  i_Exec_Comp_Stream_Init trans_fun (input1 \<frown> input2) c =
+    (f_Exec_Comp_Stream_Init trans_fun input1 c) \<frown>
+    ((i_Exec_Comp_Stream_Init trans_fun input2 (f_Exec_Comp trans_fun input1 c)) \<Up> Suc 0)"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons i_Exec_Stream_Init_eq_i_Exec_Stream_Cons i_Exec_Stream_append)
+
+corollary i_Exec_Stream_Init_append_last:"
+  i_Exec_Comp_Stream_Init trans_fun (input1 \<frown> input2) c =
+    (f_Exec_Comp_Stream_Init trans_fun input1 c) \<frown>
+    ((i_Exec_Comp_Stream_Init trans_fun input2 (last (f_Exec_Comp_Stream_Init trans_fun input1 c))) \<Up> Suc 0)"
+by (simp add: i_Exec_Stream_Init_append f_Exec_eq_f_Exec_Stream_Init_last)
+
+lemma i_Exec_Stream_Init_i_Exec_Stream_append:"
+  i_Exec_Comp_Stream_Init trans_fun (input1 \<frown> input2) c =
+    (f_Exec_Comp_Stream_Init trans_fun input1 c) \<frown>
+    (i_Exec_Comp_Stream trans_fun input2 (f_Exec_Comp trans_fun input1 c))"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons i_Exec_Stream_Init_eq_i_Exec_Stream_Cons i_Exec_Stream_append)
+
+lemma i_Exec_Stream_Init_take:"
+  (i_Exec_Comp_Stream_Init trans_fun input c) \<Down> Suc n =
+  f_Exec_Comp_Stream_Init trans_fun (input \<Down> n) c"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons i_Exec_Stream_Init_eq_i_Exec_Stream_Cons i_Exec_Stream_take)
+lemma i_Exec_Stream_Init_drop:"
+  (i_Exec_Comp_Stream_Init trans_fun input c) \<Up> n =
+  i_Exec_Comp_Stream_Init trans_fun (input \<Up> n)
+    (f_Exec_Comp trans_fun (input \<Down> n) c)"
+apply (case_tac n, simp)
+apply (simp add: i_Exec_Stream_Init_eq_i_Exec_Stream_Cons i_Exec_Stream_drop)
+apply (simp add: ilist_eq_iff i_take_Suc_conv_app_nth f_Exec_append i_Exec_Stream_nth i_append_nth i_take_first i_take_drop_eq_map)
+apply (simp add: upt_conv_Cons)
+done
+
+theorem f_Exec_Stream_Init_strictly_causal: "
+  xs \<down> n = ys \<down> n \<Longrightarrow>
+  (f_Exec_Comp_Stream_Init trans_fun xs c) \<down> Suc n = (f_Exec_Comp_Stream_Init trans_fun ys c) \<down> Suc n"
+by (simp add: f_Exec_Stream_Init_take)
+
+theorem i_Exec_Stream_Init_strictly_causal: "
+  input1 \<Down> n = input2 \<Down> n \<Longrightarrow>
+  (i_Exec_Comp_Stream_Init trans_fun input1 c) \<Down> Suc n = (i_Exec_Comp_Stream_Init trans_fun input2 c) \<Down> Suc n"
+by (simp add: i_Exec_Stream_Init_take)
+
+theorem f_Exec_N_eq_f_Exec_Stream_Init_nth:"
+  n \<le> length xs \<Longrightarrow>
+  f_Exec_Comp_N trans_fun n xs c = f_Exec_Comp_Stream_Init trans_fun xs c ! n"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons f_Exec_N_eq_f_Exec_Stream_nth)
+
+
+
+
+definition list_Previous :: "'value list \<Rightarrow> 'value \<Rightarrow> nat \<Rightarrow> 'value"
+  where "list_Previous xs init n \<equiv>
+    case n of
+      0 \<Rightarrow> init
+    | Suc n' \<Rightarrow> xs ! n'"
+
+definition ilist_Previous :: "'value ilist \<Rightarrow> 'value \<Rightarrow> nat \<Rightarrow> 'value"
+  where "ilist_Previous f init n \<equiv>
+    case n of
+      0 \<Rightarrow> init
+    | Suc n' \<Rightarrow> f n'"
+
+abbreviation "list_Previous'" :: "'value list \<Rightarrow> 'value \<Rightarrow> nat \<Rightarrow> 'value"
+    ( "_\<^bsup>\<leftarrow>'' _\<^esup> _" [1000, 10, 100] 100)
+  where "xs\<^bsup>\<leftarrow>' init\<^esup> n \<equiv> list_Previous xs init n"
+
+abbreviation "ilist_Previous'" :: "'value ilist \<Rightarrow> 'value \<Rightarrow> nat \<Rightarrow> 'value"
+    ( "_\<^bsup>\<leftarrow> _\<^esup> _" [1000, 10, 100] 100)
+  where "f\<^bsup>\<leftarrow> init\<^esup> n \<equiv> ilist_Previous f init n"
+
+lemma list_Previous_nth: "xs\<^bsup>\<leftarrow>' init\<^esup> n = (case n of 0 \<Rightarrow> init | Suc n' \<Rightarrow> xs ! n')"
+by (simp add: list_Previous_def)
+
+lemma ilist_Previous_nth: "f\<^bsup>\<leftarrow> init\<^esup> n = (case n of 0 \<Rightarrow> init | Suc n' \<Rightarrow> f n')"
+by (simp add: ilist_Previous_def)
+
+lemma list_Previous_nth_if: "xs\<^bsup>\<leftarrow>' init\<^esup> n = (if n = 0 then init else xs ! (n - Suc 0))"
+by (case_tac n, simp_all add: list_Previous_nth)
+
+lemma ilist_Previous_nth_if: "f\<^bsup>\<leftarrow> init\<^esup> n = (if n = 0 then init else f (n - Suc 0))"
+by (case_tac n, simp_all add: ilist_Previous_nth)
+
+lemma list_Previous_Cons: "xs\<^bsup>\<leftarrow>' init\<^esup> n = (init # xs) ! n"
+by (case_tac n, simp_all add: list_Previous_nth)
+
+lemma ilist_Previous_Cons: "f\<^bsup>\<leftarrow> init\<^esup> n = ([init] \<frown> f) n"
+by (case_tac n, simp_all add: ilist_Previous_nth)
+
+lemma list_Previous_0: "xs\<^bsup>\<leftarrow>' init\<^esup> 0 = init"
+by (simp add: list_Previous_def)
+
+lemma ilist_Previous_0: "f\<^bsup>\<leftarrow> init\<^esup> 0 = init"
+by (simp add: ilist_Previous_def)
+
+lemma list_Previous_gr0: "0 < n \<Longrightarrow> xs\<^bsup>\<leftarrow>' init\<^esup> n = xs ! (n - Suc 0)"
+by (case_tac n, simp_all add: list_Previous_nth)
+
+lemma ilist_Previous_gr0: "0 < n \<Longrightarrow> f\<^bsup>\<leftarrow> init\<^esup> n = f (n - Suc 0)"
+by (case_tac n, simp_all add: ilist_Previous_nth)
+
+lemma list_Previous_Suc: "xs\<^bsup>\<leftarrow>' init\<^esup> (Suc n) = xs ! n"
+by (simp add: list_Previous_def)
+
+lemma ilist_Previous_Suc: "f\<^bsup>\<leftarrow> init\<^esup> (Suc n) = f n"
+by (simp add: ilist_Previous_def)
+
+
+lemma f_Exec_Stream_Previous_f_Exec_Stream_Init: "
+  f_Exec_Comp_Stream_Init trans_fun xs c ! n =
+  (f_Exec_Comp_Stream trans_fun xs c)\<^bsup>\<leftarrow>' c\<^esup> n"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons list_Previous_Cons)
+
+lemma i_Exec_Stream_Previous_i_Exec_Stream_Init: "
+  i_Exec_Comp_Stream_Init trans_fun input c n =
+  (i_Exec_Comp_Stream trans_fun input c)\<^bsup>\<leftarrow> c\<^esup> n"
+by (simp add: i_Exec_Stream_Init_eq_i_Exec_Stream_Cons ilist_Previous_Cons)
+
+
+lemma f_Exec_Stream_hd: "
+  0 < length xs \<Longrightarrow> hd (f_Exec_Comp_Stream trans_fun xs c) = trans_fun (hd xs) c"
+by (case_tac xs, simp+)
+
+lemma f_Exec_Stream_nth_0: "
+  0 < length xs \<Longrightarrow> (f_Exec_Comp_Stream trans_fun xs c) ! 0= trans_fun (xs ! 0) c"
+by (case_tac xs, simp+)
+
+lemma f_Exec_Stream_nth_gr0_calc: "
+  \<lbrakk> n < length xs; 0 < n \<rbrakk> \<Longrightarrow>
+  f_Exec_Comp_Stream trans_fun xs c ! n =
+  trans_fun (xs ! n) (f_Exec_Comp_Stream trans_fun xs c ! (n - 1))"
+by (simp add: f_Exec_Stream_nth take_Suc_conv_app_nth f_Exec_append)
+
+lemma f_Exec_Stream_nth_calc_Previous: "
+  n < length xs \<Longrightarrow>
+  f_Exec_Comp_Stream trans_fun xs c ! n =
+  trans_fun (xs ! n) ((f_Exec_Comp_Stream trans_fun xs c)\<^bsup>\<leftarrow>' c\<^esup> n)"
+apply (case_tac n)
+ apply (simp add: list_Previous_0 f_Exec_Stream_nth_0)
+apply (simp add: list_Previous_def f_Exec_Stream_nth_gr0_calc)
+done
+
+
+lemma i_Exec_Stream_nth_0: "
+  (i_Exec_Comp_Stream trans_fun input c) 0 = trans_fun (input 0) c"
+by (simp add: i_Exec_Stream_nth i_take_first)
+
+lemma i_Exec_Stream_nth_gr0_calc: "
+  0 < n \<Longrightarrow>
+  (i_Exec_Comp_Stream trans_fun input c) n =
+  trans_fun (input n) ((i_Exec_Comp_Stream trans_fun input c) (n - 1))"
+by (simp add: i_Exec_Stream_nth i_take_Suc_conv_app_nth f_Exec_append)
+
+lemma i_Exec_Stream_nth_calc_Previous: "
+  i_Exec_Comp_Stream trans_fun input c n =
+  trans_fun (input n) ((i_Exec_Comp_Stream trans_fun input c)\<^bsup>\<leftarrow> c\<^esup> n)"
+by (simp add: i_Exec_Stream_nth ilist_Previous_nth_if i_take_first i_take_Suc_conv_app_nth f_Exec_append)
+
+lemma f_Exec_Stream_Init_nth_Suc_calc: "
+  n < length xs \<Longrightarrow>
+  f_Exec_Comp_Stream_Init trans_fun xs c ! Suc n =
+  trans_fun (xs ! n) (f_Exec_Comp_Stream_Init trans_fun xs c ! n)"
+by (simp add: f_Exec_Stream_Init_eq_f_Exec_Stream_Cons f_Exec_Stream_nth nth_Cons' length_greater_0_conv[THEN iffD1, OF gr_implies_gr0] take_Suc_conv_app_nth f_Exec_append)
+
+lemma f_Exec_Stream_Init_nth_Plus1_calc: "
+  n < length xs \<Longrightarrow>
+  f_Exec_Comp_Stream_Init trans_fun xs c ! (n + 1)=
+  trans_fun (xs ! n) (f_Exec_Comp_Stream_Init trans_fun xs c ! n)"
+by (simp add: f_Exec_Stream_Init_nth_Suc_calc)
+
+lemma f_Exec_Stream_Init_nth_gr0_calc: "
+  \<lbrakk> n \<le> length xs; 0 < n \<rbrakk> \<Longrightarrow>
+  f_Exec_Comp_Stream_Init trans_fun xs c ! n =
+  trans_fun (xs ! (n - 1)) (f_Exec_Comp_Stream_Init trans_fun xs c ! (n - 1))"
+by (clarsimp simp: gr0_conv_Suc f_Exec_Stream_Init_nth_Suc_calc)
+
+
+
+lemma i_Exec_Stream_Init_nth_Suc_calc: "
+  i_Exec_Comp_Stream_Init trans_fun input c (Suc n) =
+  trans_fun (input n) (i_Exec_Comp_Stream_Init trans_fun input c n)"
+by (simp add: i_Exec_Stream_Init_nth i_take_Suc_conv_app_nth f_Exec_append)
+
+lemma i_Exec_Stream_Init_nth_Plus1_calc: "
+  i_Exec_Comp_Stream_Init trans_fun input c (n + 1) =
+  trans_fun (input n) (i_Exec_Comp_Stream_Init trans_fun input c n)"
+by (simp add: i_Exec_Stream_Init_nth_Suc_calc)
+
+lemma i_Exec_Stream_Init_nth_gr0_calc: "
+  0 < n \<Longrightarrow>
+  i_Exec_Comp_Stream_Init trans_fun input c n =
+  trans_fun (input (n - 1)) (i_Exec_Comp_Stream_Init trans_fun input c (n - 1))"
+by (clarsimp simp: gr0_conv_Suc i_Exec_Stream_Init_nth_Suc_calc)
+
+

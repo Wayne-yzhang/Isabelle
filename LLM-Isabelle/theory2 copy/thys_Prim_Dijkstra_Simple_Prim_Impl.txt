@@ -1,0 +1,152 @@
+theory Prim_Impl
+imports 
+  Prim_Abstract
+  Undirected_Graph_Impl
+  "HOL-Library.While_Combinator"
+  "Priority_Search_Trees.PST_RBT"
+  "HOL-Data_Structures.RBT_Map"
+begin
+
+
+
+locale Prim_Impl_Adts = 
+  G: adt_wgraph G_\<alpha>w G_\<alpha>g G_invar G_adj G_empty G_add_edge 
++ M: Map M_empty M_update M_delete M_lookup M_invar
++ Q: PrioMap Q_empty Q_update Q_delete Q_invar Q_lookup Q_is_empty Q_getmin
+  
+  for typG :: "'g itself" and typM :: "'m itself" and typQ :: "'q itself"
+  and G_\<alpha>w and G_\<alpha>g :: "'g \<Rightarrow> ('v) ugraph" and G_invar G_adj G_empty G_add_edge
+  
+  and M_empty M_update M_delete and M_lookup :: "'m \<Rightarrow> 'v \<Rightarrow> 'v option" and M_invar
+  
+  and Q_empty Q_update Q_delete Q_invar and Q_lookup :: "'q \<Rightarrow> 'v \<Rightarrow> nat option" 
+  and Q_is_empty Q_getmin
+  
+begin
+
+lemmas [simp] = G.wgraph_specs
+lemmas [simp] = M.map_specs
+lemmas [simp] = Q.prio_map_specs
+
+end  
+
+locale Prim_Impl_Defs = Prim_Impl_Adts  
+  where typG = typG and typM = typM and typQ = typQ and G_\<alpha>w = G_\<alpha>w and G_\<alpha>g = G_\<alpha>g
+  for typG :: "'g itself" and typM :: "'m itself" and typQ :: "'q itself" 
+  and G_\<alpha>w and G_\<alpha>g :: "'g \<Rightarrow> ('v::linorder) ugraph" and g :: 'g and r :: 'v
+begin
+  
+term M_lookup
+definition "foreach_impl_body u \<equiv> (\<lambda>(v,d) (Qi,\<pi>i).
+  if v=r then (Qi,\<pi>i)
+  else 
+    case (Q_lookup Qi v, M_lookup \<pi>i v) of
+      (None,None) \<Rightarrow> (Q_update v d Qi, M_update v u \<pi>i)
+    | (Some d',_) \<Rightarrow> (if d<d' then (Q_update v d Qi, M_update v u \<pi>i) else (Qi,\<pi>i))
+    | (None, Some _) \<Rightarrow> (Qi,\<pi>i)
+  )"
+
+definition foreach_impl :: "'q \<Rightarrow> 'm \<Rightarrow> 'v \<Rightarrow> ('v\<times>nat) list \<Rightarrow> 'q \<times> 'm" where
+  "foreach_impl Qi \<pi>i u adjs = foldr (foreach_impl_body u) adjs (Qi,\<pi>i)"
+
+
+definition "outer_loop_impl Qi \<pi>i \<equiv> while (\<lambda>(Qi,\<pi>i). \<not>Q_is_empty Qi) (\<lambda>(Qi,\<pi>i). 
+  let
+    (u,_) = Q_getmin Qi;
+    adjs = G_adj g u;
+    (Qi,\<pi>i) = foreach_impl Qi \<pi>i u adjs;
+    Qi = Q_delete u Qi
+  in (Qi,\<pi>i)) (Qi,\<pi>i)"
+
+definition "prim_impl = (let
+  Qi = Q_update r 0 Q_empty;
+  \<pi>i = M_empty;
+  (Qi,\<pi>i) = outer_loop_impl Qi \<pi>i
+  in \<pi>i)
+"
+
+lemma prim_impl_alt: "prim_impl = (let 
+  (Q,\<pi>) = (Q_update r 0 Q_empty, M_empty);
+  (Q, \<pi>) = 
+  while (\<lambda>(Q, \<pi>). \<not> Q_is_empty Q) (\<lambda>(Q, \<pi>). let 
+    (u, _) = Q_getmin Q;
+    (Q, \<pi>) = 
+    foldr ((\<lambda>(v, d) (Q, \<pi>). let
+        qv = Q_lookup Q v;
+        \<pi>v = M_lookup \<pi> v
+      in
+        if v\<noteq>r \<and> (qv\<noteq>None \<or> \<pi>v=None) \<and> enat d < enat_of_option qv 
+        then (Q_update v d Q, M_update v u \<pi>) 
+        else (Q, \<pi>))
+    ) (G_adj g u) (Q, \<pi>); 
+    Q = Q_delete u Q
+    in (Q, \<pi>)) (Q, \<pi>)
+  in \<pi>
+)"
+proof -
+
+  have 1: "foreach_impl_body u = (\<lambda>(v,d) (Qi,\<pi>i). let
+        qiv = (Q_lookup Qi v);
+        \<pi>iv = M_lookup \<pi>i v
+      in
+        if v\<noteq>r \<and> (qiv\<noteq>None \<or> \<pi>iv=None) \<and> enat d < enat_of_option qiv 
+        then (Q_update v d Qi, M_update v u \<pi>i) 
+        else (Qi, \<pi>i))" for u
+    unfolding foreach_impl_body_def
+    apply (intro ext)
+    by (auto split: option.split)
+    
+  show ?thesis
+    unfolding prim_impl_def outer_loop_impl_def foreach_impl_def 1
+    by (simp)
+qed  
+  
+
+
+  
+definition "invar_MST \<pi>i \<equiv> M_invar \<pi>i"
+
+definition "\<alpha>_MST \<pi>i \<equiv> graph {r} {(u,v) | u v. M_lookup \<pi>i u = Some v}"
+
+end
+
+
+
+locale Prim_Impl = Prim_Impl_Defs 
+  where typG = typG and typM = typM and typQ = typQ and G_\<alpha>w = G_\<alpha>w and G_\<alpha>g = G_\<alpha>g
+  for typG :: "'g itself" and typM :: "'m itself" and typQ :: "'q itself" 
+  and G_\<alpha>w and G_\<alpha>g :: "'g \<Rightarrow> ('v::linorder) ugraph" 
+  +
+  assumes G_invar[simp]: "G_invar g"
+begin
+               
+sublocale Prim2 "G_\<alpha>w g" "G_\<alpha>g g" r .
+
+  mapping @{const None} to @{term \<infinity>}.
+\<close>
+subsubsection \<open>Concrete Invariant\<close>
+text \<open>The implementation invariants of the concrete state's components,
+  and the abstract invariant of the state's abstraction\<close>
+subsection \<open>Refinement of Algorithm\<close>
+        \<open>\<And>\<pi>. prim_invar2 (Q_\<alpha> Qi) \<pi> 
+            \<Longrightarrow> T_measure2 (Q' (Q_\<alpha> Qi) \<pi> u) (\<pi>' (Q_\<alpha> Qi) \<pi> u) 
+                < T_measure2 (Q_\<alpha> Qi) \<pi>\<close>)
+    apply (all \<open>clarsimp split: prod.splits simp: Q_\<alpha>_specs\<close>)
+subsection \<open>Instantiation with Actual Data Structures\label{sec:prim_inst_ds}\<close>
+subsubsection \<open>Adding a Graph-From-List Parser\<close>
+subsection \<open>Main Correctness Theorem\<close>
+text \<open>
+  The @{const prim_list_impl} algorithm returns @{const None}, if the input was 
+  map/set invariants and encode a minimum spanning tree of the component of the
+  
+  Notes:
+\<close>
+    None \<Rightarrow> \<not>G.valid_wgraph_repr l \<comment> \<open>Invalid input\<close>
+        G.valid_wgraph_repr l \<and> (let Gi = G.from_list l in G.invar Gi \<comment> \<open>Valid input\<close>
+        \<and> P.invar_MST \<pi>i \<comment> \<open>Output satisfies invariants\<close>
+        \<and> is_MST (G.\<alpha>w Gi) (component_of (G.\<alpha>g Gi) r) (P.\<alpha>_MST r \<pi>i)) \<comment> \<open>and represents MST\<close>"
+    None \<Rightarrow> \<not>G.valid_wgraph_repr l \<comment> \<open>Invalid input\<close>
+        G.valid_wgraph_repr l \<comment> \<open>Valid input\<close> 
+      \<and> P.invar_MST \<pi>i \<comment> \<open>Output satisfies invariants\<close>
+      \<and> is_MST w rg t \<comment> \<open>and represents MST\<close>"
+subsection \<open>Code Generation and Test\label{sec:prim_exec}\<close>

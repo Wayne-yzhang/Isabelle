@@ -1,0 +1,196 @@
+theory FiniteFun_Relative
+  imports
+    Lambda_Replacement
+begin
+
+lemma FiniteFunI :
+  assumes  "f\<in>Fin(A\<times>B)" "function(f)"
+  shows "f \<in> A -||> B"
+  using assms
+proof(induct)
+  case 0
+  then show ?case using emptyI by simp
+next
+  case (cons p f)
+  moreover
+  from assms this
+  have "fst(p)\<in>A" "snd(p)\<in>B" "function(f)"
+    by auto
+  moreover
+  have "fst(p)\<notin>domain(f)"
+    unfolding function_def
+    by force
+  ultimately
+  show ?case
+    using consI[of "fst(p)" _ "snd(p)"]
+    by auto
+qed
+
+
+
+definition
+  "B\<^bsup><\<alpha>\<^esup> \<equiv> \<Union>n\<in>\<alpha>. (n\<rightarrow>B)"
+
+lemma seqspaceI[intro]: "n\<in>\<alpha> \<Longrightarrow> f:n\<rightarrow>B \<Longrightarrow> f\<in>B\<^bsup><\<alpha>\<^esup>"
+  unfolding seqspace_def by blast
+
+lemma seqspaceD[dest]: "f\<in>B\<^bsup><\<alpha>\<^esup> \<Longrightarrow> \<exists>n\<in>\<alpha>. f:n\<rightarrow>B"
+  unfolding seqspace_def by blast
+
+locale M_pre_seqspace =  M_trancl + M_replacement + M_Pi
+begin
+
+lemma function_space_subset_Pow_rel:
+  assumes "n\<in>\<omega>" "M(B)"
+  shows "n\<rightarrow>B \<subseteq> Pow\<^bsup>M\<^esup>(\<Union>(\<omega>\<rightarrow>\<^bsup>M\<^esup>B))"
+proof -
+  {
+    fix f p
+    assume "f \<subseteq> n \<times> B" "p \<in> f"
+    with assms
+    obtain x y where "p =\<langle>x,y\<rangle>" "x\<in>n" "y\<in>B" by auto
+    with assms
+    have "p \<in> (\<lambda>_\<in>\<omega>. y)"
+      using Ord_trans[of _ _ \<omega>] lam_constant_eq_cartprod by simp
+    moreover
+    moreover from this
+    have "M(\<lambda>_\<in>\<omega>. y)" using lam_constant_eq_cartprod by (auto dest:transM)
+    moreover from calculation
+    have "(\<lambda>_\<in>\<omega>. y) : \<omega> \<rightarrow>\<^bsup>M\<^esup> B"
+      using mem_function_space_rel_abs[of \<omega> B, THEN iffD2]
+      by simp
+    ultimately
+    have "\<exists>B\<in>\<omega> \<rightarrow>\<^bsup>M\<^esup> B. p \<in> B"
+      by (rule_tac x="\<lambda>_\<in>\<omega>. y" in bexI)
+  }
+  with assms
+  show ?thesis
+    by (auto dest:transM intro!:mem_Pow_rel_abs[THEN iffD2])
+      (unfold Pi_def, auto)
+qed
+
+lemma seqspace_subset_Pow_rel:
+  assumes "M(B)"
+  shows "B\<^bsup><\<omega>\<^esup> \<subseteq> Pow\<^bsup>M\<^esup>(\<Union>(\<omega>\<rightarrow>\<^bsup>M\<^esup>B))"
+  using assms function_space_subset_Pow_rel unfolding seqspace_def
+  by auto
+
+lemma seqspace_imp_M:
+  assumes "x \<in> B\<^bsup><\<omega>\<^esup>" "M(B)"
+  shows "M(x)"
+  using assms seqspace_subset_Pow_rel
+  by (auto dest:transM)
+
+lemma seqspace_eq_Collect:
+  assumes "M(B)"
+  shows "B\<^bsup><\<omega>\<^esup> = {z \<in> Pow\<^bsup>M\<^esup>(\<Union>(\<omega>\<rightarrow>\<^bsup>M\<^esup>B)). \<exists>x[M]. \<exists>n[M]. n \<in> \<omega> \<and> z \<in> x \<and> x = n \<rightarrow>\<^bsup>M\<^esup> B}"
+  using assms seqspace_subset_Pow_rel nat_into_M seqspace_imp_M
+    transM[OF _ finite_funspace_closed, of _ _ B] function_space_rel_char
+  by (intro equalityI) (auto dest:transM dest!:seqspaceD)
+
+
+locale M_seqspace =  M_pre_seqspace +
+  assumes
+    seqspace_separation: "M(B) \<Longrightarrow> separation(M,\<lambda>z. \<exists>x[M]. \<exists>n[M]. n \<in> \<omega> \<and> z \<in> x \<and> x = n \<rightarrow>\<^bsup>M\<^esup> B)"
+begin
+
+lemma seqspace_closed:
+  "M(B) \<Longrightarrow> M(B\<^bsup><\<omega>\<^esup>)"
+  using seqspace_eq_Collect using seqspace_separation
+  by simp
+
+
+
+
+definition cons_like :: "i \<Rightarrow> o" where
+  "cons_like(f) \<equiv> \<forall> i\<in>domain(f) . \<forall>j\<in>i . fst(f`i) \<noteq> fst(f`j)"
+
+definition FiniteFun_iso :: "[i,i,i,i,i] \<Rightarrow> o" where
+  "FiniteFun_iso(A,B,n,g,f) \<equiv>  (\<forall> i\<in>n . g`i \<in> f) \<and> (\<forall> ab\<in>f. (\<exists> i\<in>n. g`i=ab))"
+
+
+definition to_FiniteFun :: "i \<Rightarrow> i" where
+  "to_FiniteFun(f) \<equiv> {f`i. i\<in>domain(f)}"
+
+definition FiniteFun_Repr :: "[i,i] \<Rightarrow> i" where
+  "FiniteFun_Repr(A,B) \<equiv> {f \<in> (A\<times>B)\<^bsup><\<omega>\<^esup> . cons_like(f) }"
+
+locale M_FiniteFun =  M_seqspace +
+  assumes
+    separation_is_function : "separation(M, is_function(M))"
+begin
+
+lemma cons_like_separation : "separation(M,\<lambda>f. cons_like(f))"
+  unfolding cons_like_def
+  using lam_replacement_identity lam_replacement_domain lam_replacement_snd
+    lam_replacement_hcomp[OF _ lam_replacement_snd ]
+    lam_replacement_hcomp[OF _ lam_replacement_fst]
+    separation_eq lam_replacement_apply2[THEN [5] lam_replacement_hcomp2] separation_neg
+  by(rule_tac separation_all,auto,rule_tac separation_all,auto)
+
+lemma supset_separation: "separation(M, \<lambda> x. \<exists>a. \<exists>b. x = \<langle>a,b\<rangle> \<and> b \<subseteq> a)"
+  using separation_Pair separation_subset lam_replacement_fst lam_replacement_snd
+  by simp
+
+lemma to_finiteFun_replacement: "strong_replacement(M, \<lambda>x y. y = range(x))"
+  using lam_replacement_range lam_replacement_imp_strong_replacement
+  by simp
+
+lemma fun_range_eq: "f\<in>A\<rightarrow>B \<Longrightarrow> {f`i . i\<in>domain(f) } = range(f)"
+  using ZF_Library.range_eq_image[of f] domain_of_fun image_fun func.apply_rangeI
+  by simp
+
+lemma FiniteFun_fst_type:
+  assumes "h\<in>A-||>B" "p\<in>h"
+  shows  "fst(p)\<in>domain(h)"
+  using assms
+  by(induct h, auto)
+
+lemma FinFun_closed:
+  "M(A) \<Longrightarrow> M(B) \<Longrightarrow> M(\<Union>{n\<rightarrow>A\<times>B . n\<in>\<omega>})"
+  using cartprod_closed seqspace_closed
+  unfolding seqspace_def by simp
+
+lemma cons_like_lt :
+  assumes "n\<in>\<omega>" "f\<in>succ(n)\<rightarrow>A\<times>B" "cons_like(f)"
+  shows "restrict(f,n)\<in>n\<rightarrow>A\<times>B" "cons_like(restrict(f,n))"
+  using assms
+proof (auto simp add: le_imp_subset restrict_type2)
+  have D:"domain(restrict(f,n)) = n" "domain(f) = succ(n)"
+    using domain_of_fun domain_restrict by auto
+  {
+    fix i j
+    assume "i\<in>domain(restrict(f,n))" (is "i\<in>?D") "j\<in>i"
+    have "j\<in>?D" "i\<in>n" "j\<in>n" using Ord_trans[of j] by simp_all
+    have "fst(restrict(f,n)`i) \<noteq> fst(restrict(f,n)`j)"
+      using restrict_if unfolding cons_like_def by auto
+  }
+  then show "cons_like(restrict(f,n))"
+    unfolding cons_like_def by auto
+qed
+
+function $g \in n \to A \times B$, with $n=|f|$.\<close>
+  from HI \<open>a\<in>_\<close> \<open>b\<in>_\<close>
+        with HI show ?thesis using  ltI[OF \<open>i\<in>_\<close>] by auto
+    from \<open>?G\<in>_\<close> \<open>g\<in>_\<close>
+      with \<open>n\<in>_\<close>
+      from \<open>i\<in>_\<close> consider (a) "i=n \<and> i\<notin>n" | (b) "i\<in>n" by auto
+        with \<open>j\<in>n\<close> HI
+        with \<open>a\<notin>_\<close> \<open>h\<in>_\<close>
+        with \<open>i\<in>n\<close> \<open>j\<in>i\<close> \<open>j\<in>n\<close> HI \<open>domain(g) = n\<close>
+text\<open>All the representations of \<^term>\<open>f\<in>A-||>B\<close> are equal.\<close>
+text\<open>If $g \in n\to A\times B$ is \<^term>\<open>cons_like\<close>, then it is a representation of
+\<^term>\<open>to_FiniteFun(g)\<close>.\<close>
+  with succ.hyps \<open>g\<in>_\<close>
+  with succ.hyps  \<open>?g'\<in>_\<close> \<open>x\<in>\<omega>\<close>
+      with HI \<open>x\<in>_\<close>
+      with \<open>cons_like(g)\<close> \<open>domain(g) = _\<close>
+  with HI assms \<open>g`x\<in>_\<close>
+      with \<open>x\<in>_\<close> consider (a) "i=x"| (b) "i\<in>x\<and>i\<noteq>x" by auto
+        with \<open>FiniteFun_iso(_,_,_,?g',?h)\<close>
+        with \<open>x\<in>_\<close>
+        have "i\<noteq>x" "i\<in>succ(x)" using  ltI[OF \<open>i\<in>_\<close>] by auto
+  with \<open>?h'\<in>_\<close>
+    using to_FiniteFun_succ_eq[OF \<open>x\<in>_\<close> \<open>g\<in>_\<close>,symmetric] by auto
+    with \<open>f\<in>_\<close>
+end \<comment> \<open>\<^locale>\<open>M_FiniteFun\<close>\<close>

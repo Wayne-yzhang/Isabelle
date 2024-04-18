@@ -1,0 +1,512 @@
+theory "Amicable_Numbers"
+  imports "HOL-Number_Theory.Number_Theory"
+   "HOL-Computational_Algebra.Computational_Algebra"
+   Pratt_Certificate.Pratt_Certificate_Code
+   Polynomial_Factorization.Prime_Factorization
+
+begin
+
+
+lemma mult_minus_eq_nat: 
+  fixes  x::nat and y ::nat and z::nat
+  assumes " x+y = z"
+  shows " -x-y = -z "
+  using assms by linarith
+
+lemma minus_eq_nat_subst: fixes A::nat and B::nat and  C::nat and  D::nat and  E::nat
+  assumes "A = B-C-D" and " -E = -C-D"
+  shows " A = B-E"
+  using assms by linarith
+
+lemma minus_eq_nat_subst_order:  fixes  A::nat and  B::nat  and  C::nat  and  D::nat  and   E::nat
+  assumes "B-C-D > 0" and "A = B-C-D+B"  shows "A = 2*B-C-D"
+   using assms by auto
+
+lemma auxiliary_ineq: fixes x::nat assumes "x \<ge> (2::nat)"
+  shows " x+1 < (2::nat)*x"
+  using assms by linarith
+
+
+lemma sum_strict_mono:
+  fixes A :: "nat set"
+  assumes "finite B" "A \<subset> B" "0 \<notin> B"
+  shows "\<Sum> A < \<Sum> B"
+proof -
+  have "B - A \<noteq> {}"
+    using assms(2) by blast
+  with assms DiffE have "\<Sum> (B-A) > 0"
+    by fastforce
+  moreover have "\<Sum> B = \<Sum> A + \<Sum> (B-A)"
+    by (metis add.commute assms(1) assms(2) psubsetE sum.subset_diff)
+  ultimately show ?thesis
+    by linarith
+qed
+
+lemma sum_image_eq:
+  assumes "inj_on f A"
+  shows "\<Sum> (f ` A) = (\<Sum> i \<in> A. f i)"
+  using assms sum.reindex_cong by fastforce
+
+lemma coprime_dvd_aux:
+  assumes "gcd m n = Suc 0" "na dvd n" "ma dvd m" "mb dvd m" "nb dvd n" and eq: "ma * na = mb * nb"
+  shows "ma = mb"
+proof -
+  have "gcd na mb = 1"
+    using assms by (metis One_nat_def gcd.commute gcd_nat.mono is_unit_gcd_iff)
+  moreover have "gcd nb ma = 1"
+    using assms by (metis One_nat_def gcd.commute gcd_nat.mono is_unit_gcd_iff)
+  ultimately show "ma = mb"
+    by (metis eq gcd_mult_distrib_nat mult.commute nat_mult_1_right)
+qed
+
+
+
+definition divisor :: "nat \<Rightarrow>nat \<Rightarrow> bool"  (infixr "divisor" 80)
+  where "n divisor m \<equiv>(n \<ge> 1 \<and> n \<le> m \<and> n dvd m)"
+
+definition divisor_set: "divisor_set m = {n. n divisor m}"
+
+lemma def_equiv_divisor_set: "divisor_set (n::nat) = set(divisors_nat n)"
+  using  divisors_nat_def divisors_nat divisor_set divisor_def by auto
+
+definition proper_divisor :: "nat \<Rightarrow>nat \<Rightarrow> bool"  (infixr "properdiv" 80)
+  where "n properdiv m \<equiv>(n \<ge> 1 \<and> n < m \<and> n dvd m)"
+
+definition properdiv_set: "properdiv_set m = {n. n properdiv m}"
+
+lemma example1_divisor: shows "(2::nat) \<in> divisor_set (4::nat)"
+ using  divisor_set divisor_def by force
+
+lemma example2_properdiv_set: "properdiv_set (Suc (Suc (Suc 0))) = {(1::nat)}"
+   by (auto simp: properdiv_set proper_divisor_def less_Suc_eq dvd_def; presburger)
+
+lemma divisor_set_not_empty: fixes m::nat assumes "m \<ge>1"
+  shows "m \<in> divisor_set m"
+using assms divisor_set divisor_def by force
+
+lemma finite_divisor_set [simp]: "finite(divisor_set n)"
+  using divisor_def divisor_set by simp
+
+lemma finite_properdiv_set[simp]: shows "finite(properdiv_set m)"
+  using  properdiv_set proper_divisor_def by simp
+
+lemma divisor_set_mult:
+  "divisor_set  (m*n) = {i*j| i j. (i \<in> divisor_set m)\<and>(j \<in> divisor_set n)}"
+  using divisor_set divisor_def
+  by (fastforce simp add: divisor_set divisor_def dest: division_decomp)
+
+lemma divisor_set_1 [simp]: "divisor_set (Suc 0) = {Suc 0}"
+  by (simp add: divisor_set divisor_def cong: conj_cong)
+
+lemma divisor_set_one: shows "divisor_set 1 ={1}"
+  using divisor_set  divisor_def by auto
+
+lemma union_properdiv_set: assumes "n\<ge>1" shows "divisor_set n =(properdiv_set n)\<union>{n}"
+ using divisor_set properdiv_set  proper_divisor_def assms  divisor_def by auto
+
+lemma prime_div_set: assumes "prime n" shows "divisor_set n = {n, 1}"
+  using divisor_def assms divisor_set  prime_nat_iff by auto
+
+lemma div_set_prime:
+  assumes "prime n"
+  shows "properdiv_set n = {1}"
+   using assms properdiv_set prime_nat_iff proper_divisor_def
+  by (metis (no_types, lifting) Collect_cong One_nat_def divisor_def divisor_set divisor_set_one
+ dvd_1_left empty_iff insert_iff mem_Collect_eq order_less_irrefl)
+
+lemma prime_gcd: fixes m::nat and n::nat assumes "prime m" and "prime n"
+and "m \<noteq> n" shows "gcd m n =1 " using prime_def
+  by (simp add: assms primes_coprime)
+
+
+definition aliquot_sum :: "nat \<Rightarrow> nat"
+  where "aliquot_sum n \<equiv> \<Sum>(properdiv_set n)"
+
+definition deficient_number :: "nat \<Rightarrow> bool"
+  where "deficient_number n \<equiv> (n > aliquot_sum n)"
+
+definition abundant_number :: "nat \<Rightarrow> bool"
+  where "abundant_number n \<equiv> (n < aliquot_sum n)"
+
+definition perfect_number :: "nat \<Rightarrow> bool"
+  where "perfect_number n \<equiv> (n = aliquot_sum n)"
+
+lemma example_perfect_6: shows "perfect_number 6"
+
+proof-
+  have a: "set(divisors_nat 6) = {1, 2, 3, 6}" by eval
+  have b: "divisor_set (6) = {1, 2, 3, 6}"
+    using a  def_equiv_divisor_set by simp
+  have  c: "properdiv_set (6) = {1, 2, 3}"
+    using b union_properdiv_set properdiv_set proper_divisor_def by auto
+  show ?thesis using aliquot_sum_def c
+    by (simp add: numeral_3_eq_3 perfect_number_def)
+qed
+
+
+
+
+definition Esigma :: "nat \<Rightarrow> nat"
+  where "Esigma n \<equiv> \<Sum>(divisor_set n)"
+
+lemma Esigma_properdiv_set:
+  assumes "m \<ge> 1"
+  shows "Esigma m = (aliquot_sum m) + m"
+  using assms divisor_set properdiv_set proper_divisor_def union_properdiv_set  Esigma_def
+        aliquot_sum_def by fastforce
+
+lemma Esigmanotzero:
+  assumes "n \<ge> 1"
+  shows "Esigma n \<ge> 1"
+  using Esigma_def assms Esigma_properdiv_set by auto
+
+lemma prime_sum_div:
+  assumes "prime n"
+  shows " Esigma n = n +(1::nat)"
+proof -
+  have "1 \<le> n"
+    using assms prime_ge_1_nat by blast
+  then show ?thesis using Esigma_properdiv_set assms div_set_prime
+    by (simp add: Esigma_properdiv_set aliquot_sum_def assms div_set_prime)
+qed
+
+lemma sum_div_is_prime:
+  assumes "Esigma n = n +(1::nat)" and "n \<ge>1"
+  shows "prime n"
+ 
+proof (rule ccontr)
+  assume F: " \<not> (prime n)"
+  have " n divisor n" using assms divisor_def by simp
+  have " (1::nat) divisor n"using assms divisor_def by simp
+
+  have "n \<noteq> Suc 0"
+    using Esigma_def assms(1) by auto
+  then have r: " \<exists>( m::nat). m \<in> divisor_set n \<and> m\<noteq> (1::nat) \<and> m \<noteq> n"
+    using assms F
+    apply (clarsimp simp add: Esigma_def divisor_set divisor_def prime_nat_iff)
+    by (meson Suc_le_eq dvd_imp_le dvd_pos_nat)
+
+  have "Suc n = \<Sum>{n,1}"
+  moreover
+  have "divisor_set n \<supset> {n,1}"
+  then have "\<Sum>(divisor_set n) > \<Sum>{n,1}"
+     apply (rule sum_strict_mono [OF finite_divisor_set])
+    by (simp add: divisor_def divisor_set)
+  ultimately
+  show False
+    using Esigma_def assms(1) by presburger
+qed
+
+lemma Esigma_prime_sum:
+  fixes k:: nat assumes "prime m" "k \<ge>1"
+  shows "Esigma (m^k) =( m^(k+(1::nat)) -(1::nat)) /(m-1)"
+
+proof-
+  have "m > 1"
+
+  have A: " Esigma (m^k) =( \<Sum> j= 0..k.( m^j)) "
+  proof-
+    have AA: "divisor_set (m^k) = (\<lambda>j. m ^ j) ` {0..k}"
+      using assms prime_ge_1_nat
+      by (auto simp add: power_increasing prime_ge_Suc_0_nat divisor_set divisor_def image_iff
+ divides_primepow_nat)
+
+    have \<section>: "\<Sum> ((\<lambda>j. m ^ j) ` {..k}) = sum (\<lambda>j. m ^ j) {0..k}"  for k
+    proof (induction k)
+      case (Suc k)
+      then show ?case
+        apply (clarsimp simp: atMost_Suc)
+        by (smt add.commute add_le_same_cancel1 assms(1) atMost_iff finite_atMost finite_imageI
+image_iff le_zero_eq power_add power_one_right prime_power_inj sum.insert zero_neq_one)
+    qed auto
+    show ?thesis
+      by (metis "\<section>" AA Esigma_def atMost_atLeast0)
+  qed
+  have B: "(\<Sum> i\<le>k.( m^i)) = ( m^Suc k -(1::nat)) /(m-(1::nat))"
+
+    apply simp
+    by (metis One_nat_def lessThan_Suc_atMost nat_one_le_power of_nat_1 of_nat_diff of_nat_mult
+of_nat_power one_le_mult_iff prime_ge_Suc_0_nat sum.lessThan_Suc)
+  show ?thesis using A B assms
+    by (metis Suc_eq_plus1 atMost_atLeast0 of_nat_1 of_nat_diff prime_ge_1_nat)
+qed
+
+lemma prime_Esigma_mult: assumes "prime m" and "prime n" and "m \<noteq> n"
+  shows "Esigma (m*n) = (Esigma n)*(Esigma m)"
+
+proof-
+  have "m divisor (m*n)" using divisor_def assms
+    by (simp add: dvd_imp_le prime_gt_0_nat)
+  moreover have "\<not>(\<exists> k::nat. k divisor (m*n) \<and> k\<noteq>(1::nat)\<and> k \<noteq> m \<and> k \<noteq> n \<and> k\<noteq> m*n)"
+    using assms unfolding divisor_def
+    by (metis One_nat_def division_decomp nat_mult_1 nat_mult_1_right prime_nat_iff)
+  ultimately have c: "divisor_set (m*n) = {m, n, m*n, 1}"
+    using divisor_set assms  divisor_def by auto
+  obtain "m\<noteq>1" "n\<noteq>1"
+    using assms not_prime_1 by blast
+  then have dd: "Esigma (m*n) = m + n +m *n +1"
+    using assms by (simp add: Esigma_def c)
+  then show ?thesis
+    using prime_sum_div assms by simp
+qed
+
+lemma gcd_Esigma_mult:
+  assumes "gcd m n = 1"
+  shows "Esigma (m*n) = (Esigma m)*(Esigma n)"
+
+proof-
+  have "Esigma (m*n) = \<Sum> {i*j| i j. i \<in> divisor_set m \<and> j \<in> divisor_set n}"
+    by (simp add: divisor_set_mult Esigma_def)
+  also have "... = (\<Sum>i \<in> divisor_set m. \<Sum>j \<in> divisor_set n. i*j)"
+  proof-
+    have "inj_on (\<lambda>(i,j). i*j) (divisor_set m \<times> divisor_set n)"
+      using assms
+      apply (simp add: inj_on_def divisor_set divisor_def)
+   by (metis assms coprime_dvd_aux mult_left_cancel not_one_le_zero)
+  moreover have
+"{i*j| i j. i \<in> divisor_set m \<and> j \<in> divisor_set n}= (\<lambda>(i,j). i*j)`(divisor_set m \<times> divisor_set n)"
+      by auto
+    ultimately show ?thesis
+      by (simp add: sum.cartesian_product sum_image_eq)
+  qed
+  also have "... = \<Sum>( divisor_set m)* \<Sum>( divisor_set n)"
+    by (simp add: sum_product)
+  also have "... = Esigma m * Esigma n"
+    by (simp add: Esigma_def)
+  finally show ?thesis .
+qed
+
+lemma deficient_Esigma:
+  assumes "Esigma m < 2*m" and "m \<ge>1"
+  shows "deficient_number m"
+  using Esigma_properdiv_set assms deficient_number_def by auto
+
+lemma abundant_Esigma:
+  assumes "Esigma m > 2*m" and "m \<ge>1" 
+  shows "abundant_number m" 
+  using Esigma_properdiv_set assms abundant_number_def by auto
+
+lemma perfect_Esigma:
+  assumes "Esigma m = 2*m" and "m \<ge>1" 
+  shows "perfect_number m" 
+ using Esigma_properdiv_set assms perfect_number_def by auto
+
+
+definition Amicable_pair :: "nat \<Rightarrow>nat \<Rightarrow> bool"  (infixr "Amic" 80)
+  where "m Amic n \<equiv> ((m = aliquot_sum n) \<and> (n = aliquot_sum m)) "
+
+lemma Amicable_pair_sym: fixes m::nat and n ::nat
+  assumes "m Amic n " shows "n Amic m "
+  using  Amicable_pair_def assms by blast
+
+lemma Amicable_pair_equiv_def:
+  assumes "(m Amic n)" and "m \<ge>1" and "n \<ge>1"
+  shows   "(Esigma m = Esigma n)\<and>(Esigma m = m+n)"
+  using assms Amicable_pair_def
+  by (metis Esigma_properdiv_set add.commute)
+
+lemma Amicable_pair_equiv_def_conv:
+  assumes "m\<ge>1" and "n\<ge>1" and "(Esigma m = Esigma n)\<and>(Esigma m = m+n)"
+  shows  "(m Amic n)"
+  using assms Amicable_pair_def Esigma_properdiv_set
+  by (metis add_right_imp_eq add.commute )
+
+definition typeAmic :: "nat \<Rightarrow> nat \<Rightarrow> nat list"
+  where "typeAmic n m =
+    [(card {i. \<exists> N. n = N*(gcd n m) \<and> prime i \<and> i dvd N \<and> \<not> i dvd (gcd n m)}),
+     (card {j. \<exists> M. m = M*(gcd n m) \<and> prime j \<and> j dvd M \<and> \<not> j dvd (gcd n m)})]"
+
+lemma Amicable_pair_deficient: assumes "m > n" and  "m Amic n"
+  shows "deficient_number m"
+  using assms deficient_number_def Amicable_pair_def by metis
+
+lemma Amicable_pair_abundant: assumes "m > n" and  "m Amic n"
+  shows "abundant_number n"
+  using assms abundant_number_def Amicable_pair_def by metis
+
+lemma even_even_amicable: assumes  "m Amic n" and "m \<ge>1" and "n \<ge>1" and "even m" and "even n"
+  shows "(2*m \<noteq> n)"
+
+proof( rule ccontr )
+     assms by blast
+
+  assume "\<not> (2*m \<noteq> n)"
+
+  then show False
+
+  proof-
+    have w: "2*m \<in> divisor_set (2*m)" using divisor_set assms divisor_set_not_empty
+      by auto
+    have w1: "2*m \<notin> divisor_set (m)" using divisor_set assms
+      by (simp add: divisor_def)
+    have w2: "\<forall> n::nat. n divisor m \<longrightarrow> n divisor (2*m)"
+      using assms divisor_def by auto
+    have w3: "divisor_set (2*m) \<supset> divisor_set m" using divisor_set divisor_def assms w w1 w2
+      by blast
+    have v: "( \<Sum> i \<in> ( divisor_set (2*m)).i)> ( \<Sum> i \<in> ( divisor_set m).i)"
+      using w3  sum_strict_mono by (simp add: divisor_def divisor_set)
+    show ?thesis using v d Esigma_def a by auto
+  qed
+qed
+
+
+
+definition regularAmicPair :: "nat \<Rightarrow> nat \<Rightarrow> bool" where
+  "regularAmicPair n m \<longleftrightarrow> (n Amic m \<and>
+     (\<exists>M N g. g = gcd m n \<and> m = M*g \<and> n = N*g \<and> squarefree M \<and>
+              squarefree N \<and> gcd g M = 1 \<and> gcd g N = 1))"
+
+lemma regularAmicPair_sym:
+  assumes "regularAmicPair n m" shows "regularAmicPair m n"
+
+proof-
+  have "gcd m n = gcd n m"
+    by (metis (no_types) gcd.commute)
+  then show ?thesis
+    using Amicable_pair_sym assms regularAmicPair_def by auto
+qed
+
+definition irregularAmicPair :: "nat \<Rightarrow> nat \<Rightarrow> bool" where
+  "irregularAmicPair n m \<longleftrightarrow> (( n Amic m) \<and> \<not> regularAmicPair n m)"
+
+lemma irregularAmicPair_sym:
+  assumes "irregularAmicPair n m"
+  shows "irregularAmicPair m n"
+  using  irregularAmicPair_def regularAmicPair_sym Amicable_pair_sym assms by blast
+
+
+
+
+definition twinAmicPair :: "nat \<Rightarrow> nat \<Rightarrow> bool" where
+  "twinAmicPair n m \<longleftrightarrow>
+     (n Amic m) \<and> (\<not>(\<exists>k l. k > Min {n, m} \<and> k < Max {n, m}\<and> k Amic l))"
+
+lemma twinAmicPair_sym:
+  assumes "twinAmicPair n m"
+  shows "twinAmicPair m n"
+  using assms twinAmicPair_def Amicable_pair_sym assms by auto
+
+
+
+lemma odd_odd_amicable_Euler: "69615 Amic 87633"
+proof-
+  have "prime(5::nat)" by simp
+  have "prime(17::nat)" by simp
+  have "\<not> (5*17)dvd((3::nat)^2*7*13)" by auto
+  have "\<not> 5 dvd((3::nat)^2*7*13)" by auto
+  have "\<not> 17 dvd((3::nat)^2*7*13)"  by auto
+  have A1: "Esigma(69615) = Esigma(3^2*7*13*5*17)" by simp
+  have A2: "Esigma(3^2*7*13*5*17) =  Esigma(3^2*7*13)*Esigma(5*17)"
+  
+  proof-
+    have A111: "coprime  ((3::nat)^2*7*13) ((5::nat)*17)"
+
+    have "gcd (3^2*7*13)((5::nat)*17) =1"
+      using A111  coprime_imp_gcd_eq_1 by blast
+        gcd_Esigma_mult
+      by (smt semiring_normalization_rules(18) semiring_normalization_rules(7))
+  qed
+  have "prime (7::nat)" by simp
+  have "\<not> 7 dvd ((3::nat)^2)"  by simp
+  have "prime (13::nat)" by simp
+  have " \<not> 13 dvd ((3::nat)^2*7)"  by simp
+  have  "gcd ((3::nat)^2*7) 13 =1"
+    by blast
+  have A3: " Esigma(3^2 * 7*13) = Esigma(3^2*7)*Esigma(13)"
+    by (smt semiring_normalization_rules(18) semiring_normalization_rules(7))
+  have  "gcd ((3::nat)^2) 7 = 1"
+    by blast
+  have A4: " Esigma(3^2*7) = Esigma(3^2)* Esigma (7)"
+    by (smt semiring_normalization_rules(18) semiring_normalization_rules(7))
+  have A5: "Esigma(3^2) = 13"
+  proof-
+    have  "(3::nat)^2 =9" by auto
+    have A55:"divisor_set 9 = {1, 3, 9}"
+    proof-
+      have A555: "set(divisors_nat (9)) = {1, 3, 9}" by eval
+      show ?thesis using def_equiv_divisor_set A555 by simp
+    qed
+  qed
+  have "prime( 13::nat)" by simp
+  have A6: "Esigma (13) = 14"
+  have "prime( 7::nat)" by simp
+  have A7: "Esigma (7) = 8"
+  have "prime (5::nat)" by simp
+  have "prime (17::nat)" by simp
+  have A8: "Esigma(5*17) = Esigma(5) * Esigma (17)" 
+    by (metis arith_simps(2) mult.commute num.inject(2) numeral_eq_iff semiring_norm(83))
+  have A9: "Esigma(69615) = Esigma(3^2)*Esigma (7) *Esigma (13) * Esigma(5) * Esigma (17)"
+    using A1 A2 A3 A4 A5 A6 A7 A8 by (metis mult.assoc)
+  have A10: "Esigma (5)=6"
+  have A11: "Esigma (17)=18"
+  have AA:  "Esigma(69615)=13*8*14*6*18" using A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11
+    by simp
+  have AAA: "Esigma(69615) =157248" using AA by simp
+
+  have AA1: "Esigma(87633) = Esigma (3^2*7*13*107)" by simp
+  have "prime (107::nat)" by simp
+  have AA2: "Esigma (3^2*7*13*107) = Esigma (3^2*7*13)*Esigma(107)"
+
+  proof-
+    have "\<not> (107::nat) dvd  (3^2*7*13)" by auto
+
+      using gcd_nat.absorb_iff2 prime_nat_iff by blast
+
+  qed
+  have AA3:  "Esigma (107) =108"
+  have AA4: "Esigma(3^2*7*13) = 13*8*14"
+    using A3 A4 A5 A6 A7 by auto
+  have AA5 : "Esigma (3^2*7*13*107) = 13*8*14*108"
+    using AA2 AA3 AA4 by auto
+  have AA6: "Esigma (3^2*7*13*107) = 157248" using AA5 by simp
+  have A:"Esigma(69615) = Esigma(87633)"
+    using  AAA AA6 AA5 AA1 by linarith
+  have B: " Esigma(87633) = 69615 + 87633"
+  show ?thesis using A B Amicable_pair_def Amicable_pair_equiv_def_conv by auto
+qed
+
+amicability is shown directly by evaluating the sets of divisors.\<close>
+section\<open>Euler's Rule\<close>
+text\<open>We present Euler's Rule as in \<^cite>\<open>"garciaetal1"\<close>. The proof has been reconstructed.\<close>
+  have aa: "Esigma p = p+1" using assms \<open>prime p\<close> prime_sum_div by simp
+  have bb: "Esigma q = q+1" using \<open>prime q\<close> prime_sum_div assms by simp
+  have cc: "Esigma r = r+1" using \<open>prime r\<close> prime_sum_div assms by simp
+    have Z0: "gcd ((2::nat)^k)r =1" using assms \<open>prime r\<close>  by simp
+    have A:  "gcd (2^k) p =1" using assms \<open>prime p\<close> by simp
+    have B:  "gcd (2^k) q =1" using assms \<open>prime q\<close> by simp
+      show ?thesis using \<open>(( 2::nat)^k) \<noteq> (p*q)\<close>
+          \<open>( 2::nat)^k \<ge>1\<close>  gcd_Esigma_mult assms C BB
+      show ?thesis using \<open>p \<noteq> q\<close>
+          \<open>prime p\<close>  \<open>prime q\<close> C  prime_Esigma_mult assms
+      using  \<open>prime (2::nat)\<close> assms Esigma_prime_sum  by auto
+        using assms \<open>f = 2^l+1\<close> by simp
+                using \<open>l < k\<close> by (simp add: algebra_simps)
+text\<open>Another approach by Euler \<^cite>\<open>"garciaetal1"\<close>:\<close>
+      using gcd_Esigma_mult \<open>gcd a n =1\<close>
+section\<open>Th\={a}bit ibn Qurra's Rule and more examples\<close>
+text\<open>Euler's Rule (theorem Euler\_Rule\_Amicable) is actually a generalisation of the following 
+the special case for $l=1$ thus $f=3$.\<close>
+  show ?thesis  using assms Euler_Rule_Amicable  \<open>f =2^1 +1\<close>
+     \<open> r =(2^(2*k -1))*(3^2) -1\<close> l f
+text\<open>In the following three example of amicable pairs, instead of evaluating the sum of the divisors 
+or using the properties of Euler's sigma function as it was done in the previous examples, we 
+prove amicability more directly as we can apply Th\={a}bit ibn Qurra's Rule.\<close>
+text\<open>The following is the first example of an amicable pair known to the Pythagoreans and can be
+
+lemma Amicable_Example_Pythagoras:
+  shows "220 Amic 284"
+
+proof-
+  have a: "(2::nat)>1" by simp
+  have b: "prime((3::nat)*(2^(2-1))-1)" by simp
+  have c: "prime((3::nat)*(2^2)-1)" by simp
+  have d: "prime((9::nat)*(2^(2*2-1))-1)" by simp
+  have e: "((2^2)*(3*(2^(2-1))-1)*(3*(2^2)-1))Amic((2^2)*(9*(2^(2*2-1))-1))"
+    using Thabit_ibn_Qurra_Rule_Amicable a b c d
+    by (metis mult.commute)
+
+  have f: "((2::nat)^2)*5*11 = 220" by simp
+  have g: "((2::nat)^2)*71 = 284" by simp
+    show ?thesis using  e f g by simp
+qed
+

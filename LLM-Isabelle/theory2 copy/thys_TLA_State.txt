@@ -1,0 +1,128 @@
+theory State 
+imports Liveness 
+begin
+
+
+typedecl state
+
+instance state :: world ..
+
+type_synonym 'a statefun = "(state,'a) stfun"
+type_synonym statepred  = "bool statefun"
+type_synonym 'a tempfun = "(state,'a) formfun"
+type_synonym temporal = "state formula"
+
+
+definition stvars    :: "'a statefun \<Rightarrow> bool"
+where basevars_def:  "stvars \<equiv> surj" 
+
+syntax
+  "PRED"    :: "lift \<Rightarrow> 'a"                          ("PRED _")
+  "_stvars" :: "lift \<Rightarrow> bool"                        ("basevars _")
+
+translations
+  "PRED P"   \<rightharpoonup>  "(P::state => _)"
+  "_stvars"  \<rightleftharpoons>  "CONST stvars"
+
+
+lemma basevars: "basevars vs \<Longrightarrow> \<exists>u. vs u = c"
+proof (unfold basevars_def surj_def)
+  assume "\<forall>y. \<exists>x. y = vs x"
+  then obtain x where "c = vs x" by blast
+  thus "\<exists>u. vs u = c" by blast
+qed
+
+lemma baseE: 
+  assumes H1: "basevars v" and H2:"\<And>x. v x = c \<Longrightarrow> Q"
+  shows "Q"
+  using H1[THEN basevars] H2 by auto
+
+lemma first_baseE:
+  assumes H1: "basevars v" and H2: "\<And>x. v (first x) = c \<Longrightarrow> Q"
+  shows "Q"
+  using H1[THEN basevars] H2 by (force simp: first_def)
+
+lemma base_pair1: 
+  assumes h: "basevars (x,y)"
+  shows "basevars x"
+proof (auto simp: basevars_def)
+  fix c
+  from h[THEN basevars] obtain s where "(LIFT (x,y)) s = (c, arbitrary)" by auto
+  thus "c \<in> range x" by auto
+qed
+
+lemma base_pair2: 
+  assumes h: "basevars (x,y)"
+  shows "basevars y"
+proof (auto simp: basevars_def)
+  fix d
+  from h[THEN basevars] obtain s where "(LIFT (x,y)) s = (arbitrary, d)" by auto
+  thus "d \<in> range y" by auto
+qed
+
+lemma base_pair: "basevars (x,y) \<Longrightarrow> basevars x \<and> basevars y"
+  by (auto elim: base_pair1 base_pair2)
+
+
+lemma unit_base: "basevars (v::state \<Rightarrow> unit)"
+  by (auto simp: basevars_def)
+
+lemma
+  fixes x :: "state \<Rightarrow> bool"
+  assumes h1: "basevars (x,x)"
+  shows "False"
+proof -
+  from h1 have "\<exists>u. (LIFT (x,x)) u = (False,True)" by (rule basevars)
+  thus False by auto
+qed
+
+lemma
+  fixes x :: "state \<Rightarrow> nat"
+  assumes h1: "basevars (x,x)"
+  shows "False"
+proof -
+  from h1 have "\<exists>u. (LIFT (x,x)) u = (0,1)" by (rule basevars)
+  thus False by auto
+qed
+
+lemma base_enabled:
+  assumes h1: "basevars vs"
+  and h2: "\<And>u. vs (first u) = c \<Longrightarrow> ((first s) ## u) \<Turnstile> F"
+  shows "s \<Turnstile> Enabled F"
+using h1 proof (rule first_baseE)
+  fix t
+  assume "vs (first t) = c"
+  hence "((first s) ## t) \<Turnstile> F" by (rule h2)
+  thus "s \<Turnstile> Enabled F" unfolding enabled_def by blast
+qed
+
+
+subsection "Temporal Quantifiers"
+
+
+consts
+  EEx        :: "('a statefun \<Rightarrow> temporal) \<Rightarrow> temporal"       (binder "Eex " 10)
+  AAll       :: "('a statefun \<Rightarrow> temporal) \<Rightarrow> temporal"       (binder "Aall " 10)
+
+syntax
+  "_EEx"     :: "[idts, lift] => lift"                ("(3\<exists>\<exists> _./ _)" [0,10] 10)
+  "_AAll"    :: "[idts, lift] => lift"                ("(3\<forall>\<forall> _./ _)" [0,10] 10)
+translations
+  "_EEx v A"  ==   "Eex v. A"
+  "_AAll v A" ==   "Aall v. A"
+
+
+axiomatization where
+     eexI: "\<turnstile> F x \<longrightarrow> (\<exists>\<exists> x. F x)"
+and  eexE: "\<lbrakk>s \<Turnstile> (\<exists>\<exists> x. F x) ; basevars vs; (!! x. \<lbrakk> basevars (x,vs); s \<Turnstile> F x \<rbrakk> \<Longrightarrow> s \<Turnstile> G)\<rbrakk>
+            \<Longrightarrow> (s \<Turnstile> G)"
+and  all_def: "\<turnstile> (\<forall>\<forall> x. F x) = (\<not>(\<exists>\<exists> x. \<not>(F x)))"
+and  eexSTUT: "STUTINV F x \<Longrightarrow> STUTINV (\<exists>\<exists> x. F x)"
+and  history: "\<turnstile> (I \<and> \<box>[A]_v) = (\<exists>\<exists> h. ($h = ha) \<and> I \<and> \<box>[A \<and> h$=hb]_(h,v))"
+
+
+lemmas tla_defs = unch_def before_def after_def first_def second_def suffix_def 
+                  tail_def nexts_def app_def angle_actrans_def actrans_def
+
+
+end

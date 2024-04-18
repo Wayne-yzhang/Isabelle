@@ -1,0 +1,85 @@
+theory Semantics
+imports Main
+begin
+
+
+
+
+datatype val
+
+abbreviation "true == Bool True"
+abbreviation "false == Bool False"
+
+
+
+
+
+datatype expr
+
+
+
+fun binop :: "bop \<Rightarrow> val \<Rightarrow> val \<Rightarrow> val option"
+where "binop Eq v\<^sub>1 v\<^sub>2               = Some(Bool(v\<^sub>1 = v\<^sub>2))"
+  | "binop And (Bool b\<^sub>1) (Bool b\<^sub>2)  = Some(Bool(b\<^sub>1 \<and> b\<^sub>2))"
+  | "binop Less (Intg i\<^sub>1) (Intg i\<^sub>2) = Some(Bool(i\<^sub>1 < i\<^sub>2))"
+  | "binop Add (Intg i\<^sub>1) (Intg i\<^sub>2)  = Some(Intg(i\<^sub>1 + i\<^sub>2))"
+  | "binop Sub (Intg i\<^sub>1) (Intg i\<^sub>2)  = Some(Intg(i\<^sub>1 - i\<^sub>2))"
+
+  | "binop bop v\<^sub>1 v\<^sub>2                = Some(Intg(0))"
+
+
+datatype com
+  = Skip
+  | Seq com com            ("_;;/ _" [61,60] 60)
+  | Cond expr com com      ("if '(_') _/ else _" [80,79,79] 70)
+  | While expr com         ("while '(_') _" [80,79] 70)
+
+
+where
+  FVc: "fv (Val V) = {}"
+  | FVv: "fv (Var V) = {V}"
+  | FVe: "fv (e1 \<guillemotleft>bop\<guillemotright> e2) = fv e1 \<union> fv e2"
+
+
+
+type_synonym state = "vname \<rightharpoonup> val"
+
+
+  i.e. no expression evaluates to None\<close>
+subsection \<open>Small Step Semantics\<close>
+  with \<open>\<langle>c'',s''\<rangle> \<rightarrow>* \<langle>Skip,s'\<rangle>\<close> show ?case by(auto dest:Skip_reds)
+        note IH = \<open>\<And>c\<^sub>1. \<lbrakk>c'' = c\<^sub>1;;c\<^sub>2; c' = Skip\<rbrakk> 
+          \<Longrightarrow> \<exists>sx. \<langle>c\<^sub>1,s''\<rangle> \<rightarrow>* \<langle>Skip,sx\<rangle> \<and> \<langle>c\<^sub>2,sx\<rangle> \<rightarrow>* \<langle>Skip,s'\<rangle>\<close>
+          with \<open>\<langle>c'',s''\<rangle> \<rightarrow>* \<langle>c',s'\<rangle>\<close> \<open>c' = Skip\<close>
+          from IH[OF \<open>c'' = c\<^sub>1';;c\<^sub>2\<close> \<open>c' = Skip\<close>]
+          from \<open>\<langle>c\<^sub>1,s\<rangle> \<rightarrow> \<langle>c\<^sub>1',s''\<rangle>\<close> \<open>\<langle>c\<^sub>1',s''\<rangle> \<rightarrow>* \<langle>Skip,sx\<rangle>\<close>
+          with \<open>\<langle>c\<^sub>2,sx\<rangle> \<rightarrow>* \<langle>Skip,s'\<rangle>\<close> show ?thesis by auto
+    with \<open>\<langle>c\<^sub>1;;c\<^sub>2,s\<rangle> \<rightarrow>* \<langle>Skip,s'\<rangle>\<close> show ?thesis by simp
+  with \<open>\<langle>c'',s''\<rangle> \<rightarrow>* \<langle>Skip,s'\<rangle>\<close> show ?case by(auto dest:Seq_reds)
+  from \<open>\<langle>c\<^sub>1;;c\<^sub>2,s\<rangle> \<rightarrow>\<^bsup>n\<^esup> \<langle>Skip,s'\<rangle>\<close> 
+    note IH = \<open>\<And>c\<^sub>1. c'' = c\<^sub>1;;c\<^sub>2
+      \<Longrightarrow> \<exists>i j sx. \<langle>c\<^sub>1,s''\<rangle> \<rightarrow>\<^bsup>i\<^esup> \<langle>Skip,sx\<rangle> \<and> \<langle>c\<^sub>2,sx\<rangle> \<rightarrow>\<^bsup>j\<^esup> \<langle>Skip,s'\<rangle> \<and> n = i + j + 1\<close>
+    from \<open>\<langle>c\<^sub>1;;c\<^sub>2,s\<rangle> \<rightarrow> \<langle>c'',s''\<rangle>\<close>
+      from \<open>c\<^sub>1 = Skip\<close> have "\<langle>c\<^sub>1,s\<rangle> \<rightarrow>\<^bsup>0\<^esup> \<langle>Skip,s\<rangle>" by(fastforce intro:red_n_Base)
+      with \<open>\<langle>c'',s''\<rangle> \<rightarrow>\<^bsup>n\<^esup> \<langle>Skip,s'\<rangle>\<close> \<open>c'' = c\<^sub>2\<close> \<open>s = s''\<close>
+      from IH[OF \<open>c'' = c\<^sub>1';;c\<^sub>2\<close>] obtain i j sx
+      from \<open>\<langle>c\<^sub>1,s\<rangle> \<rightarrow> \<langle>c\<^sub>1',s''\<rangle>\<close> \<open>\<langle>c\<^sub>1',s''\<rangle> \<rightarrow>\<^bsup>i\<^esup> \<langle>Skip,sx\<rangle>\<close>
+      with \<open>\<langle>c\<^sub>2,sx\<rangle> \<rightarrow>\<^bsup>j\<^esup> \<langle>Skip,s'\<rangle>\<close> \<open>n = i + j + 1\<close> show ?thesis
+  from \<open>\<langle>while (b) cx,s\<rangle> \<rightarrow> \<langle>c'',s''\<rangle>\<close>
+    with \<open>\<langle>c'',s''\<rangle> \<rightarrow>\<^bsup>n\<^esup> \<langle>Skip,s'\<rangle>\<close> have "s = s'" and "n = 0"
+    with \<open>\<lbrakk>b\<rbrakk> s = Some false\<close> show ?thesis by fastforce
+    with \<open>\<langle>c'',s''\<rangle> \<rightarrow>\<^bsup>n\<^esup> \<langle>Skip,s'\<rangle>\<close>
+    with \<open>\<lbrakk>b\<rbrakk> s = Some true\<close> show ?thesis by fastforce
+  from \<open>\<langle>while (b) cx,s\<rangle> \<rightarrow>\<^bsup>n\<^esup> \<langle>Skip,s'\<rangle>\<close>
+    from IHfalse[OF \<open>\<lbrakk>b\<rbrakk> s = Some false\<close>] have "P s s" .
+    with \<open>s = s'\<close> show ?thesis by simp
+    from IHtrue[OF \<open>\<lbrakk>b\<rbrakk> s = Some true\<close> \<open>\<langle>cx,s\<rangle> \<rightarrow>\<^bsup>i\<^esup> \<langle>Skip,s''\<rangle>\<close> 
+      \<open>\<langle>while (b) cx,s''\<rangle> \<rightarrow>\<^bsup>j\<^esup> \<langle>Skip,s'\<rangle>\<close> this] show ?thesis .
+  note IH = \<open>\<And>c\<^sub>2. \<langle>c\<^sub>1,s\<rangle> \<rightarrow> \<langle>c\<^sub>2,s\<^sub>2\<rangle> \<Longrightarrow> c\<^sub>1' = c\<^sub>2 \<and> s' = s\<^sub>2\<close>
+  from \<open>\<langle>c\<^sub>1;;c\<^sub>2',s\<rangle> \<rightarrow> \<langle>c\<^sub>2,s\<^sub>2\<rangle>\<close> have "c\<^sub>1 = Skip \<or> (\<exists>cx. c\<^sub>2 = cx;;c\<^sub>2' \<and> \<langle>c\<^sub>1,s\<rangle> \<rightarrow> \<langle>cx,s\<^sub>2\<rangle>)"
+    with \<open>\<langle>c\<^sub>1,s\<rangle> \<rightarrow> \<langle>c\<^sub>1',s'\<rangle>\<close> have False by(fastforce elim:red.cases)
+    from IH[OF \<open>\<langle>c\<^sub>1,s\<rangle> \<rightarrow> \<langle>cx,s\<^sub>2\<rangle>\<close>] have "c\<^sub>1' = cx \<and> s' = s\<^sub>2" .
+    with \<open>c\<^sub>2 = cx;;c\<^sub>2'\<close> show ?thesis by simp
+  from \<open>\<langle>Skip,s\<^sub>1\<rangle> \<rightarrow>* \<langle>Skip,s\<^sub>2\<rangle>\<close> show ?case
+  note IH = \<open>\<langle>c',s'\<rangle> \<rightarrow>* \<langle>Skip,s\<^sub>2\<rangle> \<Longrightarrow> s\<^sub>1 = s\<^sub>2\<close>
+  from \<open>\<langle>c'',s''\<rangle> \<rightarrow>* \<langle>Skip,s\<^sub>2\<rangle>\<close> this have "\<langle>c',s'\<rangle> \<rightarrow>* \<langle>Skip,s\<^sub>2\<rangle>"

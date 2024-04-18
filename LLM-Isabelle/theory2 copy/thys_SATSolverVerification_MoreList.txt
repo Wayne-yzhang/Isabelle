@@ -1,0 +1,281 @@
+theory MoreList
+imports Main "HOL-Library.Multiset"
+begin
+
+
+lemma listEqualsButlastAppendLast: 
+  assumes "list \<noteq> []"
+  shows "list = (butlast list) @ [last list]"
+using assms
+by (induct list) auto
+
+lemma lastListInList [simp]: 
+  assumes "list \<noteq> []"
+  shows "last list \<in> set list"
+using assms
+by (induct list) auto
+
+lemma butlastIsSubset: 
+  shows "set (butlast list) \<subseteq> set list"
+by (induct list) (auto split: if_split_asm)
+
+lemma setListIsSetButlastAndLast: 
+  shows "set list \<subseteq> set (butlast list) \<union> {last list}" 
+by (induct list) auto
+
+lemma butlastAppend: 
+  shows "butlast (list1 @ list2) = (if list2 = [] then butlast list1 else (list1 @ butlast list2))"
+by (induct list1) auto
+
+
+lemma removeAll_multiset:
+  assumes "distinct a" "x \<in> set a"
+  shows "mset a = {#x#} + mset (removeAll x a)"
+using assms
+proof (induct a)
+  case (Cons y a')
+  thus ?case
+  proof (cases "x = y")
+    case True
+    have "\<not>  x \<in> set a'"
+      by auto
+    hence "removeAll x a' = a'"
+      by (rule removeAll_id)
+      by (simp add: union_commute)
+  next
+    case False
+    have "x \<in> set a'"
+      by simp
+    have "x \<noteq> y" "distinct a'"
+      by auto
+    hence "mset a' = {#x#} + mset (removeAll x a')"
+      using Cons(1)
+      by simp
+    thus ?thesis
+      by (simp add: union_assoc)
+  qed
+qed simp
+
+lemma removeAll_map:
+  assumes "\<forall> x y. x \<noteq> y \<longrightarrow> f x \<noteq> f y"
+  shows "removeAll (f x) (map f a) = map f (removeAll x a)"
+using assms
+by (induct a arbitrary: x) auto
+
+ 
+
+primrec uniq :: "'a list => bool"
+where
+"uniq [] = True" |
+"uniq (h#t) = (h \<notin> set t \<and> uniq t)"
+
+lemma uniqDistinct:
+"uniq l = distinct l"
+by (induct l) auto
+
+lemma uniqAppend: 
+  assumes "uniq (l1 @ l2)" 
+  shows "uniq l1" "uniq l2"
+using assms
+by (induct l1) auto
+
+lemma uniqAppendIff: 
+  "uniq (l1 @ l2) = (uniq l1 \<and> uniq l2 \<and> set l1 \<inter> set l2 = {})" (is "?lhs = ?rhs")
+by (induct l1) auto
+
+lemma uniqAppendElement: 
+  assumes "uniq l" 
+  shows "e \<notin> set l = uniq (l @ [e])"
+using assms
+by (induct l) (auto split: if_split_asm)
+
+lemma uniqImpliesNotLastMemButlast:
+  assumes "uniq l"
+  shows "last l \<notin> set (butlast l)"
+proof (cases "l = []")
+  case True
+  thus ?thesis
+    using assms
+    by simp
+next
+  case False
+  hence "l = butlast l @ [last l]"
+    by (rule listEqualsButlastAppendLast)
+  moreover
+  have "uniq (butlast l)"
+    using uniqAppend[of "butlast l" "[last l]"]
+    by simp
+  ultimately
+  show ?thesis
+    using assms
+    using uniqAppendElement[of "butlast l" "last l"]
+    by simp
+qed
+
+lemma uniqButlastNotUniqListImpliesLastMemButlast: 
+  assumes "uniq (butlast l)" "\<not> uniq l" 
+  shows "last l \<in> set (butlast l)"
+proof (cases "l = []")
+  case True
+  thus ?thesis
+    using assms
+    by auto
+next
+  case False
+  hence "l = butlast l @ [(last l)]"
+    by (rule listEqualsButlastAppendLast)
+  thus ?thesis
+    using assms
+    using uniqAppendElement[of "butlast l" "last l"]
+    by auto
+qed
+
+lemma uniqRemdups:
+  shows "uniq (remdups x)"
+by (induct x) auto
+
+lemma uniqHeadTailSet:
+  assumes "uniq l"
+  shows "set (tl l) = (set l) - {hd l}"
+using assms
+by (induct l) auto
+
+lemma uniqLengthEqCardSet:
+assumes "uniq l"
+shows "length l = card (set l)"
+using assms
+by (induct l) auto
+
+lemma lengthGtOneTwoDistinctElements:
+assumes 
+  "uniq l" "length l > 1" "l \<noteq> []"
+shows
+  "\<exists> a1 a2. a1 \<in> set l \<and> a2 \<in> set l \<and> a1 \<noteq> a2"
+proof-
+  let ?a1 = "l ! 0"
+  let ?a2 = "l ! 1"
+  have "?a1 \<in> set l"
+    using nth_mem[of "0" "l"]
+    using assms
+    by simp
+  moreover
+  have "?a2 \<in> set l"
+    using nth_mem[of "1" "l"]
+    using assms
+    by simp
+  moreover
+  have "?a1 \<noteq> ?a2"
+    using nth_eq_iff_index_eq[of "l" "0" "1"]
+    using assms
+    by (auto simp add: uniqDistinct)
+  ultimately
+  show ?thesis
+    by auto
+qed
+
+
+primrec firstPos :: "'a => 'a list => nat"
+where
+"firstPos a [] = 0" |
+"firstPos a (h # t) = (if a = h then 0 else 1 + (firstPos a t))"
+
+lemma firstPosEqualZero:
+  shows "(firstPos a (m # M') = 0) = (a = m)"
+by (induct M') auto
+
+lemma firstPosLeLength: 
+  assumes "a \<in> set l"
+  shows "firstPos a l < length l"
+using assms
+by (induct l) auto
+
+lemma firstPosAppend: 
+  assumes "a \<in> set l" 
+  shows "firstPos a l = firstPos a (l @ l')"
+using assms
+by (induct l) auto
+
+lemma firstPosAppendNonMemberFirstMemberSecond: 
+  assumes "a \<notin> set l1" and  "a \<in> set l2"
+  shows "firstPos a (l1 @ l2) = length l1 + firstPos a l2"
+using assms
+by (induct l1) auto
+
+lemma firstPosDomainForElements: 
+  shows "(0 \<le> firstPos a l \<and> firstPos a l < length l) = (a \<in> set l)" (is "?lhs = ?rhs")
+  by (induct l) auto
+
+lemma firstPosEqual: 
+  assumes "a \<in> set l" and "b \<in> set l" 
+  shows "(firstPos a l = firstPos b l) = (a = b)" (is "?lhs = ?rhs")
+proof-
+  {
+    assume "?lhs"
+    hence "?rhs"
+      using assms
+    proof (induct l)
+      case (Cons m l')
+      {
+        assume "a = m"
+        have "b = m"
+        proof-
+          have "firstPos a (m # l') = 0"
+            by simp
+          with Cons 
+          have "firstPos b (m # l') = 0"
+            by simp
+          have "firstPos b (m # l') = 0"
+            by simp
+          thus ?thesis
+            using firstPosEqualZero[of "b" "m" "l'"]
+            by simp
+        qed
+        have ?case
+          by simp
+      }
+      note * = this
+      moreover
+      {
+        assume "b = m"
+        have "a = m"
+        proof-
+          have "firstPos b (m # l') = 0"
+            by simp
+          with Cons 
+          have "firstPos a (m # l') = 0"
+            by simp
+          have "firstPos a (m # l') = 0"
+            by simp
+          thus ?thesis
+            using firstPosEqualZero[of "a" "m" "l'"]
+            by simp
+        qed
+        have ?case
+          by simp
+      }
+      note ** = this
+      moreover
+      {
+        assume Q: "a \<noteq> m" "b \<noteq> m"
+        have "a \<in> set l'"
+          by simp
+        have "b \<in> set l'"
+          by simp
+        have "firstPos a l' = firstPos b l'"
+          by (simp split: if_split_asm)
+        with Cons 
+        have ?case
+          by (simp split: if_split_asm)
+      }
+      note *** = this
+      moreover
+      {
+        have "a = m \<or> b = m \<or> a \<noteq> m \<and> b \<noteq> m"
+          by auto
+      }
+      ultimately
+      show ?thesis
+      proof (cases "a = m")
+        case True
+        thus ?thesis
+          by (rule *)

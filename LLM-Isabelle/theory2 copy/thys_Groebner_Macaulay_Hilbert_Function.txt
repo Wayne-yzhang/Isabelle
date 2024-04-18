@@ -1,0 +1,590 @@
+theory Hilbert_Function
+imports
+  "HOL-Combinatorics.Permutations"
+  Dube_Prelims
+  Degree_Section
+begin
+
+
+
+definition direct_decomp :: "'a set \<Rightarrow> 'a::comm_monoid_add set list \<Rightarrow> bool"
+  where "direct_decomp A ss \<longleftrightarrow> bij_betw sum_list (listset ss) A"
+
+lemma direct_decompI:
+  "inj_on sum_list (listset ss) \<Longrightarrow> sum_list ` listset ss = A \<Longrightarrow> direct_decomp A ss"
+  by (simp add: direct_decomp_def bij_betw_def)
+
+lemma direct_decompI_alt:
+  "(\<And>qs. qs \<in> listset ss \<Longrightarrow> sum_list qs \<in> A) \<Longrightarrow> (\<And>a. a \<in> A \<Longrightarrow> \<exists>!qs\<in>listset ss. a = sum_list qs) \<Longrightarrow>
+    direct_decomp A ss"
+  by (auto simp: direct_decomp_def intro!: bij_betwI') blast
+
+lemma direct_decompD:
+  assumes "direct_decomp A ss"
+  shows "qs \<in> listset ss \<Longrightarrow> sum_list qs \<in> A" and "inj_on sum_list (listset ss)"
+    and "sum_list ` listset ss = A"
+  using assms by (auto simp: direct_decomp_def bij_betw_def)
+
+lemma direct_decompE:
+  assumes "direct_decomp A ss" and "a \<in> A"
+  obtains qs where "qs \<in> listset ss" and "a = sum_list qs"
+  using assms by (auto simp: direct_decomp_def bij_betw_def)
+
+lemma direct_decomp_unique:
+  "direct_decomp A ss \<Longrightarrow> qs \<in> listset ss \<Longrightarrow> qs' \<in> listset ss \<Longrightarrow> sum_list qs = sum_list qs' \<Longrightarrow>
+    qs = qs'"
+  by (auto dest: direct_decompD simp: inj_on_def)
+
+lemma direct_decomp_singleton: "direct_decomp A [A]"
+proof (rule direct_decompI_alt)
+  fix qs
+  assume "qs \<in> listset [A]"
+  then obtain q where "q \<in> A" and "qs = [q]" by (rule listset_singletonE)
+  thus "sum_list qs \<in> A" by simp
+next
+  fix a
+  assume "a \<in> A"
+  show "\<exists>!qs\<in>listset [A]. a = sum_list qs"
+  proof (intro ex1I conjI allI impI)
+  next
+    fix qs
+    assume "qs \<in> listset [A] \<and> a = sum_list qs"
+    hence a: "a = sum_list qs" and "qs \<in> listset [A]" by simp_all
+    from this(2) obtain b where qs: "qs = [b]" by (rule listset_singletonE)
+    with a show "qs = [a]" by simp
+  qed simp_all
+qed
+
+lemma mset_bij:
+  assumes "bij_betw f {..<length xs} {..<length ys}" and "\<And>i. i < length xs \<Longrightarrow> xs ! i = ys ! f i"
+  shows "mset xs = mset ys"
+proof -
+  from assms(1) have 1: "inj_on f {0..<length xs}" and 2: "f ` {0..<length xs} = {0..<length ys}"
+    by (simp_all add: bij_betw_def lessThan_atLeast0)
+  let ?f = "(!) ys \<circ> f"
+  have "xs = map ?f [0..<length xs]" unfolding list_eq_iff_nth_eq
+  proof (intro conjI allI impI)
+    fix i
+    assume "i < length xs"
+    hence "xs ! i = ys ! f i" by (rule assms(2))
+    finally show "xs ! i = map ((!) ys \<circ> f) [0..<length xs] ! i" .
+  qed simp
+  hence "mset xs = mset (map ?f [0..<length xs])" by (rule arg_cong)
+  also have "\<dots> = image_mset ((!) ys) (image_mset f (mset_set {0..<length xs}))"
+    by (simp flip: image_mset.comp)
+  also from 1 have "\<dots> = image_mset ((!) ys) (mset_set {0..<length ys})"
+    by (simp add: image_mset_mset_set 2)
+  also have "\<dots> = mset (map ((!) ys) [0..<length ys])" by simp
+  finally show "mset xs = mset ys" by (simp only: map_nth)
+qed
+
+lemma direct_decomp_perm:
+  assumes "direct_decomp A ss1" and "mset ss1 = mset ss2"
+  shows "direct_decomp A ss2"
+proof -
+  from assms(2) have len_ss1: "length ss1 = length ss2"
+    using mset_eq_length by blast
+    by (rule mset_eq_permutation)
+  then have f_bij: "bij_betw f {..<length ss2} {..<length ss1}"
+    and f: "\<And>i. i < length ss2 \<Longrightarrow> ss1 ! i = ss2 ! f i" 
+    by (auto simp add: permutes_imp_bij permute_list_nth)
+  define g where "g = inv_into {..<length ss2} f"
+  from f_bij have g_bij: "bij_betw g {..<length ss1} {..<length ss2}"
+    unfolding g_def len_ss1 by (rule bij_betw_inv_into)
+  have f_g: "f (g i) = i" if "i < length ss1" for i
+  proof -
+    from that f_bij have "i \<in> f ` {..<length ss2}" by (simp add: bij_betw_def len_ss1)
+    thus ?thesis by (simp only: f_inv_into_f g_def)
+  qed
+  have g_f: "g (f i) = i" if "i < length ss2" for i
+  proof -
+    from f_bij have "inj_on f {..<length ss2}" by (simp only: bij_betw_def)
+    moreover from that have "i \<in> {..<length ss2}" by simp
+    ultimately show ?thesis by (simp add: g_def)
+  qed
+  have g: "ss2 ! i = ss1 ! g i" if "i < length ss1" for i
+  proof -
+    from that have "i \<in> {..<length ss2}" by (simp add: len_ss1)
+    hence "g i \<in> g ` {..<length ss2}" by (rule imageI)
+    also from g_bij have "\<dots> = {..<length ss2}" by (simp only: len_ss1 bij_betw_def)
+    finally have "g i < length ss2" by simp
+    hence "ss1 ! g i = ss2 ! f (g i)" by (rule f)
+    with that show ?thesis by (simp only: f_g)
+  qed
+  show ?thesis
+  proof (rule direct_decompI_alt)
+    fix qs2
+    assume "qs2 \<in> listset ss2"
+    then obtain qs1 where qs1_in: "qs1 \<in> listset ss1" and len_qs1: "length qs1 = length qs2"
+      and *: "\<And>i. i < length qs2 \<Longrightarrow> qs1 ! i = qs2 ! f i" using f_bij f by (rule listset_permE) blast+
+    with f_bij have "bij_betw f {..<length qs1} {..<length qs2}" by (simp only: len_qs1 len_ss1)
+    hence "mset qs1 = mset qs2" using * by (rule mset_bij) (simp only: len_qs1)
+    hence "sum_list qs2 = sum_list qs1" by (simp flip: sum_mset_sum_list)
+    also from assms(1) qs1_in have "\<dots> \<in> A" by (rule direct_decompD)
+    finally show "sum_list qs2 \<in> A" .
+  next
+    fix a
+    assume "a \<in> A"
+    with assms(1) obtain qs where a: "a = sum_list qs" and qs_in: "qs \<in> listset ss1"
+      by (rule direct_decompE)
+    from qs_in obtain qs2 where qs2_in: "qs2 \<in> listset ss2" and len_qs2: "length qs2 = length qs"
+      and 1: "\<And>i. i < length qs \<Longrightarrow> qs2 ! i = qs ! g i" using g_bij g by (rule listset_permE) blast+
+    show "\<exists>!qs\<in>listset ss2. a = sum_list qs"
+    proof (intro ex1I conjI allI impI)
+      from qs_in have len_qs: "length qs = length ss1" by (rule listsetD)
+      with g_bij have g_bij2: "bij_betw g {..<length qs2} {..<length qs}" by (simp only: len_qs2 len_ss1)
+      hence "mset qs2 = mset qs" using 1 by (rule mset_bij) (simp only: len_qs2)
+      thus a2: "a = sum_list qs2" by (simp only: a flip: sum_mset_sum_list)
+
+      fix qs'
+      assume "qs' \<in> listset ss2 \<and> a = sum_list qs'"
+      hence qs'_in: "qs' \<in> listset ss2" and a': "a = sum_list qs'" by simp_all
+      from this(1) obtain qs1 where qs1_in: "qs1 \<in> listset ss1" and len_qs1: "length qs1 = length qs'"
+      and 2: "\<And>i. i < length qs' \<Longrightarrow> qs1 ! i = qs' ! f i" using f_bij f by (rule listset_permE) blast+
+      with f_bij have "bij_betw f {..<length qs1} {..<length qs'}" by (simp only: len_qs1 len_ss1)
+      hence "mset qs1 = mset qs'" using 2 by (rule mset_bij) (simp only: len_qs1)
+      hence "sum_list qs1 = sum_list qs'" by (simp flip: sum_mset_sum_list)
+      hence "sum_list qs1 = sum_list qs" by (simp only: a flip: a')
+      with assms(1) qs1_in qs_in have "qs1 = qs" by (rule direct_decomp_unique)
+      show "qs' = qs2" unfolding list_eq_iff_nth_eq
+      proof (intro conjI allI impI)
+        from qs'_in have "length qs' = length ss2" by (rule listsetD)
+        thus eq: "length qs' = length qs2" by (simp only: len_qs2 len_qs len_ss1)
+
+        fix i
+        assume "i < length qs'"
+        hence "i < length qs2" by (simp only: eq)
+        hence "i \<in> {..<length qs2}" and "i < length qs" and "i < length ss1"
+          by (simp_all add: len_qs2 len_qs)
+        from this(1) have "g i \<in> g ` {..<length qs2}" by (rule imageI)
+        also from g_bij2 have "\<dots> = {..<length qs}" by (simp only: bij_betw_def)
+        finally have "g i < length qs'" by (simp add: eq len_qs2)
+        finally show "qs' ! i = qs2 ! i" by (rule sym)
+      qed
+    qed fact
+  qed
+qed
+
+lemma direct_decomp_split_map:
+  "direct_decomp A (map f ss) \<Longrightarrow> direct_decomp A (map f (filter P ss) @ map f (filter (- P) ss))"
+proof (rule direct_decomp_perm)
+  show "mset (map f ss) = mset (map f (filter P ss) @ map f (filter (- P) ss))"
+    by simp (metis image_mset_union multiset_partition) 
+qed
+
+lemmas direct_decomp_split = direct_decomp_split_map[where f=id, simplified]
+
+lemma direct_decomp_direct_decomp:
+  assumes "direct_decomp A (s # ss)" and "direct_decomp s rs"
+  shows "direct_decomp A (ss @ rs)" (is "direct_decomp A ?ss")
+proof (rule direct_decompI_alt)
+  fix qs
+  assume "qs \<in> listset ?ss"
+  then obtain qs1 qs2 where qs1: "qs1 \<in> listset ss" and qs2: "qs2 \<in> listset rs" and qs: "qs = qs1 @ qs2"
+    by (rule listset_appendE)
+  have "sum_list qs = sum_list ((sum_list qs2) # qs1)" by (simp add: qs add.commute)
+  also from assms(1) have "\<dots> \<in> A"
+  proof (rule direct_decompD)
+    from assms(2) qs2 have "sum_list qs2 \<in> s" by (rule direct_decompD)
+    thus "sum_list qs2 # qs1 \<in> listset (s # ss)" using qs1 refl by (rule listset_ConsI)
+  qed
+  finally show "sum_list qs \<in> A" .
+next
+  fix a
+  assume "a \<in> A"
+  with assms(1) obtain qs1 where qs1_in: "qs1 \<in> listset (s # ss)" and a: "a = sum_list qs1"
+    by (rule direct_decompE)
+  from qs1_in obtain qs11 qs12 where "qs11 \<in> s" and qs12_in: "qs12 \<in> listset ss"
+    and qs1: "qs1 = qs11 # qs12" by (rule listset_ConsE)
+  from assms(2) this(1) obtain qs2 where qs2_in: "qs2 \<in> listset rs" and qs11: "qs11 = sum_list qs2"
+    by (rule direct_decompE)
+  let ?qs = "qs12 @ qs2"
+  show "\<exists>!qs\<in>listset ?ss. a = sum_list qs"
+  proof (intro ex1I conjI allI impI)
+    from qs12_in qs2_in refl show "?qs \<in> listset ?ss" by (rule listset_appendI)
+
+    show "a = sum_list ?qs" by (simp add: a qs1 qs11 add.commute)
+
+    fix qs0
+    assume "qs0 \<in> listset ?ss \<and> a = sum_list qs0"
+    hence qs0_in: "qs0 \<in> listset ?ss" and a2: "a = sum_list qs0" by simp_all
+    from this(1) obtain qs01 qs02 where qs01_in: "qs01 \<in> listset ss" and qs02_in: "qs02 \<in> listset rs"
+      and qs0: "qs0 = qs01 @ qs02" by (rule listset_appendE)
+    note assms(1)
+    moreover from _ qs01_in refl have "(sum_list qs02) # qs01 \<in> listset (s # ss)" (is "?qs' \<in> _")
+    proof (rule listset_ConsI)
+      from assms(2) qs02_in show "sum_list qs02 \<in> s" by (rule direct_decompD)
+    qed
+    moreover note qs1_in
+    moreover from a2 have "sum_list ?qs' = sum_list qs1" by (simp add: qs0 a add.commute)
+    ultimately have "?qs' = qs11 # qs12" unfolding qs1 by (rule direct_decomp_unique)
+    hence "qs11 = sum_list qs02" and 1: "qs01 = qs12" by simp_all
+    from this(1) have "sum_list qs02 = sum_list qs2" by (simp only: qs11)
+    with assms(2) qs02_in qs2_in have "qs02 = qs2" by (rule direct_decomp_unique)
+    thus "qs0 = qs12 @ qs2" by (simp only: 1 qs0)
+  qed
+qed
+
+  by (induct xs) (simp_all add: algebra_simps)
+
+lemma direct_decomp_image_times:
+  assumes "direct_decomp (A::'a::semiring_0 set) ss" and "\<And>a b. x * a = x * b \<Longrightarrow> x \<noteq> 0 \<Longrightarrow> a = b"
+proof (rule direct_decompI_alt)
+  fix qs
+  assume "qs \<in> listset ?ss"
+    by (rule listset_map_imageE)
+  have "sum_list qs = x * sum_list qs0" by (simp only: qs sum_list_map_times)
+  moreover from assms(1) qs0_in have "sum_list qs0 \<in> A" by (rule direct_decompD)
+next
+  fix a
+  assume "a \<in> ?A"
+  then obtain a' where "a' \<in> A" and a: "a = x * a'" ..
+  from assms(1) this(1) obtain qs' where qs'_in: "qs' \<in> listset ss" and a': "a' = sum_list qs'"
+    by (rule direct_decompE)
+  show "\<exists>!qs\<in>listset ?ss. a = sum_list qs"
+  proof (intro ex1I conjI allI impI)
+    from qs'_in qs_def show "qs \<in> listset ?ss" by (rule listset_map_imageI)
+
+    fix qs0
+    assume "qs0 \<in> listset ?ss \<and> a = sum_list qs0"
+    hence "qs0 \<in> listset ?ss" and a0: "a = sum_list qs0" by simp_all
+      by (rule listset_map_imageE)
+    show "qs0 = qs"
+    proof (cases "x = 0")
+      case True
+      from qs1_in have "length qs1 = length ss" by (rule listsetD)
+      moreover from qs'_in have "length qs' = length ss" by (rule listsetD)
+      ultimately show ?thesis by (simp add: qs_def qs0 list_eq_iff_nth_eq True)
+    next
+      case False
+      have "x * sum_list qs1 = a" by (simp only: a0 qs0 sum_list_map_times)
+      also have "\<dots> = x * sum_list qs'" by (simp only: a' a)
+      finally have "sum_list qs1 = sum_list qs'" using False by (rule assms(2))
+      with assms(1) qs1_in qs'_in have "qs1 = qs'" by (rule direct_decomp_unique)
+      thus ?thesis by (simp only: qs0 qs_def)
+    qed
+  qed (simp only: a a' qs_def sum_list_map_times)
+qed
+
+lemma direct_decomp_appendD:
+  assumes "direct_decomp A (ss1 @ ss2)"
+  shows "{} \<notin> set ss2 \<Longrightarrow> direct_decomp (sum_list ` listset ss1) ss1" (is "_ \<Longrightarrow> ?thesis1")
+    and "{} \<notin> set ss1 \<Longrightarrow> direct_decomp (sum_list ` listset ss2) ss2" (is "_ \<Longrightarrow> ?thesis2")
+    and "direct_decomp A [sum_list ` listset ss1, sum_list ` listset ss2]" (is "direct_decomp _ ?ss")
+proof -
+  have rl: "direct_decomp (sum_list ` listset ts1) ts1"
+    if "direct_decomp A (ts1 @ ts2)" and "{} \<notin> set ts2" for ts1 ts2
+  proof (intro direct_decompI inj_onI refl)
+    fix qs1 qs2
+    assume qs1: "qs1 \<in> listset ts1" and qs2: "qs2 \<in> listset ts1"
+    assume eq: "sum_list qs1 = sum_list qs2"
+    from that(2) have "listset ts2 \<noteq> {}" by (simp add: listset_empty_iff)
+    then obtain qs3 where qs3: "qs3 \<in> listset ts2" by blast
+    note that(1)
+    moreover from qs1 qs3 refl have "qs1 @ qs3 \<in> listset (ts1 @ ts2)" by (rule listset_appendI)
+    moreover from qs2 qs3 refl have "qs2 @ qs3 \<in> listset (ts1 @ ts2)" by (rule listset_appendI)
+    moreover have "sum_list (qs1 @ qs3) = sum_list (qs2 @ qs3)" by (simp add: eq)
+    ultimately have "qs1 @ qs3 = qs2 @ qs3" by (rule direct_decomp_unique)
+    thus "qs1 = qs2" by simp
+  qed
+
+  {
+    assume "{} \<notin> set ss2"
+    with assms show ?thesis1 by (rule rl)
+  }
+
+  {
+    from assms have "direct_decomp A (ss2 @ ss1)"
+      by (rule direct_decomp_perm) simp
+    moreover assume "{} \<notin> set ss1"
+    ultimately show ?thesis2 by (rule rl)
+  }
+
+  show "direct_decomp A ?ss"
+  proof (rule direct_decompI_alt)
+    fix qs
+    assume "qs \<in> listset ?ss"
+    then obtain q1 q2 where q1: "q1 \<in> sum_list ` listset ss1" and q2: "q2 \<in> sum_list ` listset ss2"
+      and qs: "qs = [q1, q2]" by (rule listset_doubletonE)
+    from q1 obtain qs1 where qs1: "qs1 \<in> listset ss1" and q1: "q1 = sum_list qs1" ..
+    from q2 obtain qs2 where qs2: "qs2 \<in> listset ss2" and q2: "q2 = sum_list qs2" ..
+    from qs1 qs2 refl have "qs1 @ qs2 \<in> listset (ss1 @ ss2)" by (rule listset_appendI)
+    with assms have "sum_list (qs1 @ qs2) \<in> A" by (rule direct_decompD)
+    thus "sum_list qs \<in> A" by (simp add: qs q1 q2)
+  next
+    fix a
+    assume "a \<in> A"
+    with assms obtain qs0 where qs0_in: "qs0 \<in> listset (ss1 @ ss2)" and a: "a = sum_list qs0"
+      by (rule direct_decompE)
+    from this(1) obtain qs1 qs2 where qs1: "qs1 \<in> listset ss1" and qs2: "qs2 \<in> listset ss2"
+      and qs0: "qs0 = qs1 @ qs2" by (rule listset_appendE)
+    from qs1 have len_qs1: "length qs1 = length ss1" by (rule listsetD)
+    define qs where "qs = [sum_list qs1, sum_list qs2]"
+    show "\<exists>!qs\<in>listset ?ss. a = sum_list qs"
+    proof (intro ex1I conjI)
+      from qs1 have "sum_list qs1 \<in> sum_list ` listset ss1" by (rule imageI)
+      moreover from qs2 have "sum_list qs2 \<in> sum_list ` listset ss2" by (rule imageI)
+      ultimately show "qs \<in> listset ?ss" using qs_def by (rule listset_doubletonI)
+
+      fix qs'
+      assume "qs' \<in> listset ?ss \<and> a = sum_list qs'"
+      hence "qs' \<in> listset ?ss" and a': "a = sum_list qs'" by simp_all
+      from this(1) obtain q1 q2 where q1: "q1 \<in> sum_list ` listset ss1"
+        and q2: "q2 \<in> sum_list ` listset ss2" and qs': "qs' = [q1, q2]" by (rule listset_doubletonE)
+      from q1 obtain qs1' where qs1': "qs1' \<in> listset ss1" and q1: "q1 = sum_list qs1'" ..
+      from q2 obtain qs2' where qs2': "qs2' \<in> listset ss2" and q2: "q2 = sum_list qs2'" ..
+      from qs1' have len_qs1': "length qs1' = length ss1" by (rule listsetD)
+      note assms
+      moreover from qs1' qs2' refl have "qs1' @ qs2' \<in> listset (ss1 @ ss2)" by (rule listset_appendI)
+      moreover note qs0_in
+      moreover have "sum_list (qs1' @ qs2') = sum_list qs0" by (simp add: a' qs' flip: a q1 q2)
+      ultimately have "qs1' @ qs2' = qs0" by (rule direct_decomp_unique)
+      also have "\<dots> = qs1 @ qs2" by fact
+      finally show "qs' = qs" by (simp add: qs_def qs' q1 q2 len_qs1 len_qs1')
+    qed (simp add: qs_def a qs0)
+  qed
+qed
+
+lemma direct_decomp_Cons_zeroI:
+  assumes "direct_decomp A ss"
+  shows "direct_decomp A ({0} # ss)"
+proof (rule direct_decompI_alt)
+  fix qs
+  assume "qs \<in> listset ({0} # ss)"
+  then obtain q qs' where "q \<in> {0}" and "qs' \<in> listset ss" and "qs = q # qs'"
+    by (rule listset_ConsE)
+  from this(1, 3) have "sum_list qs = sum_list qs'" by simp
+  finally show "sum_list qs \<in> A" .
+next
+  fix a
+  assume "a \<in> A"
+  with assms obtain qs' where qs': "qs' \<in> listset ss" and a: "a = sum_list qs'"
+    by (rule direct_decompE)
+  define qs where "qs = 0 # qs'"
+  show "\<exists>!qs. qs \<in> listset ({0} # ss) \<and> a = sum_list qs"
+  proof (intro ex1I conjI)
+    from _ qs' qs_def show "qs \<in> listset ({0} # ss)" by (rule listset_ConsI) simp
+  next
+    fix qs0
+    assume "qs0 \<in> listset ({0} # ss) \<and> a = sum_list qs0"
+    hence "qs0 \<in> listset ({0} # ss)" and a0: "a = sum_list qs0" by simp_all
+    from this(1) obtain q0 qs0' where "q0 \<in> {0}" and qs0': "qs0' \<in> listset ss"
+      and qs0: "qs0 = q0 # qs0'" by (rule listset_ConsE)
+    from this(1, 3) have "sum_list qs0' = sum_list qs'" by (simp add: a0 flip: a)
+    with assms qs0' qs' have "qs0' = qs'" by (rule direct_decomp_unique)
+  qed (simp add: qs_def a)
+qed
+
+lemma direct_decomp_Cons_zeroD:
+  assumes "direct_decomp A ({0} # ss)"
+  shows "direct_decomp A ss"
+proof -
+  have "direct_decomp {0} []" by (simp add: direct_decomp_def bij_betw_def)
+  with assms have "direct_decomp A (ss @ [])" by (rule direct_decomp_direct_decomp)
+  thus ?thesis by simp
+qed
+
+lemma direct_decomp_Cons_subsetI:
+  assumes "direct_decomp A (s # ss)" and "\<And>s0. s0 \<in> set ss \<Longrightarrow> 0 \<in> s0"
+  shows "s \<subseteq> A"
+proof
+  fix x
+  assume "x \<in> s"
+  moreover from assms(2) have "map (\<lambda>_. 0) ss \<in> listset ss"
+    by (induct ss, auto simp del: listset.simps(2) intro: listset_ConsI)
+  ultimately have "x # (map (\<lambda>_. 0) ss) \<in> listset (s # ss)" using refl by (rule listset_ConsI)
+  with assms(1) have "sum_list (x # (map (\<lambda>_. 0) ss)) \<in> A" by (rule direct_decompD)
+  thus "x \<in> A" by simp
+qed
+
+lemma direct_decomp_Int_zero:
+  assumes "direct_decomp A ss" and "i < j" and "j < length ss" and "\<And>s. s \<in> set ss \<Longrightarrow> 0 \<in> s"
+  shows "ss ! i \<inter> ss ! j = {0}"
+proof -
+  from assms(2, 3) have "i < length ss" by (rule less_trans)
+  hence i_in: "ss ! i \<in> set ss" by simp
+  from assms(3) have j_in: "ss ! j \<in> set ss" by simp
+  show ?thesis
+  proof
+    show "ss ! i \<inter> ss ! j \<subseteq> {0}"
+    proof
+      fix x
+      assume "x \<in> ss ! i \<inter> ss ! j"
+      hence x_i: "x \<in> ss ! i" and x_j: "x \<in> ss ! j" by simp_all
+      have 1: "(map (\<lambda>_. 0) ss)[k := y] \<in> listset ss" if "k < length ss" and "y \<in> ss ! k" for k y
+        using assms(4) that
+      proof (induct ss arbitrary: k)
+        case Nil
+        from Nil(2) show ?case by simp
+      next
+        case (Cons s ss)
+        have *: "\<And>s'. s' \<in> set ss \<Longrightarrow> 0 \<in> s'" by (rule Cons.prems) simp
+        show ?case
+        proof (cases k)
+          case k: 0
+          with Cons.prems(3) have "y \<in> s" by simp
+          moreover from * have "map (\<lambda>_. 0) ss \<in> listset ss"
+            by (induct ss) (auto simp del: listset.simps(2) intro: listset_ConsI)
+          moreover have "(map (\<lambda>_. 0) (s # ss))[k := y] = y # map (\<lambda>_. 0) ss" by (simp add: k)
+          ultimately show ?thesis by (rule listset_ConsI)
+        next
+          case k: (Suc k')
+          have "0 \<in> s" by (rule Cons.prems) simp
+          moreover from * have "(map (\<lambda>_. 0) ss)[k' := y] \<in> listset ss"
+          proof (rule Cons.hyps)
+            from Cons.prems(2) show "k' < length ss" by (simp add: k)
+          next
+            from Cons.prems(3) show "y \<in> ss ! k'" by (simp add: k)
+          qed
+          moreover have "(map (\<lambda>_. 0) (s # ss))[k := y] = 0 # (map (\<lambda>_. 0) ss)[k' := y]"
+            by (simp add: k)
+          ultimately show ?thesis by (rule listset_ConsI)
+        qed
+      qed
+      have 2: "sum_list ((map (\<lambda>_. 0) ss)[k := y]) = y" if "k < length ss" for k and y::'a
+        using that by (induct ss arbitrary: k) (auto simp: add_ac split: nat.split)
+      define qs1 where "qs1 = (map (\<lambda>_. 0) ss)[i := x]"
+      define qs2 where "qs2 = (map (\<lambda>_. 0) ss)[j := x]"
+      note assms(1)
+      moreover from assms(3) x_j have "qs2 \<in> listset ss" unfolding qs2_def by (rule 1)
+      thm sum_list_update
+        by (simp add: qs1_def qs2_def 2)
+      ultimately have "qs1 = qs2" by (rule direct_decomp_unique)
+      hence "qs1 ! i = qs2 ! i" by simp
+    qed
+  next
+    from i_in have "0 \<in> ss ! i" by (rule assms(4))
+    moreover from j_in have "0 \<in> ss ! j" by (rule assms(4))
+    ultimately show "{0} \<subseteq> ss ! i \<inter> ss ! j" by simp
+  qed
+qed
+
+corollary direct_decomp_pairwise_zero:
+  assumes "direct_decomp A ss" and "\<And>s. s \<in> set ss \<Longrightarrow> 0 \<in> s"
+  shows "pairwise (\<lambda>s1 s2. s1 \<inter> s2 = {0}) (set ss)"
+proof (rule pairwiseI)
+  fix s1 s2
+  assume "s1 \<in> set ss"
+  then obtain i where "i < length ss" and s1: "s1 = ss ! i" by (metis in_set_conv_nth)
+  assume "s2 \<in> set ss"
+  then obtain j where "j < length ss" and s2: "s2 = ss ! j" by (metis in_set_conv_nth)
+  assume "s1 \<noteq> s2"
+  hence "i < j \<or> j < i" by (auto simp: s1 s2)
+  thus "s1 \<inter> s2 = {0}"
+  proof
+    assume "i < j"
+      by (rule direct_decomp_Int_zero)
+  next
+    assume "j < i"
+      by (rule direct_decomp_Int_zero)
+    thus ?thesis by (simp only: Int_commute)
+  qed
+qed
+
+corollary direct_decomp_repeated_eq_zero:
+  assumes "direct_decomp A ss" and "1 < count_list ss X" and "\<And>s. s \<in> set ss \<Longrightarrow> 0 \<in> s"
+  shows "X = {0}"
+proof -
+  from assms(2) obtain i j where "i < j" and "j < length ss" and 1: "ss ! i = X" and 2: "ss ! j = X"
+    by (rule count_list_gr_1_E)
+  from assms(1) this(1, 2) assms(3) have "ss ! i \<inter> ss ! j = {0}" by (rule direct_decomp_Int_zero)
+  thus ?thesis by (simp add: 1 2)
+qed
+
+corollary direct_decomp_map_Int_zero:
+  assumes "direct_decomp A (map f ss)" and "s1 \<in> set ss" and "s2 \<in> set ss" and "s1 \<noteq> s2"
+    and "\<And>s. s \<in> set ss \<Longrightarrow> 0 \<in> f s"
+  shows "f s1 \<inter> f s2 = {0}"
+proof -
+  from assms(2) obtain i where "i < length ss" and s1: "s1 = ss ! i" by (metis in_set_conv_nth)
+  from this(1) have i: "i < length (map f ss)" by simp
+  from assms(3) obtain j where "j < length ss" and s2: "s2 = ss ! j" by (metis in_set_conv_nth)
+  from this(1) have j: "j < length (map f ss)" by simp
+  have *: "0 \<in> s" if "s \<in> set (map f ss)" for s
+  proof -
+    from that obtain s' where "s' \<in> set ss" and s: "s = f s'" unfolding set_map ..
+    from this(1) show "0 \<in> s" unfolding s by (rule assms(5))
+  qed
+  show ?thesis
+  proof (rule linorder_cases)
+    assume "i < j"
+    with assms(1) have "(map f ss) ! i \<inter> (map f ss) ! j = {0}"
+      using j * by (rule direct_decomp_Int_zero)
+    with i j show ?thesis by (simp add: s1 s2)
+  next
+    assume "j < i"
+    with assms(1) have "(map f ss) ! j \<inter> (map f ss) ! i = {0}"
+      using i * by (rule direct_decomp_Int_zero)
+    with i j show ?thesis by (simp add: s1 s2 Int_commute)
+  next
+    assume "i = j"
+    with assms(4) show ?thesis by (simp add: s1 s2)
+  qed
+qed
+
+
+definition (in vector_space) is_basis :: "'b set \<Rightarrow> 'b set \<Rightarrow> bool"
+  where "is_basis V B \<longleftrightarrow> (B \<subseteq> V \<and> independent B \<and> V \<subseteq> span B \<and> card B = dim V)"
+
+definition (in vector_space) some_basis :: "'b set \<Rightarrow> 'b set"
+  where "some_basis V = Eps (local.is_basis V)"
+
+hide_const (open) real_vector.is_basis real_vector.some_basis
+
+context vector_space
+begin
+
+lemma dim_empty [simp]: "dim {} = 0"
+  using dim_span_eq_card_independent independent_empty by fastforce
+
+lemma dim_zero [simp]: "dim {0} = 0"
+  using dim_span_eq_card_independent independent_empty by fastforce
+
+lemma independent_UnI:
+  assumes "independent A" and "independent B" and "span A \<inter> span B = {0}"
+  shows "independent (A \<union> B)"
+proof
+  from span_superset have "A \<inter> B \<subseteq> span A \<inter> span B" by blast
+  hence "A \<inter> B = {}" unfolding assms(3) using assms(1, 2) dependent_zero by blast
+  assume "dependent (A \<union> B)"
+  then obtain T u v where "finite T" and "T \<subseteq> A \<union> B" and eq: "(\<Sum>v\<in>T. u v *s v) = 0"
+    and "v \<in> T" and "u v \<noteq> 0" unfolding dependent_explicit by blast
+  define TA where "TA = T \<inter> A"
+  define TB where "TB = T \<inter> B"
+  have "0 = (\<Sum>v\<in>TA \<union> TB. u v *s v)" by (simp only: eq flip: T)
+  also have "\<dots> = (\<Sum>v\<in>TA. u v *s v) + (\<Sum>v\<in>TB. u v *s v)" by (rule sum.union_disjoint) fact+
+  finally have "(\<Sum>v\<in>TA. u v *s v) = (\<Sum>v\<in>TB. (- u) v *s v)" (is "?x = ?y")
+    by (simp add: sum_negf eq_neg_iff_add_eq_0)
+  hence "u v = 0"
+  proof
+    assume "v \<in> TA"
+  next
+    assume "v \<in> TB"
+    thus "u v = 0" by simp
+  qed
+qed
+
+lemma subspace_direct_decomp:
+  assumes "direct_decomp A ss" and "\<And>s. s \<in> set ss \<Longrightarrow> subspace s"
+  shows "subspace A"
+proof (rule subspaceI)
+  let ?qs = "map (\<lambda>_. 0) ss"
+  from assms(2) have "?qs \<in> listset ss"
+    by (induct ss) (auto simp del: listset.simps(2) dest: subspace_0 intro: listset_ConsI)
+  with assms(1) have "sum_list ?qs \<in> A" by (rule direct_decompD)
+  thus "0 \<in> A" by simp
+next
+  fix p q
+  assume "p \<in> A"
+  with assms(1) obtain ps where ps: "ps \<in> listset ss" and p: "p = sum_list ps" by (rule direct_decompE)
+  assume "q \<in> A"
+  with assms(1) obtain qs where qs: "qs \<in> listset ss" and q: "q = sum_list qs" by (rule direct_decompE)
+  from ps qs have l: "length ps = length qs" by (simp only: listsetD)
+  from ps qs have "map2 (+) ps qs \<in> listset ss" (is "?qs \<in> _")
+    by (rule listset_closed_map2) (auto dest: assms(2) subspace_add)
+  with assms(1) have "sum_list ?qs \<in> A" by (rule direct_decompD)
+  thus "p + q \<in> A" using l by (simp only: p q sum_list_map2_plus)
+next
+  fix c p
+  assume "p \<in> A"
+  with assms(1) obtain ps where "ps \<in> listset ss" and p: "p = sum_list ps" by (rule direct_decompE)

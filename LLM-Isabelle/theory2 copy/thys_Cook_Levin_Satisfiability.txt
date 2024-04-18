@@ -1,0 +1,423 @@
+theory Satisfiability
+  imports Wellformed NP
+begin
+
+
+
+
+
+
+
+
+datatype literal = Neg nat | Pos nat
+
+type_synonym clause = "literal list"
+
+type_synonym formula = "clause list"
+
+
+type_synonym assignment = "nat \<Rightarrow> bool"
+
+abbreviation satisfies_literal :: "assignment \<Rightarrow> literal \<Rightarrow> bool" where
+  "satisfies_literal \<alpha> x \<equiv> case x of Neg n \<Rightarrow> \<not> \<alpha> n | Pos n \<Rightarrow> \<alpha> n"
+
+definition satisfies_clause :: "assignment \<Rightarrow> clause \<Rightarrow> bool" where
+  "satisfies_clause \<alpha> c \<equiv> \<exists>x\<in>set c. satisfies_literal \<alpha> x"
+
+definition satisfies :: "assignment \<Rightarrow> formula \<Rightarrow> bool" (infix "\<Turnstile>" 60) where
+  "\<alpha> \<Turnstile> \<phi> \<equiv> \<forall>c\<in>set \<phi>. satisfies_clause \<alpha> c"
+
+
+proposition "\<not> satisfies_clause \<alpha> []"
+  by (simp add: satisfies_clause_def)
+
+proposition "\<alpha> \<Turnstile> []"
+  by (simp add: satisfies_def)
+
+lemma satisfies_clause_take:
+  assumes "i < length clause"
+  shows "satisfies_clause \<alpha> (take (Suc i) clause) \<longleftrightarrow>
+    satisfies_clause \<alpha> (take i clause) \<or> satisfies_literal \<alpha> (clause ! i)"
+  using assms satisfies_clause_def by (auto simp add: take_Suc_conv_app_nth)
+
+lemma satisfies_take:
+  assumes "i < length \<phi>"
+  shows "\<alpha> \<Turnstile> take (Suc i) \<phi> \<longleftrightarrow> \<alpha> \<Turnstile> take i \<phi> \<and> satisfies_clause \<alpha> (\<phi> ! i)"
+  using assms satisfies_def by (auto simp add: take_Suc_conv_app_nth)
+
+lemma satisfies_append:
+  assumes "\<alpha> \<Turnstile> \<phi>\<^sub>1 @ \<phi>\<^sub>2"
+  shows "\<alpha> \<Turnstile> \<phi>\<^sub>1" and "\<alpha> \<Turnstile> \<phi>\<^sub>2"
+  using assms satisfies_def by simp_all
+
+lemma satisfies_append':
+  assumes "\<alpha> \<Turnstile> \<phi>\<^sub>1" and "\<alpha> \<Turnstile> \<phi>\<^sub>2"
+  shows "\<alpha> \<Turnstile> \<phi>\<^sub>1 @ \<phi>\<^sub>2"
+  using assms satisfies_def by auto
+
+lemma satisfies_concat_map:
+  assumes "\<alpha> \<Turnstile> concat (map f [0..<k])" and "i < k"
+  shows "\<alpha> \<Turnstile> f i"
+  using assms satisfies_def by simp
+
+lemma satisfies_concat_map':
+  assumes "\<And>i. i < k \<Longrightarrow> \<alpha> \<Turnstile> f i"
+  shows "\<alpha> \<Turnstile> concat (map f [0..<k])"
+  using assms satisfies_def by simp
+
+
+definition satisfiable :: "formula \<Rightarrow> bool" where
+  "satisfiable \<phi> \<equiv> \<exists>\<alpha>. \<alpha> \<Turnstile> \<phi>"
+
+
+definition variables :: "formula \<Rightarrow> nat set" where
+  "variables \<phi> \<equiv> {n. \<exists>c\<in>set \<phi>. Neg n \<in> set c \<or> Pos n \<in> set c}"
+
+lemma finite_variables: "finite (variables \<phi>)"
+proof -
+  define voc :: "clause \<Rightarrow> nat set" where
+    "voc c = {n. Neg n \<in> set c \<or> Pos n \<in> set c}" for c
+  let ?vocs = "set (map voc \<phi>)"
+
+  have "finite (voc c)" for c
+  proof (induction c)
+    case Nil
+    then show ?case
+      using voc_def by simp
+  next
+    case (Cons a c)
+    have "voc (a # c) = {n. Neg n \<in> set (a # c) \<or> Pos n \<in> set (a # c)}"
+      using voc_def by simp
+    also have "... = {n. Neg n \<in> set c \<or> Neg n = a \<or> Pos n \<in> set c \<or> Pos n = a}"
+      by auto
+    also have "... = {n. (Neg n \<in> set c \<or> Pos n \<in> set c) \<or> (Pos n = a \<or> Neg n = a)}"
+      by auto
+    also have "... = {n. Neg n \<in> set c \<or> Pos n \<in> set c} \<union> {n. Pos n = a \<or> Neg n = a}"
+      by auto
+    also have "... = voc c \<union> {n. Pos n = a \<or> Neg n = a}"
+      using voc_def by simp
+    finally have "voc (a # c) = voc c \<union> {n. Pos n = a \<or> Neg n = a}" .
+    moreover have "finite {n. Pos n = a \<or> Neg n = a}"
+      using finite_nat_set_iff_bounded by auto
+    ultimately show ?case
+      using Cons by simp
+  qed
+  moreover have "variables \<phi> = \<Union>?vocs"
+    using variables_def voc_def by auto
+  moreover have "finite ?vocs"
+    by simp
+  ultimately show ?thesis
+    by simp
+qed
+
+lemma variables_append: "variables (\<phi>\<^sub>1 @ \<phi>\<^sub>2) = variables \<phi>\<^sub>1 \<union> variables \<phi>\<^sub>2"
+  using variables_def by auto
+
+
+definition fsize :: "formula \<Rightarrow> nat" where
+  "fsize \<phi> \<equiv> sum_list (map length \<phi>)"
+
+
+
+
+
+
+
+definition depon :: "nat \<Rightarrow> (assignment \<Rightarrow> bool) \<Rightarrow> bool" where
+  "depon l F \<equiv> \<forall>\<alpha>\<^sub>1 \<alpha>\<^sub>2. (\<forall>i<l. \<alpha>\<^sub>1 i = \<alpha>\<^sub>2 i) \<longrightarrow> F \<alpha>\<^sub>1 = F \<alpha>\<^sub>2"
+
+
+fun str_of_len :: "nat \<Rightarrow> string list" where
+  "str_of_len 0 = [[]]" |
+  "str_of_len (Suc l) = map ((#) \<bbbO>) (str_of_len l) @ map ((#) \<bbbI>) (str_of_len l)"
+
+lemma length_str_of_len: "length (str_of_len l) = 2 ^ l"
+  by (induction l) simp_all
+
+lemma in_str_of_len_length: "xs \<in> set (str_of_len l) \<Longrightarrow> length xs = l"
+  by (induction l arbitrary: xs) auto
+
+lemma length_in_str_of_len: "length xs = l \<Longrightarrow> xs \<in> set (str_of_len l)"
+proof (induction l arbitrary: xs)
+  case 0
+  then show ?case
+    by simp
+next
+  case (Suc l)
+  then obtain y ys where "xs = y # ys"
+    by (meson length_Suc_conv)
+  then have "length ys = l"
+    using Suc by simp
+  show ?case
+  proof (cases y)
+    case True
+    then have "xs \<in> set (map ((#) \<bbbI>) (str_of_len l))"
+      using `length ys = l` Suc `xs = y # ys` by simp
+    then show ?thesis
+      by simp
+  next
+    case False
+    then have "xs \<in> set (map ((#) \<bbbO>) (str_of_len l))"
+      using `length ys = l` Suc `xs = y # ys` by simp
+    then show ?thesis
+      by simp
+  qed
+qed
+
+
+lemma depon_ex_formula:
+  assumes "depon l F"
+  shows "\<exists>\<phi>.
+    fsize \<phi> \<le> l * 2 ^ l \<and>
+    length \<phi> \<le> 2 ^ l \<and>
+    variables \<phi> \<subseteq> {..<l} \<and>
+    (\<forall>\<alpha>. F \<alpha> = \<alpha> \<Turnstile> \<phi>)"
+proof -
+  define cl where "cl = (\<lambda>v. map (\<lambda>i. if v ! i then Neg i else Pos i) [0..<l])"
+  have cl1: "satisfies_clause a (cl v)" if "length v = l" and "v \<noteq> map a [0..<l]" for v a
+  proof -
+    obtain i where i: "i < l" "a i \<noteq> v ! i"
+      by (smt (verit, best) atLeastLessThan_iff map_eq_conv map_nth set_upt)
+    then have *: "cl v ! i = (if v ! i then Neg i else Pos i)"
+      using cl_def by simp
+    then have "case (cl v ! i) of Neg n \<Rightarrow> \<not> a n | Pos n \<Rightarrow> a n"
+      using i(2) by simp
+    then show ?thesis
+      using cl_def * that(1) satisfies_clause_def i(1) by fastforce
+  qed
+  have cl2: "v \<noteq> map a [0..<l]" if "length v = l" and "satisfies_clause a (cl v)" for v a
+  proof
+    assume assm: "v = map a [0..<l]"
+    from that(2) have "\<exists>x\<in>set (cl v). case x of Neg n \<Rightarrow> \<not> a n | Pos n \<Rightarrow> a n"
+      using satisfies_clause_def by simp
+    then obtain i where i: "i < l" and "case (cl v ! i) of Neg n \<Rightarrow> \<not> a n | Pos n \<Rightarrow> a n"
+      using cl_def by auto
+    then have "v ! i \<noteq> a i"
+      using cl_def by fastforce
+    then show False
+      using i assm by simp
+  qed
+
+  have filter_length_nth: "f (vs ! j)" if "vs = filter f sol" and "j < length vs"
+    for vs sol :: "'a list" and f j
+    using that nth_mem by (metis length_removeAll_less less_irrefl removeAll_filter_not)
+
+  have sum_list_map: "sum_list (map g xs) \<le> k * length xs" if "\<And>x. x \<in> set xs \<Longrightarrow> g x = k"
+    for xs :: "'a list" and g k
+    using that
+  proof (induction "length xs" arbitrary: xs)
+    case 0
+    then show ?case
+      by simp
+  next
+    case (Suc x)
+    then obtain y ys where "xs = y # ys"
+      by (metis length_Suc_conv)
+    then have "length ys = x"
+      using Suc by simp
+    have "y \<in> set xs"
+      using `xs = y # ys` by simp
+    have "sum_list (map g xs) = sum_list (map g (y # ys))"
+      using `xs = y # ys` by simp
+    also have "... = g y + sum_list (map g ys)"
+      by simp
+    also have "... = k + sum_list (map g ys)"
+      using Suc `y \<in> set xs` by simp
+    also have "... \<le> k + k * length ys"
+    also have "... = k * length xs"
+    finally show ?case
+      by simp
+  qed
+
+  define vs where
+    "vs = filter (\<lambda>v. F (\<lambda>i. if i < l then v ! i else False) = False) (str_of_len l)"
+  define \<phi> where "\<phi> = map cl vs"
+
+  have "a \<Turnstile> \<phi>" if "F a" for a
+  proof -
+    define v where "v = map a [0..<l]"
+    then have "(\<lambda>i. if i < l then v ! i else False) j = a j" if "j < l" for j
+      by (simp add: that)
+    then have *: "F (\<lambda>i. if i < l then v ! i else False)"
+      using assms(1) depon_def that by (smt (verit, ccfv_SIG))
+    have "satisfies_clause a c" if "c \<in> set \<phi>" for c
+    proof -
+      obtain j where j: "c = \<phi> ! j" "j < length \<phi>"
+        using \<phi>_def `c \<in> set \<phi>` by (metis in_set_conv_nth)
+      then have "c = cl (vs ! j)"
+        using \<phi>_def by simp
+      have "j < length vs"
+        using \<phi>_def j by simp
+      then have "F (\<lambda>i. if i < l then (vs ! j) ! i else False) = False"
+        using vs_def filter_length_nth by blast
+      then have "vs ! j \<noteq> v"
+        using * by auto
+      moreover have "length (vs ! j) = l"
+        by (smt (z3) filter_eq_nths in_str_of_len_length notin_set_nthsI nth_mem)
+      ultimately have "satisfies_clause a (cl (vs ! j))"
+        using v_def cl1 by simp
+      then show ?thesis
+        using `c = cl (vs ! j)` by simp
+    qed
+    then show ?thesis
+      using satisfies_def by simp
+  qed
+  moreover have "F \<alpha>" if "\<alpha> \<Turnstile> \<phi>" for \<alpha>
+  proof (rule ccontr)
+    assume assm: "\<not> F \<alpha>"
+    define v where "v = map \<alpha> [0..<l]"
+    have *: "F (\<lambda>i. if i < l then v ! i else False) = False"
+    proof -
+      have "(\<lambda>i. if i < l then v ! i else False) j = \<alpha> j" if "j < l" for j
+        using v_def by (simp add: that)
+      then show ?thesis
+        using assm assms(1) depon_def by (smt (verit, best))
+    qed
+    have "length v = l"
+      using v_def by simp
+    then obtain j where "j < length (str_of_len l)" and "v = str_of_len l ! j"
+      by (metis in_set_conv_nth length_in_str_of_len)
+    then have "v \<in> set vs"
+      using vs_def * by fastforce
+    then have "cl v \<in> set \<phi>"
+      using \<phi>_def by simp
+    then have "satisfies_clause \<alpha> (cl v)"
+      using that satisfies_def by simp
+    then have "v \<noteq> map \<alpha> [0..<l]"
+      using `length v = l` cl2 by simp
+    then show False
+      using v_def by simp
+  qed
+  ultimately have "\<forall>\<alpha>. F \<alpha> = \<alpha> \<Turnstile> \<phi>"
+    by auto
+  moreover have "fsize \<phi> \<le> l * 2 ^ l"
+  proof -
+    have "length c = l" if "c \<in> set \<phi>" for c
+      using that cl_def \<phi>_def by auto
+    then have "fsize \<phi> \<le> l * length \<phi>"
+      unfolding fsize_def using sum_list_map by auto
+    also have "... \<le> l * length (str_of_len l)"
+      using \<phi>_def vs_def by simp
+    also have "... = l * 2 ^ l"
+      using length_str_of_len by simp
+    finally show ?thesis .
+  qed
+  moreover have "length \<phi> \<le> 2 ^ l"
+  proof -
+    have "length \<phi> \<le> length (str_of_len l)"
+      using \<phi>_def vs_def by simp
+    also have "... = 2 ^ l"
+      using length_str_of_len by simp
+    finally show ?thesis .
+  qed
+  moreover have "variables \<phi> \<subseteq> {..<l}"
+  proof
+    fix x assume "x \<in> variables \<phi>"
+    then obtain c where c: "c \<in> set \<phi>" "Neg x \<in> set c \<or> Pos x \<in> set c"
+      using variables_def by auto
+    then obtain v where v: "v \<in> set (str_of_len l)" "c = cl v"
+      using \<phi>_def vs_def by auto
+    then show "x \<in> {..<l}"
+      using cl_def c by auto
+  qed
+  ultimately show ?thesis
+    by auto
+qed
+
+
+
+
+fun rename :: "nat list \<Rightarrow> literal \<Rightarrow> literal" where
+  "rename \<sigma> (Neg i) = Neg (\<sigma> ! i)" |
+  "rename \<sigma> (Pos i) = Pos (\<sigma> ! i)"
+
+definition relabel :: "nat list \<Rightarrow> formula \<Rightarrow> formula" where
+  "relabel \<sigma> \<phi> \<equiv> map (map (rename \<sigma>)) \<phi>"
+
+lemma fsize_relabel: "fsize (relabel \<sigma> \<phi>) = fsize \<phi>"
+  using relabel_def fsize_def by (metis length_concat length_map map_concat)
+
+
+definition remap :: "nat list \<Rightarrow> assignment \<Rightarrow> assignment" where
+  "remap \<sigma> \<alpha> i \<equiv> if i < length \<sigma> then \<alpha> (\<sigma> ! i) else \<alpha> i"
+
+definition reseq :: "nat list \<Rightarrow> nat list \<Rightarrow> nat list" where
+  "reseq \<sigma> vs \<equiv> map ((!) \<sigma>) vs"
+
+lemma length_reseq [simp]: "length (reseq \<sigma> vs) = length vs"
+  using reseq_def by simp
+
+
+lemma satisfies_sigma:
+  assumes "variables \<phi> \<subseteq> {..<length \<sigma>}"
+  shows "\<alpha> \<Turnstile> relabel \<sigma> \<phi> \<longleftrightarrow> remap \<sigma> \<alpha> \<Turnstile> \<phi>"
+proof
+  assume sat: "\<alpha> \<Turnstile> relabel \<sigma> \<phi>"
+  have "satisfies_clause (remap \<sigma> \<alpha>) c" if "c \<in> set \<phi>" for c
+  proof -
+    obtain i where "i < length \<phi>" "\<phi> ! i = c"
+    then have "satisfies_clause \<alpha> (map (rename \<sigma>) c)"
+        (is "satisfies_clause \<alpha> ?c")
+      using sat satisfies_def relabel_def by auto
+    then obtain x where "x\<in>set ?c" "case x of Neg n \<Rightarrow> \<not> \<alpha> n | Pos n \<Rightarrow> \<alpha> n"
+      using satisfies_clause_def by auto
+    then obtain j where j: "j < length ?c" "case (?c ! j) of Neg n \<Rightarrow> \<not> \<alpha> n | Pos n \<Rightarrow> \<alpha> n"
+      by (metis in_set_conv_nth)
+    have "case c ! j of Neg n \<Rightarrow> \<not> (remap \<sigma> \<alpha>) n | Pos n \<Rightarrow> (remap \<sigma> \<alpha>) n"
+    proof (cases "c ! j")
+      case (Neg n)
+      then have 1: "?c ! j = Neg (\<sigma> ! n)"
+        using j(1) by simp
+      have "n \<in> variables \<phi>"
+        using Neg j(1) nth_mem that variables_def by force
+      then have "n < length \<sigma>"
+        using assms by auto
+      then show ?thesis
+        using Neg 1 j(2) remap_def by auto
+    next
+      case (Pos n)
+      then have 1: "?c ! j = Pos (\<sigma> ! n)"
+        using j(1) by simp
+      have "n \<in> variables \<phi>"
+        using Pos j(1) nth_mem that variables_def by force
+      then have "n < length \<sigma>"
+        using assms by auto
+      then show ?thesis
+        using Pos 1 j(2) remap_def by auto
+    qed
+    then show ?thesis
+      using satisfies_clause_def j by auto
+  qed
+  then show "remap \<sigma> \<alpha> \<Turnstile> \<phi>"
+    using satisfies_def by simp
+next
+  assume sat: "remap \<sigma> \<alpha> \<Turnstile> \<phi>"
+  have "satisfies_clause \<alpha> c" if "c \<in> set (relabel \<sigma> \<phi>)" for c
+  proof -
+    let ?phi = "relabel \<sigma> \<phi>"
+    let ?beta = "remap \<sigma> \<alpha>"
+    obtain i where i: "i < length ?phi" "?phi ! i = c"
+    then have "satisfies_clause ?beta (\<phi> ! i)"
+        (is "satisfies_clause _ ?c")
+      using sat satisfies_def relabel_def by simp
+    then obtain x where "x\<in>set ?c" "case x of Neg n \<Rightarrow> \<not> ?beta n | Pos n \<Rightarrow> ?beta n"
+      using satisfies_clause_def by auto
+    then obtain j where j: "j < length ?c" "case (?c ! j) of Neg n \<Rightarrow> \<not> ?beta n | Pos n \<Rightarrow> ?beta n"
+      by (metis in_set_conv_nth)
+    then have ren: "c ! j = rename \<sigma> (?c ! j)"
+      using i relabel_def by auto
+    have "case c ! j of Neg n \<Rightarrow> \<not> \<alpha> n | Pos n \<Rightarrow> \<alpha> n"
+    proof (cases "?c ! j")
+      case (Neg n)
+      then have *: "c ! j = Neg (\<sigma> ! n)"
+        by (simp add: ren)
+      have "n \<in> variables \<phi>"
+        using Neg i j variables_def that length_map mem_Collect_eq nth_mem relabel_def by force
+      then have "n < length \<sigma>"
+        using assms by auto
+      moreover have "\<not> (remap \<sigma> \<alpha>) n"
+        using j(2) Neg by simp
+      ultimately have "\<not> \<alpha> (\<sigma> ! n)"
+        using remap_def by simp
+      then show ?thesis
+        by (simp add: *)

@@ -1,0 +1,1206 @@
+theory Huffman
+  imports Main
+begin
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+declare
+  Int_Un_distrib [simp]
+  Int_Un_distrib2 [simp]
+  max.absorb1 [simp]
+  max.absorb2 [simp]
+
+
+
+
+datatype 'a tree =
+  Leaf nat 'a
+| Node nat "('a tree)" "('a tree)"
+
+
+
+type_synonym 'a forest = "'a tree list"
+
+
+
+primrec alphabet :: "'a tree \<Rightarrow> 'a set" where
+"alphabet (Leaf w a) = {a}" |
+"alphabet (Node w t\<^sub>1 t\<^sub>2) = alphabet t\<^sub>1 \<union> alphabet t\<^sub>2"
+
+
+primrec alphabet\<^sub>F :: "'a forest \<Rightarrow> 'a set" where
+"alphabet\<^sub>F [] = {}" |
+"alphabet\<^sub>F (t # ts) = alphabet t \<union> alphabet\<^sub>F ts"
+
+
+lemma finite_alphabet[simp]:
+"finite (alphabet t)"
+by (induct t) auto
+
+lemma exists_in_alphabet:
+"\<exists>a. a \<in> alphabet t"
+by (induct t) auto
+
+
+
+primrec consistent :: "'a tree \<Rightarrow> bool" where
+"consistent (Leaf w a) = True" |
+"consistent (Node w t\<^sub>1 t\<^sub>2) =
+ (alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {} \<and> consistent t\<^sub>1 \<and> consistent t\<^sub>2)"
+
+primrec consistent\<^sub>F :: "'a forest \<Rightarrow> bool" where
+"consistent\<^sub>F [] = True" |
+"consistent\<^sub>F (t # ts) =
+ (alphabet t \<inter> alphabet\<^sub>F ts = {} \<and> consistent t \<and> consistent\<^sub>F ts)"
+
+
+lemma tree_induct_consistent[consumes 1, case_names base step\<^sub>1 step\<^sub>2 step\<^sub>3]:
+"\<lbrakk>consistent t;
+  \<And>w\<^sub>b b a. P (Leaf w\<^sub>b b) a;
+  \<And>w t\<^sub>1 t\<^sub>2 a.
+     \<lbrakk>consistent t\<^sub>1; consistent t\<^sub>2; alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {};
+      a \<in> alphabet t\<^sub>1; a \<notin> alphabet t\<^sub>2; P t\<^sub>1 a; P t\<^sub>2 a\<rbrakk> \<Longrightarrow>
+     P (Node w t\<^sub>1 t\<^sub>2) a;
+  \<And>w t\<^sub>1 t\<^sub>2 a.
+     \<lbrakk>consistent t\<^sub>1; consistent t\<^sub>2; alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {};
+      a \<notin> alphabet t\<^sub>1; a \<in> alphabet t\<^sub>2; P t\<^sub>1 a; P t\<^sub>2 a\<rbrakk> \<Longrightarrow>
+     P (Node w t\<^sub>1 t\<^sub>2) a;
+  \<And>w t\<^sub>1 t\<^sub>2 a.
+     \<lbrakk>consistent t\<^sub>1; consistent t\<^sub>2; alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {};
+      a \<notin> alphabet t\<^sub>1; a \<notin> alphabet t\<^sub>2; P t\<^sub>1 a; P t\<^sub>2 a\<rbrakk> \<Longrightarrow>
+     P (Node w t\<^sub>1 t\<^sub>2) a\<rbrakk> \<Longrightarrow>
+ P t a"
+
+
+apply rotate_tac
+apply induction_schema
+       apply atomize_elim
+       apply (metis consistent.simps(2) disjoint_iff_not_equal tree.exhaust)
+by lexicographic_order
+
+
+
+
+primrec depth :: "'a tree \<Rightarrow> 'a \<Rightarrow> nat" where
+"depth (Leaf w b) a = 0" |
+"depth (Node w t\<^sub>1 t\<^sub>2) a =
+ (if a \<in> alphabet t\<^sub>1 then depth t\<^sub>1 a + 1
+  else if a \<in> alphabet t\<^sub>2 then depth t\<^sub>2 a + 1
+  else 0)"
+
+
+
+
+primrec height :: "'a tree \<Rightarrow> nat" where
+"height (Leaf w a) = 0" |
+"height (Node w t\<^sub>1 t\<^sub>2) = max (height t\<^sub>1) (height t\<^sub>2) + 1"
+
+primrec height\<^sub>F :: "'a forest \<Rightarrow> nat" where
+"height\<^sub>F [] = 0" |
+"height\<^sub>F (t # ts) = max (height t) (height\<^sub>F ts)"
+
+
+lemma depth_le_height:
+"depth t a \<le> height t"
+by (induct t) auto
+
+lemma exists_at_height:
+"consistent t \<Longrightarrow> \<exists>a \<in> alphabet t. depth t a = height t"
+proof (induct t)
+  case Leaf thus ?case by simp
+next
+  case (Node w t\<^sub>1 t\<^sub>2)
+  note hyps = Node
+  let ?t = "Node w t\<^sub>1 t\<^sub>2"
+  from hyps obtain b where b: "b \<in> alphabet t\<^sub>1" "depth t\<^sub>1 b = height t\<^sub>1" by auto
+  from hyps obtain c where c: "c \<in> alphabet t\<^sub>2" "depth t\<^sub>2 c = height t\<^sub>2" by auto
+  let ?a = "if height t\<^sub>1 \<ge> height t\<^sub>2 then b else c"
+  from b c have "?a \<in> alphabet ?t" "depth ?t ?a = height ?t"
+  thus "\<exists>a \<in> alphabet ?t. depth ?t a = height ?t" ..
+qed
+
+
+lemma depth_max_heightE_left[elim!]:
+"\<lbrakk>depth t\<^sub>1 a = max (height t\<^sub>1) (height t\<^sub>2);
+  \<lbrakk>depth t\<^sub>1 a = height t\<^sub>1; height t\<^sub>1 \<ge> height t\<^sub>2\<rbrakk> \<Longrightarrow> P\<rbrakk> \<Longrightarrow>
+ P"
+by (cut_tac t = t\<^sub>1 and a = a in depth_le_height) simp
+
+lemma depth_max_heightE_right[elim!]:
+"\<lbrakk>depth t\<^sub>2 a = max (height t\<^sub>1) (height t\<^sub>2);
+  \<lbrakk>depth t\<^sub>2 a = height t\<^sub>2; height t\<^sub>2 \<ge> height t\<^sub>1\<rbrakk> \<Longrightarrow> P\<rbrakk> \<Longrightarrow>
+ P"
+by (cut_tac t = t\<^sub>2 and a = a in depth_le_height) simp
+
+
+lemma height_gt_0_alphabet_eq_imp_height_gt_0:
+assumes "height t > 0" "consistent t" "alphabet t = alphabet u"
+shows "height u > 0"
+proof (cases t)
+  case Leaf thus ?thesis using assms by simp
+next
+  case (Node w t\<^sub>1 t\<^sub>2)
+  note t = Node
+  from exists_in_alphabet obtain b where b: "b \<in> alphabet t\<^sub>1" ..
+  from exists_in_alphabet obtain c where c: "c \<in> alphabet t\<^sub>2" ..
+  show ?thesis
+  proof (cases u)
+    case Leaf thus ?thesis using b c bc t assms by auto
+  next
+    case Node thus ?thesis by simp
+  qed
+qed
+
+
+
+primrec freq :: "'a tree \<Rightarrow> 'a \<Rightarrow> nat" where
+"freq (Leaf w a) b = (if b = a then w else 0)" |
+"freq (Node w t\<^sub>1 t\<^sub>2) b = freq t\<^sub>1 b + freq t\<^sub>2 b"
+
+primrec freq\<^sub>F :: "'a forest \<Rightarrow> 'a \<Rightarrow> nat" where
+"freq\<^sub>F [] b = 0" |
+"freq\<^sub>F (t # ts) b = freq t b + freq\<^sub>F ts b"
+
+
+lemma notin_alphabet_imp_freq_0[simp]:
+"a \<notin> alphabet t \<Longrightarrow> freq t a = 0"
+by (induct t) simp+
+
+lemma notin_alphabet\<^sub>F_imp_freq\<^sub>F_0[simp]:
+"a \<notin> alphabet\<^sub>F ts \<Longrightarrow> freq\<^sub>F ts a = 0"
+by (induct ts) simp+
+
+lemma freq_0_right[simp]:
+"\<lbrakk>alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {}; a \<in> alphabet t\<^sub>1\<rbrakk> \<Longrightarrow> freq t\<^sub>2 a = 0"
+by (auto intro: notin_alphabet_imp_freq_0 simp: disjoint_iff_not_equal)
+
+lemma freq_0_left[simp]:
+"\<lbrakk>alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {}; a \<in> alphabet t\<^sub>2\<rbrakk> \<Longrightarrow> freq t\<^sub>1 a = 0"
+by (auto simp: disjoint_iff_not_equal)
+
+
+lemma height\<^sub>F_0_imp_Leaf_freq\<^sub>F_in_set:
+"\<lbrakk>consistent\<^sub>F ts; height\<^sub>F ts = 0; a \<in> alphabet\<^sub>F ts\<rbrakk> \<Longrightarrow>
+ Leaf (freq\<^sub>F ts a) a \<in> set ts"
+proof (induct ts)
+  case Nil thus ?case by simp
+next
+  case (Cons t ts) show ?case using Cons by (cases t) auto
+qed
+
+
+
+primrec weight :: "'a tree \<Rightarrow> nat" where
+"weight (Leaf w a) = w" |
+"weight (Node w t\<^sub>1 t\<^sub>2) = weight t\<^sub>1 + weight t\<^sub>2"
+
+
+lemma weight_eq_Sum_freq:
+"consistent t \<Longrightarrow> weight t = (\<Sum>a \<in> alphabet t. freq t a)"
+by (induct t) (auto simp: sum.union_disjoint)
+
+
+
+
+primrec cost :: "'a tree \<Rightarrow> nat" where
+"cost (Leaf w a) = 0" |
+"cost (Node w t\<^sub>1 t\<^sub>2) = weight t\<^sub>1 + cost t\<^sub>1 + weight t\<^sub>2 + cost t\<^sub>2"
+
+
+theorem cost_eq_Sum_freq_mult_depth:
+"consistent t \<Longrightarrow> cost t = (\<Sum>a \<in> alphabet t. freq t a * depth t a)"
+proof (induct t)
+  case Leaf thus ?case by simp
+next
+  case (Node w t\<^sub>1 t\<^sub>2)
+  let ?t = "Node w t\<^sub>1 t\<^sub>2"
+  let ?A = "alphabet ?t" and ?A\<^sub>1 = "alphabet t\<^sub>1" and ?A\<^sub>2 = "alphabet t\<^sub>2"
+  note hyps = Node
+  have d\<^sub>2: "\<And>a. \<lbrakk>?A\<^sub>1 \<inter> ?A\<^sub>2 = {}; a \<in> ?A\<^sub>2\<rbrakk> \<Longrightarrow> depth ?t a = depth t\<^sub>2 a + 1"
+    by auto
+  have "cost ?t = weight t\<^sub>1 + cost t\<^sub>1 + weight t\<^sub>2 + cost t\<^sub>2" by simp
+  also have "\<dots> = weight t\<^sub>1 + (\<Sum>a \<in> ?A\<^sub>1. freq t\<^sub>1 a * depth t\<^sub>1 a)
+    + weight t\<^sub>2 + (\<Sum>a \<in> ?A\<^sub>2. freq t\<^sub>2 a * depth t\<^sub>2 a)"
+    using hyps by simp
+  also have "\<dots> = weight t\<^sub>1 + (\<Sum>a \<in> ?A\<^sub>1. freq t\<^sub>1 a * (depth ?t a - 1))
+    + weight t\<^sub>2 + (\<Sum>a \<in> ?A\<^sub>2. freq t\<^sub>2 a * (depth ?t a - 1))"
+    using c d\<^sub>2 by simp
+  also have "\<dots> = weight t\<^sub>1 + (\<Sum>a \<in> ?A\<^sub>1. freq t\<^sub>1 a * depth ?t a)
+    - (\<Sum>a \<in> ?A\<^sub>1. freq t\<^sub>1 a)
+    + weight t\<^sub>2 + (\<Sum>a \<in> ?A\<^sub>2. freq t\<^sub>2 a * depth ?t a)
+    - (\<Sum>a \<in> ?A\<^sub>2. freq t\<^sub>2 a)"
+    using c d\<^sub>2 by (simp add: sum.distrib)
+  also have "\<dots> = (\<Sum>a \<in> ?A\<^sub>1. freq t\<^sub>1 a * depth ?t a)
+    + (\<Sum>a \<in> ?A\<^sub>2. freq t\<^sub>2 a * depth ?t a)"
+    using c by (simp add: weight_eq_Sum_freq)
+  also have "\<dots> = (\<Sum>a \<in> ?A\<^sub>1. freq ?t a * depth ?t a)
+    + (\<Sum>a \<in> ?A\<^sub>2. freq ?t a * depth ?t a)"
+    using c by auto
+  also have "\<dots> = (\<Sum>a \<in> ?A\<^sub>1 \<union> ?A\<^sub>2. freq ?t a * depth ?t a)"
+    using c by (simp add: sum.union_disjoint)
+  also have "\<dots> = (\<Sum>a \<in> ?A. freq ?t a * depth ?t a)" by simp
+  finally show ?case .
+qed
+
+
+lemma height_0_imp_cost_0[simp]:
+"height t = 0 \<Longrightarrow> cost t = 0"
+by (case_tac t) simp+
+
+
+
+definition optimum :: "'a tree \<Rightarrow> bool" where
+"optimum t =
+ (\<forall>u. consistent u \<longrightarrow> alphabet t = alphabet u \<longrightarrow> freq t = freq u \<longrightarrow>
+  cost t \<le> cost u)"
+
+
+
+
+primrec cachedWeight :: "'a tree \<Rightarrow> nat" where
+"cachedWeight (Leaf w a) = w" |
+"cachedWeight (Node w t\<^sub>1 t\<^sub>2) = w"
+
+
+lemma height_0_imp_cachedWeight_eq_weight[simp]:
+"height t = 0 \<Longrightarrow> cachedWeight t = weight t"
+by (case_tac t) simp+
+
+
+
+definition uniteTrees :: "'a tree \<Rightarrow> 'a tree \<Rightarrow> 'a tree" where
+"uniteTrees t\<^sub>1 t\<^sub>2 = Node (cachedWeight t\<^sub>1 + cachedWeight t\<^sub>2) t\<^sub>1 t\<^sub>2"
+
+
+lemma alphabet_uniteTrees[simp]:
+"alphabet (uniteTrees t\<^sub>1 t\<^sub>2) = alphabet t\<^sub>1 \<union> alphabet t\<^sub>2"
+by (simp add: uniteTrees_def)
+
+lemma consistent_uniteTrees[simp]:
+"\<lbrakk>consistent t\<^sub>1; consistent t\<^sub>2; alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {}\<rbrakk> \<Longrightarrow>
+ consistent (uniteTrees t\<^sub>1 t\<^sub>2)"
+by (simp add: uniteTrees_def)
+
+lemma freq_uniteTrees[simp]:
+"freq (uniteTrees t\<^sub>1 t\<^sub>2) a = freq t\<^sub>1 a + freq t\<^sub>2 a"
+by (simp add: uniteTrees_def)
+
+
+
+primrec insortTree :: "'a tree \<Rightarrow> 'a forest \<Rightarrow> 'a forest" where
+"insortTree u [] = [u]" |
+"insortTree u (t # ts) =
+ (if cachedWeight u \<le> cachedWeight t then u # t # ts else t # insortTree u ts)"
+
+
+lemma length_insortTree[simp]:
+"length (insortTree t ts) = length ts + 1"
+by (induct ts) simp+
+
+lemma insortTree_ne_Nil[simp]:
+"insortTree t ts \<noteq> []"
+by (case_tac ts) simp+
+
+
+lemma alphabet\<^sub>F_insortTree[simp]:
+"alphabet\<^sub>F (insortTree t ts) = alphabet t \<union> alphabet\<^sub>F ts"
+by (induct ts) auto
+
+lemma consistent\<^sub>F_insortTree[simp]:
+"consistent\<^sub>F (insortTree t ts) = consistent\<^sub>F (t # ts)"
+by (induct ts) auto
+
+lemma freq\<^sub>F_insortTree[simp]:
+"freq\<^sub>F (insortTree t ts) = (\<lambda>a. freq t a + freq\<^sub>F ts a)"
+by (induct ts) (simp add: ext)+
+
+lemma height\<^sub>F_insortTree[simp]:
+"height\<^sub>F (insortTree t ts) = max (height t) (height\<^sub>F ts)"
+by (induct ts) auto
+
+
+
+fun huffman :: "'a forest \<Rightarrow> 'a tree" where
+"huffman [t] = t" |
+"huffman (t\<^sub>1 # t\<^sub>2 # ts) = huffman (insortTree (uniteTrees t\<^sub>1 t\<^sub>2) ts)"
+
+
+theorem alphabet_huffman[simp]:
+"ts \<noteq> [] \<Longrightarrow> alphabet (huffman ts) = alphabet\<^sub>F ts"
+by (induct ts rule: huffman.induct) auto
+
+theorem consistent_huffman[simp]:
+"\<lbrakk>consistent\<^sub>F ts; ts \<noteq> []\<rbrakk> \<Longrightarrow> consistent (huffman ts)"
+by (induct ts rule: huffman.induct) simp+
+
+theorem freq_huffman[simp]:
+"ts \<noteq> [] \<Longrightarrow> freq (huffman ts) a = freq\<^sub>F ts a"
+by (induct ts rule: huffman.induct) auto
+
+
+
+
+fun sibling :: "'a tree \<Rightarrow> 'a \<Rightarrow> 'a" where
+"sibling (Leaf w\<^sub>b b) a = a" |
+"sibling (Node w (Leaf w\<^sub>b b) (Leaf w\<^sub>c c)) a =
+     (if a = b then c else if a = c then b else a)" |
+"sibling (Node w t\<^sub>1 t\<^sub>2) a =
+     (if a \<in> alphabet t\<^sub>1 then sibling t\<^sub>1 a
+      else if a \<in> alphabet t\<^sub>2 then sibling t\<^sub>2 a
+      else a)"
+
+
+lemma notin_alphabet_imp_sibling_id[simp]:
+"a \<notin> alphabet t \<Longrightarrow> sibling t a = a"
+by (cases rule: sibling.cases[where x = "(t, a)"]) simp+
+
+lemma height_0_imp_sibling_id[simp]:
+"height t = 0 \<Longrightarrow> sibling t a = a"
+by (case_tac t) simp+
+
+lemma height_gt_0_in_alphabet_imp_sibling_left[simp]:
+"\<lbrakk>height t\<^sub>1 > 0; a \<in> alphabet t\<^sub>1\<rbrakk> \<Longrightarrow>
+ sibling (Node w t\<^sub>1 t\<^sub>2) a = sibling t\<^sub>1 a"
+by (case_tac t\<^sub>1) simp+
+
+lemma height_gt_0_in_alphabet_imp_sibling_right[simp]:
+"\<lbrakk>height t\<^sub>2 > 0; a \<in> alphabet t\<^sub>1\<rbrakk> \<Longrightarrow>
+ sibling (Node w t\<^sub>1 t\<^sub>2) a = sibling t\<^sub>1 a"
+by (case_tac t\<^sub>2) simp+
+
+lemma height_gt_0_notin_alphabet_imp_sibling_left[simp]:
+"\<lbrakk>height t\<^sub>1 > 0; a \<notin> alphabet t\<^sub>1\<rbrakk> \<Longrightarrow>
+ sibling (Node w t\<^sub>1 t\<^sub>2) a = sibling t\<^sub>2 a"
+by (case_tac t\<^sub>1) simp+
+
+lemma height_gt_0_notin_alphabet_imp_sibling_right[simp]:
+"\<lbrakk>height t\<^sub>2 > 0; a \<notin> alphabet t\<^sub>1\<rbrakk> \<Longrightarrow>
+ sibling (Node w t\<^sub>1 t\<^sub>2) a = sibling t\<^sub>2 a"
+by (case_tac t\<^sub>2) simp+
+
+lemma either_height_gt_0_imp_sibling[simp]:
+"height t\<^sub>1 > 0 \<or> height t\<^sub>2 > 0 \<Longrightarrow>
+ sibling (Node w t\<^sub>1 t\<^sub>2) a =
+     (if a \<in> alphabet t\<^sub>1 then sibling t\<^sub>1 a else sibling t\<^sub>2 a)"
+by auto
+
+
+lemma in_alphabet_imp_sibling_in_alphabet:
+"a \<in> alphabet t \<Longrightarrow> sibling t a \<in> alphabet t"
+by (induct t a rule: sibling.induct) auto
+
+lemma sibling_ne_imp_sibling_in_alphabet:
+"sibling t a \<noteq> a \<Longrightarrow> sibling t a \<in> alphabet t"
+using in_alphabet_imp_sibling_in_alphabet by force
+
+
+lemma sibling_induct_consistent[consumes 1,
+  case_names base step\<^sub>1 step\<^sub>2\<^sub>1 step\<^sub>2\<^sub>2 step\<^sub>2\<^sub>3]:
+"\<lbrakk>consistent t;
+  \<And>w b a. P (Leaf w b) a;
+  \<And>w w\<^sub>b b w\<^sub>c c a. b \<noteq> c \<Longrightarrow> P (Node w (Leaf w\<^sub>b b) (Leaf w\<^sub>c c)) a;
+  \<And>w t\<^sub>1 t\<^sub>2 a.
+     \<lbrakk>consistent t\<^sub>1; consistent t\<^sub>2; alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {};
+      height t\<^sub>1 > 0 \<or> height t\<^sub>2 > 0; a \<in> alphabet t\<^sub>1;
+      sibling t\<^sub>1 a \<in> alphabet t\<^sub>1; a \<notin> alphabet t\<^sub>2;
+      sibling t\<^sub>1 a \<notin> alphabet t\<^sub>2; P t\<^sub>1 a\<rbrakk> \<Longrightarrow>
+     P (Node w t\<^sub>1 t\<^sub>2) a;
+  \<And>w t\<^sub>1 t\<^sub>2 a.
+     \<lbrakk>consistent t\<^sub>1; consistent t\<^sub>2; alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {};
+      height t\<^sub>1 > 0 \<or> height t\<^sub>2 > 0; a \<notin> alphabet t\<^sub>1;
+      sibling t\<^sub>2 a \<notin> alphabet t\<^sub>1; a \<in> alphabet t\<^sub>2;
+      sibling t\<^sub>2 a \<in> alphabet t\<^sub>2; P t\<^sub>2 a\<rbrakk> \<Longrightarrow>
+     P (Node w t\<^sub>1 t\<^sub>2) a;
+  \<And>w t\<^sub>1 t\<^sub>2 a.
+     \<lbrakk>consistent t\<^sub>1; consistent t\<^sub>2; alphabet t\<^sub>1 \<inter> alphabet t\<^sub>2 = {};
+      height t\<^sub>1 > 0 \<or> height t\<^sub>2 > 0; a \<notin> alphabet t\<^sub>1; a \<notin> alphabet t\<^sub>2\<rbrakk> \<Longrightarrow>
+     P (Node w t\<^sub>1 t\<^sub>2) a\<rbrakk> \<Longrightarrow>
+ P t a"
+apply rotate_tac
+apply induction_schema
+   apply atomize_elim
+   apply (case_tac t, simp)
+   apply clarsimp
+   apply (metis One_nat_def add_is_0 alphabet.simps(1) bot_nat_0.not_eq_extremum disjoint_iff
+                exists_at_height height.simps(2) in_alphabet_imp_sibling_in_alphabet nat.simps(3)
+                tree.exhaust)
+by lexicographic_order
+
+
+lemma sibling_sibling_id[simp]:
+"consistent t \<Longrightarrow> sibling t (sibling t a) = a"
+by (induct t a rule: sibling_induct_consistent) simp+
+
+lemma sibling_reciprocal:
+"\<lbrakk>consistent t; sibling t a = b\<rbrakk> \<Longrightarrow> sibling t b = a"
+by auto
+
+lemma depth_height_imp_sibling_ne:
+"\<lbrakk>consistent t; depth t a = height t; height t > 0; a \<in> alphabet t\<rbrakk> \<Longrightarrow>
+ sibling t a \<noteq> a"
+by (induct t a rule: sibling_induct_consistent) auto
+
+lemma depth_sibling[simp]:
+"consistent t \<Longrightarrow> depth t (sibling t a) = depth t a"
+by (induct t a rule: sibling_induct_consistent) simp+
+
+
+
+primrec swapLeaves :: "'a tree \<Rightarrow> nat \<Rightarrow> 'a \<Rightarrow> nat \<Rightarrow> 'a \<Rightarrow> 'a tree" where
+"swapLeaves (Leaf w\<^sub>c c) w\<^sub>a a w\<^sub>b b =
+     (if c = a then Leaf w\<^sub>b b else if c = b then Leaf w\<^sub>a a else Leaf w\<^sub>c c)" |
+"swapLeaves (Node w t\<^sub>1 t\<^sub>2) w\<^sub>a a w\<^sub>b b =
+     Node w (swapLeaves t\<^sub>1 w\<^sub>a a w\<^sub>b b) (swapLeaves t\<^sub>2 w\<^sub>a a w\<^sub>b b)"
+
+
+lemma swapLeaves_id_when_notin_alphabet[simp]:
+"a \<notin> alphabet t \<Longrightarrow> swapLeaves t w a w' a = t"
+by (induct t) simp+
+
+lemma swapLeaves_id[simp]:
+"consistent t \<Longrightarrow> swapLeaves t (freq t a) a (freq t a) a = t"
+by (induct t a rule: tree_induct_consistent) simp+
+
+
+lemma alphabet_swapLeaves:
+"alphabet (swapLeaves t w\<^sub>a a w\<^sub>b b) =
+     (if a \<in> alphabet t then
+        if b \<in> alphabet t then alphabet t else (alphabet t - {a}) \<union> {b}
+      else
+        if b \<in> alphabet t then (alphabet t - {b}) \<union> {a} else alphabet t)"
+by (induct t) auto
+
+lemma consistent_swapLeaves[simp]:
+"consistent t \<Longrightarrow> consistent (swapLeaves t w\<^sub>a a w\<^sub>b b)"
+by (induct t) (auto simp: alphabet_swapLeaves)
+
+lemma depth_swapLeaves_neither[simp]:
+"\<lbrakk>consistent t; c \<noteq> a; c \<noteq> b\<rbrakk> \<Longrightarrow> depth (swapLeaves t w\<^sub>a a w\<^sub>b b) c = depth t c"
+by (induct t a rule: tree_induct_consistent) (auto simp: alphabet_swapLeaves)
+
+lemma height_swapLeaves[simp]:
+"height (swapLeaves t w\<^sub>a a w\<^sub>b b) = height t"
+by (induct t) simp+
+
+lemma freq_swapLeaves[simp]:
+"\<lbrakk>consistent t; a \<noteq> b\<rbrakk> \<Longrightarrow>
+ freq (swapLeaves t w\<^sub>a a w\<^sub>b b) =
+     (\<lambda>c. if c = a then if b \<in> alphabet t then w\<^sub>a else 0
+          else if c = b then if a \<in> alphabet t then w\<^sub>b else 0
+          else freq t c)"
+apply (rule ext)
+apply (induct t)
+by auto
+
+
+lemma weight_swapLeaves:
+"\<lbrakk>consistent t; a \<noteq> b\<rbrakk> \<Longrightarrow>
+ if a \<in> alphabet t then
+   if b \<in> alphabet t then
+     weight (swapLeaves t w\<^sub>a a w\<^sub>b b) + freq t a + freq t b =
+         weight t + w\<^sub>a + w\<^sub>b
+   else
+     weight (swapLeaves t w\<^sub>a a w\<^sub>b b) + freq t a = weight t + w\<^sub>b
+ else
+   if b \<in> alphabet t then
+     weight (swapLeaves t w\<^sub>a a w\<^sub>b b) + freq t b = weight t + w\<^sub>a
+   else
+     weight (swapLeaves t w\<^sub>a a w\<^sub>b b) = weight t"
+proof (induct t a rule: tree_induct_consistent)
+  case base thus ?case by clarsimp
+next
+  case (step\<^sub>1 w t\<^sub>1 t\<^sub>2 a) show ?case
+  proof cases
+    assume b: "b \<in> alphabet t\<^sub>1"
+    hence "b \<notin> alphabet t\<^sub>2" using step\<^sub>1 by auto
+    thus ?case using b step\<^sub>1 by simp
+  next
+    assume "b \<notin> alphabet t\<^sub>1" thus ?case using step\<^sub>1 by auto
+  qed
+next
+  case (step\<^sub>2 w t\<^sub>1 t\<^sub>2 a) show ?case
+  proof cases
+    assume b: "b \<in> alphabet t\<^sub>1"
+    hence "b \<notin> alphabet t\<^sub>2" using step\<^sub>2 by auto
+    thus ?case using b step\<^sub>2 by simp
+  next
+    assume "b \<notin> alphabet t\<^sub>1" thus ?case using step\<^sub>2 by auto
+  qed
+next
+  case (step\<^sub>3 w t\<^sub>1 t\<^sub>2 a) show ?case
+  proof cases
+    assume b: "b \<in> alphabet t\<^sub>1"
+    hence "b \<notin> alphabet t\<^sub>2" using step\<^sub>3 by auto
+    thus ?case using b step\<^sub>3 by simp
+  next
+    assume "b \<notin> alphabet t\<^sub>1" thus ?case using step\<^sub>3 by auto
+  qed
+qed
+
+lemma cost_swapLeaves:
+"\<lbrakk>consistent t; a \<noteq> b\<rbrakk> \<Longrightarrow>
+ if a \<in> alphabet t then
+   if b \<in> alphabet t then
+     cost (swapLeaves t w\<^sub>a a w\<^sub>b b) + freq t a * depth t a
+     + freq t b * depth t b =
+         cost t + w\<^sub>a * depth t b + w\<^sub>b * depth t a
+   else
+     cost (swapLeaves t w\<^sub>a a w\<^sub>b b) + freq t a * depth t a =
+         cost t + w\<^sub>b * depth t a
+ else
+   if b \<in> alphabet t then
+     cost (swapLeaves t w\<^sub>a a w\<^sub>b b) + freq t b * depth t b =
+         cost t + w\<^sub>a * depth t b
+   else
+     cost (swapLeaves t w\<^sub>a a w\<^sub>b b) = cost t"
+proof (induct t)
+  case Leaf show ?case by simp
+next
+  case (Node w t\<^sub>1 t\<^sub>2)
+  note hyps = Node
+  have w\<^sub>1: "if a \<in> alphabet t\<^sub>1 then
+              if b \<in> alphabet t\<^sub>1 then
+                weight (swapLeaves t\<^sub>1 w\<^sub>a a w\<^sub>b b) + freq t\<^sub>1 a + freq t\<^sub>1 b =
+                    weight t\<^sub>1 + w\<^sub>a + w\<^sub>b
+                  else
+                weight (swapLeaves t\<^sub>1 w\<^sub>a a w\<^sub>b b) + freq t\<^sub>1 a = weight t\<^sub>1 + w\<^sub>b
+            else
+              if b \<in> alphabet t\<^sub>1 then
+                weight (swapLeaves t\<^sub>1 w\<^sub>a a w\<^sub>b b) + freq t\<^sub>1 b = weight t\<^sub>1 + w\<^sub>a
+              else
+                weight (swapLeaves t\<^sub>1 w\<^sub>a a w\<^sub>b b) = weight t\<^sub>1" using hyps
+    by (simp add: weight_swapLeaves)
+  have w\<^sub>2: "if a \<in> alphabet t\<^sub>2 then
+              if b \<in> alphabet t\<^sub>2 then
+                weight (swapLeaves t\<^sub>2 w\<^sub>a a w\<^sub>b b) + freq t\<^sub>2 a + freq t\<^sub>2 b =
+                    weight t\<^sub>2 + w\<^sub>a + w\<^sub>b
+              else
+                weight (swapLeaves t\<^sub>2 w\<^sub>a a w\<^sub>b b) + freq t\<^sub>2 a = weight t\<^sub>2 + w\<^sub>b
+            else
+              if b \<in> alphabet t\<^sub>2 then
+                weight (swapLeaves t\<^sub>2 w\<^sub>a a w\<^sub>b b) + freq t\<^sub>2 b = weight t\<^sub>2 + w\<^sub>a
+              else
+                weight (swapLeaves t\<^sub>2 w\<^sub>a a w\<^sub>b b) = weight t\<^sub>2" using hyps
+    by (simp add: weight_swapLeaves)
+  show ?case
+  proof cases
+    assume a\<^sub>1: "a \<in> alphabet t\<^sub>1"
+    hence a\<^sub>2: "a \<notin> alphabet t\<^sub>2" using c by auto
+    show ?case
+    proof cases
+      assume b\<^sub>1: "b \<in> alphabet t\<^sub>1"
+      hence "b \<notin> alphabet t\<^sub>2" using c by auto
+      thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+    next
+      assume b\<^sub>1: "b \<notin> alphabet t\<^sub>1" show ?case
+      proof cases
+        assume "b \<in> alphabet t\<^sub>2" thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+      next
+        assume "b \<notin> alphabet t\<^sub>2" thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+      qed
+    qed
+  next
+    assume a\<^sub>1: "a \<notin> alphabet t\<^sub>1" show ?case
+    proof cases
+      assume a\<^sub>2: "a \<in> alphabet t\<^sub>2" show ?case
+      proof cases
+        assume b\<^sub>1: "b \<in> alphabet t\<^sub>1"
+        hence "b \<notin> alphabet t\<^sub>2" using c by auto
+        thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+      next
+        assume b\<^sub>1: "b \<notin> alphabet t\<^sub>1" show ?case
+        proof cases
+          assume "b \<in> alphabet t\<^sub>2" thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+        next
+          assume "b \<notin> alphabet t\<^sub>2" thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+        qed
+      qed
+    next
+      assume a\<^sub>2: "a \<notin> alphabet t\<^sub>2" show ?case
+      proof cases
+        assume b\<^sub>1: "b \<in> alphabet t\<^sub>1"
+        hence "b \<notin> alphabet t\<^sub>2" using c by auto
+        thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+      next
+        assume b\<^sub>1: "b \<notin> alphabet t\<^sub>1" show ?case
+        proof cases
+          assume "b \<in> alphabet t\<^sub>2" thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+        next
+          assume "b \<notin> alphabet t\<^sub>2" thus ?case using a\<^sub>1 a\<^sub>2 b\<^sub>1 w\<^sub>1 w\<^sub>2 hyps by simp
+        qed
+      qed
+    qed
+  qed
+qed
+
+
+lemma sibling_swapLeaves_sibling[simp]:
+"\<lbrakk>consistent t; sibling t b \<noteq> b; a \<noteq> b\<rbrakk> \<Longrightarrow>
+ sibling (swapLeaves t w\<^sub>a a w\<^sub>s (sibling t b)) a = b"
+proof (induct t)
+  case Leaf thus ?case by simp
+next
+  case (Node w t\<^sub>1 t\<^sub>2)
+  note hyps = Node
+  show ?case
+  proof (cases "height t\<^sub>1 = 0")
+    case True
+    note h\<^sub>1 = True
+    show ?thesis
+    proof (cases t\<^sub>1)
+      case (Leaf w\<^sub>c c)
+      note l\<^sub>1 = Leaf
+      show ?thesis
+      proof (cases "height t\<^sub>2 = 0")
+        case True
+        note h\<^sub>2 = True
+        show ?thesis
+        proof (cases t\<^sub>2)
+          case Leaf thus ?thesis using l\<^sub>1 hyps by simp presburger
+        next
+          case Node thus ?thesis using h\<^sub>2 by simp
+        qed
+      next
+        case False
+        note h\<^sub>2 = False
+        show ?thesis
+        proof cases
+          assume "c = b" thus ?thesis using l\<^sub>1 h\<^sub>2 hyps by simp
+        next
+          assume "c \<noteq> b"
+            by (simp add: sibling_ne_imp_sibling_in_alphabet)
+        qed
+      qed
+    next
+      case Node thus ?thesis using h\<^sub>1 by simp
+    qed
+  next
+    case False
+    note h\<^sub>1 = False
+    show ?thesis
+    proof (cases "height t\<^sub>2 = 0")
+      case True
+      note h\<^sub>2 = True
+      show ?thesis using h\<^sub>1 h\<^sub>2 hyps(1,3-5) by auto
+    next
+      case False
+      note h\<^sub>2 = False
+      show ?thesis
+      proof (cases "b \<in> alphabet t\<^sub>1")
+        case True thus ?thesis using h\<^sub>1 h\<^sub>2 hyps by auto
+      next
+        case False
+        note b\<^sub>1 = False
+        show ?thesis
+        proof (cases "b \<in> alphabet t\<^sub>2")
+          case True thus ?thesis using b\<^sub>1 h\<^sub>1 h\<^sub>2 hyps
+            by (auto simp: in_alphabet_imp_sibling_in_alphabet
+                           alphabet_swapLeaves)
+        next
+          case False thus ?thesis using b\<^sub>1 h\<^sub>1 h\<^sub>2 hyps by simp
+        qed
+      qed
+    qed
+  qed
+qed
+
+
+
+definition swapSyms :: "'a tree \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> 'a tree" where
+"swapSyms t a b = swapLeaves t (freq t a) a (freq t b) b"
+
+lemma swapSyms_id[simp]:
+"consistent t \<Longrightarrow> swapSyms t a a = t"
+by (simp add: swapSyms_def)
+
+lemma alphabet_swapSyms[simp]:
+"\<lbrakk>a \<in> alphabet t; b \<in> alphabet t\<rbrakk> \<Longrightarrow> alphabet (swapSyms t a b) = alphabet t"
+by (simp add: swapSyms_def alphabet_swapLeaves)
+
+lemma consistent_swapSyms[simp]:
+"consistent t \<Longrightarrow> consistent (swapSyms t a b)"
+by (simp add: swapSyms_def)
+
+lemma depth_swapSyms_neither[simp]:
+"\<lbrakk>consistent t; c \<noteq> a; c \<noteq> b\<rbrakk> \<Longrightarrow>
+ depth (swapSyms t a b) c = depth t c"
+by (simp add: swapSyms_def)
+
+lemma freq_swapSyms[simp]:
+"\<lbrakk>consistent t; a \<in> alphabet t; b \<in> alphabet t\<rbrakk> \<Longrightarrow>
+ freq (swapSyms t a b) = freq t"
+by (case_tac "a = b") (simp add: swapSyms_def ext)+
+
+lemma cost_swapSyms:
+assumes "consistent t" "a \<in> alphabet t" "b \<in> alphabet t"
+shows "cost (swapSyms t a b) + freq t a * depth t a + freq t b * depth t b =
+           cost t + freq t a * depth t b + freq t b * depth t a"
+proof cases
+  assume "a = b" thus ?thesis using assms by simp
+next
+  assume "a \<noteq> b"
+  thus ?thesis using assms by (simp add: cost_swapLeaves swapSyms_def)
+qed
+
+
+lemma cost_swapSyms_le:
+assumes "consistent t" "a \<in> alphabet t" "b \<in> alphabet t" "freq t a \<le> freq t b"
+        "depth t a \<le> depth t b"
+shows "cost (swapSyms t a b) \<le> cost t"
+proof -
+  let ?aabb = "freq t a * depth t a + freq t b * depth t b"
+  let ?abba = "freq t a * depth t b + freq t b * depth t a"
+  have "?abba \<le> ?aabb" using assms(4-5)
+    by (metis (no_types) Groups.add_ac(2) Groups.mult_ac(2) nat_arith.rule0 nat_le_add_iff1
+        nat_le_add_iff2 zero_order(1))
+  have "cost (swapSyms t a b) + ?aabb = cost t + ?abba" using assms(1-3)
+    by (simp add: cost_swapSyms add.assoc[THEN sym])
+  finally show ?thesis using assms(4-5) by simp
+qed
+
+
+lemma sibling_swapSyms_sibling[simp]:
+"\<lbrakk>consistent t; sibling t b \<noteq> b; a \<noteq> b\<rbrakk> \<Longrightarrow>
+ sibling (swapSyms t a (sibling t b)) a = b"
+by (simp add: swapSyms_def)
+
+
+lemma sibling_swapSyms_other_sibling[simp]:
+"\<lbrakk>consistent t; sibling t b \<noteq> a; sibling t b \<noteq> b; a \<noteq> b\<rbrakk> \<Longrightarrow>
+ sibling (swapSyms t a b) (sibling t b) = a"
+by (metis consistent_swapSyms sibling_swapSyms_sibling sibling_reciprocal)
+
+
+
+definition swapFourSyms :: "'a tree \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> 'a tree" where
+"swapFourSyms t a b c d =
+ (if a = d then swapSyms t b c
+  else if b = c then swapSyms t a d
+  else swapSyms (swapSyms t a c) b d)"
+
+
+lemma alphabet_swapFourSyms[simp]:
+"\<lbrakk>a \<in> alphabet t; b \<in> alphabet t; c \<in> alphabet t; d \<in> alphabet t\<rbrakk> \<Longrightarrow>
+ alphabet (swapFourSyms t a b c d) = alphabet t"
+by (simp add: swapFourSyms_def)
+
+lemma consistent_swapFourSyms[simp]:
+"consistent t \<Longrightarrow> consistent (swapFourSyms t a b c d)"
+by (simp add: swapFourSyms_def)
+
+lemma freq_swapFourSyms[simp]:
+"\<lbrakk>consistent t; a \<in> alphabet t; b \<in> alphabet t; c \<in> alphabet t;
+  d \<in> alphabet t\<rbrakk> \<Longrightarrow>
+ freq (swapFourSyms t a b c d) = freq t"
+by (auto simp: swapFourSyms_def)
+
+
+lemma sibling_swapFourSyms_when_4th_is_sibling:
+assumes "consistent t" "a \<in> alphabet t" "b \<in> alphabet t" "c \<in> alphabet t"
+        "a \<noteq> b" "sibling t c \<noteq> c"
+shows "sibling (swapFourSyms t a b c (sibling t c)) a = b"
+proof (cases "a \<noteq> sibling t c \<and> b \<noteq> c")
+  case True show ?thesis
+  proof -
+    let ?d = "sibling t c"
+    let ?t\<^sub>s = "swapFourSyms t a b c ?d"
+      by (metis consistent_swapFourSyms sibling_reciprocal)
+    have s: "sibling t c = sibling (swapSyms t a c) a" using True assms
+      by (metis sibling_reciprocal sibling_swapSyms_sibling)
+    have "sibling ?t\<^sub>s b = sibling (swapSyms t a c) ?d" using s True assms
+      by (auto simp: swapFourSyms_def)
+    also have "\<dots> = a" using True assms
+      by (metis sibling_reciprocal sibling_swapSyms_other_sibling swapLeaves_id swapSyms_def)
+    finally have "sibling ?t\<^sub>s b = a" .
+    with abba show ?thesis ..
+  qed
+next
+  case False thus ?thesis using assms
+    by (auto intro: sibling_reciprocal simp: swapFourSyms_def)
+qed
+
+
+
+fun mergeSibling :: "'a tree \<Rightarrow> 'a \<Rightarrow> 'a tree" where
+"mergeSibling (Leaf w\<^sub>b b) a = Leaf w\<^sub>b b" |
+"mergeSibling (Node w (Leaf w\<^sub>b b) (Leaf w\<^sub>c c)) a =
+     (if a = b \<or> a = c then Leaf (w\<^sub>b + w\<^sub>c) a
+      else Node w (Leaf w\<^sub>b b) (Leaf w\<^sub>c c))" |
+"mergeSibling (Node w t\<^sub>1 t\<^sub>2) a =
+     Node w (mergeSibling t\<^sub>1 a) (mergeSibling t\<^sub>2 a)"
+
+
+lemmas mergeSibling_induct_consistent = sibling_induct_consistent
+
+
+lemma notin_alphabet_imp_mergeSibling_id[simp]:
+"a \<notin> alphabet t \<Longrightarrow> mergeSibling t a = t"
+by (induct t a rule: mergeSibling.induct) simp+
+
+lemma height_gt_0_imp_mergeSibling_left[simp]:
+"height t\<^sub>1 > 0 \<Longrightarrow>
+ mergeSibling (Node w t\<^sub>1 t\<^sub>2) a =
+     Node w (mergeSibling t\<^sub>1 a) (mergeSibling t\<^sub>2 a)"
+by (case_tac t\<^sub>1) simp+
+
+lemma height_gt_0_imp_mergeSibling_right[simp]:
+"height t\<^sub>2 > 0 \<Longrightarrow>
+ mergeSibling (Node w t\<^sub>1 t\<^sub>2) a =
+     Node w (mergeSibling t\<^sub>1 a) (mergeSibling t\<^sub>2 a)"
+by (case_tac t\<^sub>2) simp+
+
+lemma either_height_gt_0_imp_mergeSibling[simp]:
+"height t\<^sub>1 > 0 \<or> height t\<^sub>2 > 0 \<Longrightarrow>
+ mergeSibling (Node w t\<^sub>1 t\<^sub>2) a =
+     Node w (mergeSibling t\<^sub>1 a) (mergeSibling t\<^sub>2 a)"
+by auto
+
+lemma alphabet_mergeSibling[simp]:
+"\<lbrakk>consistent t; a \<in> alphabet t\<rbrakk> \<Longrightarrow>
+ alphabet (mergeSibling t a) = (alphabet t - {sibling t a}) \<union> {a}"
+by (induct t a rule: mergeSibling_induct_consistent) auto
+
+lemma consistent_mergeSibling[simp]:
+"consistent t \<Longrightarrow> consistent (mergeSibling t a)"
+by (induct t a rule: mergeSibling_induct_consistent) auto
+
+lemma freq_mergeSibling:
+"\<lbrakk>consistent t; a \<in> alphabet t; sibling t a \<noteq> a\<rbrakk> \<Longrightarrow>
+ freq (mergeSibling t a) =
+     (\<lambda>c. if c = a then freq t a + freq t (sibling t a)
+          else if c = sibling t a then 0
+          else freq t c)"
+by (induct t a rule: mergeSibling_induct_consistent) (auto simp: fun_eq_iff)
+
+lemma weight_mergeSibling[simp]:
+"weight (mergeSibling t a) = weight t"
+by (induct t a rule: mergeSibling.induct) simp+
+
+
+lemma cost_mergeSibling:
+"\<lbrakk>consistent t; sibling t a \<noteq> a\<rbrakk> \<Longrightarrow>
+ cost (mergeSibling t a) + freq t a + freq t (sibling t a) = cost t"
+by (induct t a rule: mergeSibling_induct_consistent) auto
+
+
+
+primrec splitLeaf :: "'a tree \<Rightarrow> nat \<Rightarrow> 'a \<Rightarrow> nat \<Rightarrow> 'a \<Rightarrow> 'a tree" where
+"splitLeaf (Leaf w\<^sub>c c) w\<^sub>a a w\<^sub>b b =
+ (if c = a then Node w\<^sub>c (Leaf w\<^sub>a a) (Leaf w\<^sub>b b) else Leaf w\<^sub>c c)" |
+"splitLeaf (Node w t\<^sub>1 t\<^sub>2) w\<^sub>a a w\<^sub>b b =
+ Node w (splitLeaf t\<^sub>1 w\<^sub>a a w\<^sub>b b) (splitLeaf t\<^sub>2 w\<^sub>a a w\<^sub>b b)"
+
+primrec splitLeaf\<^sub>F :: "'a forest \<Rightarrow> nat \<Rightarrow> 'a \<Rightarrow> nat \<Rightarrow> 'a \<Rightarrow> 'a forest" where
+"splitLeaf\<^sub>F [] w\<^sub>a a w\<^sub>b b = []" |
+"splitLeaf\<^sub>F (t # ts) w\<^sub>a a w\<^sub>b b =
+     splitLeaf t w\<^sub>a a w\<^sub>b b # splitLeaf\<^sub>F ts w\<^sub>a a w\<^sub>b b"
+
+
+lemma notin_alphabet_imp_splitLeaf_id[simp]:
+"a \<notin> alphabet t \<Longrightarrow> splitLeaf t w\<^sub>a a w\<^sub>b b = t"
+by (induct t) simp+
+
+lemma notin_alphabet\<^sub>F_imp_splitLeaf\<^sub>F_id[simp]:
+"a \<notin> alphabet\<^sub>F ts \<Longrightarrow> splitLeaf\<^sub>F ts w\<^sub>a a w\<^sub>b b = ts"
+by (induct ts) simp+
+
+lemma alphabet_splitLeaf[simp]:
+"alphabet (splitLeaf t w\<^sub>a a w\<^sub>b b) =
+ (if a \<in> alphabet t then alphabet t \<union> {b} else alphabet t)"
+by (induct t) simp+
+
+lemma consistent_splitLeaf[simp]:
+"\<lbrakk>consistent t; b \<notin> alphabet t\<rbrakk> \<Longrightarrow> consistent (splitLeaf t w\<^sub>a a w\<^sub>b b)"
+by (induct t) auto
+
+lemma freq_splitLeaf[simp]:
+"\<lbrakk>consistent t; b \<notin> alphabet t\<rbrakk> \<Longrightarrow>
+ freq (splitLeaf t w\<^sub>a a w\<^sub>b b) =
+ (if a \<in> alphabet t then (\<lambda>c. if c = a then w\<^sub>a else if c = b then w\<^sub>b else freq t c)
+  else freq t)"
+by (induct t b rule: tree_induct_consistent) (rule ext, auto)+
+
+lemma weight_splitLeaf[simp]:
+"\<lbrakk>consistent t; a \<in> alphabet t; freq t a = w\<^sub>a + w\<^sub>b\<rbrakk> \<Longrightarrow>
+ weight (splitLeaf t w\<^sub>a a w\<^sub>b b) = weight t"
+by (induct t a rule: tree_induct_consistent) simp+
+
+lemma cost_splitLeaf[simp]:
+"\<lbrakk>consistent t; a \<in> alphabet t; freq t a = w\<^sub>a + w\<^sub>b\<rbrakk> \<Longrightarrow>
+ cost (splitLeaf t w\<^sub>a a w\<^sub>b b) = cost t + w\<^sub>a + w\<^sub>b"
+by (induct t a rule: tree_induct_consistent) simp+
+
+
+
+fun sortedByWeight :: "'a forest \<Rightarrow> bool" where
+"sortedByWeight [] = True" |
+"sortedByWeight [t] = True" |
+"sortedByWeight (t\<^sub>1 # t\<^sub>2 # ts) =
+ (weight t\<^sub>1 \<le> weight t\<^sub>2 \<and> sortedByWeight (t\<^sub>2 # ts))"
+
+
+lemma sortedByWeight_Cons_imp_sortedByWeight:
+"sortedByWeight (t # ts) \<Longrightarrow> sortedByWeight ts"
+by (case_tac ts) simp+
+
+lemma sortedByWeight_Cons_imp_forall_weight_ge:
+"sortedByWeight (t # ts) \<Longrightarrow> \<forall>u \<in> set ts. weight u \<ge> weight t"
+by (induct ts arbitrary: t) force+
+
+lemma sortedByWeight_insortTree:
+"\<lbrakk>sortedByWeight ts; height t = 0; height\<^sub>F ts = 0\<rbrakk> \<Longrightarrow>
+ sortedByWeight (insortTree t ts)"
+by (induct ts rule: sortedByWeight.induct) auto
+
+
+
+definition minima :: "'a tree \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> bool" where
+"minima t a b =
+ (a \<in> alphabet t \<and> b \<in> alphabet t \<and> a \<noteq> b
+  \<and> (\<forall>c \<in> alphabet t. c \<noteq> a \<longrightarrow> c \<noteq> b \<longrightarrow>
+    freq t c \<ge> freq t a \<and> freq t c \<ge> freq t b))"
+
+
+
+
+lemma cost_swapFourSyms_le:
+assumes
+  "consistent t" "minima t a b" "c \<in> alphabet t" "d \<in> alphabet t"
+  "depth t c = height t" "depth t d = height t" "c \<noteq> d"
+shows "cost (swapFourSyms t a b c d) \<le> cost t"
+proof -
+  note lems = swapFourSyms_def minima_def cost_swapSyms_le depth_le_height
+  show ?thesis
+  proof (cases "a \<noteq> d \<and> b \<noteq> c")
+    case True show ?thesis
+    proof cases
+      assume "a = c" thus ?thesis
+      using assms by (metis Orderings.order_eq_iff True cost_swapSyms_le depth_le_height minima_def
+                            swapFourSyms_def swapSyms_id)
+    next
+      assume "a \<noteq> c" show ?thesis
+      proof cases
+          by (simp add: lems)
+      next
+        assume "b \<noteq> d"
+        have "cost (swapFourSyms t a b c d) \<le> cost (swapSyms t a c)"
+          by (clarsimp simp: lems)
+        finally show ?thesis .
+      qed
+    qed
+  next
+    case False thus ?thesis using assms by (clarsimp simp: lems)
+  qed
+qed
+
+
+
+lemma twice_freq_le_imp_minima:
+"\<lbrakk>\<forall>c \<in> alphabet t. w\<^sub>a \<le> freq t c \<and> w\<^sub>b \<le> freq t c;
+  alphabet u = alphabet t \<union> {b}; a \<in> alphabet u; a \<noteq> b;
+  freq u = (\<lambda>c. if c = a then w\<^sub>a else if c = b then w\<^sub>b else freq t c)\<rbrakk> \<Longrightarrow>
+ minima u a b"
+by (simp add: minima_def)
+
+
+lemma optimum_splitLeaf:
+assumes "consistent t" "optimum t" "a \<in> alphabet t" "b \<notin> alphabet t"
+        "freq t a = w\<^sub>a + w\<^sub>b" "\<forall>c \<in> alphabet t. freq t c \<ge> w\<^sub>a \<and> freq t c \<ge> w\<^sub>b"
+shows "optimum (splitLeaf t w\<^sub>a a w\<^sub>b b)"
+proof (unfold optimum_def, clarify)
+  fix u
+  let ?t' = "splitLeaf t w\<^sub>a a w\<^sub>b b"
+  assume c\<^sub>u: "consistent u" and a\<^sub>u: "alphabet ?t' = alphabet u" and
+    f\<^sub>u: "freq ?t' = freq u"
+  show "cost ?t' \<le> cost u"
+  proof (cases "height ?t' = 0")
+    case True thus ?thesis by simp
+  next
+    case False
+    hence h\<^sub>u: "height u > 0" using a\<^sub>u assms
+      by (auto intro: height_gt_0_alphabet_eq_imp_height_gt_0)
+    have a\<^sub>a: "a \<in> alphabet u" using a\<^sub>u assms by fastforce
+    have a\<^sub>b: "b \<in> alphabet u" using a\<^sub>u assms by fastforce
+    have ab: "a \<noteq> b" using assms by blast
+
+    from exists_at_height[OF c\<^sub>u]
+    obtain c where a\<^sub>c: "c \<in> alphabet u" and d\<^sub>c: "depth u c = height u" ..
+    let ?d = "sibling u c"
+
+    have dc: "?d \<noteq> c" using d\<^sub>c c\<^sub>u h\<^sub>u a\<^sub>c by (metis depth_height_imp_sibling_ne)
+    have a\<^sub>d: "?d \<in> alphabet u" using dc
+      by (rule sibling_ne_imp_sibling_in_alphabet)
+    have d\<^sub>d: "depth u ?d = height u" using d\<^sub>c c\<^sub>u by simp
+
+    let ?u' = "swapFourSyms u a b c ?d"
+    have c\<^sub>u\<^sub>': "consistent ?u'" using c\<^sub>u by simp
+    have a\<^sub>u\<^sub>': "alphabet ?u' = alphabet u" using a\<^sub>a a\<^sub>b a\<^sub>c a\<^sub>d a\<^sub>u by simp
+    have f\<^sub>u\<^sub>': "freq ?u' = freq u" using a\<^sub>a a\<^sub>b a\<^sub>c a\<^sub>d c\<^sub>u f\<^sub>u by simp
+    have s\<^sub>a: "sibling ?u' a = b" using c\<^sub>u a\<^sub>a a\<^sub>b a\<^sub>c ab dc
+      by (rule sibling_swapFourSyms_when_4th_is_sibling)
+
+    let ?v = "mergeSibling ?u' a"
+    have c\<^sub>v: "consistent ?v" using c\<^sub>u\<^sub>' by simp
+    have a\<^sub>v: "alphabet ?v = alphabet t" using s\<^sub>a c\<^sub>u\<^sub>' a\<^sub>u\<^sub>' a\<^sub>a a\<^sub>u assms by auto
+    have f\<^sub>v: "freq ?v = freq t"
+      using s\<^sub>a c\<^sub>u\<^sub>' a\<^sub>u\<^sub>' f\<^sub>u\<^sub>' f\<^sub>u[THEN sym] ab a\<^sub>u[THEN sym] assms
+      by (simp add: freq_mergeSibling ext)
+
+    have "cost ?t' = cost t + w\<^sub>a + w\<^sub>b" using assms by simp
+      by (simp add: optimum_def)
+    also have "\<dots> = cost ?u'"
+      proof -
+        have "cost ?v + freq ?u' a + freq ?u' (sibling ?u' a) = cost ?u'"
+          using c\<^sub>u\<^sub>' s\<^sub>a assms by (subst cost_mergeSibling) auto
+        moreover have "w\<^sub>a = freq ?u' a" "w\<^sub>b = freq ?u' b"
+          using f\<^sub>u\<^sub>' f\<^sub>u[THEN sym] assms by clarsimp+
+        ultimately show ?thesis using s\<^sub>a by simp
+      qed
+    also have "\<dots> \<le> cost u"
+      proof -
+        have "minima u a b" using a\<^sub>u f\<^sub>u assms
+          by (subst twice_freq_le_imp_minima) auto
+        with c\<^sub>u show ?thesis using a\<^sub>c a\<^sub>d d\<^sub>c d\<^sub>d dc[THEN not_sym]
+          by (rule cost_swapFourSyms_le)
+      qed
+    finally show ?thesis .
+  qed
+qed
+
+
+
+lemma cachedWeight_splitLeaf[simp]:
+"cachedWeight (splitLeaf t w\<^sub>a a w\<^sub>b b) = cachedWeight t"
+by (case_tac t) simp+
+
+lemma splitLeaf\<^sub>F_insortTree_when_in_alphabet_left[simp]:
+"\<lbrakk>a \<in> alphabet t; consistent t; a \<notin> alphabet\<^sub>F ts; freq t a = w\<^sub>a + w\<^sub>b\<rbrakk> \<Longrightarrow>
+ splitLeaf\<^sub>F (insortTree t ts) w\<^sub>a a w\<^sub>b b = insortTree (splitLeaf t w\<^sub>a a w\<^sub>b b) ts"
+by (induct ts) simp+
+
+lemma splitLeaf\<^sub>F_insortTree_when_in_alphabet\<^sub>F_tail[simp]:
+"\<lbrakk>a \<in> alphabet\<^sub>F ts; consistent\<^sub>F ts; a \<notin> alphabet t; freq\<^sub>F ts a = w\<^sub>a + w\<^sub>b\<rbrakk> \<Longrightarrow>
+ splitLeaf\<^sub>F (insortTree t ts) w\<^sub>a a w\<^sub>b b =
+ insortTree t (splitLeaf\<^sub>F ts w\<^sub>a a w\<^sub>b b)"
+proof (induct ts)
+  case Nil thus ?case by simp
+next
+  case (Cons u us) show ?case
+  proof (cases "a \<in> alphabet u")
+    case True
+    hence "a \<notin> alphabet\<^sub>F us" using Cons by auto
+    thus ?thesis using Cons by auto
+  next
+    case False thus ?thesis using Cons by simp
+  qed
+qed
+
+
+lemma splitLeaf_huffman_commute:
+"\<lbrakk>consistent\<^sub>F ts; a \<in> alphabet\<^sub>F ts; freq\<^sub>F ts a = w\<^sub>a + w\<^sub>b\<rbrakk> \<Longrightarrow>
+ splitLeaf (huffman ts) w\<^sub>a a w\<^sub>b b = huffman (splitLeaf\<^sub>F ts w\<^sub>a a w\<^sub>b b)"
+proof (induct ts rule: huffman.induct)
+  case (1 t) thus ?case by simp
+next
+  case (2 t\<^sub>1 t\<^sub>2 ts)
+  note hyps = 2
+  show ?case
+  proof (cases "a \<in> alphabet t\<^sub>1")
+    case True
+    hence "a \<notin> alphabet t\<^sub>2" "a \<notin> alphabet\<^sub>F ts" using hyps by auto
+    thus ?thesis using hyps by (simp add: uniteTrees_def)
+  next
+    case False
+    note a\<^sub>1 = False
+    show ?thesis
+    proof (cases "a \<in> alphabet t\<^sub>2")
+      case True
+      hence "a \<notin> alphabet\<^sub>F ts" using hyps by auto
+      thus ?thesis using a\<^sub>1 hyps by (simp add: uniteTrees_def)
+    next
+      case False
+      thus ?thesis using a\<^sub>1 hyps by simp
+    qed
+  qed
+next
+  case 3 thus ?case by simp
+qed
+
+
+
+
+theorem optimum_huffman:
+"\<lbrakk>consistent\<^sub>F ts; height\<^sub>F ts = 0; sortedByWeight ts; ts \<noteq> []\<rbrakk> \<Longrightarrow>
+ optimum (huffman ts)"
+
+
+proof (induct ts rule: length_induct)
+  case (1 ts)
+  note hyps = 1
+  show ?case
+  proof (cases ts)
+  next
+    case (Cons t\<^sub>a ts')
+    note ts = Cons
+    show ?thesis
+    proof (cases ts')
+      case Nil thus ?thesis using ts hyps by (simp add: optimum_def)
+    next
+      case (Cons t\<^sub>b ts'')
+      note ts' = Cons
+      show ?thesis
+      proof (cases t\<^sub>a)
+        case (Leaf w\<^sub>a a)
+        note l\<^sub>a = Leaf
+        show ?thesis
+        proof (cases t\<^sub>b)
+          case (Leaf w\<^sub>b b)
+          note l\<^sub>b = Leaf
+          show ?thesis
+          proof -
+            let ?us = "insortTree (uniteTrees t\<^sub>a t\<^sub>b) ts''"
+            let ?us' = "insortTree (Leaf (w\<^sub>a + w\<^sub>b) a) ts''"
+            let ?t\<^sub>s = "splitLeaf (huffman ?us') w\<^sub>a a w\<^sub>b b"
+
+            have e\<^sub>1: "huffman ts = huffman ?us" using ts' ts by simp
+            have e\<^sub>2: "huffman ?us = ?t\<^sub>s" using l\<^sub>a l\<^sub>b ts' ts hyps
+              by (auto simp: splitLeaf_huffman_commute uniteTrees_def)
+
+            have "optimum (huffman ?us')" using l\<^sub>a ts' ts hyps
+              by (drule_tac x = ?us' in spec)
+                 (auto dest: sortedByWeight_Cons_imp_sortedByWeight
+                  simp: sortedByWeight_insortTree)
+            hence "optimum ?t\<^sub>s" using l\<^sub>a l\<^sub>b ts' ts hyps
+              apply simp
+              apply (rule optimum_splitLeaf)
+              by (auto dest!: height\<^sub>F_0_imp_Leaf_freq\<^sub>F_in_set
+                  sortedByWeight_Cons_imp_forall_weight_ge)
+            thus "optimum (huffman ts)" using e\<^sub>1 e\<^sub>2 by simp
+          qed
+        next
+          case Node thus ?thesis using ts' ts hyps by simp
+        qed
+      next
+        case Node thus ?thesis using ts' ts hyps by simp
+      qed
+    qed
+  qed
+qed
+
+
+
+
+
+
+end

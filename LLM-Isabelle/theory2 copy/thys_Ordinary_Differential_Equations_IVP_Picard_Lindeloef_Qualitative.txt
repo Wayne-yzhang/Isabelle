@@ -1,0 +1,842 @@
+theory Picard_Lindeloef_Qualitative
+imports Initial_Value_Problem
+begin
+
+
+
+lemma cball_eq_closed_segment_real:
+  fixes x e::real
+  shows "cball x e = (if e \<ge> 0 then {x - e -- x + e} else {})"
+  by (auto simp: closed_segment_eq_real_ivl dist_real_def mem_cball)
+
+lemma cube_in_cball:
+  fixes x y :: "'a::euclidean_space"
+  assumes "r > 0"
+  assumes "\<And>i. i\<in> Basis \<Longrightarrow> dist (x \<bullet> i) (y \<bullet> i) \<le> r / sqrt(DIM('a))"
+  shows "y \<in> cball x r"
+  unfolding mem_cball euclidean_dist_l2[of x y] L2_set_def
+proof -
+  have "(\<Sum>i\<in>Basis. (dist (x \<bullet> i) (y \<bullet> i))\<^sup>2) \<le> (\<Sum>(i::'a)\<in>Basis. (r / sqrt(DIM('a)))\<^sup>2)"
+  proof (intro sum_mono)
+    fix i :: 'a
+    assume "i \<in> Basis"
+    thus "(dist (x \<bullet> i) (y \<bullet> i))\<^sup>2 \<le> (r / sqrt(DIM('a)))\<^sup>2"
+      using assms
+      by (auto intro: sqrt_le_D)
+  qed
+  moreover
+  have "... \<le> r\<^sup>2"
+    using assms by (simp add: power_divide)
+  ultimately
+  show "sqrt (\<Sum>i\<in>Basis. (dist (x \<bullet> i) (y \<bullet> i))\<^sup>2) \<le> r"
+    using assms by (auto intro!: real_le_lsqrt sum_nonneg)
+qed
+
+lemma cbox_in_cball':
+  fixes x::"'a::euclidean_space"
+  assumes "0 < r"
+  shows "\<exists>b > 0. b \<le> r \<and> (\<exists>B. B = (\<Sum>i\<in>Basis. b *\<^sub>R i) \<and> (\<forall>y \<in> cbox (x - B) (x + B). y \<in> cball x r))"
+proof (rule, safe)
+  have "r / sqrt (real DIM('a)) \<le> r / 1"
+    using assms  by (auto simp: divide_simps real_of_nat_ge_one_iff)
+  thus "r / sqrt (real DIM('a)) \<le> r" by simp
+next
+  let ?B = "\<Sum>i\<in>Basis. (r / sqrt (real DIM('a))) *\<^sub>R i"
+  show "\<exists>B. B = ?B \<and> (\<forall>y \<in> cbox (x - B) (x + B). y \<in> cball x r)"
+  proof (rule, safe)
+    fix y::'a
+    assume "y \<in> cbox (x - ?B) (x + ?B)"
+    hence bounds:
+      "\<And>i. i \<in> Basis \<Longrightarrow> (x - ?B) \<bullet> i \<le> y \<bullet> i"
+      "\<And>i. i \<in> Basis \<Longrightarrow> y \<bullet> i \<le> (x + ?B) \<bullet> i"
+      by (auto simp: mem_box)
+    show "y \<in> cball x r"
+    proof (intro cube_in_cball)
+      fix i :: 'a
+      assume "i\<in> Basis"
+      with bounds
+      have bounds_comp:
+        "x \<bullet> i - r / sqrt (real DIM('a)) \<le> y \<bullet> i"
+        "y \<bullet> i \<le> x \<bullet> i + r / sqrt (real DIM('a))"
+        by (auto simp: algebra_simps)
+      thus "dist (x \<bullet> i) (y \<bullet> i) \<le> r / sqrt (real DIM('a))"
+        unfolding dist_real_def by simp
+    qed (auto simp add: assms)
+  qed (rule)
+qed (auto simp: assms)
+
+lemma Pair1_in_Basis: "i \<in> Basis \<Longrightarrow> (i, 0) \<in> Basis"
+ and Pair2_in_Basis: "i \<in> Basis \<Longrightarrow> (0, i) \<in> Basis"
+  by (auto simp: Basis_prod_def)
+
+lemma le_real_sqrt_sumsq' [simp]: "y \<le> sqrt (x * x + y * y)"
+  by (simp add: power2_eq_square [symmetric])
+
+lemma cball_Pair_split_subset: "cball (a, b) c \<subseteq> cball a c \<times> cball b c"
+  by (auto simp: dist_prod_def mem_cball power2_eq_square
+      intro: order_trans[OF le_real_sqrt_sumsq] order_trans[OF le_real_sqrt_sumsq'])
+
+lemma cball_times_subset: "cball a (c/2) \<times> cball b (c/2) \<subseteq> cball (a, b) c"
+proof -
+  {
+    fix a' b'
+    have "sqrt ((dist a a')\<^sup>2 + (dist b b')\<^sup>2) \<le> dist a a' + dist b b'"
+      by (rule real_le_lsqrt) (auto simp: power2_eq_square algebra_simps)
+    also assume "a' \<in> cball a (c / 2)"
+    then have "dist a a' \<le> c / 2" by (simp add: mem_cball)
+    also assume "b' \<in> cball b (c / 2)"
+    then have "dist b b' \<le> c / 2" by (simp add: mem_cball)
+    finally have "sqrt ((dist a a')\<^sup>2 + (dist b b')\<^sup>2) \<le> c"
+      by simp
+  } thus ?thesis by (auto simp: dist_prod_def mem_cball)
+qed
+
+lemma eventually_bound_pairE:
+  assumes "isCont f (t0, x0)"
+  obtains B where
+    "B \<ge> 1"
+    "eventually (\<lambda>e. \<forall>x \<in> cball t0 e \<times> cball x0 e. norm (f x) \<le> B) (at_right 0)"
+proof -
+  from assms[simplified isCont_def, THEN tendstoD, OF zero_less_one]
+  obtain d::real where d: "d > 0"
+    "\<And>x. x \<noteq> (t0, x0) \<Longrightarrow> dist x (t0, x0) < d \<Longrightarrow> dist (f x) (f (t0, x0)) < 1"
+    by (auto simp: eventually_at)
+  have bound: "norm (f (t, x)) \<le> norm (f (t0, x0)) + 1"
+    if "t \<in> cball t0 (d/3)" "x \<in> cball x0 (d/3)" for t x
+  proof -
+    from that have "norm (f (t, x) - f (t0, x0)) < 1"
+      unfolding dist_norm[symmetric]
+      apply (cases "(t, x) = (t0, x0)", force)
+      by (rule d) (auto simp: dist_commute dist_prod_def mem_cball
+        intro!: le_less_trans[OF sqrt_sum_squares_le_sum_abs])
+    then show ?thesis
+      by norm
+  qed
+  have "norm (f (t0, x0)) + 1 \<ge> 1"
+    "eventually (\<lambda>e. \<forall>x \<in> cball t0 e \<times> cball x0 e.
+      norm (f x) \<le> norm (f (t0, x0)) + 1) (at_right 0)"
+    using d(1) bound
+    by (auto simp: eventually_at dist_real_def mem_cball intro!: exI[where x="d/3"])
+  thus ?thesis ..
+qed
+
+lemma
+  eventually_in_cballs:
+  assumes "d > 0" "c > 0"
+  shows "eventually (\<lambda>e. cball t0 (c * e) \<times> (cball x0 e) \<subseteq> cball (t0, x0) d) (at_right 0)"
+  using assms
+  by (auto simp: eventually_at dist_real_def field_simps dist_prod_def mem_cball
+    intro!: exI[where x="min d (d / c) / 3"]
+    order_trans[OF sqrt_sum_squares_le_sum_abs])
+
+lemma cball_eq_sing':
+  fixes x :: "'a::{metric_space,perfect_space}"
+  shows "cball x e = {y} \<longleftrightarrow> e = 0 \<and> x = y"
+  using cball_eq_sing[of x e]
+  apply (cases "x = y", force)
+  by (metis cball_empty centre_in_cball insert_not_empty not_le singletonD)
+
+locale ll_on_open = interval T for T +
+  fixes f::"real \<Rightarrow> 'a::{banach, heine_borel} \<Rightarrow> 'a" and X
+  assumes local_lipschitz: "local_lipschitz T X f"
+  assumes cont: "\<And>x. x \<in> X \<Longrightarrow> continuous_on T (\<lambda>t. f t x)"
+  assumes open_domain[intro!, simp]: "open T" "open X"
+begin
+
+
+definition csols where
+  "csols t0 x0 = {(x, t1). {t0--t1} \<subseteq> T \<and> x t0 = x0 \<and> (x solves_ode f) {t0--t1} X}"
+
+
+definition "existence_ivl t0 x0 = (\<Union>(x, t1)\<in>csols t0 x0 . {t0--t1})"
+
+
+definition "csol t0 x0 = (SOME csol. \<forall>t \<in> existence_ivl t0 x0. (csol t, t) \<in> csols t0 x0)"
+
+
+definition flow where "flow t0 x0 = (\<lambda>t. if t \<in> existence_ivl t0 x0 then csol t0 x0 t t else 0)"
+
+end
+
+locale ll_on_open_it =
+  ll_on_open + fixes t0::real
+
+context ll_on_open begin
+
+sublocale ll_on_open_it where t0 = t0  for t0 ..
+
+sublocale continuous_rhs T X f
+  by unfold_locales (rule continuous_on_TimesI[OF local_lipschitz cont])
+
+end
+
+context ll_on_open_it begin
+
+lemma ll_on_open_rev[intro, simp]: "ll_on_open (preflect t0 ` T) (\<lambda>t. - f (preflect t0 t)) X"
+  using local_lipschitz interval
+  by unfold_locales
+    (auto intro!: continuous_intros cont intro: local_lipschitz_compose1
+      simp: fun_Compl_def local_lipschitz_minus local_lipschitz_subset open_neg_translation
+        image_image preflect_def)
+
+lemma eventually_lipschitz:
+  assumes "t0 \<in> T" "x0 \<in> X" "c > 0"
+  obtains L where
+    "eventually (\<lambda>u. \<forall>t' \<in> cball t0 (c * u) \<inter> T.
+      L-lipschitz_on (cball x0 u \<inter> X) (\<lambda>y. f t' y)) (at_right 0)"
+proof -
+  obtain u L where
+    "u > 0"
+    "\<And>t'. t' \<in> cball t0 u \<inter> T \<Longrightarrow> L-lipschitz_on (cball x0 u \<inter> X) (\<lambda>y. f t' y)"
+    by auto
+  hence "eventually (\<lambda>u. \<forall>t' \<in> cball t0 (c * u) \<inter> T.
+      L-lipschitz_on (cball x0 u \<inter> X) (\<lambda>y. f t' y)) (at_right 0)"
+    by (auto simp: dist_real_def eventually_at divide_simps algebra_simps
+      intro!: exI[where x="min u (u / c)"]
+      intro: lipschitz_on_subset[where E="cball x0 u \<inter> X"])
+  thus ?thesis ..
+qed
+
+lemmas continuous_on_Times_f = continuous
+lemmas continuous_on_f = continuous_rhs_comp
+
+lemma
+  lipschitz_on_compact:
+  assumes "compact K" "K \<subseteq> T"
+  assumes "compact Y" "Y \<subseteq> X"
+  obtains L where "\<And>t. t \<in> K \<Longrightarrow> L-lipschitz_on Y (f t)"
+proof -
+  have cont: "\<And>x. x \<in> Y \<Longrightarrow> continuous_on K (\<lambda>t. f t x)"
+    by (auto intro!: continuous_on_f continuous_intros)
+  from local_lipschitz
+  have "local_lipschitz K Y f"
+  show ?thesis by metis
+qed
+
+lemma csols_empty_iff: "csols t0 x0 = {} \<longleftrightarrow> t0 \<notin> T \<or> x0 \<notin> X"
+proof cases
+  assume iv_defined: "t0 \<in> T \<and> x0 \<in> X"
+  then have "(\<lambda>_. x0, t0) \<in> csols t0 x0"
+    by (auto simp: csols_def intro!: solves_ode_singleton)
+qed (auto simp: solves_ode_domainD csols_def)
+
+lemma csols_notempty: "t0 \<in> T \<Longrightarrow> x0 \<in> X \<Longrightarrow> csols t0 x0 \<noteq> {}"
+  by (simp add: csols_empty_iff)
+
+
+lemma existence_ivl_empty_iff[simp]: "existence_ivl t0 x0 = {} \<longleftrightarrow> t0 \<notin> T \<or> x0 \<notin> X"
+  using csols_empty_iff
+  by (auto simp: existence_ivl_def)
+
+lemma existence_ivl_empty1[simp]: "t0 \<notin> T \<Longrightarrow> existence_ivl t0 x0 = {}"
+  and existence_ivl_empty2[simp]: "x0 \<notin> X \<Longrightarrow> existence_ivl t0 x0 = {}"
+  using csols_empty_iff
+  by (auto simp: existence_ivl_def)
+
+lemma flow_undefined:
+  shows "t0 \<notin> T \<Longrightarrow> flow t0 x0 = (\<lambda>_. 0)"
+    "x0 \<notin> X \<Longrightarrow> flow t0 x0 = (\<lambda>_. 0)"
+  using existence_ivl_empty_iff
+  by (auto simp: flow_def)
+
+lemma (in ll_on_open) flow_eq_in_existence_ivlI:
+  assumes "\<And>u. x0 \<in> X \<Longrightarrow> u \<in> existence_ivl t0 x0 \<longleftrightarrow> g u \<in> existence_ivl s0 x0"
+  assumes "\<And>u. x0 \<in> X \<Longrightarrow> u \<in> existence_ivl t0 x0 \<Longrightarrow> flow t0 x0 u = flow s0 x0 (g u)"
+  shows "flow t0 x0 = (\<lambda>t. flow s0 x0 (g t))"
+  apply (cases "x0 \<in> X")
+  subgoal using assms by (auto intro!: ext simp: flow_def)
+  subgoal by (simp add: flow_undefined)
+  done
+
+
+
+lemma local_unique_solution:
+  assumes iv_defined: "t0 \<in> T" "x0 \<in> X"
+  obtains et ex B L
+  where "et > 0" "0 < ex" "cball t0 et \<subseteq> T" "cball x0 ex \<subseteq> X"
+    "unique_on_cylinder t0 (cball t0 et) x0 ex f B L"
+proof -
+  have "\<forall>\<^sub>F e::real in at_right 0. 0 < e"
+    by (auto simp: eventually_at_filter)
+  moreover
+
+  from open_Times[OF open_domain] have "open (T \<times> X)" .
+  from at_within_open[OF _ this] iv_defined
+  have "isCont (\<lambda>(t, x). f t x) (t0, x0)"
+    using continuous by (auto simp: continuous_on_eq_continuous_within)
+  from eventually_bound_pairE[OF this]
+  obtain B where B:
+    "1 \<le> B" "\<forall>\<^sub>F e in at_right 0. \<forall>t\<in>cball t0 e. \<forall>x\<in>cball x0 e. norm (f t x) \<le> B"
+    by force
+  note B(2)
+  moreover
+
+  define t where "t \<equiv> inverse B"
+  have te: "\<And>e. e > 0 \<Longrightarrow> t * e > 0"
+  have t_pos: "t > 0"
+
+  from B(2) obtain dB where "0 < dB" "0 < dB / 2"
+    and dB: "\<And>d t x. 0 < d \<Longrightarrow> d < dB \<Longrightarrow> t\<in>cball t0 d \<Longrightarrow> x\<in>cball x0 d \<Longrightarrow>
+      norm (f t x) \<le> B"
+    by (auto simp: eventually_at dist_real_def Ball_def)
+
+  hence dB': "\<And>t x. (t, x) \<in> cball (t0, x0) (dB / 2) \<Longrightarrow> norm (f t x) \<le> B"
+    using cball_Pair_split_subset[of t0 x0 "dB / 2"]
+    by (auto simp: eventually_at dist_real_def
+      simp del: mem_cball
+      intro!: dB[where d="dB/2"])
+  have "\<forall>\<^sub>F e in at_right 0. \<forall>t\<in>cball t0 (t * e). \<forall>x\<in>cball x0 e. norm (f t x) \<le> B"
+    unfolding eventually_at_filter
+    by eventually_elim (auto intro!: dB')
+  moreover
+
+  from eventually_lipschitz[OF iv_defined t_pos] obtain L where
+    "\<forall>\<^sub>F u in at_right 0. \<forall>t'\<in>cball t0 (t * u) \<inter> T. L-lipschitz_on (cball x0 u \<inter> X) (f t')"
+    by auto
+  moreover
+  have "\<forall>\<^sub>F e in at_right 0. cball t0 (t * e) \<subseteq> T"
+    using eventually_open_cball[OF open_domain(1) iv_defined(1)]
+    by (subst eventually_filtermap[symmetric, where f="\<lambda>x. t * x"])
+      (simp add: filtermap_times_pos_at_right t_pos)
+  moreover
+  have "eventually (\<lambda>e. cball x0 e \<subseteq> X) (at_right 0)"
+    using open_domain(2) iv_defined(2)
+    by (rule eventually_open_cball)
+  ultimately have "\<forall>\<^sub>F e in at_right 0. 0 < e \<and> cball t0 (t * e) \<subseteq> T \<and> cball x0 e \<subseteq> X \<and>
+    unique_on_cylinder t0 (cball t0 (t * e)) x0 e f B L"
+  proof eventually_elim
+    case (elim e)
+    moreover
+    moreover
+    moreover
+    have L: "t' \<in> cball t0 (t * e) \<inter> T \<Longrightarrow> L-lipschitz_on (cball x0 e) (f t')" for t'
+      by auto
+    from elim have B: "\<And>t' x. t' \<in> cball t0 (t * e) \<Longrightarrow> x \<in> cball x0 e \<Longrightarrow> norm (f t' x) \<le> B"
+      by auto
+
+
+    have "t * e \<le> e / B"
+      by (auto simp: t_def cball_def dist_real_def inverse_eq_divide)
+
+    have "{t0 -- t0 + t * e} \<subseteq> cball t0 (t * e)"
+      by (auto simp: cball_eq_closed_segment_real closed_segment_eq_real_ivl)
+    then have "unique_on_cylinder t0 (cball t0 (t * e)) x0 e f B L"
+      by unfold_locales
+        (auto intro!: continuous_rhs_comp continuous_on_fst continuous_on_snd B L
+          continuous_on_id
+          simp: split_beta' dist_commute mem_cball)
+    ultimately show ?case by auto
+  qed
+  from eventually_happens[OF this]
+  obtain e where "0 < e" "cball t0 (t * e) \<subseteq> T" "cball x0 e \<subseteq> X"
+    "unique_on_cylinder t0 (cball t0 (t * e)) x0 e f B L"
+    by (metis trivial_limit_at_right_real)
+qed
+
+lemma mem_existence_ivl_iv_defined:
+  assumes "t \<in> existence_ivl t0 x0"
+  shows "t0 \<in> T" "x0 \<in> X"
+  using assms existence_ivl_empty_iff
+  unfolding atomize_conj
+  by blast
+
+lemma csol_mem_csols:
+  assumes "t \<in> existence_ivl t0 x0"
+  shows "(csol t0 x0 t, t) \<in> csols t0 x0"
+proof -
+  have "\<exists>csol. \<forall>t \<in> existence_ivl t0 x0. (csol t, t) \<in> csols t0 x0"
+  proof (safe intro!: bchoice)
+    fix t assume "t \<in> existence_ivl t0 x0"
+    then obtain csol t1 where csol: "(csol t, t1) \<in> csols t0 x0" "t \<in> {t0 -- t1}"
+      by (auto simp: existence_ivl_def)
+    then have "{t0--t} \<subseteq> {t0 -- t1}"
+      by (auto simp: closed_segment_eq_real_ivl)
+    then have "(csol t, t) \<in> csols t0 x0" using csol
+      by (auto simp: csols_def intro: solves_ode_on_subset)
+    then show "\<exists>y. (y, t) \<in> csols t0 x0" by force
+  qed
+  then have "\<forall>t \<in> existence_ivl t0 x0. (csol t0 x0 t, t) \<in> csols t0 x0"
+    unfolding csol_def
+    by (rule someI_ex)
+  with assms show "?thesis" by auto
+qed
+
+lemma csol:
+  assumes "t \<in> existence_ivl t0 x0"
+  shows "t \<in> T" "{t0--t} \<subseteq> T" "csol t0 x0 t t0 = x0" "(csol t0 x0 t solves_ode f) {t0--t} X"
+  using csol_mem_csols[OF assms]
+  by (auto simp: csols_def)
+
+lemma existence_ivl_initial_time_iff[simp]: "t0 \<in> existence_ivl t0 x0 \<longleftrightarrow> t0 \<in> T \<and> x0 \<in> X"
+  using csols_empty_iff
+  by (auto simp: existence_ivl_def)
+
+lemma existence_ivl_initial_time: "t0 \<in> T \<Longrightarrow> x0 \<in> X \<Longrightarrow> t0 \<in> existence_ivl t0 x0"
+  by simp
+
+lemmas mem_existence_ivl_subset = csol(1)
+
+lemma existence_ivl_subset:
+  "existence_ivl t0 x0 \<subseteq> T"
+  using mem_existence_ivl_subset by blast
+
+lemma is_interval_existence_ivl[intro, simp]: "is_interval (existence_ivl t0 x0)"
+  unfolding is_interval_connected_1
+  by (auto simp: existence_ivl_def intro!: connected_Union)
+
+lemma connected_existence_ivl[intro, simp]: "connected (existence_ivl t0 x0)"
+  using is_interval_connected by blast
+
+lemma in_existence_between_zeroI:
+  "t \<in> existence_ivl t0 x0 \<Longrightarrow> s \<in> {t0 -- t} \<Longrightarrow> s \<in> existence_ivl t0 x0"
+  by (meson existence_ivl_initial_time interval.closed_segment_subset_domainI interval.intro
+    is_interval_existence_ivl mem_existence_ivl_iv_defined(1) mem_existence_ivl_iv_defined(2))
+
+lemma segment_subset_existence_ivl:
+  assumes "s \<in> existence_ivl t0 x0" "t \<in> existence_ivl t0 x0"
+  shows "{s -- t} \<subseteq> existence_ivl t0 x0"
+  using assms is_interval_existence_ivl
+  unfolding is_interval_convex_1
+  by (rule closed_segment_subset)
+
+lemma flow_initial_time_if: "flow t0 x0 t0 = (if t0 \<in> T \<and> x0 \<in> X then x0 else 0)"
+  by (simp add: flow_def csol(3))
+
+lemma flow_initial_time[simp]: "t0 \<in> T \<Longrightarrow> x0 \<in> X \<Longrightarrow> flow t0 x0 t0 = x0"
+  by (auto simp: flow_initial_time_if)
+
+lemma open_existence_ivl[intro, simp]: "open (existence_ivl t0 x0)"
+proof (rule openI)
+  fix t assume t: "t \<in> existence_ivl t0 x0"
+  note csol = csol[OF this]
+  note mem_existence_ivl_iv_defined[OF t]
+
+    using csol(4) solves_ode_domainD
+    by (force simp add: flow_def)
+
+  obtain et ex B L where lsol:
+    "0 < et"
+    "0 < ex"
+    "cball t et \<subseteq> T"
+    "cball (flow t0 x0 t) ex \<subseteq> X"
+    "unique_on_cylinder t (cball t et) (flow t0 x0 t) ex f B L"
+    by metis
+  then interpret unique_on_cylinder t "cball t et" "flow t0 x0 t" ex "cball (flow t0 x0 t) ex" f B L
+    by auto
+  from solution_usolves_ode have lsol_ode: "(solution solves_ode f) (cball t et) (cball (flow t0 x0 t) ex)"
+    by (intro usolves_odeD)
+  show "\<exists>e>0. ball t e \<subseteq> existence_ivl t0 x0"
+  proof cases
+    assume "t = t0"
+    show ?thesis
+      fix t' assume "t' \<in> ball t et"
+      then have subset: "{t0--t'} \<subseteq> ball t et"
+      also have "\<dots> \<subseteq> cball t et" by simp
+      finally have "{t0--t'} \<subseteq> T" by simp
+      moreover have "(solution solves_ode f) {t0--t'} X"
+        using lsol_ode
+        apply (rule solves_ode_on_subset)
+        using subset lsol
+        by (auto simp: mem_ball mem_cball)
+      ultimately have "(solution, t') \<in> csols t0 x0"
+        unfolding csols_def
+        by (auto simp: csols_def)
+      then show "t' \<in> existence_ivl t0 x0"
+        unfolding existence_ivl_def
+        by force
+    qed
+  next
+    assume "t \<noteq> t0"
+    let ?m = "min et (dist t0 t / 2)"
+    show ?thesis
+    proof (safe intro!: exI[where x = ?m])
+      let ?t1' = "if t0 \<le> t then t + et else t - et"
+      have lsol_ode: "(solution solves_ode f) {t -- ?t1'} (cball (flow t0 x0 t) ex)"
+        by (rule solves_ode_on_subset[OF lsol_ode])
+      let ?if = "\<lambda>ta. if ta \<in> {t0--t} then csol t0 x0 t ta else solution ta"
+      let ?iff = "\<lambda>ta. if ta \<in> {t0--t} then f ta else f ta"
+      have "(?if solves_ode ?iff) ({t0--t} \<union> {t -- ?t1'}) X"
+        by (auto intro!: simp: closed_segment_eq_real_ivl flow_def split: if_split_asm)
+      also have "?iff = f" by auto
+      also have Un_eq: "{t0--t} \<union> {t -- ?t1'} = {t0 -- ?t1'}"
+        by (auto simp: closed_segment_eq_real_ivl)
+      finally have continuation: "(?if solves_ode f) {t0--?t1'} X" .
+      have subset_T: "{t0 -- ?t1'} \<subseteq> T"
+        unfolding Un_eq[symmetric]
+        apply (intro Un_least)
+        subgoal using csol by force
+        subgoal using _ lsol(3)
+          apply (rule order_trans)
+          by (auto simp: closed_segment_eq_real_ivl subset_iff mem_cball dist_real_def)
+        done
+      fix t' assume "t' \<in> ball t ?m"
+      then have scs: "{t0 -- t'} \<subseteq> {t0--?t1'}"
+        by (auto simp: closed_segment_eq_real_ivl dist_real_def abs_real_def mem_ball split: if_split_asm)
+      with continuation have "(?if solves_ode f) {t0 -- t'} X"
+        by (rule solves_ode_on_subset) simp
+      then have "(?if, t') \<in> csols t0 x0"
+        by (auto simp: csols_def subset_iff)
+      then show "t' \<in> existence_ivl t0 x0"
+        unfolding existence_ivl_def
+        by force
+  qed
+qed
+
+lemma csols_unique:
+  assumes "(x, t1) \<in> csols t0 x0"
+  assumes "(y, t2) \<in> csols t0 x0"
+  shows "\<forall>t \<in> {t0 -- t1} \<inter> {t0 -- t2}. x t = y t"
+proof (rule ccontr)
+  let ?S = "{t0 -- t1} \<inter> {t0 -- t2}"
+  let ?Z0 = "(\<lambda>t. x t - y t) -` {0} \<inter> ?S"
+  let ?Z = "connected_component_set ?Z0 t0"
+  from assms have t1: "t1 \<in> existence_ivl t0 x0" and t2: "t2 \<in> existence_ivl t0 x0"
+    and x: "(x solves_ode f) {t0 -- t1} X"
+    and y: "(y solves_ode f) {t0 -- t2} X"
+    and sub1: "{t0--t1} \<subseteq> T"
+    and sub2: "{t0--t2} \<subseteq> T"
+    and x0: "x t0 = x0"
+    and y0: "y t0 = x0"
+    by (auto simp: existence_ivl_def csols_def)
+
+  assume "\<not> (\<forall>t\<in>?S. x t = y t)"
+  hence "\<exists>t\<in>?S. x t \<noteq> y t" by simp
+  then obtain t_ne where t_ne: "t_ne \<in> ?S" "x t_ne \<noteq> y t_ne" ..
+  from assms have x: "(x solves_ode f) {t0--t1} X"
+    and y:"(y solves_ode f) {t0--t2} X"
+    by (auto simp: csols_def)
+  have "compact ?S"
+    by auto
+  have "closed ?Z"
+    by (intro closed_connected_component closed_vimage_Int)
+      (auto intro!: continuous_intros continuous_on_subset[OF solves_ode_continuous_on[OF x]]
+        continuous_on_subset[OF solves_ode_continuous_on[OF y]])
+  moreover
+  have "t0 \<in> ?Z" using assms
+    by (auto simp: csols_def)
+  then have "?Z \<noteq> {}"
+    by (auto intro!: exI[where x=t0])
+  ultimately
+  obtain t_max where max: "t_max \<in> ?Z" "y \<in> ?Z \<Longrightarrow> dist t_ne t_max \<le> dist t_ne y" for y
+    by (blast intro: distance_attains_inf)
+  have max_equal_flows: "x t = y t" if "t \<in> {t0 -- t_max}" for t
+    using max(1) that
+    by (auto simp: connected_component_def vimage_def subset_iff closed_segment_eq_real_ivl
+      split: if_split_asm) (metis connected_iff_interval)+
+  then have t_ne_outside: "t_ne \<notin> {t0 -- t_max}" using t_ne by auto
+
+  have "x t_max = y t_max"
+    by (rule max_equal_flows) simp
+  have "t_max \<in> ?S" "t_max \<in> T"
+    using max sub1 sub2
+    by (auto simp: connected_component_def)
+  with solves_odeD[OF x]
+  have "x t_max \<in> X"
+    by auto
+
+  obtain et ex B L
+    where "0 < et" "0 < ex"
+      and "cball t_max et \<subseteq> T" "cball (x t_max) ex \<subseteq> X"
+      and "unique_on_cylinder t_max (cball t_max et) (x t_max) ex f B L"
+    by metis
+  then interpret unique_on_cylinder t_max "cball t_max et" "x t_max" ex "cball (x t_max) ex" f B L
+    by auto
+
+  have solution_usolves_on_X: "(solution usolves_ode f from t_max) (cball t_max et) X" by simp
+
+  have ge_imps: "t0 \<le> t1" "t0 \<le> t2" "t0 \<le> t_max" "t_max < t_ne" if "t0 \<le> t_ne"
+    by (auto simp: min_def dist_real_def max_def closed_segment_eq_real_ivl split: if_split_asm)
+  have le_imps: "t0 \<ge> t1" "t0 \<ge> t2" "t0 \<ge> t_max" "t_max > t_ne" if "t0 \<ge> t_ne"
+    by (auto simp: min_def dist_real_def max_def closed_segment_eq_real_ivl split: if_split_asm)
+
+  define tt where "tt \<equiv> if t0 \<le> t_ne then min (t_max + et) t_ne else max (t_max - et) t_ne"
+  have "tt \<in> cball t_max et" "tt \<in> {t0 -- t1}" "tt \<in> {t0 -- t2}"
+    by (auto simp: mem_cball closed_segment_eq_real_ivl tt_def dist_real_def abs_real_def min_def max_def not_less)
+
+  have segment_unsplit: "{t0 -- t_max} \<union> {t_max -- tt} = {t0 -- tt}"
+    by (auto simp: tt_def closed_segment_eq_real_ivl min_def max_def split: if_split_asm) arith
+
+  have "tt \<in> {t0 -- t1}"
+    by (auto simp: tt_def closed_segment_eq_real_ivl min_def max_def split: if_split_asm)
+
+  have "tt \<in> ?Z"
+  proof (safe intro!: connected_componentI[where T = "{t0 -- t_max} \<union> {t_max -- tt}"])
+    fix s assume s: "s \<in> {t_max -- tt}"
+    have "{t_max--s} \<subseteq> {t_max -- tt}"
+      by (rule closed_segment_subset) (auto simp: s)
+    also have "\<dots> \<subseteq> cball t_max et"
+      by (intro closed_segment_subset) auto
+    finally have subset: "{t_max--s} \<subseteq> cball t_max et" .
+    from s show "s \<in> {t0--t1}" "s \<in> {t0--t2}"
+      by (auto simp: tt_def min_def max_def closed_segment_eq_real_ivl split: if_split_asm)
+    have ivl: "t_max \<in> {t_max -- s}" "is_interval {t_max--s}"
+      by (simp_all add: is_interval_convex_1)
+    {
+      note ivl subset
+      moreover
+      have "{t_max--s} \<subseteq> {t0--t1}"
+        by (simp add: closed_segment_subset)
+      from x this order_refl have "(x solves_ode f) {t_max--s} X"
+        by (rule solves_ode_on_subset)
+      moreover note solution_iv[symmetric]
+      ultimately
+      have "x s = solution s"
+        by (rule usolves_odeD(4)[OF solution_usolves_on_X]) simp
+    } moreover {
+      note ivl subset
+      moreover
+      have "{t_max--s} \<subseteq> {t0--t2}"
+        by (simp add: closed_segment_subset)
+      from y this order_refl have "(y solves_ode f) {t_max--s} X"
+        by (rule solves_ode_on_subset)
+      moreover from solution_iv[symmetric] have "y t_max = solution t_max"
+      ultimately
+      have "y s = solution s"
+        by (rule usolves_odeD[OF solution_usolves_on_X]) simp
+    } ultimately show "s \<in> (\<lambda>t. x t - y t) -` {0}" by simp
+  next
+    fix s assume s: "s \<in> {t0 -- t_max}"
+    then show "s \<in> (\<lambda>t. x t - y t) -` {0}"
+      by (auto intro!: max_equal_flows)
+    show "s \<in> {t0--t1}" "s \<in> {t0--t2}"
+  qed (auto simp: segment_unsplit)
+  then have "dist t_ne t_max \<le> dist t_ne tt"
+    by (rule max)
+  moreover have "dist t_ne t_max > dist t_ne tt"
+    by (auto simp: tt_def dist_real_def)
+  ultimately show False by simp
+qed
+
+lemma csol_unique:
+  assumes t1: "t1 \<in> existence_ivl t0 x0"
+  assumes t2: "t2 \<in> existence_ivl t0 x0"
+  assumes t: "t \<in> {t0 -- t1}" "t \<in> {t0 -- t2}"
+  shows "csol t0 x0 t1 t = csol t0 x0 t2 t"
+  using csols_unique[OF csol_mem_csols[OF t1] csol_mem_csols[OF t2]] t
+  by simp
+
+lemma flow_vderiv_on_left:
+  "(flow t0 x0 has_vderiv_on (\<lambda>x. f x (flow t0 x0 x))) (existence_ivl t0 x0 \<inter> {..t0})"
+  unfolding has_vderiv_on_def
+proof safe
+  fix t
+  assume t: "t \<in> existence_ivl t0 x0" "t \<le> t0"
+  with open_existence_ivl
+  obtain e where "e > 0" and e: "\<And>s. s \<in> cball t e \<Longrightarrow> s \<in> existence_ivl t0 x0"
+    by (force simp: open_contains_cball)
+  have csol_eq: "csol t0 x0 (t - e) s = flow t0 x0 s" if "t - e \<le> s" "s \<le> t0" for s
+    unfolding flow_def
+    by (auto simp: cball_def dist_real_def abs_real_def closed_segment_eq_real_ivl subset_iff
+      intro!: csol_unique in_existence_between_zeroI[of "t - e" x0 s]
+      split: if_split_asm)
+
+  let ?l = "existence_ivl t0 x0 \<inter> {..t0}"
+  let ?s = "{t0 -- t - e}"
+
+  have 1: "(csol t0 x0 (t - e) solves_ode f) ?s X"
+    by (auto simp: mem_cball)
+  from solves_odeD(1)[OF 1, unfolded has_vderiv_on_def, rule_format, OF this]
+  have "(csol t0 x0 (t - e) has_vector_derivative f t (csol t0 x0 (t - e) t)) (at t within ?s)" .
+  also have "at t within ?s = (at t within ?l)"
+    by (intro at_within_nhd[where S="{t - e <..< t0 + 1}"])
+  finally
+  have "(csol t0 x0 (t - e) has_vector_derivative f t (csol t0 x0 (t - e) t)) (at t within existence_ivl t0 x0 \<inter> {..t0})" .
+  also have "csol t0 x0 (t - e) t = flow t0 x0 t"
+  finally
+  show "(flow t0 x0 has_vector_derivative f t (flow t0 x0 t)) (at t within existence_ivl t0 x0 \<inter> {..t0})"
+    apply (rule has_vector_derivative_transform_within[where d=e])
+    by (auto intro!: csol_eq simp: dist_real_def)
+qed
+
+lemma flow_vderiv_on_right:
+  "(flow t0 x0 has_vderiv_on (\<lambda>x. f x (flow t0 x0 x))) (existence_ivl t0 x0 \<inter> {t0..})"
+  unfolding has_vderiv_on_def
+proof safe
+  fix t
+  assume t: "t \<in> existence_ivl t0 x0" "t0 \<le> t"
+  with open_existence_ivl
+  obtain e where "e > 0" and e: "\<And>s. s \<in> cball t e \<Longrightarrow> s \<in> existence_ivl t0 x0"
+    by (force simp: open_contains_cball)
+  have csol_eq: "csol t0 x0 (t + e) s = flow t0 x0 s" if "s \<le> t + e" "t0 \<le> s" for s
+    unfolding flow_def
+    by (auto simp: cball_def dist_real_def abs_real_def closed_segment_eq_real_ivl subset_iff
+      intro!: csol_unique in_existence_between_zeroI[of "t + e" x0 s]
+      split: if_split_asm)
+
+  let ?l = "existence_ivl t0 x0 \<inter> {t0..}"
+  let ?s = "{t0 -- t + e}"
+
+  have 1: "(csol t0 x0 (t + e) solves_ode f) ?s X"
+    by (auto simp: dist_real_def mem_cball)
+  from solves_odeD(1)[OF 1, unfolded has_vderiv_on_def, rule_format, OF this]
+  have "(csol t0 x0 (t + e) has_vector_derivative f t (csol t0 x0 (t + e) t)) (at t within ?s)" .
+  also have "at t within ?s = (at t within ?l)"
+    by (intro at_within_nhd[where S="{t0 - 1 <..< t + e}"])
+  finally
+  have "(csol t0 x0 (t + e) has_vector_derivative f t (csol t0 x0 (t + e) t)) (at t within ?l)" .
+  also have "csol t0 x0 (t + e) t = flow t0 x0 t"
+  finally
+  show "(flow t0 x0 has_vector_derivative f t (flow t0 x0 t)) (at t within ?l)"
+    apply (rule has_vector_derivative_transform_within[where d=e])
+    by (auto intro!: csol_eq simp: dist_real_def)
+qed
+
+lemma flow_usolves_ode:
+  assumes iv_defined: "t0 \<in> T" "x0 \<in> X"
+  shows "(flow t0 x0 usolves_ode f from t0) (existence_ivl t0 x0) X"
+proof (rule usolves_odeI)
+  let ?l = "existence_ivl t0 x0 \<inter> {..t0}" and ?r = "existence_ivl t0 x0 \<inter> {t0..}"
+  let ?split = "?l \<union> ?r"
+  have insert_idem: "insert t0 ?l = ?l" "insert t0 ?r = ?r" using iv_defined
+    by auto
+  from existence_ivl_initial_time have cl_inter: "closure ?l \<inter> closure ?r = {t0}"
+  proof safe
+    from iv_defined have "t0 \<in> ?l" by simp also note closure_subset finally show "t0 \<in> closure ?l" .
+    from iv_defined have "t0 \<in> ?r" by simp also note closure_subset finally show "t0 \<in> closure ?r" .
+    fix x
+    assume xl: "x \<in> closure ?l"
+    assume "x \<in> closure ?r"
+    also have "closure ?r \<subseteq> closure {t0..}"
+      by (rule closure_mono) simp
+    finally have "t0 \<le> x" by simp
+    moreover
+    {
+      note xl
+      also have cl: "closure ?l \<subseteq> closure {..t0}"
+        by (rule closure_mono) simp
+      finally have "x \<le> t0" by simp
+    } ultimately show "x = t0" by simp
+  qed
+  have "(flow t0 x0 has_vderiv_on (\<lambda>t. f t (flow t0 x0 t))) ?split"
+    by (rule has_vderiv_on_union)
+      (auto simp: cl_inter insert_idem flow_vderiv_on_right flow_vderiv_on_left)
+  also have "?split = existence_ivl t0 x0"
+    by auto
+  finally have "(flow t0 x0 has_vderiv_on (\<lambda>t. f t (flow t0 x0 t))) (existence_ivl t0 x0)" .
+  moreover
+  have "flow t0 x0 t \<in> X" if "t \<in> existence_ivl t0 x0" for t
+    using solves_odeD(2)[OF csol(4)[OF that]] that
+    by (simp add: flow_def)
+  ultimately show "(flow t0 x0 solves_ode f) (existence_ivl t0 x0) X"
+    by (rule solves_odeI)
+  show "t0 \<in> existence_ivl t0 x0" using iv_defined by simp
+  show "is_interval (existence_ivl t0 x0)" by (simp add: is_interval_existence_ivl)
+  fix z t
+  assume z: "{t0 -- t} \<subseteq> existence_ivl t0 x0" "(z solves_ode f) {t0 -- t} X" "z t0 = flow t0 x0 t0"
+  then have "t \<in> existence_ivl t0 x0" by auto
+  moreover
+  from csol[OF this] z have "(z, t) \<in> csols t0 x0" by (auto simp: csols_def)
+  moreover have "(csol t0 x0 t, t) \<in> csols t0 x0"
+    by (rule csol_mem_csols) fact
+  ultimately
+  show "z t = flow t0 x0 t"
+    unfolding flow_def
+    by (auto intro: csols_unique[rule_format])
+qed
+
+lemma flow_solves_ode: "t0 \<in> T \<Longrightarrow> x0 \<in> X \<Longrightarrow> (flow t0 x0 solves_ode f) (existence_ivl t0 x0) X"
+  by (rule usolves_odeD[OF flow_usolves_ode])
+
+lemma equals_flowI:
+  assumes "t0 \<in> T'"
+    "is_interval T'"
+    "T' \<subseteq> existence_ivl t0 x0"
+    "(z solves_ode f) T' X"
+    "z t0 = flow t0 x0 t0" "t \<in> T'"
+  shows "z t = flow t0 x0 t"
+proof -
+  from assms have iv_defined: "t0 \<in> T" "x0 \<in> X"
+    unfolding atomize_conj
+    using assms existence_ivl_subset mem_existence_ivl_iv_defined
+    by blast
+  show ?thesis
+    using assms
+    by (rule usolves_odeD[OF flow_usolves_ode[OF iv_defined]])
+qed
+
+lemma existence_ivl_maximal_segment:
+  assumes "(x solves_ode f) {t0 -- t} X" "x t0 = x0"
+  assumes "{t0 -- t} \<subseteq> T"
+  shows "t \<in> existence_ivl t0 x0"
+  using assms
+  by (auto simp: existence_ivl_def csols_def)
+
+lemma existence_ivl_maximal_interval:
+  assumes "(x solves_ode f) S X" "x t0 = x0"
+  assumes "t0 \<in> S" "is_interval S" "S \<subseteq> T"
+  shows "S \<subseteq> existence_ivl t0 x0"
+proof
+  fix t assume "t \<in> S"
+  with assms have subset1: "{t0--t} \<subseteq> S"
+    by (intro closed_segment_subset) (auto simp: is_interval_convex_1)
+  have "(x solves_ode f) {t0 -- t} X"
+    using assms(1) subset1 order_refl
+    by (rule solves_ode_on_subset)
+    by (rule existence_ivl_maximal_segment)
+qed
+
+lemma maximal_existence_flow:
+  assumes sol: "(x solves_ode f) K X" and iv: "x t0 = x0"
+  assumes "is_interval K"
+  assumes "t0 \<in> K"
+  assumes "K \<subseteq> T"
+  shows "K \<subseteq> existence_ivl t0 x0" "\<And>t. t \<in> K \<Longrightarrow> flow t0 x0 t = x t"
+proof -
+  from assms have iv_defined: "t0 \<in> T" "x0 \<in> X"
+    unfolding atomize_conj
+    using solves_ode_domainD by blast
+  show exivl: "K \<subseteq> existence_ivl t0 x0"
+    by (rule existence_ivl_maximal_interval; rule assms)
+  show "flow t0 x0 t = x t" if "t \<in> K" for t
+    apply (rule sym)
+    by (simp add: iv iv_defined)
+qed
+
+lemma maximal_existence_flowI:
+  assumes "(x has_vderiv_on (\<lambda>t. f t (x t))) K"
+  assumes "\<And>t. t \<in> K \<Longrightarrow> x t \<in> X"
+  assumes "x t0 = x0"
+  assumes K: "is_interval K" "t0 \<in> K" "K \<subseteq> T"
+  shows "K \<subseteq> existence_ivl t0 x0" "\<And>t. t \<in> K \<Longrightarrow> flow t0 x0 t = x t"
+proof -
+  from assms(1,2) have sol: "(x solves_ode f) K X" by (rule solves_odeI)
+  from maximal_existence_flow[OF sol assms(3) K]
+  show "K \<subseteq> existence_ivl t0 x0" "\<And>t. t \<in> K \<Longrightarrow> flow t0 x0 t = x t"
+    by auto
+qed
+
+lemma flow_in_domain: "t \<in> existence_ivl t0 x0 \<Longrightarrow> flow t0 x0 t \<in> X"
+  using flow_solves_ode solves_ode_domainD local.mem_existence_ivl_iv_defined
+  by blast
+
+lemma (in ll_on_open)
+  assumes "t \<in> existence_ivl s x"
+  assumes "x \<in> X"
+  assumes auto: "\<And>s t x. x \<in> X \<Longrightarrow> f s x = f t x"
+  assumes "T = UNIV"
+  shows mem_existence_ivl_shift_autonomous1: "t - s \<in> existence_ivl 0 x"
+    and flow_shift_autonomous1: "flow s x t = flow 0 x (t - s)"
+proof -
+  have na: "s \<in> T" "x \<in> X" and a: "0 \<in> T" "x \<in> X"
+    by (auto simp: assms)
+
+  have tI[simp]: "t \<in> T" for t by (simp add: assms)
+  let ?T = "((+) (- s) ` existence_ivl s x)"
+  have shifted: "is_interval ?T" "0 \<in> ?T"
+
+  have "(\<lambda>t. t - s) = (+) (- s)" by auto
+  with shift_autonomous_solution[OF flow_solves_ode[OF na], of s] flow_in_domain
+  have sol: "((\<lambda>t. flow s x (t + s)) solves_ode f) ?T X"
+
+  from maximal_existence_flow[OF sol this shifted]
+  have *: "?T \<subseteq> existence_ivl 0 x"
+    and **: "\<And>t. t \<in> ?T \<Longrightarrow> flow 0 x t = flow s x (t + s)"
+    by (auto simp: subset_iff)
+
+  have "t - s \<in> ?T"
+    by auto
+  also note *
+  finally show "t - s \<in> existence_ivl 0 x" .
+
+  show "flow s x t = flow 0 x (t - s)"
+    by (auto simp: **)

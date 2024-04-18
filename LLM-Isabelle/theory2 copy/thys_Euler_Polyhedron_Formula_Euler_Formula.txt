@@ -1,0 +1,431 @@
+theory Euler_Formula
+  imports 
+    "HOL-Analysis.Analysis" 
+    Library_Extras
+    Inclusion_Exclusion
+begin
+
+
+
+definition hyperplane_side
+  where "hyperplane_side \<equiv> \<lambda>(a,b). \<lambda>x. sgn (a \<bullet> x - b)"
+
+
+definition hyperplane_equiv
+ where "hyperplane_equiv \<equiv> \<lambda>A x y. \<forall>h \<in> A. hyperplane_side h x = hyperplane_side h y"
+
+lemma hyperplane_equiv_refl [iff]: "hyperplane_equiv A x x"
+  by (simp add: hyperplane_equiv_def)
+
+lemma hyperplane_equiv_sym:
+   "hyperplane_equiv A x y \<longleftrightarrow> hyperplane_equiv A y x"
+  by (auto simp: hyperplane_equiv_def)
+
+lemma hyperplane_equiv_trans:
+   "\<lbrakk>hyperplane_equiv A x y; hyperplane_equiv A y z\<rbrakk> \<Longrightarrow> hyperplane_equiv A x z"
+  by (auto simp: hyperplane_equiv_def)
+
+lemma hyperplane_equiv_Un:
+   "hyperplane_equiv (A \<union> B) x y \<longleftrightarrow> hyperplane_equiv A x y \<and> hyperplane_equiv B x y"
+  by (meson Un_iff hyperplane_equiv_def)
+
+
+definition hyperplane_cell :: "('a::real_inner \<times> real) set \<Rightarrow> 'a set \<Rightarrow> bool"
+  where "hyperplane_cell \<equiv> \<lambda>A C. \<exists>x. C = Collect (hyperplane_equiv A x)"
+
+lemma hyperplane_cell: "hyperplane_cell A C \<longleftrightarrow> (\<exists>x. C = {y. hyperplane_equiv A x y})"
+  by (simp add: hyperplane_cell_def)
+
+lemma not_hyperplane_cell_empty [simp]: "\<not> hyperplane_cell A {}"
+  using hyperplane_cell by auto
+
+lemma nonempty_hyperplane_cell: "hyperplane_cell A C \<Longrightarrow> (C \<noteq> {})"
+  by auto
+
+lemma Union_hyperplane_cells: "\<Union> {C. hyperplane_cell A C} = UNIV"
+  using hyperplane_cell by blast
+
+lemma disjoint_hyperplane_cells:
+   "\<lbrakk>hyperplane_cell A C1; hyperplane_cell A C2; C1 \<noteq> C2\<rbrakk> \<Longrightarrow> disjnt C1 C2"
+  by (force simp: hyperplane_cell_def disjnt_iff hyperplane_equiv_def)
+
+lemma disjoint_hyperplane_cells_eq:
+   "\<lbrakk>hyperplane_cell A C1; hyperplane_cell A C2\<rbrakk> \<Longrightarrow> (disjnt C1 C2 \<longleftrightarrow> (C1 \<noteq> C2))"
+  using disjoint_hyperplane_cells by auto
+
+lemma hyperplane_cell_empty [iff]: "hyperplane_cell {} C \<longleftrightarrow> C = UNIV"
+  by (simp add: hyperplane_cell hyperplane_equiv_def)
+
+lemma hyperplane_cell_singleton_cases:
+  assumes "hyperplane_cell {(a,b)} C"
+  shows "C = {x. a \<bullet> x = b} \<or> C = {x. a \<bullet> x < b} \<or> C = {x. a \<bullet> x > b}"
+proof -
+  obtain x where x: "C = {y. hyperplane_side (a, b) x = hyperplane_side (a, b) y}"
+    using assms by (auto simp: hyperplane_equiv_def hyperplane_cell)
+  then show ?thesis
+    by (auto simp: hyperplane_side_def sgn_if split: if_split_asm)
+qed
+
+lemma hyperplane_cell_singleton:
+   "hyperplane_cell {(a,b)} C \<longleftrightarrow>
+    (if a = 0 then C = UNIV else C = {x. a \<bullet> x = b} \<or> C = {x. a \<bullet> x < b} \<or> C = {x. a \<bullet> x > b})"
+  apply (simp add: hyperplane_cell_def hyperplane_equiv_def hyperplane_side_def sgn_if split: if_split_asm)
+  by (smt (verit) Collect_cong gt_ex hyperplane_eq_Ex lt_ex)
+
+lemma hyperplane_cell_Un:
+   "hyperplane_cell (A \<union> B) C \<longleftrightarrow>
+        C \<noteq> {} \<and>
+        (\<exists>C1 C2. hyperplane_cell A C1 \<and> hyperplane_cell B C2 \<and> C = C1 \<inter> C2)"
+  by (auto simp: hyperplane_cell hyperplane_equiv_def)
+
+lemma finite_hyperplane_cells:
+   "finite A \<Longrightarrow> finite {C. hyperplane_cell A C}"
+proof (induction rule: finite_induct)
+  case (insert p A)
+  obtain a b where peq: "p = (a,b)"
+    by fastforce
+  have "Collect (hyperplane_cell {p}) \<subseteq> {{x. a \<bullet> x = b},{x. a \<bullet> x < b},{x. a \<bullet> x > b}}"
+    using hyperplane_cell_singleton_cases
+    by (auto simp: peq)
+  then have *: "finite (Collect (hyperplane_cell {p}))"
+    by (simp add: finite_subset)
+  define \<C> where "\<C> \<equiv> (\<Union>C1 \<in> {C. hyperplane_cell A C}.  \<Union>C2 \<in> {C. hyperplane_cell {p} C}. {C1 \<inter> C2})"
+  have "{a. hyperplane_cell (insert p A) a} \<subseteq>  \<C>"
+    using hyperplane_cell_Un [of "{p}" A] by (auto simp: \<C>_def)
+  moreover have "finite \<C>"
+    using * \<C>_def insert.IH by blast
+  ultimately show ?case
+    using finite_subset by blast
+qed auto
+
+lemma finite_restrict_hyperplane_cells:
+   "finite A \<Longrightarrow> finite {C. hyperplane_cell A C \<and> P C}"
+  by (simp add: finite_hyperplane_cells)
+
+lemma finite_set_of_hyperplane_cells:
+   "\<lbrakk>finite A; \<And>C. C \<in> \<C> \<Longrightarrow> hyperplane_cell A C\<rbrakk> \<Longrightarrow> finite \<C>"
+  by (metis finite_hyperplane_cells finite_subset mem_Collect_eq subsetI)
+
+lemma pairwise_disjoint_hyperplane_cells:
+   "(\<And>C. C \<in> \<C> \<Longrightarrow> hyperplane_cell A C) \<Longrightarrow> pairwise disjnt \<C>"
+  by (metis disjoint_hyperplane_cells pairwiseI)
+
+lemma hyperplane_cell_Int_open_affine:
+  assumes "finite A" "hyperplane_cell A C"
+  obtains S T where "open S" "affine T" "C = S \<inter> T"
+  using assms
+proof (induction arbitrary: thesis C rule: finite_induct)
+  case empty
+  then show ?case
+    by auto 
+next
+  case (insert p A thesis C')
+  obtain a b where peq: "p = (a,b)"
+    by fastforce
+  obtain C C1 where C1: "hyperplane_cell {(a,b)} C1" and C: "hyperplane_cell A C" 
+              and "C' \<noteq> {}" and C': "C' = C1 \<inter> C"
+    by (metis hyperplane_cell_Un insert.prems(2) insert_is_Un peq)
+  then obtain S T where ST: "open S" "affine T" "C = S \<inter> T"
+    by (meson insert.IH)
+  show ?case
+  proof (cases "a=0")
+    case True
+    with insert.prems show ?thesis
+  next
+    case False
+    then consider "C1 = {x. a \<bullet> x = b}" | "C1 = {x. a \<bullet> x < b}" | "C1 = {x. b < a \<bullet> x}"
+      by (metis C1 hyperplane_cell_singleton)
+    then show ?thesis
+    proof cases
+      case 1
+      then show thesis
+        by (metis C' ST affine_Int affine_hyperplane inf_left_commute insert.prems(1))
+    next
+      case 2
+      with ST show thesis
+          by (metis Int_assoc C' insert.prems(1) open_Int open_halfspace_lt)
+    next
+      case 3
+      with ST show thesis
+        by (metis Int_assoc C' insert.prems(1) open_Int open_halfspace_gt)
+    qed
+  qed
+qed
+
+lemma hyperplane_cell_relatively_open:
+  assumes "finite A" "hyperplane_cell A C"
+  shows "openin (subtopology euclidean (affine hull C)) C"
+proof -
+  obtain S T where "open S" "affine T" "C = S \<inter> T"
+    by (meson assms hyperplane_cell_Int_open_affine)
+  show ?thesis
+  proof (cases "S \<inter> T = {}")
+    case True
+    then show ?thesis
+  next
+    case False
+    then have "affine hull (S \<inter> T) = T"
+    then show ?thesis
+  qed
+qed
+
+lemma hyperplane_cell_relative_interior:
+   "\<lbrakk>finite A; hyperplane_cell A C\<rbrakk> \<Longrightarrow> rel_interior C = C"
+  by (simp add: hyperplane_cell_relatively_open rel_interior_openin)
+
+lemma hyperplane_cell_convex:
+  assumes "hyperplane_cell A C"
+  shows "convex C"
+proof -
+  obtain c where c: "C = {y. hyperplane_equiv A c y}"
+    by (meson assms hyperplane_cell)
+  have "convex (\<Inter>h\<in>A. {y. hyperplane_side h c = hyperplane_side h y})"
+  proof (rule convex_INT)
+    fix h :: "'a \<times> real"
+    assume "h \<in> A"
+    obtain a b where heq: "h = (a,b)"
+      by fastforce
+    have [simp]: "{y. \<not> a \<bullet> c < a \<bullet> y \<and> a \<bullet> y = a \<bullet> c} = {y. a \<bullet> y = a \<bullet> c}"
+                 "{y. \<not> b < a \<bullet> y \<and> a \<bullet> y \<noteq> b} = {y. b > a \<bullet> y}"
+      by auto
+    then show "convex {y. hyperplane_side h c = hyperplane_side h y}"
+      by (fastforce simp: heq hyperplane_side_def sgn_if convex_halfspace_gt convex_halfspace_lt convex_hyperplane cong: conj_cong)
+  qed
+  with c show ?thesis
+    by (simp add: hyperplane_equiv_def INTER_eq)
+qed
+
+lemma hyperplane_cell_Inter:
+  assumes "\<And>C. C \<in> \<C> \<Longrightarrow> hyperplane_cell A C"
+    and "\<C> \<noteq> {}" and INT: "\<Inter>\<C> \<noteq> {}"
+  shows "hyperplane_cell A (\<Inter>\<C>)"
+proof -
+  have "\<Inter>\<C> = {y. hyperplane_equiv A z y}" 
+    if "z \<in> \<Inter>\<C>" for z
+      using assms that by (force simp: hyperplane_cell hyperplane_equiv_def)
+  with INT hyperplane_cell show ?thesis
+    by fastforce
+qed
+
+
+lemma hyperplane_cell_Int:
+   "\<lbrakk>hyperplane_cell A S; hyperplane_cell A T; S \<inter> T \<noteq> {}\<rbrakk> \<Longrightarrow> hyperplane_cell A (S \<inter> T)"
+  by (metis hyperplane_cell_Un sup.idem)
+
+
+definition hyperplane_cellcomplex 
+  where "hyperplane_cellcomplex A S \<equiv>
+        \<exists>\<T>. (\<forall>C \<in> \<T>. hyperplane_cell A C) \<and> S = \<Union>\<T>"
+
+lemma hyperplane_cellcomplex_empty [simp]: "hyperplane_cellcomplex A {}"
+  using hyperplane_cellcomplex_def by auto
+
+lemma hyperplane_cell_cellcomplex:
+   "hyperplane_cell A C \<Longrightarrow> hyperplane_cellcomplex A C"
+  by (auto simp: hyperplane_cellcomplex_def)
+
+lemma hyperplane_cellcomplex_Union:
+  assumes "\<And>S. S \<in> \<C> \<Longrightarrow> hyperplane_cellcomplex A S"
+  shows "hyperplane_cellcomplex A (\<Union> \<C>)"
+proof -
+  obtain \<F> where \<F>: "\<And>S. S \<in> \<C> \<Longrightarrow> (\<forall>C \<in> \<F> S. hyperplane_cell A C) \<and> S = \<Union>(\<F> S)"
+    by (metis assms hyperplane_cellcomplex_def)
+  show ?thesis
+    unfolding hyperplane_cellcomplex_def
+    using \<F> by (fastforce intro: exI [where x="\<Union> (\<F> ` \<C>)"])
+qed
+
+lemma hyperplane_cellcomplex_Un:
+   "\<lbrakk>hyperplane_cellcomplex A S; hyperplane_cellcomplex A T\<rbrakk>
+        \<Longrightarrow> hyperplane_cellcomplex A (S \<union> T)"
+  by (smt (verit) Un_iff Union_Un_distrib hyperplane_cellcomplex_def)
+
+lemma hyperplane_cellcomplex_UNIV [simp]: "hyperplane_cellcomplex A UNIV"
+  by (metis Union_hyperplane_cells hyperplane_cellcomplex_def mem_Collect_eq)
+
+lemma hyperplane_cellcomplex_Inter:
+  assumes "\<And>S. S \<in> \<C> \<Longrightarrow> hyperplane_cellcomplex A S"
+  shows "hyperplane_cellcomplex A (\<Inter>\<C>)"
+proof (cases "\<C> = {}")
+  case True
+  then show ?thesis
+    by simp
+next
+  case False
+  obtain \<F> where \<F>: "\<And>S. S \<in> \<C> \<Longrightarrow> (\<forall>C \<in> \<F> S. hyperplane_cell A C) \<and> S = \<Union>(\<F> S)"
+    by (metis assms hyperplane_cellcomplex_def)
+  have *: "\<C> = (\<lambda>S. \<Union>(\<F> S)) ` \<C>"
+    using \<F> by force
+  define U where "U \<equiv> \<Union> {T \<in> {\<Inter>(g ` \<C>) |g. \<forall>S\<in>\<C>. g S \<in> \<F> S}. T \<noteq> {}}"
+  have "\<Inter>\<C> = \<Union>{\<Inter>(g ` \<C>) |g. \<forall>S\<in>\<C>. g S \<in> \<F> S}"
+    using False \<F> unfolding Inter_over_Union [symmetric]
+    by blast
+  also have "\<dots> = U"
+    unfolding U_def
+    by blast
+  finally have "\<Inter>\<C> = U" .
+  have "hyperplane_cellcomplex A U"
+    using False \<F> unfolding U_def
+    apply (intro hyperplane_cellcomplex_Union hyperplane_cell_cellcomplex)
+    by (auto intro!: hyperplane_cell_Inter)
+  then show ?thesis
+qed
+
+lemma hyperplane_cellcomplex_Int:
+   "\<lbrakk>hyperplane_cellcomplex A S; hyperplane_cellcomplex A T\<rbrakk>
+        \<Longrightarrow> hyperplane_cellcomplex A (S \<inter> T)"
+  using hyperplane_cellcomplex_Inter [of "{S,T}"] by force
+
+lemma hyperplane_cellcomplex_Compl:
+  assumes "hyperplane_cellcomplex A S"
+  shows "hyperplane_cellcomplex A (- S)"
+proof -
+  obtain \<C> where \<C>: "\<And>C. C \<in> \<C> \<Longrightarrow> hyperplane_cell A C" and "S = \<Union>\<C>"
+    by (meson assms hyperplane_cellcomplex_def)
+  have "hyperplane_cellcomplex A (\<Inter>T \<in> \<C>. -T)"
+  proof (intro hyperplane_cellcomplex_Inter)
+    fix C0
+    assume "C0 \<in> uminus ` \<C>"
+    then obtain C where C: "C0 = -C" "C \<in> \<C>"
+      by auto
+    have *: "-C = \<Union> {D. hyperplane_cell A D \<and> D \<noteq> C}"  (is "_ = ?rhs")
+    proof
+      show "- C \<subseteq> ?rhs"
+        using hyperplane_cell by blast
+      show "?rhs \<subseteq> - C"
+    qed
+    then show "hyperplane_cellcomplex A C0"
+      by (metis (no_types, lifting) C(1) hyperplane_cell_cellcomplex hyperplane_cellcomplex_Union mem_Collect_eq)
+  qed
+  then show ?thesis
+qed
+
+lemma hyperplane_cellcomplex_diff:
+   "\<lbrakk>hyperplane_cellcomplex A S; hyperplane_cellcomplex A T\<rbrakk>
+        \<Longrightarrow> hyperplane_cellcomplex A (S - T)"
+  using hyperplane_cellcomplex_Inter [of "{S,-T}"] 
+  by (force simp: Diff_eq hyperplane_cellcomplex_Compl)
+
+lemma hyperplane_cellcomplex_mono:
+  assumes "hyperplane_cellcomplex A S" "A \<subseteq> B"
+  shows "hyperplane_cellcomplex B S"
+proof -
+  obtain \<C> where \<C>: "\<And>C. C \<in> \<C> \<Longrightarrow> hyperplane_cell A C" and eq: "S = \<Union>\<C>"
+    by (meson assms hyperplane_cellcomplex_def)
+  show ?thesis
+    unfolding eq
+  proof (intro hyperplane_cellcomplex_Union)
+    fix C
+    assume "C \<in> \<C>"
+    have "\<And>x. x \<in> C \<Longrightarrow> \<exists>D'. (\<exists>D. D' = D \<inter> C \<and> hyperplane_cell (B - A) D \<and> D \<inter> C \<noteq> {}) \<and> x \<in> D'"
+      unfolding hyperplane_cell_def by blast
+    then
+    have "hyperplane_cellcomplex (A \<union> (B - A)) C"
+      unfolding hyperplane_cellcomplex_def hyperplane_cell_Un
+    moreover have "B = A \<union> (B - A)"
+    ultimately show "hyperplane_cellcomplex B C" by simp
+  qed
+qed
+
+lemma finite_hyperplane_cellcomplexes:
+  assumes "finite A"
+  shows "finite {C. hyperplane_cellcomplex A C}"
+proof -
+  have "{C. hyperplane_cellcomplex A C} \<subseteq> image \<Union> {T. T \<subseteq> {C. hyperplane_cell A C}}"
+    by (force simp: hyperplane_cellcomplex_def subset_eq)
+  with finite_hyperplane_cells show ?thesis
+    by (metis assms finite_Collect_subsets finite_surj)
+qed
+
+lemma finite_restrict_hyperplane_cellcomplexes:
+   "finite A \<Longrightarrow> finite {C. hyperplane_cellcomplex A C \<and> P C}"
+  by (simp add: finite_hyperplane_cellcomplexes)
+
+lemma finite_set_of_hyperplane_cellcomplex:
+  assumes "finite A" "\<And>C. C \<in> \<C> \<Longrightarrow> hyperplane_cellcomplex A C"
+  shows "finite \<C>"
+  by (metis assms finite_hyperplane_cellcomplexes mem_Collect_eq rev_finite_subset subsetI)
+
+lemma cell_subset_cellcomplex:
+   "\<lbrakk>hyperplane_cell A C; hyperplane_cellcomplex A S\<rbrakk> \<Longrightarrow> C \<subseteq> S \<longleftrightarrow> ~ disjnt C S"
+  by (smt (verit) Union_iff disjnt_iff disjnt_subset1 disjoint_hyperplane_cells_eq hyperplane_cellcomplex_def subsetI)
+
+
+
+
+definition Euler_characteristic :: "('a::euclidean_space \<times> real) set \<Rightarrow> 'a set \<Rightarrow> int"
+  where "Euler_characteristic A S \<equiv>
+        (\<Sum>C | hyperplane_cell A C \<and> C \<subseteq> S. (-1) ^ nat (aff_dim C))"
+
+lemma Euler_characteristic_empty [simp]: "Euler_characteristic A {} = 0"
+  by (simp add: sum.neutral Euler_characteristic_def)
+
+lemma Euler_characteristic_cell_Union:
+  assumes "\<And>C. C \<in> \<C> \<Longrightarrow> hyperplane_cell A C"
+  shows "Euler_characteristic A (\<Union> \<C>) = (\<Sum>C\<in>\<C>. (- 1) ^ nat (aff_dim C))"
+proof -
+  have "\<And>x. \<lbrakk>hyperplane_cell A x; x \<subseteq> \<Union> \<C>\<rbrakk> \<Longrightarrow> x \<in> \<C>"
+    by (metis assms disjnt_Union1 disjnt_subset1 disjoint_hyperplane_cells_eq)
+  then have "{C. hyperplane_cell A C \<and> C \<subseteq> \<Union> \<C>} = \<C>"
+    by (auto simp: assms)
+  then show ?thesis
+    by (auto simp: Euler_characteristic_def)
+qed
+
+lemma Euler_characteristic_cell:
+   "hyperplane_cell A C \<Longrightarrow> Euler_characteristic A C = (-1) ^ (nat(aff_dim C))"
+  using Euler_characteristic_cell_Union [of "{C}"] by force
+
+lemma Euler_characteristic_cellcomplex_Un:
+  assumes "finite A" "hyperplane_cellcomplex A S" 
+    and AT: "hyperplane_cellcomplex A T" and "disjnt S T"
+  shows "Euler_characteristic A (S \<union> T) =
+         Euler_characteristic A S + Euler_characteristic A T"
+proof -
+  have *: "{C. hyperplane_cell A C \<and> C \<subseteq> S \<union> T} =
+        {C. hyperplane_cell A C \<and> C \<subseteq> S} \<union> {C. hyperplane_cell A C \<and> C \<subseteq> T}"
+    using cell_subset_cellcomplex [OF _ AT] by (auto simp: disjnt_iff)
+  have **: "{C. hyperplane_cell A C \<and> C \<subseteq> S} \<inter> {C. hyperplane_cell A C \<and> C \<subseteq> T} = {}"
+    using assms cell_subset_cellcomplex disjnt_subset1 by fastforce
+  show ?thesis
+  unfolding Euler_characteristic_def
+    by (simp add: finite_restrict_hyperplane_cells assms * ** flip: sum.union_disjoint)
+qed
+
+lemma Euler_characteristic_cellcomplex_Union:
+  assumes "finite A" 
+    and \<C>: "\<And>C. C \<in> \<C> \<Longrightarrow> hyperplane_cellcomplex A C" "pairwise disjnt \<C>"
+  shows "Euler_characteristic A (\<Union> \<C>) = sum (Euler_characteristic A) \<C>"
+proof -
+  have "finite \<C>"
+    using assms finite_set_of_hyperplane_cellcomplex by blast
+  then show ?thesis
+    using \<C>
+  proof (induction rule: finite_induct)
+    case empty
+    then show ?case
+      by auto
+  next
+    case (insert C \<C>)
+    then obtain "disjoint \<C>" "disjnt C (\<Union> \<C>)"
+      by (metis disjnt_Union2 pairwise_insert)
+    with insert show ?case
+  qed
+qed
+
+lemma Euler_characteristic:
+  fixes A :: "('n::euclidean_space * real) set"
+  assumes "finite A"
+  shows "Euler_characteristic A S =
+        (\<Sum>d = 0..DIM('n). (-1) ^ d * int (card {C. hyperplane_cell A C \<and> C \<subseteq> S \<and> aff_dim C = int d}))"
+        (is "_ = ?rhs")
+proof -
+  have "\<And>T. \<lbrakk>hyperplane_cell A T; T \<subseteq> S\<rbrakk> \<Longrightarrow> aff_dim T \<in> {0..DIM('n)}"
+    by (metis atLeastAtMost_iff nle_le order.strict_iff_not aff_dim_negative_iff 
+        nonempty_hyperplane_cell aff_dim_le_DIM)
+  then have *: "aff_dim ` {C. hyperplane_cell A C \<and> C \<subseteq> S} \<subseteq> int ` {0..DIM('n)}"
+    by (auto simp: image_int_atLeastAtMost)
+  have "Euler_characteristic A  S = (\<Sum>y\<in>int ` {0..DIM('n)}.
+       \<Sum>C\<in>{x. hyperplane_cell A x \<and> x \<subseteq> S \<and> aff_dim x = y}. (- 1) ^ nat y) "
+    using sum.group [of "{C. hyperplane_cell A C \<and> C \<subseteq> S}" "int ` {0..DIM('n)}" aff_dim "\<lambda>C. (-1::int) ^ nat(aff_dim C)", symmetric]
+    by (simp add: assms Euler_characteristic_def finite_restrict_hyperplane_cells *)

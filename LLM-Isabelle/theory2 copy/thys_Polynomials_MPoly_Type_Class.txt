@@ -1,0 +1,209 @@
+theory MPoly_Type_Class
+  imports
+    Utils
+    Power_Products
+    More_Modules
+begin
+
+
+lemma when_distrib: "f (a when b) = (f a when b)" if "\<not> b \<Longrightarrow> f 0 = 0"
+  using that by (auto simp: when_def)
+
+definition mapp_2 :: "('a \<Rightarrow> 'b \<Rightarrow> 'c \<Rightarrow> 'd) \<Rightarrow> ('a \<Rightarrow>\<^sub>0 'b::zero) \<Rightarrow> ('a \<Rightarrow>\<^sub>0 'c::zero) \<Rightarrow> ('a \<Rightarrow>\<^sub>0 'd::zero)"
+  where "mapp_2 f p q = Abs_poly_mapping (\<lambda>k. f k (lookup p k) (lookup q k) when k \<in> keys p \<union> keys q)"
+
+lemma lookup_mapp_2:
+  "lookup (mapp_2 f p q) k = (f k (lookup p k) (lookup q k) when k \<in> keys p \<union> keys q)"
+proof -
+  have "lookup (Abs_poly_mapping (\<lambda>k. f k (lookup p k) (lookup q k) when k \<in> keys p \<union> keys q)) =
+        (\<lambda>k. f k (lookup p k) (lookup q k) when k \<in> keys p \<union> keys q)"
+    by (rule Abs_poly_mapping_inverse, simp)
+  thus ?thesis by (simp add: mapp_2_def)
+qed
+
+lemma lookup_mapp_2_homogenous:
+  assumes "f k 0 0 = 0"
+  shows "lookup (mapp_2 f p q) k = f k (lookup p k) (lookup q k)"
+  by (simp add: lookup_mapp_2 when_def in_keys_iff assms)
+
+lemma mapp_2_cong [fundef_cong]:
+  assumes "p = p'" and "q = q'"
+  assumes "\<And>k. k \<in> keys p' \<union> keys q' \<Longrightarrow> f k (lookup p' k) (lookup q' k) = f' k (lookup p' k) (lookup q' k)"
+  shows "mapp_2 f p q = mapp_2 f' p' q'"
+  by (rule poly_mapping_eqI, simp add: assms(1, 2) lookup_mapp_2, rule when_cong, fact refl, rule assms(3), blast)
+
+lemma keys_mapp_subset: "keys (mapp_2 f p q) \<subseteq> keys p \<union> keys q"
+proof
+  fix t
+  assume "t \<in> keys (mapp_2 f p q)"
+  hence "lookup (mapp_2 f p q) t \<noteq> 0" by (simp add: in_keys_iff) 
+  thus "t \<in> keys p \<union> keys q" by (simp add: lookup_mapp_2 when_def split: if_split_asm)
+qed
+
+lemma mapp_2_mapp: "mapp_2 (\<lambda>t a. f t) 0 p = Poly_Mapping.mapp f p"
+  by (rule poly_mapping_eqI, simp add: lookup_mapp lookup_mapp_2)
+
+
+lemma in_keys_plusI1:
+  assumes "t \<in> keys p" and "t \<notin> keys q"
+  shows "t \<in> keys (p + q)"
+  using assms unfolding in_keys_iff lookup_add by simp
+
+lemma in_keys_plusI2:
+  assumes "t \<in> keys q" and "t \<notin> keys p"
+  shows "t \<in> keys (p + q)"
+  using assms unfolding in_keys_iff lookup_add by simp
+
+lemma keys_plus_eqI:
+  assumes "keys p \<inter> keys q = {}"
+  shows "keys (p + q) = (keys p \<union> keys q)"
+proof
+  show "keys (p + q) \<subseteq> keys p \<union> keys q"
+    by (simp add: Poly_Mapping.keys_add)
+  show "keys p \<union> keys q \<subseteq> keys (p + q)"
+    by (simp add: More_MPoly_Type.keys_add assms)
+qed
+  
+lemma keys_uminus: "keys (- p) = keys p"
+  by (transfer, auto)
+
+lemma keys_minus: "keys (p - q) \<subseteq> (keys p \<union> keys q)"
+  by (transfer, auto)
+
+
+abbreviation "monomial \<equiv> (\<lambda>c t. Poly_Mapping.single t c)"
+
+lemma keys_of_monomial:
+  assumes "c \<noteq> 0"
+  shows "keys (monomial c t) = {t}"
+  using assms by simp
+
+lemma monomial_uminus:
+  shows "- monomial c s = monomial (- c) s"
+  by (transfer, rule ext, simp add: Poly_Mapping.when_def)
+
+lemma monomial_inj:
+  assumes "monomial c s = monomial (d::'b::zero_neq_one) t"
+  shows "(c = 0 \<and> d = 0) \<or> (c = d \<and> s = t)"
+  using assms unfolding poly_mapping_eq_iff
+  by (metis (mono_tags, opaque_lifting) lookup_single_eq lookup_single_not_eq)
+
+definition is_monomial :: "('a \<Rightarrow>\<^sub>0 'b::zero) \<Rightarrow> bool"
+  where "is_monomial p \<longleftrightarrow> card (keys p) = 1"
+
+lemma monomial_is_monomial:
+  assumes "c \<noteq> 0"
+  shows "is_monomial (monomial c t)"
+  using keys_single[of t c] assms by (simp add: is_monomial_def)
+
+lemma is_monomial_monomial:
+  assumes "is_monomial p"
+  obtains c t where "c \<noteq> 0" and "p = monomial c t"
+proof -
+  from assms have "card (keys p) = 1" unfolding is_monomial_def .
+  then obtain t where sp: "keys p = {t}" by (rule card_1_singletonE)
+  let ?c = "lookup p t"
+  from sp have "?c \<noteq> 0" by fastforce
+  show ?thesis
+  proof
+    show "p = monomial ?c t"
+    proof (intro poly_mapping_keys_eqI)
+    next
+      fix s
+      assume "s \<in> keys p"
+      with sp have "s = t" by simp
+    qed
+  qed fact
+qed
+  
+lemma is_monomial_uminus: "is_monomial (-p) \<longleftrightarrow> is_monomial p"
+  unfolding is_monomial_def keys_uminus ..
+
+lemma monomial_not_0:
+  assumes "is_monomial p"
+  shows "p \<noteq> 0"
+  using assms unfolding is_monomial_def by auto
+
+lemma keys_subset_singleton_imp_monomial:
+  assumes "keys p \<subseteq> {t}"
+  shows "monomial (lookup p t) t = p"
+proof (rule poly_mapping_eqI, simp add: lookup_single when_def, rule)
+  fix s
+  assume "t \<noteq> s"
+  hence "s \<notin> keys p" using assms by blast
+  thus "lookup p s = 0" by (simp add: in_keys_iff) 
+qed
+
+lemma monomial_0I:
+  assumes "c = 0"
+  shows "monomial c t = 0"
+  using assms by transfer (auto)
+
+lemma monomial_0D:
+  assumes "monomial c t = 0"
+  shows "c = 0"
+  using assms by transfer (auto simp: fun_eq_iff when_def; meson)
+
+corollary monomial_0_iff: "monomial c t = 0 \<longleftrightarrow> c = 0"
+  by (rule, erule monomial_0D, erule monomial_0I)
+
+lemma lookup_times_monomial_left: "lookup (monomial c t * p) s = (c * lookup p (s - t) when t adds s)"
+  for c::"'b::semiring_0" and t::"'a::comm_powerprod"
+proof (induct p rule: poly_mapping_except_induct, simp)
+  fix p::"'a \<Rightarrow>\<^sub>0 'b" and w
+  assume "p \<noteq> 0" and "w \<in> keys p"
+    and IH: "lookup (monomial c t * except p {w}) s =
+             (c * lookup (except p {w}) (s - t) when t adds s)" (is "_ = ?x")
+  have "monomial c t * p = monomial c t * (monomial (lookup p w) w + except p {w})"
+    by (simp only: plus_except[symmetric])
+  also have "... = monomial c t * monomial (lookup p w) w + monomial c t * except p {w}"
+    by (simp add: algebra_simps)
+  also have "... = monomial (c * lookup p w) (t + w) + monomial c t * except p {w}"
+    by (simp only: mult_single)
+  finally have "lookup (monomial c t * p) s = lookup (monomial (c * lookup p w) (t + w)) s + ?x"
+    by (simp only: lookup_add IH)
+  also have "... = (lookup (monomial (c * lookup p w) (t + w)) s +
+                    c * lookup (except p {w}) (s - t) when t adds s)"
+    by (rule when_distrib, auto simp add: lookup_single when_def)
+  also from refl have "... = (c * lookup p (s - t) when t adds s)"
+  proof (rule when_cong)
+    assume "t adds s"
+    then obtain u where u: "s = t + u" ..
+    show "lookup (monomial (c * lookup p w) (t + w)) s + c * lookup (except p {w}) (s - t) =
+          c * lookup p (s - t)"
+      by (simp add: u, cases "u = w", simp_all add: lookup_except lookup_single add.commute)
+  qed
+  finally show "lookup (monomial c t * p) s = (c * lookup p (s - t) when t adds s)" .
+qed
+
+lemma lookup_times_monomial_right: "lookup (p * monomial c t) s = (lookup p (s - t) * c when t adds s)"
+  for c::"'b::semiring_0" and t::"'a::comm_powerprod"
+proof (induct p rule: poly_mapping_except_induct, simp)
+  fix p::"'a \<Rightarrow>\<^sub>0 'b" and w
+  assume "p \<noteq> 0" and "w \<in> keys p"
+    and IH: "lookup (except p {w} * monomial c t) s =
+             ((lookup (except p {w}) (s - t)) * c when t adds s)"
+            (is "_ = ?x")
+  have "p * monomial c t = (monomial (lookup p w) w + except p {w}) * monomial c t"
+    by (simp only: plus_except[symmetric])
+  also have "... = monomial (lookup p w) w * monomial c t + except p {w} * monomial c t"
+    by (simp add: algebra_simps)
+  also have "... = monomial (lookup p w * c) (w + t) + except p {w} * monomial c t"
+    by (simp only: mult_single)
+  finally have "lookup (p * monomial c t) s = lookup (monomial (lookup p w * c) (w + t)) s + ?x"
+    by (simp only: lookup_add IH)
+  also have "... = (lookup (monomial (lookup p w * c) (w + t)) s +
+                    lookup (except p {w}) (s - t) * c when t adds s)"
+    by (rule when_distrib, auto simp add: lookup_single when_def)
+  also from refl have "... = (lookup p (s - t) * c when t adds s)"
+  proof (rule when_cong)
+    assume "t adds s"
+    then obtain u where u: "s = t + u" ..
+    show "lookup (monomial (lookup p w * c) (w + t)) s + lookup (except p {w}) (s - t) * c =
+          lookup p (s - t) * c"
+      by (simp add: u, cases "u = w", simp_all add: lookup_except lookup_single add.commute)
+  qed
+  finally show "lookup (p * monomial c t) s = (lookup p (s - t) * c when t adds s)" .
+qed
+
+

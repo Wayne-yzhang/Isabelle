@@ -1,0 +1,227 @@
+theory Syntax
+imports
+  Complex_Main
+  "Ids"
+begin 
+datatype ('a, 'c) trm =
+  Var 'c
+| Const real
+| Function 'a "'c \<Rightarrow> ('a, 'c) trm" ("$f")
+| Plus "('a, 'c) trm" "('a, 'c) trm"
+| Times "('a, 'c) trm" "('a, 'c) trm"
+| DiffVar 'c ("$''")
+| Differential "('a, 'c) trm"
+
+datatype('a, 'c) ODE =
+OVar 'c
+| OSing 'c "('a, 'c) trm"
+| OProd "('a, 'c) ODE" "('a, 'c) ODE"
+
+datatype ('a, 'b, 'c) hp =
+  Pvar 'c                           ("$\<alpha>")
+| Assign 'c "('a, 'c) trm"                (infixr ":=" 10)
+| DiffAssign 'c "('a, 'c) trm"
+| Test "('a, 'b, 'c) formula"                 ("?")
+| EvolveODE "('a, 'c) ODE" "('a, 'b, 'c) formula"
+| Choice "('a, 'b, 'c) hp" "('a, 'b, 'c) hp"            (infixl "\<union>\<union>" 10)
+| Sequence "('a, 'b, 'c) hp"  "('a, 'b, 'c) hp"         (infixr ";;" 8)
+| Loop "('a, 'b, 'c) hp"                      ("_**")
+
+and ('a, 'b, 'c) formula =
+  Geq "('a, 'c) trm" "('a, 'c) trm"
+| Prop 'c "'c \<Rightarrow> ('a, 'c) trm"      ("$\<phi>")
+| Not "('a, 'b, 'c) formula"            ("!")
+| And "('a, 'b, 'c) formula" "('a, 'b, 'c) formula"    (infixl "&&" 8)
+| Exists 'c "('a, 'b, 'c) formula"
+| Diamond "('a, 'b, 'c) hp" "('a, 'b, 'c) formula"         ("(\<langle> _ \<rangle> _)" 10)
+| InContext 'b "('a, 'b, 'c) formula"
+    
+definition Or :: "('a, 'b, 'c) formula \<Rightarrow> ('a, 'b, 'c) formula \<Rightarrow> ('a, 'b, 'c) formula" (infixl "||" 7)
+where "Or P Q = Not (And (Not P) (Not Q))"
+
+definition Implies :: "('a, 'b, 'c) formula \<Rightarrow> ('a, 'b, 'c) formula \<Rightarrow> ('a, 'b, 'c) formula" (infixr "\<rightarrow>" 10)
+where "Implies P Q = Or Q (Not P)"
+
+definition Equiv :: "('a, 'b, 'c) formula \<Rightarrow> ('a, 'b, 'c) formula \<Rightarrow> ('a, 'b, 'c) formula" (infixl "\<leftrightarrow>" 10)
+where "Equiv P Q = Or (And P Q) (And (Not P) (Not Q))"
+
+definition Forall :: "'c \<Rightarrow> ('a, 'b, 'c) formula \<Rightarrow> ('a, 'b, 'c) formula"
+where "Forall x P = Not (Exists x (Not P))"
+
+definition Equals :: "('a, 'c) trm \<Rightarrow> ('a, 'c) trm \<Rightarrow> ('a, 'b, 'c) formula"
+where "Equals \<theta> \<theta>' = ((Geq \<theta> \<theta>') && (Geq \<theta>' \<theta>))"
+
+definition Greater :: "('a, 'c) trm \<Rightarrow> ('a, 'c) trm \<Rightarrow> ('a, 'b, 'c) formula"
+where "Greater \<theta> \<theta>' = ((Geq \<theta> \<theta>') && (Not (Geq \<theta>' \<theta>)))"
+  
+definition Box :: "('a, 'b, 'c) hp \<Rightarrow> ('a, 'b, 'c) formula \<Rightarrow> ('a, 'b, 'c) formula" ("([[_]]_)" 10)
+where "Box \<alpha> P = Not (Diamond \<alpha> (Not P))"
+  
+definition TT ::"('a,'b,'c) formula" 
+where "TT = Geq (Const 0) (Const 0)"
+
+definition FF ::"('a,'b,'c) formula" 
+where "FF = Geq (Const 0) (Const 1)"
+
+type_synonym ('a,'b,'c) sequent = "('a,'b,'c) formula list * ('a,'b,'c) formula list"
+type_synonym ('a,'b,'c) rule = "('a,'b,'c) sequent list * ('a,'b,'c) sequent"
+
+  
+primrec sizeF::"('sf,'sc, 'sz) formula \<Rightarrow> nat"
+  and   sizeP::"('sf,'sc, 'sz) hp \<Rightarrow> nat"
+where 
+  "sizeP (Pvar a) = 1"
+| "sizeP (Assign x \<theta>) = 1"
+| "sizeP (DiffAssign x \<theta>) = 1"
+| "sizeP (Test \<phi>) = Suc (sizeF \<phi>)"
+| "sizeP (EvolveODE ODE \<phi>) = Suc (sizeF \<phi>)"
+| "sizeP (Choice \<alpha> \<beta>) = Suc (sizeP \<alpha> + sizeP \<beta>)"
+| "sizeP (Sequence \<alpha> \<beta>) = Suc (sizeP \<alpha> + sizeP \<beta>)"
+| "sizeP (Loop \<alpha>) = Suc (sizeP \<alpha>)"
+| "sizeF (Geq p q) = 1"
+| "sizeF (Prop p args) = 1"
+| "sizeF (Not p) = Suc (sizeF p)"
+| "sizeF (And p q) = sizeF p + sizeF q"
+| "sizeF (Exists x p) = Suc (sizeF p)"
+| "sizeF (Diamond p q) = Suc (sizeP p + sizeF q)"
+| "sizeF (InContext C \<phi>) = Suc (sizeF \<phi>)"
+
+lemma sizeF_diseq:"sizeF p \<noteq> sizeF q \<Longrightarrow> p \<noteq> q" by auto
+  
+named_theorems "expr_diseq" "Structural disequality rules for expressions"  
+lemma [expr_diseq]:"p \<noteq> And p q" by(induction p, auto)
+lemma [expr_diseq]:"q \<noteq> And p q" by(induction q, auto)
+lemma [expr_diseq]:"p \<noteq> Not p" by(induction p, auto)
+lemma [expr_diseq]:"p \<noteq> Or p q" by(rule sizeF_diseq, auto simp add: Or_def)
+lemma [expr_diseq]:"q \<noteq> Or p q" by(rule sizeF_diseq, auto simp add: Or_def)
+lemma [expr_diseq]:"p \<noteq> Implies p q" by(rule sizeF_diseq, auto simp add: Implies_def Or_def)
+lemma [expr_diseq]:"q \<noteq> Implies p q" by(rule sizeF_diseq, auto simp add: Implies_def Or_def)
+lemma [expr_diseq]:"p \<noteq> Equiv p q" by(rule sizeF_diseq, auto simp add: Equiv_def Or_def)
+lemma [expr_diseq]:"q \<noteq> Equiv p q" by(rule sizeF_diseq, auto simp add: Equiv_def Or_def)
+lemma [expr_diseq]:"p \<noteq> Exists x p" by(induction p, auto)
+lemma [expr_diseq]:"p \<noteq> Diamond a p" by(induction p, auto)
+lemma [expr_diseq]:"p \<noteq> InContext C p" by(induction p, auto)
+
+fun Predicational :: "'b \<Rightarrow> ('a, 'b, 'c) formula" ("Pc")
+where "Predicational P = InContext P (Geq (Const 0) (Const 0))"
+
+context ids begin
+definition empty::" 'b \<Rightarrow> ('a, 'b) trm"
+where "empty \<equiv> \<lambda>i.(Const 0)"
+
+fun singleton :: "('a, 'sz) trm \<Rightarrow> ('sz \<Rightarrow> ('a, 'sz) trm)"
+where "singleton t i = (if i = vid1 then t else (Const 0))"
+
+lemma expand_singleton:"singleton t = (\<lambda>i. (if i = vid1 then t else (Const 0)))"
+  by auto
+
+definition f1::"'sf \<Rightarrow> 'sz \<Rightarrow> ('sf,'sz) trm"
+where "f1 f x = Function f (singleton (Var x))"
+
+definition f0::"'sf \<Rightarrow> ('sf,'sz) trm"
+where "f0 f = Function f empty"
+
+definition p1::"'sz \<Rightarrow> 'sz \<Rightarrow> ('sf, 'sc, 'sz) formula"
+where "p1 p x = Prop p (singleton (Var x))"
+
+definition P::"'sc \<Rightarrow> ('sf, 'sc, 'sz) formula"
+where "P p = Predicational p"
+end
+
+inductive dfree :: "('a, 'c) trm \<Rightarrow> bool"
+where
+  dfree_Var: "dfree (Var i)"
+| dfree_Const: "dfree (Const r)"
+| dfree_Fun: "(\<And>i. dfree (args i)) \<Longrightarrow> dfree (Function i args)"
+| dfree_Plus: "dfree \<theta>\<^sub>1 \<Longrightarrow> dfree \<theta>\<^sub>2 \<Longrightarrow> dfree (Plus \<theta>\<^sub>1 \<theta>\<^sub>2)"
+| dfree_Times: "dfree \<theta>\<^sub>1 \<Longrightarrow> dfree \<theta>\<^sub>2 \<Longrightarrow> dfree (Times \<theta>\<^sub>1 \<theta>\<^sub>2)"
+  
+inductive dsafe :: "('a, 'c) trm \<Rightarrow> bool"
+where
+  dsafe_Var: "dsafe (Var i)"
+| dsafe_Const: "dsafe (Const r)"
+| dsafe_Fun: "(\<And>i. dsafe (args i)) \<Longrightarrow> dsafe (Function i args)"
+| dsafe_Plus: "dsafe \<theta>\<^sub>1 \<Longrightarrow> dsafe \<theta>\<^sub>2 \<Longrightarrow> dsafe (Plus \<theta>\<^sub>1 \<theta>\<^sub>2)"
+| dsafe_Times: "dsafe \<theta>\<^sub>1 \<Longrightarrow> dsafe \<theta>\<^sub>2 \<Longrightarrow> dsafe (Times \<theta>\<^sub>1 \<theta>\<^sub>2)"
+| dsafe_Diff: "dfree \<theta> \<Longrightarrow> dsafe (Differential \<theta>)"
+| dsafe_DiffVar: "dsafe ($' i)"
+
+fun ODE_dom::"('a, 'c) ODE \<Rightarrow> 'c set"
+where 
+  "ODE_dom (OVar c) =  {}"
+| "ODE_dom (OSing x \<theta>) = {x}"
+| "ODE_dom (OProd ODE1 ODE2) = ODE_dom ODE1 \<union> ODE_dom ODE2"
+
+inductive osafe:: "('a, 'c) ODE \<Rightarrow> bool"
+where
+  osafe_Var:"osafe (OVar c)"
+| osafe_Sing:"dfree \<theta> \<Longrightarrow> osafe (OSing x \<theta>)"
+| osafe_Prod:"osafe ODE1 \<Longrightarrow> osafe ODE2 \<Longrightarrow> ODE_dom ODE1 \<inter> ODE_dom ODE2 = {} \<Longrightarrow> osafe (OProd ODE1 ODE2)"
+
+inductive hpfree:: "('a, 'b, 'c) hp \<Rightarrow> bool"
+  and     ffree::  "('a, 'b, 'c) formula \<Rightarrow> bool"
+where
+  "hpfree (Pvar x)"
+| "dfree e \<Longrightarrow> hpfree (Assign x e)"
+| "dfree e \<Longrightarrow> hpfree (DiffAssign x e)"
+| "ffree P \<Longrightarrow> hpfree (Test P)" 
+| "osafe ODE \<Longrightarrow> ffree P \<Longrightarrow> hpfree (EvolveODE ODE P)"
+| "hpfree a \<Longrightarrow> hpfree b \<Longrightarrow> hpfree (Choice a b )"
+| "hpfree a \<Longrightarrow> hpfree b \<Longrightarrow> hpfree (Sequence a b)"
+| "hpfree a \<Longrightarrow> hpfree (Loop a)"
+| "ffree f \<Longrightarrow> ffree (InContext C f)"
+| "(\<And>arg. arg \<in> range args \<Longrightarrow> dfree arg) \<Longrightarrow> ffree (Prop p args)"
+| "ffree p \<Longrightarrow> ffree (Not p)"
+| "ffree p \<Longrightarrow> ffree q \<Longrightarrow> ffree (And p q)"
+| "ffree p \<Longrightarrow> ffree (Exists x p)"
+| "hpfree a \<Longrightarrow> ffree p \<Longrightarrow> ffree (Diamond a p)"
+| "ffree (Predicational P)"
+| "dfree t1 \<Longrightarrow> dfree t2 \<Longrightarrow> ffree (Geq t1 t2)"
+
+inductive hpsafe:: "('a, 'b, 'c) hp \<Rightarrow> bool"
+  and     fsafe::  "('a, 'b, 'c) formula \<Rightarrow> bool"
+where
+   hpsafe_Pvar:"hpsafe (Pvar x)"
+ | hpsafe_Assign:"dsafe e \<Longrightarrow> hpsafe (Assign x e)"
+ | hpsafe_DiffAssign:"dsafe e \<Longrightarrow> hpsafe (DiffAssign x e)"
+ | hpsafe_Test:"fsafe P \<Longrightarrow> hpsafe (Test P)" 
+ | hpsafe_Evolve:"osafe ODE \<Longrightarrow> fsafe P \<Longrightarrow> hpsafe (EvolveODE ODE P)"
+ | hpsafe_Choice:"hpsafe a \<Longrightarrow> hpsafe b \<Longrightarrow> hpsafe (Choice a b )"
+ | hpsafe_Sequence:"hpsafe a \<Longrightarrow> hpsafe b \<Longrightarrow> hpsafe (Sequence a b)"
+ | hpsafe_Loop:"hpsafe a \<Longrightarrow> hpsafe (Loop a)"
+
+ | fsafe_Geq:"dsafe t1 \<Longrightarrow> dsafe t2 \<Longrightarrow> fsafe (Geq t1 t2)"
+ | fsafe_Prop:"(\<And>i. dsafe (args i)) \<Longrightarrow> fsafe (Prop p args)"
+ | fsafe_Not:"fsafe p \<Longrightarrow> fsafe (Not p)"
+ | fsafe_And:"fsafe p \<Longrightarrow> fsafe q \<Longrightarrow> fsafe (And p q)"
+ | fsafe_Exists:"fsafe p \<Longrightarrow> fsafe (Exists x p)"
+ | fsafe_Diamond:"hpsafe a \<Longrightarrow> fsafe p \<Longrightarrow> fsafe (Diamond a p)"
+ | fsafe_InContext:"fsafe f \<Longrightarrow> fsafe (InContext C f)"
+
+inductive_simps
+      dfree_Plus_simps[simp]: "dfree (Plus a b)"
+  and dfree_Times_simps[simp]: "dfree (Times a b)"
+  and dfree_Var_simps[simp]: "dfree (Var x)"
+  and dfree_DiffVar_simps[simp]: "dfree (DiffVar x)"
+  and dfree_Differential_simps[simp]: "dfree (Differential x)"
+  and dfree_Fun_simps[simp]: "dfree (Function i args)"
+  and dfree_Const_simps[simp]: "dfree (Const r)"
+
+inductive_simps
+      dsafe_Plus_simps[simp]: "dsafe (Plus a b)"
+  and dsafe_Times_simps[simp]: "dsafe (Times a b)"
+  and dsafe_Var_simps[simp]: "dsafe (Var x)"
+  and dsafe_DiffVar_simps[simp]: "dsafe (DiffVar x)"
+  and dsafe_Fun_simps[simp]: "dsafe (Function i args)"
+  and dsafe_Diff_simps[simp]: "dsafe (Differential a)"
+  and dsafe_Const_simps[simp]: "dsafe (Const r)"
+
+inductive_simps
+      osafe_OVar_simps[simp]:"osafe (OVar c)"
+  and osafe_OSing_simps[simp]:"osafe (OSing x \<theta>)"
+  and osafe_OProd_simps[simp]:"osafe (OProd ODE1 ODE2)"
+
+inductive_simps
+      hpsafe_Pvar_simps[simp]: "hpsafe (Pvar a)"
+  and hpsafe_Sequence_simps[simp]: "hpsafe (a ;; b)"
+  and hpsafe_Loop_simps[simp]: "hpsafe (a**)"

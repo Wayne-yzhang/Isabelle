@@ -1,0 +1,462 @@
+theory Category
+imports Main "HOL-Library.FuncSet"
+begin
+
+
+
+  locale partial_magma =
+  fixes OP :: "'a \<Rightarrow> 'a \<Rightarrow> 'a"
+  assumes ex_un_null: "\<exists>!n. \<forall>t. OP n t = n \<and> OP t n = n"
+  begin
+
+    definition null :: 'a
+    where "null = (THE n. \<forall>t. OP n t = n \<and> OP t n = n)"
+
+    lemma null_eqI:
+    assumes "\<And>t. OP n t = n \<and> OP t n = n"
+    shows "n = null"
+      using assms null_def ex_un_null the1_equality [of "\<lambda>n. \<forall>t. OP n t = n \<and> OP t n = n"]
+      by auto
+    
+    lemma null_is_zero [simp]:
+    shows "OP null t = null" and "OP t null = null"
+      using null_def ex_un_null theI' [of "\<lambda>n. \<forall>t. OP n t = n \<and> OP t n = n"]
+      by auto
+
+  end
+
+  section "Partial Composition"
+
+
+  type_synonym 'a comp = "'a \<Rightarrow> 'a \<Rightarrow> 'a"
+
+  locale partial_composition =
+    partial_magma C
+  for C :: "'a comp" (infixr "\<cdot>" 55)
+  begin
+
+
+    definition ide
+    where "ide a \<equiv> a \<cdot> a \<noteq> null \<and>
+                   (\<forall>f. (f \<cdot> a \<noteq> null \<longrightarrow> f \<cdot> a = f) \<and> (a \<cdot> f \<noteq> null \<longrightarrow> a \<cdot> f = f))"
+
+
+    definition domains
+    where "domains f \<equiv> {a. ide a \<and> f \<cdot> a \<noteq> null}"
+
+    definition codomains
+    where "codomains f \<equiv> {b. ide b \<and> b \<cdot> f \<noteq> null}"
+
+    lemma domains_null:
+    shows "domains null = {}"
+      by (simp add: domains_def)
+
+    lemma codomains_null:
+    shows "codomains null = {}"
+      by (simp add: codomains_def)
+
+    lemma self_domain_iff_ide:
+    shows "a \<in> domains a \<longleftrightarrow> ide a"
+      using ide_def domains_def by auto
+
+    lemma self_codomain_iff_ide:
+    shows "a \<in> codomains a \<longleftrightarrow> ide a"
+      using ide_def codomains_def by auto
+
+
+    definition arr
+    where "arr f \<equiv> domains f \<noteq> {} \<or> codomains f \<noteq> {}"
+
+    lemma not_arr_null [simp]:
+    shows "\<not> arr null"
+      by (simp add: arr_def domains_null codomains_null)
+
+
+    definition in_hom     ("\<guillemotleft>_ : _ \<rightarrow> _\<guillemotright>")
+    where "\<guillemotleft>f : a \<rightarrow> b\<guillemotright> \<equiv> a \<in> domains f \<and> b \<in> codomains f"
+
+    abbreviation hom
+    where "hom a b \<equiv> {f. \<guillemotleft>f : a \<rightarrow> b\<guillemotright>}"
+
+    lemma arrI:
+    assumes "\<guillemotleft>f : a \<rightarrow> b\<guillemotright>"
+    shows "arr f"
+      using assms arr_def in_hom_def by auto
+
+    lemma ide_in_hom [intro]:
+    shows "ide a \<longleftrightarrow> \<guillemotleft>a : a \<rightarrow> a\<guillemotright>"
+      using self_domain_iff_ide self_codomain_iff_ide in_hom_def ide_def by fastforce
+
+
+    abbreviation seq
+    where "seq g f \<equiv> arr (g \<cdot> f)"
+
+    lemma comp_arr_ide:
+    assumes "ide a" and "seq f a"
+    shows "f \<cdot> a = f"
+      using assms ide_in_hom ide_def not_arr_null by metis
+
+    lemma comp_ide_arr:
+    assumes "ide b" and "seq b f"
+    shows "b \<cdot> f = f"
+      using assms ide_in_hom ide_def not_arr_null by metis
+
+
+    definition dom
+    where "dom f = (if domains f \<noteq> {} then (SOME a. a \<in> domains f) else null)"
+
+    definition cod
+    where "cod f = (if codomains f \<noteq> {} then (SOME b. b \<in> codomains f) else null)"
+
+    lemma dom_null [simp]:
+    shows "dom null = null"
+      by (simp add: dom_def domains_null)
+
+    lemma cod_null [simp]:
+    shows "cod null = null"
+      by (simp add: cod_def codomains_null)
+
+    lemma dom_in_domains:
+    assumes "domains f \<noteq> {}"
+    shows "dom f \<in> domains f"
+      using assms dom_def someI [of "\<lambda>a. a \<in> domains f"] by auto
+
+    lemma cod_in_codomains:
+    assumes "codomains f \<noteq> {}"
+    shows "cod f \<in> codomains f"
+      using assms cod_def someI [of "\<lambda>b. b \<in> codomains f"] by auto
+
+  end
+
+  section "Categories"
+
+
+  locale category = partial_composition +
+  assumes ext: "g \<cdot> f \<noteq> null \<Longrightarrow> seq g f"
+  and has_domain_iff_has_codomain: "domains f \<noteq> {} \<longleftrightarrow> codomains f \<noteq> {}"
+  and match_1: "\<lbrakk> seq h g; seq (h \<cdot> g) f \<rbrakk> \<Longrightarrow> seq g f"
+  and match_2: "\<lbrakk> seq h (g \<cdot> f); seq g f \<rbrakk> \<Longrightarrow> seq h g"
+  and match_3: "\<lbrakk> seq g f; seq h g \<rbrakk> \<Longrightarrow> seq (h \<cdot> g) f"
+  and comp_assoc': "\<lbrakk> seq g f; seq h g \<rbrakk> \<Longrightarrow> (h \<cdot> g) \<cdot> f = h \<cdot> g \<cdot> f"
+  begin
+
+
+    lemma comp_assoc:
+    shows "(h \<cdot> g) \<cdot> f = h \<cdot> g \<cdot> f"
+      by (metis comp_assoc' ex_un_null ext match_1 match_2)
+
+    lemma match_4:
+    assumes "seq g f" and "seq h g"
+    shows "seq h (g \<cdot> f)"
+      using assms match_3 comp_assoc by auto
+
+    lemma domains_comp:
+    assumes "seq g f"
+    shows "domains (g \<cdot> f) = domains f"
+    proof -
+      have "domains (g \<cdot> f) = {a. ide a \<and> seq (g \<cdot> f) a}"
+        using domains_def ext by auto
+      also have "... = {a. ide a \<and> seq f a}"
+        using assms ide_def match_1 match_3 by meson
+      also have "... = domains f"
+        using domains_def ext by auto
+      finally show ?thesis by blast
+    qed
+
+    lemma codomains_comp:
+    assumes "seq g f"
+    shows "codomains (g \<cdot> f) = codomains g"
+    proof -
+      have "codomains (g \<cdot> f) = {b. ide b \<and> seq b (g \<cdot> f)}"
+        using codomains_def ext by auto
+      also have "... = {b. ide b \<and> seq b g}"
+        using assms ide_def match_2 match_4 by meson
+      also have "... = codomains g"
+        using codomains_def ext by auto
+      finally show ?thesis by blast
+    qed
+
+    lemma has_domain_iff_arr:
+    shows "domains f \<noteq> {} \<longleftrightarrow> arr f"
+      by (simp add: arr_def has_domain_iff_has_codomain)
+
+    lemma has_codomain_iff_arr:
+    shows "codomains f \<noteq> {} \<longleftrightarrow> arr f"
+      using has_domain_iff_arr has_domain_iff_has_codomain by auto
+
+
+    lemma domain_unique:
+    assumes "a \<in> domains f" and "a' \<in> domains f"
+    shows "a = a'"
+    proof -
+      have "ide a \<and> seq f a \<and> ide a' \<and> seq f a'"
+        using assms domains_def ext by force
+      thus ?thesis
+        using match_1 ide_def not_arr_null by metis
+    qed
+
+    lemma codomain_unique:
+    assumes "b \<in> codomains f" and "b' \<in> codomains f"
+    shows "b = b'"
+    proof -
+      have "ide b \<and> seq b f \<and> ide b' \<and> seq b' f"
+        using assms codomains_def ext by force
+      thus ?thesis
+        using match_2 ide_def not_arr_null by metis
+    qed
+
+    lemma domains_simp:
+    assumes "arr f"
+    shows "domains f = {dom f}"
+      using assms dom_in_domains has_domain_iff_arr domain_unique by auto
+
+    lemma codomains_simp:
+    assumes "arr f"
+    shows "codomains f = {cod f}"
+      using assms cod_in_codomains has_codomain_iff_arr codomain_unique by auto
+
+    lemma domains_char:
+    shows "domains f = (if arr f then {dom f} else {})"
+      using dom_in_domains has_domain_iff_arr domain_unique by auto
+
+    lemma codomains_char:
+    shows "codomains f = (if arr f then {cod f} else {})"
+      using cod_in_codomains has_codomain_iff_arr codomain_unique by auto
+
+
+    lemma arr_iff_in_hom:
+    shows "arr f \<longleftrightarrow> \<guillemotleft>f : dom f \<rightarrow> cod f\<guillemotright>"
+      using cod_in_codomains dom_in_domains has_domain_iff_arr has_codomain_iff_arr in_hom_def
+      by auto
+
+    lemma in_homI [intro]:
+    assumes "arr f" and "dom f = a" and "cod f = b"
+    shows "\<guillemotleft>f : a \<rightarrow> b\<guillemotright>"
+      using assms cod_in_codomains dom_in_domains has_domain_iff_arr has_codomain_iff_arr
+            in_hom_def
+      by auto
+
+    lemma in_homE [elim]:
+    assumes "\<guillemotleft>f : a \<rightarrow> b\<guillemotright>"
+    and "arr f \<Longrightarrow> dom f = a \<Longrightarrow> cod f = b \<Longrightarrow> T"
+    shows "T"
+     using assms in_hom_def domains_char codomains_char has_domain_iff_arr
+     by (metis empty_iff singleton_iff)
+
+
+    lemma arr_dom_iff_arr:
+    shows "arr (dom f) \<longleftrightarrow> arr f"
+      using dom_def dom_in_domains has_domain_iff_arr self_domain_iff_ide domains_def
+      by fastforce
+
+    lemma arr_cod_iff_arr:
+    shows "arr (cod f) \<longleftrightarrow> arr f"
+      using cod_def cod_in_codomains has_codomain_iff_arr self_codomain_iff_ide codomains_def
+      by fastforce
+
+    lemma arr_dom [simp]:
+    assumes "arr f"
+    shows "arr (dom f)"
+      using assms arr_dom_iff_arr by simp
+
+    lemma arr_cod [simp]:
+    assumes "arr f"
+    shows "arr (cod f)"
+      using assms arr_cod_iff_arr by simp
+
+    lemma seqI [simp]:
+    assumes "arr f" and "arr g" and "dom g = cod f"
+    shows "seq g f"
+    proof -
+      have "ide (cod f) \<and> seq (cod f) f"
+        using assms(1) has_codomain_iff_arr codomains_def cod_in_codomains ext by blast
+      moreover have "ide (cod f) \<and> seq g (cod f)"
+        using assms(2-3) domains_def domains_simp ext by fastforce
+      ultimately show ?thesis
+        using match_4 ide_def ext by metis
+    qed
+
+
+    lemma seqI' [intro]:
+    assumes "\<guillemotleft>f : a \<rightarrow> b\<guillemotright>" and "\<guillemotleft>g : b \<rightarrow> c\<guillemotright>"
+    shows "seq g f"
+      using assms by fastforce
+
+    lemma compatible_iff_seq:
+    shows "domains g \<inter> codomains f \<noteq> {} \<longleftrightarrow> seq g f"
+    proof
+      show "domains g \<inter> codomains f \<noteq> {} \<Longrightarrow> seq g f"
+        using cod_in_codomains dom_in_domains empty_iff has_domain_iff_arr has_codomain_iff_arr
+              domain_unique codomain_unique
+        by (metis Int_emptyI seqI)
+      show "seq g f \<Longrightarrow> domains g \<inter> codomains f \<noteq> {}"
+      proof -
+        assume gf: "seq g f"
+        have 1: "cod f \<in> codomains f"
+          using gf has_domain_iff_arr domains_comp cod_in_codomains codomains_simp by blast
+        have "ide (cod f) \<and> seq (cod f) f"
+          using 1 codomains_def ext by auto
+        hence "seq g (cod f)"
+          using gf has_domain_iff_arr match_2 domains_null ide_def by metis
+        thus ?thesis
+          using domains_def 1 codomains_def by auto
+      qed
+    qed
+
+
+    lemma seqE [elim]:
+    assumes "seq g f"
+    and "arr f \<Longrightarrow> arr g \<Longrightarrow> dom g = cod f \<Longrightarrow> T"
+    shows "T"
+      using assms cod_in_codomains compatible_iff_seq has_domain_iff_arr has_codomain_iff_arr
+            domains_comp codomains_comp domains_char codomain_unique
+      by (metis Int_emptyI singletonD)
+
+    lemma comp_in_homI [intro]:
+    assumes "\<guillemotleft>f : a \<rightarrow> b\<guillemotright>" and "\<guillemotleft>g : b \<rightarrow> c\<guillemotright>"
+    shows "\<guillemotleft>g \<cdot> f : a \<rightarrow> c\<guillemotright>"
+    proof
+      show 1: "seq g f" using assms compatible_iff_seq by blast
+      show "dom (g \<cdot> f) = a"
+        using assms 1 domains_comp domains_simp by blast
+      show "cod (g \<cdot> f) = c"
+        using assms 1 codomains_comp codomains_simp by blast
+    qed
+
+    lemma comp_in_homI' [simp]:
+    assumes "arr f" and "arr g" and "dom f = a" and "cod g = c" and "dom g = cod f"
+    shows "\<guillemotleft>g \<cdot> f : a \<rightarrow> c\<guillemotright>"
+      using assms by auto
+
+    lemma comp_in_homE [elim]:
+    assumes "\<guillemotleft>g \<cdot> f : a \<rightarrow> c\<guillemotright>"
+    obtains b where "\<guillemotleft>f : a \<rightarrow> b\<guillemotright>" and "\<guillemotleft>g : b \<rightarrow> c\<guillemotright>"
+      using assms in_hom_def domains_comp codomains_comp
+      by (metis arrI in_homI seqE)
+
+
+    lemma comp_arr_dom:
+    assumes "arr f" and "dom f = a"
+    shows "f \<cdot> a = f"
+      using assms dom_in_domains has_domain_iff_arr domains_def ide_def by auto
+
+    lemma comp_cod_arr:
+    assumes "arr f" and "cod f = b"
+    shows "b \<cdot> f = f"
+      using assms cod_in_codomains has_codomain_iff_arr ide_def codomains_def by auto
+
+    lemma ide_char:
+    shows "ide a \<longleftrightarrow> arr a \<and> dom a = a \<and> cod a = a"
+      using ide_in_hom by auto
+
+
+    lemma ideD [simp]:
+    assumes "ide a"
+    shows "arr a" and "dom a = a" and "cod a = a"
+      using assms ide_char by auto
+
+    lemma ide_dom [simp]:
+    assumes "arr f"
+    shows "ide (dom f)"
+      using assms dom_in_domains has_domain_iff_arr domains_def by auto
+
+    lemma ide_cod [simp]:
+    assumes "arr f"
+    shows "ide (cod f)"
+      using assms cod_in_codomains has_codomain_iff_arr codomains_def by auto
+
+    lemma dom_eqI:
+    assumes "ide a" and "seq f a"
+    shows "dom f = a"
+      using assms cod_in_codomains codomain_unique ide_char
+      by (metis seqE)
+
+    lemma cod_eqI:
+    assumes "ide b" and "seq b f"
+    shows "cod f = b"
+      using assms dom_in_domains domain_unique ide_char
+      by (metis seqE)
+
+    lemma dom_eqI':
+    assumes "a \<in> domains f"
+    shows "a = dom f"
+      using assms dom_in_domains domain_unique by blast
+
+    lemma cod_eqI':
+    assumes "a \<in> codomains f"
+    shows "a = cod f"
+      using assms cod_in_codomains codomain_unique by blast
+
+    lemma ide_char':
+    shows "ide a \<longleftrightarrow> arr a \<and> (dom a = a \<or> cod a = a)"
+      using ide_dom ide_cod ide_char by metis
+
+    lemma dom_dom:
+    shows "dom (dom f) = dom f"
+      by (metis dom_null domains_char ideD(2) ide_dom dom_def)
+
+    lemma cod_cod:
+    shows "cod (cod f) = cod f"
+      by (metis arr_cod_iff_arr cod_def has_codomain_iff_arr ideD(3) ide_cod)
+
+    lemma dom_cod:
+    shows "dom (cod f) = cod f"
+      by (metis arr_cod_iff_arr cod_def has_codomain_iff_arr has_domain_iff_arr ideD(2)
+          ide_cod dom_def)
+
+    lemma cod_dom:
+    shows "cod (dom f) = dom f"
+      by (metis cod_null has_domain_iff_arr ideD(3) ide_dom dom_def)
+
+    lemma dom_comp [simp]:
+    assumes "seq g f"
+    shows "dom (g \<cdot> f) = dom f"
+      using assms by (simp add: dom_def domains_comp)
+
+    lemma cod_comp [simp]:
+    assumes "seq g f"
+    shows "cod (g \<cdot> f) = cod g"
+      using assms by (simp add: cod_def codomains_comp)
+
+    lemma comp_ide_self [simp]:
+    assumes "ide a"
+    shows "a \<cdot> a = a"
+      using assms comp_arr_ide arrI by auto
+
+    lemma ide_compE [elim]:
+    assumes "ide (g \<cdot> f)"
+    and "seq g f \<Longrightarrow> seq f g \<Longrightarrow> g \<cdot> f = dom f \<Longrightarrow> g \<cdot> f = cod g \<Longrightarrow> T"
+    shows "T"
+      using assms dom_comp cod_comp ide_char ide_in_hom
+      by (metis seqE seqI)
+
+
+    lemma comp_permute:
+    assumes "f \<cdot> g = k \<cdot> l" and "seq f g" and "seq g h"
+    shows "f \<cdot> g \<cdot> h = k \<cdot> l \<cdot> h"
+      using assms by (metis comp_assoc)
+
+    lemma comp_reduce:
+    assumes "f \<cdot> g = k" and "seq f g" and "seq g h"
+    shows "f \<cdot> g \<cdot> h = k \<cdot> h"
+      using assms comp_assoc by auto
+
+
+    abbreviation endo
+    where "endo f \<equiv> seq f f"
+     
+    abbreviation antipar
+    where "antipar f g \<equiv> seq g f \<and> seq f g"
+
+    abbreviation span
+    where "span f g \<equiv> arr f \<and> arr g \<and> dom f = dom g"
+
+    abbreviation cospan
+    where "cospan f g \<equiv> arr f \<and> arr g \<and> cod f = cod g"
+
+    abbreviation par
+    where "par f g \<equiv> arr f \<and> arr g \<and> dom f = dom g \<and> cod f = cod g"
+
+  end
+
+end

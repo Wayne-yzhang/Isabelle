@@ -1,0 +1,155 @@
+theory SRCTransforms
+imports "HOL-Library.Multiset"
+begin
+
+datatype 'a form = At "nat"
+                 | Compound "'a" "'a form list"
+                 | ff
+
+datatype 'a sequent = Sequent "('a form) multiset" "('a form) multiset" (" (_) \<Rightarrow>* (_)" [6,6] 5)
+
+abbreviation multiset_abbrev ("\<LM> _  \<RM>" [75]75) where
+   "\<LM> A \<RM> \<equiv> {# A #}"
+
+abbreviation multiset_empty ("\<Empt>" 75) where
+  "\<Empt> \<equiv> {#}"
+
+type_synonym 'a rule = "'a sequent list * 'a sequent"
+
+type_synonym 'a deriv = "'a sequent * nat"
+
+abbreviation
+multiset_plus (infixl "\<oplus>" 80) where
+   "(\<Gamma> :: 'a multiset) \<oplus> (A :: 'a) \<equiv> \<Gamma> + \<LM>A\<RM>"
+abbreviation
+multiset_minus (infixl "\<ominus>" 80) where
+   "(\<Gamma> :: 'a multiset) \<ominus>  (A :: 'a) \<equiv> \<Gamma> - \<LM>A\<RM>" 
+
+consts
+  extend :: "'a sequent \<Rightarrow> 'a sequent \<Rightarrow> 'a sequent"
+  extendRule :: "'a sequent \<Rightarrow> 'a rule \<Rightarrow> 'a rule"
+
+  uniqueConclusion :: "'a rule set \<Rightarrow> bool"
+
+  invertible :: "'a rule \<Rightarrow> 'a rule set \<Rightarrow> bool"
+  invertible_set :: "'a rule set \<Rightarrow> bool"
+
+primrec antec :: "'a sequent \<Rightarrow> 'a form multiset" where "antec (Sequent ant suc) = ant"
+primrec succ :: "'a sequent \<Rightarrow> 'a form multiset" where "succ (Sequent ant suc) = suc"
+primrec mset :: "'a sequent \<Rightarrow> 'a form multiset" where "mset (Sequent ant suc) = ant + suc"
+primrec seq_size :: "'a sequent \<Rightarrow> nat" where "seq_size (Sequent ant suc) = size ant + size suc"
+
+overloading
+  extend \<equiv> extend
+  extendRule \<equiv> extendRule
+  uniqueConclusion \<equiv> uniqueConclusion
+begin
+
+definition extend
+  where "extend forms seq \<equiv> (antec forms + antec seq) \<Rightarrow>* (succ forms + succ seq)"
+
+definition extendRule
+  where "extendRule forms R \<equiv> (map (extend forms) (fst R), extend forms (snd R))"
+
+definition uniqueConclusion :: "'a rule set \<Rightarrow> bool"
+  where "uniqueConclusion R \<equiv> \<forall> r1 \<in> R. \<forall> r2 \<in> R. (snd r1 = snd r2) \<longrightarrow> (r1 =r2)"
+
+end
+
+primrec max_list :: "nat list \<Rightarrow> nat" where
+  "max_list [] = 0"
+| "max_list (n # ns) = max n (max_list ns)"
+
+fun depth :: "'a form \<Rightarrow> nat"
+where
+   "depth (At i) = 0"
+|  "depth (Compound f fs) = (max_list (map depth fs)) + 1"
+|  "depth (ff) = 0"
+
+
+inductive_set "Ax" where
+   id[intro]: "([], \<LM> At i \<RM> \<Rightarrow>* \<LM> At i \<RM>) \<in> Ax"
+|  Lbot[intro]: "([], \<LM> ff \<RM> \<Rightarrow>* \<Empt>) \<in> Ax"
+
+inductive_set "upRules" where
+   I[intro]: "\<lbrakk> mset c \<equiv> \<LM> Compound R Fs \<RM> ; ps \<noteq> [] \<rbrakk> \<Longrightarrow> (ps,c) \<in> upRules"
+
+inductive_set extRules :: "'a rule set \<Rightarrow> 'a rule set"  ("_*")
+  for R :: "'a rule set" 
+  where
+   I[intro]: "r \<in> R \<Longrightarrow> extendRule seq r \<in> R*"
+
+
+inductive leftPrincipal :: "'a rule \<Rightarrow> 'a form \<Rightarrow> bool"
+  where
+  up[intro]: "C = (\<LM>Compound F Fs\<RM> \<Rightarrow>* \<Empt>)  \<Longrightarrow> 
+                   leftPrincipal (Ps,C) (Compound F Fs)"
+
+
+inductive rightPrincipal :: "'a rule \<Rightarrow> 'a form \<Rightarrow> bool"
+  where
+  up[intro]: "C = (\<Empt> \<Rightarrow>* \<LM>Compound F Fs\<RM>) \<Longrightarrow> rightPrincipal (Ps,C) (Compound F Fs)"
+
+
+
+inductive_set derivable :: "'a rule set \<Rightarrow> 'a deriv set"
+  for R :: "'a rule set"
+  where
+   base[intro]: "\<lbrakk>([],C) \<in> R\<rbrakk> \<Longrightarrow> (C,0) \<in> derivable R"
+|  step[intro]: "\<lbrakk> r \<in> R ; (fst r)\<noteq>[] ; \<forall> p \<in> set (fst r). \<exists> n \<le> m. (p,n) \<in> derivable R \<rbrakk> 
+                       \<Longrightarrow> (snd r,m + 1) \<in> derivable R"
+
+
+inductive_set derivable' :: "'a rule set \<Rightarrow> 'a sequent set"
+   for R :: "'a rule set"
+   where
+    base[intro]: "\<lbrakk> ([],C) \<in> R \<rbrakk> \<Longrightarrow> C \<in> derivable' R"
+|   step[intro]: "\<lbrakk> r \<in> R ; (fst r) \<noteq> [] ; \<forall> p \<in> set (fst r). p \<in> derivable' R \<rbrakk>
+                       \<Longrightarrow> (snd r) \<in> derivable' R"
+
+lemma deriv_to_deriv[simp]:
+assumes "(C,n) \<in> derivable R"
+shows "C \<in> derivable' R"
+using assms by (induct) auto
+
+lemma deriv_to_deriv2:
+assumes "C \<in> derivable' R"
+shows "\<exists> n. (C,n) \<in> derivable R"
+using assms
+proof (induct)
+  case (base C)
+  then have "(C,0) \<in> derivable R" by auto
+  then show ?case by blast
+next
+  case (step r)
+  then obtain ps c where "r = (ps,c)" and "ps \<noteq> []" by (cases r) auto
+  then have aa: "\<forall> p \<in> set ps. \<exists> n. (p,n) \<in> derivable R" using step(3) by auto
+  then have "\<exists> m. \<forall> p \<in> set ps. \<exists> n\<le>m. (p,n) \<in> derivable R"
+  proof (induct ps)
+    case Nil
+    then show ?case  by auto
+  next
+    case (Cons a as)
+    then have "\<exists> m. \<forall> p \<in> set as. \<exists> n\<le>m. (p,n) \<in> derivable R" by auto
+    then obtain m where "\<forall> p \<in> set as. \<exists> n\<le>m. (p,n) \<in> derivable R" by auto
+      "\<exists> n. (a,n) \<in> derivable R" by auto
+    then obtain m' where "(a,m') \<in> derivable R" by blast
+    ultimately have "\<forall> p \<in> set (a # as). \<exists> n\<le>(max m m'). (p,n) \<in> derivable R"
+      apply (auto simp add:Ball_def)
+      apply (rule_tac x=m' in exI) apply simp
+      apply (drule_tac x=x in spec) apply auto
+      apply (rule_tac x=n in exI) apply auto done
+    then show ?case by blast
+  qed
+  then obtain m where "\<forall> p \<in> set ps. \<exists> n\<le>m. (p,n) \<in> derivable R" by blast
+    derivable.step[where r="(ps,c)" and R=R and m=m] by auto
+qed
+
+overloading
+  invertible \<equiv> invertible
+  invertible_set \<equiv> invertible_set
+begin
+
+definition invertible
+  where "invertible r R \<equiv>
+    \<forall> n S. (r \<in> R \<and> (snd (extendRule S r),n) \<in> derivable R*) \<longrightarrow>

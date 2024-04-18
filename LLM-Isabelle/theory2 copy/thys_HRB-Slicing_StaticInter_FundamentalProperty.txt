@@ -1,0 +1,393 @@
+theory FundamentalProperty imports WeakSimulation SemanticsCFG begin
+
+context SDG begin
+
+
+lemma observable_set_stack_in_slice:
+  "S,f \<turnstile> (ms,s) -a\<rightarrow> (ms',s') 
+  \<Longrightarrow> \<forall>mx \<in> set (tl ms'). \<exists>mx'. call_of_return_node mx mx' \<and> mx' \<in> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+proof(induct rule:observable_move.induct)
+  case (observable_move_intra f a s s' ms S ms') thus ?case by simp
+next
+  case (observable_move_call f a s s' Q r p fs a' ms S ms')
+  have "call_of_return_node (targetnode a') (sourcenode a)"
+    by(fastforce simp:return_node_def call_of_return_node_def)
+  show ?case by fastforce
+next
+  case (observable_move_return f a s s' Q p f' ms S ms')
+  thus ?case by(cases "tl ms") auto
+qed
+
+
+lemma silent_move_preserves_stacks:
+  assumes "S,f \<turnstile> (m#ms,s) -a\<rightarrow>\<^sub>\<tau> (m'#ms',s')" and "valid_call_list cs m"
+  and "\<forall>i < length rs. rs!i \<in> get_return_edges (cs!i)" and "valid_return_list rs m"
+  and "length rs = length cs" and "ms = targetnodes rs"
+  obtains cs' rs' where "valid_node m'" and "valid_call_list cs' m'"
+  and "\<forall>i < length rs'. rs'!i \<in> get_return_edges (cs'!i)"
+  and "valid_return_list rs' m'" and "length rs' = length cs'" 
+  and "ms' = targetnodes rs'" and "upd_cs cs [a] = cs'"
+proof(atomize_elim)
+  from assms show "\<exists>cs' rs'. valid_node m' \<and> valid_call_list cs' m' \<and>
+    (\<forall>i<length rs'. rs' ! i \<in> get_return_edges (cs' ! i)) \<and>
+    valid_return_list rs' m' \<and> length rs' = length cs' \<and> ms' = targetnodes rs' \<and>
+    upd_cs cs [a] = cs'"
+  proof(induct S f "m#ms" s a "m'#ms'" s' rule:silent_move.induct)
+    case (silent_move_intra f a s s' n\<^sub>c)
+    have [simp]:"m' = targetnode a" "ms' = ms" by simp_all
+    moreover
+    have "get_proc (sourcenode a) = get_proc (targetnode a)" by(rule get_proc_intra)
+    have "valid_call_list cs m'"
+      apply(clarsimp simp:valid_call_list_def)
+      apply(erule_tac x="cs'" in allE)
+      apply(erule_tac x="c" in allE)
+      by(auto split:list.split)
+    moreover
+    have "valid_return_list rs m'"
+      apply(clarsimp simp:valid_return_list_def)
+      apply(erule_tac x="cs'" in allE) apply clarsimp
+      by(case_tac cs') auto
+    moreover
+      by(fastforce simp:intra_kind_def)
+      apply(rule_tac x="cs" in exI)
+      apply(rule_tac x="rs" in exI) 
+      by clarsimp
+  next
+    case (silent_move_call f a s s' Q r p fs a' S)
+    have [simp]:"m = sourcenode a" "m' = targetnode a" 
+      "ms' = targetnode a' # tl (m # ms)"
+      by simp_all
+    moreover
+      by(rule get_proc_call)
+    have "valid_call_list (a # cs) (targetnode a)"
+      apply(clarsimp simp:valid_call_list_def)
+      apply(case_tac cs') apply auto
+      apply(erule_tac x="list" in allE)
+      by(case_tac list)(auto simp:sourcenodes_def)
+    moreover
+    have "\<forall>i<length (a'#rs). (a'#rs) ! i \<in> get_return_edges ((a#cs) ! i)"
+      by auto(case_tac i,auto)
+    moreover
+      by(rule get_return_edges_valid)
+    obtain Q' f' where "kind a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'" by(fastforce dest!:call_return_edges)
+      by(rule get_proc_return)
+    have "get_proc (sourcenode a) = get_proc (targetnode a')" 
+      by(rule get_proc_get_return_edge)
+    have "valid_return_list (a'#rs) (targetnode a)"
+      apply(clarsimp simp:valid_return_list_def)
+      apply(case_tac cs') apply auto
+      apply(erule_tac x="list" in allE)
+      by(case_tac list)(auto simp:targetnodes_def)
+    moreover
+    moreover
+      by(simp add:targetnodes_def)
+    moreover
+    ultimately show ?case
+      apply(rule_tac x="a#cs" in exI)
+      apply(rule_tac x="a'#rs" in exI)
+      by clarsimp
+  next
+    case (silent_move_return f a s s' Q p f' S)
+    have [simp]:"m = sourcenode a" "m' = targetnode a" by simp_all
+    have "ms = targetnode a # ms'" 
+      by(cases ms) auto
+    obtain r' rs' where "rs = r' # rs'" 
+      and "targetnode a = targetnode r'" and "ms' = targetnodes rs'" 
+      by(cases rs)(auto simp:targetnodes_def)
+    moreover
+      and "length rs' = length cs'" by(cases cs) auto
+    moreover
+    have "\<forall>i<length rs'. rs' ! i \<in> get_return_edges (cs' ! i)"
+      and "r' \<in> get_return_edges c'" by auto
+    moreover
+    moreover
+    obtain p' Q' r fs' where "valid_edge c'" and "kind c' = Q':r\<hookrightarrow>\<^bsub>p'\<^esub>fs'" 
+      and "p' = get_proc m"
+      apply(auto simp:valid_call_list_def)
+      by(erule_tac x="[]" in allE) auto
+    have "get_proc (sourcenode a) = p" by(rule get_proc_return)
+    have "get_proc (targetnode c') = p" by(fastforce intro:get_proc_call)
+      by(rule get_return_edges_valid)
+    obtain Q'' f'' where "kind r' = Q''\<hookleftarrow>\<^bsub>p\<^esub>f''" by(fastforce dest!:call_return_edges)
+      by(fastforce simp:method_exit_def)
+      by(fastforce simp:method_exit_def)
+    have "sourcenode a = sourcenode r'" by(fastforce intro:method_exit_unique)
+    have "a = r'" by(fastforce intro:edge_det)
+    have "get_proc (sourcenode c') = get_proc (targetnode a)"
+      by(fastforce intro:get_proc_get_return_edge)
+    have "valid_call_list cs' (targetnode a)"
+      apply(clarsimp simp:valid_call_list_def)
+      apply(hypsubst_thin)
+      apply(erule_tac x="c' # cs'" in allE)
+      by(case_tac cs')(auto simp:sourcenodes_def)
+    moreover
+    have "valid_return_list rs' (targetnode a)"
+      apply(clarsimp simp:valid_return_list_def)
+      apply(erule_tac x="r' # cs'" in allE)
+      by(case_tac cs')(auto simp:targetnodes_def)
+    moreover
+    ultimately show ?case
+      apply(rule_tac x="cs'" in exI)
+      apply(rule_tac x="rs'" in exI)
+      by clarsimp
+  qed
+qed
+
+
+lemma silent_moves_preserves_stacks:
+  assumes "S,f \<turnstile> (m#ms,s) =as\<Rightarrow>\<^sub>\<tau> (m'#ms',s')" 
+  and "valid_node m" and "valid_call_list cs m"
+  and "\<forall>i < length rs. rs!i \<in> get_return_edges (cs!i)" and "valid_return_list rs m"
+  and "length rs = length cs" and "ms = targetnodes rs"
+  obtains cs' rs' where "valid_node m'" and "valid_call_list cs' m'"
+  and "\<forall>i < length rs'. rs'!i \<in> get_return_edges (cs'!i)"
+  and "valid_return_list rs' m'" and "length rs' = length cs'" 
+  and "ms' = targetnodes rs'" and "upd_cs cs as = cs'"
+proof(atomize_elim)
+  from assms show "\<exists>cs' rs'. valid_node m' \<and> valid_call_list cs' m' \<and>
+    (\<forall>i<length rs'. rs' ! i \<in> get_return_edges (cs' ! i)) \<and>
+    valid_return_list rs' m' \<and> length rs' = length cs' \<and> ms' = targetnodes rs' \<and>
+    upd_cs cs as = cs'"
+  proof(induct S f "m#ms" s as "m'#ms'" s' 
+      arbitrary:m ms cs rs rule:silent_moves.induct)
+    case (silent_moves_Nil s n\<^sub>c f)
+    thus ?case
+      apply(rule_tac x="cs" in exI)
+      apply(rule_tac x="rs" in exI)
+      by clarsimp
+  next
+    case (silent_moves_Cons S f s a msx'' s'' as sx')
+    obtain m'' ms'' where "msx'' = m''#ms''"
+      by(cases msx'')(auto elim:silent_move.cases)
+    obtain cs'' rs'' where hyps:"valid_node m''" "valid_call_list cs'' m''"
+      "\<forall>i < length rs''. rs''!i \<in> get_return_edges (cs''!i)"
+      "valid_return_list rs'' m''" "length rs'' = length cs''" 
+      "ms'' = targetnodes rs''" and "upd_cs cs [a] = cs''"
+      by(auto elim!:silent_move_preserves_stacks)
+    obtain cs' rs' where results:"valid_node m'" "valid_call_list cs' m'"
+      "\<forall>i<length rs'. rs' ! i \<in> get_return_edges (cs' ! i)"
+      "valid_return_list rs' m'" "length rs' = length cs'" "ms' = targetnodes rs'"
+      and "upd_cs cs'' as = cs'" by blast
+    have "upd_cs cs ([a] @ as) = cs'" by(rule upd_cs_Append)
+    with results show ?case
+      apply(rule_tac x="cs'" in exI)
+      apply(rule_tac x="rs'" in exI)
+      by clarsimp
+  qed
+qed
+
+
+lemma observable_move_preserves_stacks:
+  assumes "S,f \<turnstile> (m#ms,s) -a\<rightarrow> (m'#ms',s')" and "valid_call_list cs m"
+  and "\<forall>i < length rs. rs!i \<in> get_return_edges (cs!i)" and "valid_return_list rs m"
+  and "length rs = length cs" and "ms = targetnodes rs"
+  obtains cs' rs' where "valid_node m'" and "valid_call_list cs' m'"
+  and "\<forall>i < length rs'. rs'!i \<in> get_return_edges (cs'!i)"
+  and "valid_return_list rs' m'" and "length rs' = length cs'" 
+  and "ms' = targetnodes rs'" and "upd_cs cs [a] = cs'"
+proof(atomize_elim)
+  from assms show "\<exists>cs' rs'. valid_node m' \<and> valid_call_list cs' m' \<and>
+    (\<forall>i<length rs'. rs' ! i \<in> get_return_edges (cs' ! i)) \<and>
+    valid_return_list rs' m' \<and> length rs' = length cs' \<and> ms' = targetnodes rs' \<and>
+    upd_cs cs [a] = cs'"
+  proof(induct S f "m#ms" s a "m'#ms'" s' rule:observable_move.induct)
+    case (observable_move_intra f a s s' n\<^sub>c)
+    have [simp]:"m' = targetnode a" "ms' = ms" by simp_all
+    moreover
+    have "get_proc (sourcenode a) = get_proc (targetnode a)" by(rule get_proc_intra)
+    have "valid_call_list cs m'"
+      apply(clarsimp simp:valid_call_list_def)
+      apply(erule_tac x="cs'" in allE)
+      apply(erule_tac x="c" in allE)
+      by(auto split:list.split)
+    moreover
+    have "valid_return_list rs m'"
+      apply(clarsimp simp:valid_return_list_def)
+      apply(erule_tac x="cs'" in allE) apply clarsimp
+      by(case_tac cs') auto
+    moreover
+      by(fastforce simp:intra_kind_def)
+      apply(rule_tac x="cs" in exI)
+      apply(rule_tac x="rs" in exI) 
+      by clarsimp
+  next
+    case (observable_move_call f a s s' Q r p fs a' S)
+    have [simp]:"m = sourcenode a" "m' = targetnode a" 
+      "ms' = targetnode a' # tl (m # ms)"
+      by simp_all
+    moreover
+      by(rule get_proc_call)
+    have "valid_call_list (a # cs) (targetnode a)"
+      apply(clarsimp simp:valid_call_list_def)
+      apply(case_tac cs') apply auto
+      apply(erule_tac x="list" in allE)
+      by(case_tac list)(auto simp:sourcenodes_def)
+    moreover
+    have "\<forall>i<length (a'#rs). (a'#rs) ! i \<in> get_return_edges ((a#cs) ! i)"
+      by auto(case_tac i,auto)
+    moreover
+      by(rule get_return_edges_valid)
+    obtain Q' f' where "kind a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'" by(fastforce dest!:call_return_edges)
+      by(rule get_proc_return)
+    have "get_proc (sourcenode a) = get_proc (targetnode a')" 
+      by(rule get_proc_get_return_edge)
+    have "valid_return_list (a'#rs) (targetnode a)"
+      apply(clarsimp simp:valid_return_list_def)
+      apply(case_tac cs') apply auto
+      apply(erule_tac x="list" in allE)
+      by(case_tac list)(auto simp:targetnodes_def)
+    moreover
+    moreover
+      by(simp add:targetnodes_def)
+    moreover
+    ultimately show ?case
+      apply(rule_tac x="a#cs" in exI)
+      apply(rule_tac x="a'#rs" in exI)
+      by clarsimp
+  next
+    case (observable_move_return f a s s' Q p f' S)
+    have [simp]:"m = sourcenode a" "m' = targetnode a" by simp_all
+    have "ms = targetnode a # ms'" 
+      by(cases ms) auto
+    obtain r' rs' where "rs = r' # rs'" 
+      and "targetnode a = targetnode r'" and "ms' = targetnodes rs'" 
+      by(cases rs)(auto simp:targetnodes_def)
+    moreover
+      and "length rs' = length cs'" by(cases cs) auto
+    moreover
+    have "\<forall>i<length rs'. rs' ! i \<in> get_return_edges (cs' ! i)"
+      and "r' \<in> get_return_edges c'" by auto
+    moreover
+    moreover
+    obtain p' Q' r fs' where "valid_edge c'" and "kind c' = Q':r\<hookrightarrow>\<^bsub>p'\<^esub>fs'" 
+      and "p' = get_proc m"
+      apply(auto simp:valid_call_list_def)
+      by(erule_tac x="[]" in allE) auto
+    have "get_proc (sourcenode a) = p" by(rule get_proc_return)
+    have "get_proc (targetnode c') = p" by(fastforce intro:get_proc_call)
+      by(rule get_return_edges_valid)
+    obtain Q'' f'' where "kind r' = Q''\<hookleftarrow>\<^bsub>p\<^esub>f''" by(fastforce dest!:call_return_edges)
+      by(fastforce simp:method_exit_def)
+      by(fastforce simp:method_exit_def)
+    have "sourcenode a = sourcenode r'" by(fastforce intro:method_exit_unique)
+    have "a = r'" by(fastforce intro:edge_det)
+    have "get_proc (sourcenode c') = get_proc (targetnode a)"
+      by(fastforce intro:get_proc_get_return_edge)
+    have "valid_call_list cs' (targetnode a)"
+      apply(clarsimp simp:valid_call_list_def)
+      apply(hypsubst_thin)
+      apply(erule_tac x="c' # cs'" in allE)
+      by(case_tac cs')(auto simp:sourcenodes_def)
+    moreover
+    have "valid_return_list rs' (targetnode a)"
+      apply(clarsimp simp:valid_return_list_def)
+      apply(erule_tac x="r' # cs'" in allE)
+      by(case_tac cs')(auto simp:targetnodes_def)
+    moreover
+    ultimately show ?case
+      apply(rule_tac x="cs'" in exI)
+      apply(rule_tac x="rs'" in exI)
+      by clarsimp
+  qed
+qed
+
+
+lemma observable_moves_preserves_stack:
+  assumes "S,f \<turnstile> (m#ms,s) =as\<Rightarrow> (m'#ms',s')" 
+  and "valid_node m" and "valid_call_list cs m"
+  and "\<forall>i < length rs. rs!i \<in> get_return_edges (cs!i)" and "valid_return_list rs m"
+  and "length rs = length cs" and "ms = targetnodes rs"
+  obtains cs' rs' where "valid_node m'" and "valid_call_list cs' m'"
+  and "\<forall>i < length rs'. rs'!i \<in> get_return_edges (cs'!i)"
+  and "valid_return_list rs' m'" and "length rs' = length cs'" 
+  and "ms' = targetnodes rs'" and "upd_cs cs as = cs'"
+proof(atomize_elim)
+    where "as = as'@[a']" and "S,f \<turnstile> (m#ms,s) =as'\<Rightarrow>\<^sub>\<tau> (msx,s'')"
+    and "S,f \<turnstile> (msx,s'') -a'\<rightarrow> (m'#ms',s')"
+    by(fastforce elim:observable_moves.cases)
+    where [simp]:"msx = m''#ms''" by(cases msx)(auto elim:observable_move.cases)
+  obtain cs'' rs'' where "valid_node m''" and "valid_call_list cs'' m''"
+    and "\<forall>i < length rs''. rs''!i \<in> get_return_edges (cs''!i)"
+    and "valid_return_list rs'' m''" and "length rs'' = length cs''" 
+    and "ms'' = targetnodes rs''" and "upd_cs cs as' = cs''"
+    by(auto elim!:silent_moves_preserves_stacks)
+  obtain cs' rs' where results:"valid_node m'" "valid_call_list cs' m'"
+    "\<forall>i<length rs'. rs' ! i \<in> get_return_edges (cs' ! i)"
+    "valid_return_list rs' m'" "length rs' = length cs'" "ms' = targetnodes rs'"
+    and "upd_cs cs'' [a'] = cs'"
+    by(auto elim!:observable_move_preserves_stacks)
+  have "upd_cs cs (as'@[a']) = cs'" by(rule upd_cs_Append)
+  show "\<exists>cs' rs'. valid_node m' \<and> valid_call_list cs' m' \<and>
+    (\<forall>i<length rs'. rs' ! i \<in> get_return_edges (cs' ! i)) \<and>
+    valid_return_list rs' m' \<and> length rs' = length cs' \<and> ms' = targetnodes rs' \<and>
+    upd_cs cs as = cs'"
+    apply(rule_tac x="cs'" in exI)
+    apply(rule_tac x="rs'" in exI)
+    by clarsimp
+qed
+
+
+lemma silent_moves_slpa_path:
+  "\<lbrakk>S,f \<turnstile> (m#ms''@ms,s) =as\<Rightarrow>\<^sub>\<tau> (m'#ms',s'); valid_node m; valid_call_list cs m;
+  \<forall>i < length rs. rs!i \<in> get_return_edges (cs!i); valid_return_list rs m; 
+  length rs = length cs; ms'' = targetnodes rs;
+  \<forall>mx \<in> set ms. \<exists>mx'. call_of_return_node mx mx' \<and> mx' \<in> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>;
+  ms'' \<noteq> [] \<longrightarrow> (\<exists>mx'. call_of_return_node (last ms'') mx' \<and> mx' \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>);
+  \<forall>mx \<in> set ms'. \<exists>mx'. call_of_return_node mx mx' \<and> mx' \<in> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>\<rbrakk>
+  \<Longrightarrow> same_level_path_aux cs as \<and> upd_cs cs as = [] \<and> m -as\<rightarrow>* m' \<and> ms = ms'"
+proof(induct S f "m#ms''@ms" s as "m'#ms'" s' arbitrary:m ms'' ms cs rs
+    rule:silent_moves.induct)
+  case (silent_moves_Nil sx S f) thus ?case
+    apply(cases ms'' rule:rev_cases) apply(auto intro:empty_path simp:targetnodes_def)
+    by(cases rs rule:rev_cases,auto)+
+next
+  case (silent_moves_Cons S f sx a msx' sx' as sx'')
+  thus ?case
+  proof(induct _ _ "m#ms''@ms" _ _ _ _ rule:silent_move.induct)
+    case (silent_move_intra f a s s' S msx')
+    have "get_proc (sourcenode a) = get_proc (targetnode a)" by(rule get_proc_intra)
+      by simp
+    have "valid_call_list cs (targetnode a)"
+      apply(clarsimp simp:valid_call_list_def)
+      apply(erule_tac x="cs'" in allE)
+      apply(erule_tac x="c" in allE)
+      by(auto split:list.split)
+    have "valid_return_list rs (targetnode a)"
+      apply(clarsimp simp:valid_return_list_def)
+      apply(erule_tac x="cs'" in allE) apply clarsimp
+      by(case_tac cs') auto
+    have "msx' = targetnode a # ms'' @ ms" by simp
+    have "same_level_path_aux cs as" and "upd_cs cs as = []"
+      and "targetnode a -as\<rightarrow>* m'" and "ms = ms'" by simp_all
+    have "same_level_path_aux cs (a # as)" by(fastforce simp:intra_kind_def)
+    moreover
+    have "upd_cs cs (a # as) = []" by(fastforce simp:intra_kind_def)
+    moreover
+    have "m -a # as\<rightarrow>* m'" by(fastforce intro:Cons_path)
+  next
+    case (silent_move_call f a s s' Q r p fs a' S msx')
+      by simp
+      by(rule get_proc_call)
+    have "valid_call_list (a # cs) (targetnode a)"
+      apply(clarsimp simp:valid_call_list_def)
+      apply(case_tac cs') apply auto
+      apply(erule_tac x="list" in allE)
+      by(case_tac list)(auto simp:sourcenodes_def)
+    have "\<forall>i<length (a'#rs). (a'#rs) ! i \<in> get_return_edges ((a#cs) ! i)"
+      by auto(case_tac i,auto)
+      by(rule get_return_edges_valid)
+    obtain Q' f' where "kind a' = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'" by(fastforce dest!:call_return_edges)
+      by(rule get_proc_return)
+    have "get_proc (sourcenode a) = get_proc (targetnode a')" 
+      by(rule get_proc_get_return_edge)
+    have "valid_return_list (a'#rs) (targetnode a)"
+      apply(clarsimp simp:valid_return_list_def)
+      apply(case_tac cs') apply auto
+      apply(erule_tac x="list" in allE)
+      by(case_tac list)(auto simp:targetnodes_def)
+    have "targetnode a' # ms'' = targetnodes (a'#rs)" by(simp add:targetnodes_def)
+    have "msx' = targetnode a # targetnode a' # ms'' @ ms" by simp
+    have "\<exists>mx'. call_of_return_node (last (targetnode a' # ms'')) mx' \<and>
+      mx' \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+    proof(cases "ms'' = []")
+      case True

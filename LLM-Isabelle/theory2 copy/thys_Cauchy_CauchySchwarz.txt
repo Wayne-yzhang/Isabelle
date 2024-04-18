@@ -1,0 +1,214 @@
+theory CauchySchwarz
+imports Complex_Main
+begin
+
+
+
+
+lemmas real_sq = power2_eq_square [where 'a = real, symmetric]
+
+lemmas real_sq_exp = power_mult_distrib [where 'a = real and ?n = 2]
+
+lemma double_sum_equiv:
+  fixes f::"nat \<Rightarrow> real"
+  shows
+  "(\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j)) =
+   (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f j * g k))"
+  by (rule sum.swap)
+
+
+
+
+
+
+
+
+
+
+
+
+type_synonym vector = "(nat\<Rightarrow>real) * nat"
+
+definition
+  ith :: "vector \<Rightarrow> nat \<Rightarrow> real" ("((_)\<^bsub>_\<^esub>)" [80,100] 100) where
+  "ith v i = fst v i"
+
+definition
+  vlen :: "vector \<Rightarrow> nat" where
+  "vlen v = snd v"
+
+
+
+
+definition
+  dot :: "vector \<Rightarrow> vector \<Rightarrow> real" (infixr "\<cdot>" 60) where
+  "dot a b = (\<Sum>j\<in>{1..(vlen a)}. a\<^bsub>j\<^esub>*b\<^bsub>j\<^esub>)"
+
+definition
+  norm :: "vector \<Rightarrow> real"                  ("\<parallel>_\<parallel>" 100) where
+  "norm v = sqrt (\<Sum>j\<in>{1..(vlen v)}. v\<^bsub>j\<^esub>^2)"
+
+
+lemma norm_dot:
+ "\<parallel>v\<parallel> = sqrt (v\<cdot>v)"
+proof -
+  have "sqrt (v\<cdot>v) = sqrt (\<Sum>j\<in>{1..(vlen v)}. v\<^bsub>j\<^esub>*v\<^bsub>j\<^esub>)" unfolding dot_def by simp
+  also with real_sq have "\<dots> = sqrt (\<Sum>j\<in>{1..(vlen v)}. v\<^bsub>j\<^esub>^2)" by simp
+  also have "\<dots> = \<parallel>v\<parallel>" unfolding norm_def by simp
+  finally show ?thesis ..
+qed
+
+
+lemma norm_pos:
+  "\<parallel>v\<parallel> \<ge> 0"
+proof -
+  have "\<forall>j. v\<^bsub>j\<^esub>^2 \<ge> 0" unfolding ith_def by auto
+  have "(\<Sum>j\<in>{1..(vlen v)}. v\<^bsub>j\<^esub>^2) \<ge> 0" by (simp add: sum_nonneg)
+  with real_sqrt_ge_zero have "sqrt (\<Sum>j\<in>{1..(vlen v)}. v\<^bsub>j\<^esub>^2) \<ge> 0" .
+  thus ?thesis unfolding norm_def .
+qed
+
+
+lemma double_sum_aux:
+  fixes f::"nat \<Rightarrow> real"
+  shows
+  "(\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j)) =
+   (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (f k * g j + f j * g k) / 2))"
+proof -
+  have
+    "2 * (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j)) =
+    (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j)) +
+    (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j))"
+    by simp
+  also have
+    "\<dots> =
+    (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j)) +
+    (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f j * g k))"
+    by (simp only: double_sum_equiv)
+  also have
+    "\<dots> =
+    (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j + f j * g k))"
+    by (auto simp add: sum.distrib)
+  finally have
+    "2 * (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j)) =
+    (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j + f j * g k))" .
+  hence
+    "(\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. f k * g j)) =
+     (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (f k * g j + f j * g k)))*(1/2)"
+    by auto
+  also have
+    "\<dots> =
+     (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (f k * g j + f j * g k)*(1/2)))"
+    by (simp add: sum_distrib_left mult.commute)
+  finally show ?thesis by (auto simp add: inverse_eq_divide)
+qed
+
+
+theorem CauchySchwarzReal:
+  fixes x::vector
+  assumes "vlen x = vlen y"
+  shows "\<bar>x\<cdot>y\<bar> \<le> \<parallel>x\<parallel>*\<parallel>y\<parallel>"
+proof -
+  have "\<bar>x\<cdot>y\<bar>^2 \<le> (\<parallel>x\<parallel>*\<parallel>y\<parallel>)^2"
+  proof -
+    have "(\<parallel>x\<parallel>*\<parallel>y\<parallel>)^2 - \<bar>x\<cdot>y\<bar>^2 \<ge> 0"
+    proof -
+      obtain n where nx: "n = vlen x" by simp
+      {
+        have "(\<Sum>j\<in>{1..n}. x\<^bsub>j\<^esub>^2) \<ge> 0" by (simp add: sum_nonneg)
+        hence xp: "(sqrt (\<Sum>j\<in>{1..n}. x\<^bsub>j\<^esub>^2))^2 = (\<Sum>j\<in>{1..n}. x\<^bsub>j\<^esub>^2)"
+          by (rule real_sqrt_pow2)
+
+        have "(\<Sum>j\<in>{1..n}. y\<^bsub>j\<^esub>^2) \<ge> 0" by (simp add: sum_nonneg)
+        hence yp: "(sqrt (\<Sum>j\<in>{1..n}. y\<^bsub>j\<^esub>^2))^2 = (\<Sum>j\<in>{1..n}. y\<^bsub>j\<^esub>^2)"
+          by (rule real_sqrt_pow2)
+
+        have
+          "(\<parallel>x\<parallel>*\<parallel>y\<parallel>)^2 = \<parallel>x\<parallel>^2 * \<parallel>y\<parallel>^2"
+          by (simp add: real_sq_exp)
+        also from nx ny have
+          "\<dots> = (sqrt (\<Sum>j\<in>{1..n}. x\<^bsub>j\<^esub>^2))^2 * (sqrt (\<Sum>j\<in>{1..n}. y\<^bsub>j\<^esub>^2))^2"
+          unfolding norm_def by auto
+        also from xp yp have
+          "\<dots> = (\<Sum>j\<in>{1..n}. x\<^bsub>j\<^esub>^2)*(\<Sum>j\<in>{1..n}. y\<^bsub>j\<^esub>^2)"
+          by simp
+        also from sum_product have
+          "\<dots> = (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>^2)*(y\<^bsub>j\<^esub>^2)))" .
+        finally have
+          "(\<parallel>x\<parallel>*\<parallel>y\<parallel>)^2 = (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>^2)*(y\<^bsub>j\<^esub>^2)))" .
+      }
+      moreover
+      {
+        have
+          "\<bar>x\<cdot>y\<bar>^2 = (x\<cdot>y)^2"
+          by simp
+        also from nx have
+          "\<dots> = (\<Sum>j\<in>{1..n}. x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)^2"
+          unfolding dot_def by simp
+        also from real_sq have
+          "\<dots> = (\<Sum>j\<in>{1..n}. x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)*(\<Sum>j\<in>{1..n}. x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)"
+          by simp
+        also from sum_product have
+          "\<dots> = (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)))" .
+        finally have
+          "\<bar>x\<cdot>y\<bar>^2 = (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)))" .
+      }
+      ultimately have
+        "(\<parallel>x\<parallel>*\<parallel>y\<parallel>)^2 - \<bar>x\<cdot>y\<bar>^2 =
+         (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>^2)*(y\<^bsub>j\<^esub>^2))) -
+         (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)))"
+        by simp
+      also have
+        "\<dots> =
+         (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. ((x\<^bsub>k\<^esub>^2*y\<^bsub>j\<^esub>^2) + (x\<^bsub>j\<^esub>^2*y\<^bsub>k\<^esub>^2))/2)) -
+         (\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)))"
+        by (simp only: double_sum_aux)
+      also have
+        "\<dots> =
+         (\<Sum>k\<in>{1..n}.  (\<Sum>j\<in>{1..n}. ((x\<^bsub>k\<^esub>^2*y\<^bsub>j\<^esub>^2) + (x\<^bsub>j\<^esub>^2*y\<^bsub>k\<^esub>^2))/2 - (x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)))"
+        by (auto simp add: sum_subtractf)
+      also have
+        "\<dots> =
+         (\<Sum>k\<in>{1..n}.  (\<Sum>j\<in>{1..n}. (inverse 2)*2*
+         (((x\<^bsub>k\<^esub>^2*y\<^bsub>j\<^esub>^2) + (x\<^bsub>j\<^esub>^2*y\<^bsub>k\<^esub>^2))*(1/2) - (x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>))))"
+        by auto
+      also have
+        "\<dots> =
+         (\<Sum>k\<in>{1..n}.  (\<Sum>j\<in>{1..n}. (inverse 2)*(2*
+        (((x\<^bsub>k\<^esub>^2*y\<^bsub>j\<^esub>^2) + (x\<^bsub>j\<^esub>^2*y\<^bsub>k\<^esub>^2))*(1/2) - (x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)))))"
+        by (simp only: mult.assoc)
+      also have
+        "\<dots> =
+         (\<Sum>k\<in>{1..n}.  (\<Sum>j\<in>{1..n}. (inverse 2)*
+        ((((x\<^bsub>k\<^esub>^2*y\<^bsub>j\<^esub>^2) + (x\<^bsub>j\<^esub>^2*y\<^bsub>k\<^esub>^2))*2*(inverse 2) - 2*(x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)))))"
+        by (auto simp add: distrib_right mult.assoc ac_simps)
+      also have
+        "\<dots> =
+        (\<Sum>k\<in>{1..n}.  (\<Sum>j\<in>{1..n}. (inverse 2)*
+        ((((x\<^bsub>k\<^esub>^2*y\<^bsub>j\<^esub>^2) + (x\<^bsub>j\<^esub>^2*y\<^bsub>k\<^esub>^2)) - 2*(x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>)))))"
+        by (simp only: mult.assoc, simp)
+      also have
+        "\<dots> =
+         (inverse 2)*(\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}.
+         (((x\<^bsub>k\<^esub>^2*y\<^bsub>j\<^esub>^2) + (x\<^bsub>j\<^esub>^2*y\<^bsub>k\<^esub>^2)) - 2*(x\<^bsub>k\<^esub>*y\<^bsub>k\<^esub>)*(x\<^bsub>j\<^esub>*y\<^bsub>j\<^esub>))))"
+        by (simp only: sum_distrib_left)
+      also have
+        "\<dots> =
+         (inverse 2)*(\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>*y\<^bsub>j\<^esub> - x\<^bsub>j\<^esub>*y\<^bsub>k\<^esub>)^2))"
+        by (simp only: power2_diff real_sq_exp, auto simp add: ac_simps)
+      also have "\<dots> \<ge> 0"
+      proof -
+        have "(\<Sum>k\<in>{1..n}. (\<Sum>j\<in>{1..n}. (x\<^bsub>k\<^esub>*y\<^bsub>j\<^esub> - x\<^bsub>j\<^esub>*y\<^bsub>k\<^esub>)^2)) \<ge> 0"
+          by (simp add: sum_nonneg)
+        thus ?thesis by simp
+      qed
+      finally show "(\<parallel>x\<parallel>*\<parallel>y\<parallel>)^2 - \<bar>x\<cdot>y\<bar>^2 \<ge> 0" .
+    qed
+    thus ?thesis by simp
+  qed
+  moreover have "0 \<le> \<parallel>x\<parallel>*\<parallel>y\<parallel>"
+    by (auto simp add: norm_pos)
+  ultimately show ?thesis by (rule power2_le_imp_le)
+qed
+
+end

@@ -1,0 +1,270 @@
+theory
+  UPFCore
+  imports 
+    Monads
+begin
+
+
+
+datatype '\<alpha> decision = allow '\<alpha> | deny '\<alpha>
+
+type_synonym ('\<alpha>,'\<beta>) policy = "'\<alpha>  \<rightharpoonup> '\<beta> decision" (infixr "|->" 0)
+
+
+translations (type)        "'\<alpha> |-> '\<beta>" <= (type) "'\<alpha>  \<rightharpoonup> '\<beta> decision"
+type_notation "policy" (infixr "\<mapsto>" 0) 
+
+
+notation    "None" ("\<bottom>")
+notation    "Some" ("\<lfloor>_\<rfloor>" 80)
+
+
+definition Allow :: "('\<alpha> decision) set"
+where     "Allow = range allow"
+
+definition Deny :: "('\<alpha> decision) set"
+where     "Deny = range deny"
+ 
+
+
+nonterminal policylets and policylet
+
+syntax
+  "_policylet1"  :: "['a, 'a] => policylet"                 ("_ /\<mapsto>\<^sub>+/ _")
+  "_policylet2"  :: "['a, 'a] => policylet"                 ("_ /\<mapsto>\<^sub>-/ _")
+  ""             :: "policylet => policylets"               ("_")
+  "_Maplets"     :: "[policylet, policylets] => policylets" ("_,/ _")
+  "_Maplets"     :: "[policylet, policylets] => policylets" ("_,/ _")
+   "_MapUpd"      :: "['a |-> 'b, policylets] => 'a |-> 'b"  ("_/'(_')" [900,0]900)
+  "_emptypolicy" :: "'a |-> 'b"                             ("\<emptyset>")
+
+translations
+  "_MapUpd m (_Maplets xy ms)"   \<rightleftharpoons> "_MapUpd (_MapUpd m xy) ms"
+  "_MapUpd m (_policylet1 x y)"  \<rightleftharpoons> "m(x := CONST Some (CONST allow y))"
+  "_MapUpd m (_policylet2 x y)"  \<rightleftharpoons> "m(x := CONST Some (CONST deny y))"
+  "\<emptyset>"                            \<rightleftharpoons> "CONST Map.empty" 
+
+lemma test: "\<emptyset>(x\<mapsto>\<^sub>+a, y\<mapsto>\<^sub>-b) = \<emptyset>(x \<mapsto>\<^sub>+ a, y \<mapsto>\<^sub>- b)"   by simp
+
+lemma test2: "p(x\<mapsto>\<^sub>+a,x\<mapsto>\<^sub>-b) = p(x\<mapsto>\<^sub>-b)"   by simp
+
+
+lemma pol_upd_triv1: "t k =   \<lfloor>allow x\<rfloor> \<Longrightarrow> t(k\<mapsto>\<^sub>+x) = t"
+  by (rule ext) simp
+
+lemma pol_upd_triv2: "t k = \<lfloor>deny x\<rfloor> \<Longrightarrow> t(k\<mapsto>\<^sub>-x) = t"
+  by (rule ext) simp
+
+lemma pol_upd_allow_nonempty: "t(k\<mapsto>\<^sub>+x) \<noteq> \<emptyset>" 
+  by simp
+
+lemma pol_upd_deny_nonempty: "t(k\<mapsto>\<^sub>-x) \<noteq> \<emptyset>" 
+  by simp
+
+lemma pol_upd_eqD1 : "m(a\<mapsto>\<^sub>+x) = n(a\<mapsto>\<^sub>+y) \<Longrightarrow> x = y"
+  by(auto dest: map_upd_eqD1)
+
+lemma pol_upd_eqD2 : "m(a\<mapsto>\<^sub>-x) = n(a\<mapsto>\<^sub>-y) \<Longrightarrow> x = y"
+  by(auto dest: map_upd_eqD1)
+
+lemma pol_upd_neq1 [simp]: "m(a\<mapsto>\<^sub>+x) \<noteq> n(a\<mapsto>\<^sub>-y)"
+  by(auto dest: map_upd_eqD1)
+
+
+
+syntax
+  "_policyoverride"  :: "['a \<mapsto> 'b, 'a \<mapsto> 'b] \<Rightarrow> 'a \<mapsto> 'b" (infixl "\<Oplus>" 100)
+translations
+  "p \<Oplus> q" \<rightleftharpoons> "q ++ p" 
+
+
+
+lemma override_empty: "p \<Oplus> \<emptyset> = p" 
+  by simp
+
+lemma empty_override: "\<emptyset> \<Oplus> p = p" 
+  by simp
+
+lemma override_assoc: "p1 \<Oplus> (p2 \<Oplus> p3) = (p1 \<Oplus> p2) \<Oplus> p3" 
+  by simp
+
+
+definition override_A :: "['\<alpha>\<mapsto>'\<beta>, '\<alpha>\<mapsto>'\<beta>] \<Rightarrow> '\<alpha>\<mapsto>'\<beta>" (infixl "++'_A" 100) 
+where  "m2 ++_A m1 = 
+          (\<lambda>x. (case m1 x of 
+                 \<lfloor>allow a\<rfloor> \<Rightarrow>  \<lfloor>allow a\<rfloor>
+               | \<lfloor>deny a\<rfloor>  \<Rightarrow> (case m2 x of \<lfloor>allow b\<rfloor> \<Rightarrow> \<lfloor>allow b\<rfloor> 
+                                            | _ \<Rightarrow> \<lfloor>deny a\<rfloor>)
+               | \<bottom> \<Rightarrow> m2 x)
+           )"
+
+syntax
+  "_policyoverride_A"  :: "['a \<mapsto> 'b, 'a \<mapsto> 'b] \<Rightarrow> 'a \<mapsto> 'b" (infixl "\<Oplus>\<^sub>A" 100)
+translations
+  "p \<Oplus>\<^sub>A q" \<rightleftharpoons> "p ++_A q"
+
+lemma override_A_empty[simp]: "p \<Oplus>\<^sub>A \<emptyset> = p" 
+  by(simp add:override_A_def)
+
+lemma empty_override_A[simp]: "\<emptyset> \<Oplus>\<^sub>A p = p" 
+  apply (rule ext)
+  apply (simp add:override_A_def)
+  subgoal for x 
+    apply (case_tac "p x")
+     apply (simp_all)
+    subgoal for a
+      apply (case_tac a)
+       apply (simp_all)
+      done
+    done 
+  done 
+
+
+lemma override_A_assoc: "p1 \<Oplus>\<^sub>A (p2 \<Oplus>\<^sub>A p3) = (p1 \<Oplus>\<^sub>A p2) \<Oplus>\<^sub>A p3" 
+  by (rule ext, simp add: override_A_def split: decision.splits  option.splits)
+
+definition override_D :: "['\<alpha>\<mapsto>'\<beta>, '\<alpha>\<mapsto>'\<beta>] \<Rightarrow> '\<alpha>\<mapsto>'\<beta>" (infixl "++'_D" 100) 
+where "m1 ++_D m2 = 
+          (\<lambda>x. case m2 x of 
+                \<lfloor>deny a\<rfloor> \<Rightarrow> \<lfloor>deny a\<rfloor>
+              | \<lfloor>allow a\<rfloor> \<Rightarrow> (case m1 x of \<lfloor>deny b\<rfloor> \<Rightarrow> \<lfloor>deny b\<rfloor>
+                                  | _ \<Rightarrow> \<lfloor>allow a\<rfloor>)
+              | \<bottom> \<Rightarrow> m1 x 
+           )"
+ 
+syntax
+  "_policyoverride_D"  :: "['a \<mapsto> 'b, 'a \<mapsto> 'b] \<Rightarrow> 'a \<mapsto> 'b" (infixl "\<Oplus>\<^sub>D" 100)
+translations
+  "p \<Oplus>\<^sub>D q" \<rightleftharpoons> "p ++_D q"
+
+lemma override_D_empty[simp]: "p \<Oplus>\<^sub>D \<emptyset> = p" 
+  by(simp add:override_D_def)
+
+lemma empty_override_D[simp]: "\<emptyset> \<Oplus>\<^sub>D p = p" 
+  apply (rule ext)
+  apply (simp add:override_D_def)
+  subgoal for x 
+    apply (case_tac "p x", simp_all)
+    subgoal for a
+      apply (case_tac a, simp_all)
+      done
+    done
+  done
+
+lemma override_D_assoc: "p1 \<Oplus>\<^sub>D (p2 \<Oplus>\<^sub>D p3) = (p1 \<Oplus>\<^sub>D p2) \<Oplus>\<^sub>D p3"
+  apply (rule ext)
+  apply (simp add: override_D_def split: decision.splits  option.splits)
+done
+
+
+
+definition policy_range_comp :: "['\<beta>\<Rightarrow>'\<gamma>, '\<alpha>\<mapsto>'\<beta>] \<Rightarrow> '\<alpha> \<mapsto>'\<gamma>"   (infixl "o'_f" 55) 
+where
+  "f o_f p = (\<lambda>x. case p x of
+                     \<lfloor>allow y\<rfloor> \<Rightarrow> \<lfloor>allow (f y)\<rfloor>
+                   | \<lfloor>deny y\<rfloor> \<Rightarrow> \<lfloor>deny (f y)\<rfloor>
+                   | \<bottom> \<Rightarrow> \<bottom>)"
+
+syntax
+  "_policy_range_comp" :: "['\<beta>\<Rightarrow>'\<gamma>, '\<alpha>\<mapsto>'\<beta>] \<Rightarrow> '\<alpha> \<mapsto>'\<gamma>" (infixl "o\<^sub>f" 55)
+translations
+  "p o\<^sub>f q" \<rightleftharpoons> "p o_f q"
+
+lemma policy_range_comp_strict : "f o\<^sub>f \<emptyset> = \<emptyset>"
+  apply (rule ext)
+  apply (simp add: policy_range_comp_def)
+  done
+
+
+
+definition range_split :: "[('\<beta>\<Rightarrow>'\<gamma>)\<times>('\<beta>\<Rightarrow>'\<gamma>),'\<alpha> \<mapsto> '\<beta>] \<Rightarrow> '\<alpha> \<mapsto> '\<gamma>"
+                          (infixr "\<nabla>" 100)
+where "(P) \<nabla> p = (\<lambda>x. case p x of 
+                          \<lfloor>allow y\<rfloor> \<Rightarrow> \<lfloor>allow ((fst P) y)\<rfloor>
+                        | \<lfloor>deny y\<rfloor>  \<Rightarrow> \<lfloor>deny ((snd P) y)\<rfloor> 
+                        | \<bottom>        \<Rightarrow> \<bottom>)"
+
+lemma range_split_strict[simp]: "P \<nabla> \<emptyset> = \<emptyset>"
+  apply (rule ext)
+  apply (simp add: range_split_def)
+  done
+
+
+lemma range_split_charn:
+  "(f,g) \<nabla> p = (\<lambda>x. case p x of 
+                           \<lfloor>allow x\<rfloor> \<Rightarrow> \<lfloor>allow (f x)\<rfloor>
+                         | \<lfloor>deny x\<rfloor>  \<Rightarrow> \<lfloor>deny (g x)\<rfloor> 
+                         | \<bottom>        \<Rightarrow> \<bottom>)"
+  apply (simp add: range_split_def)
+  apply (rule ext)
+  subgoal for x 
+    apply (case_tac "p x")
+     apply (simp_all)
+    subgoal for a
+      apply (case_tac "a")
+       apply (simp_all)
+      done
+    done
+  done
+
+
+lemma range_split_vs_range_compose: "(f,f) \<nabla> p = f o\<^sub>f p"
+  by(simp add: range_split_charn policy_range_comp_def)
+    
+lemma range_split_id [simp]: "(id,id) \<nabla> p = p"
+  apply (rule ext)
+  apply (simp add: range_split_charn id_def)
+  subgoal for x
+    apply (case_tac "p x")
+     apply (simp_all)
+    subgoal for a
+      apply (case_tac "a")
+       apply (simp_all)
+      done
+    done 
+  done 
+
+lemma range_split_bi_compose [simp]: "(f1,f2) \<nabla> (g1,g2) \<nabla> p = (f1 o g1,f2 o g2) \<nabla> p"
+  apply (rule ext)
+  apply (simp add: range_split_charn comp_def)
+  subgoal for x 
+    apply (case_tac "p x")
+     apply (simp_all)
+    subgoal for a
+      apply (case_tac "a")
+       apply (simp_all)
+      done
+    done
+  done
+
+
+
+definition dom_split2a :: "[('\<alpha> \<rightharpoonup> '\<gamma>) \<times> ('\<alpha> \<rightharpoonup>'\<gamma>),'\<alpha> \<mapsto> '\<beta>] \<Rightarrow> '\<alpha> \<mapsto> '\<gamma>"         (infixr "\<Delta>a" 100)
+where "P \<Delta>a p = (\<lambda>x. case p x of 
+                          \<lfloor>allow y\<rfloor> \<Rightarrow> \<lfloor>allow (the ((fst P) x))\<rfloor>
+                        | \<lfloor>deny y\<rfloor>  \<Rightarrow>  \<lfloor>deny (the ((snd P) x))\<rfloor> 
+                        | \<bottom>        \<Rightarrow> \<bottom>)"
+
+definition dom_split2 :: "[('\<alpha> \<Rightarrow> '\<gamma>) \<times> ('\<alpha> \<Rightarrow>'\<gamma>),'\<alpha> \<mapsto> '\<beta>] \<Rightarrow> '\<alpha> \<mapsto> '\<gamma>"          (infixr "\<Delta>" 100)
+where "P \<Delta> p = (\<lambda>x. case p x of 
+                          \<lfloor>allow y\<rfloor> \<Rightarrow> \<lfloor>allow ((fst P) x)\<rfloor>
+                        | \<lfloor>deny y\<rfloor>  \<Rightarrow>  \<lfloor>deny ((snd P) x)\<rfloor>
+                        | \<bottom>        \<Rightarrow> \<bottom>)"
+
+definition range_split2 :: "[('\<alpha> \<Rightarrow> '\<gamma>) \<times> ('\<alpha> \<Rightarrow>'\<gamma>),'\<alpha> \<mapsto> '\<beta>] \<Rightarrow> '\<alpha> \<mapsto> ('\<beta> \<times>'\<gamma>)" (infixr "\<nabla>2" 100)
+where "P \<nabla>2 p = (\<lambda>x. case p x of 
+                          \<lfloor>allow y\<rfloor> \<Rightarrow> \<lfloor>allow (y,(fst P) x)\<rfloor>
+                        | \<lfloor>deny y\<rfloor>  \<Rightarrow> \<lfloor>deny (y,(snd P) x)\<rfloor> 
+                        | \<bottom>        \<Rightarrow> \<bottom>)"
+
+
+definition policy2MON :: "('\<iota>\<times>'\<sigma> \<mapsto> 'o\<times>'\<sigma>) \<Rightarrow> ('\<iota> \<Rightarrow>('o decision,'\<sigma>) MON\<^sub>S\<^sub>E)"
+where "policy2MON p = (\<lambda> \<iota> \<sigma>. case p (\<iota>,\<sigma>) of
+                              \<lfloor>(allow (outs,\<sigma>'))\<rfloor> \<Rightarrow> \<lfloor>(allow outs, \<sigma>')\<rfloor>
+                            | \<lfloor>(deny (outs,\<sigma>'))\<rfloor>  \<Rightarrow> \<lfloor>(deny outs, \<sigma>')\<rfloor>
+                            | \<bottom>                  \<Rightarrow> \<bottom>)"
+
+lemmas UPFCoreDefs = Allow_def Deny_def override_A_def override_D_def policy_range_comp_def 
+                     range_split_def dom_split2_def map_add_def restrict_map_def
+end
+

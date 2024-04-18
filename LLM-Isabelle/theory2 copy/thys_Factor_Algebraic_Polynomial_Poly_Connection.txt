@@ -1,0 +1,169 @@
+theory Poly_Connection
+  imports 
+    Polynomials.MPoly_Type_Univariate
+    Jordan_Normal_Form.Missing_Misc
+    Polynomial_Interpolation.Ring_Hom_Poly
+    Hermite_Lindemann.More_Multivariate_Polynomial_HLW
+    Polynomials.MPoly_Type_Class
+begin
+
+lemma mpoly_is_unitE:
+  fixes p :: "'a :: {comm_semiring_1, semiring_no_zero_divisors} mpoly"
+  assumes "p dvd 1"
+  obtains c where "p = Const c" "c dvd 1"
+proof -
+  obtain r where r: "p * r = 1"
+    using assms by auto
+  from r have [simp]: "p \<noteq> 0" "r \<noteq> 0"
+    by auto
+  have "0 = lead_monom (1 :: 'a mpoly)"
+    by simp
+  also have "1 = p * r"
+    using r by simp
+  also have "lead_monom (p * r) = lead_monom p + lead_monom r"
+    by (intro lead_monom_mult) auto
+  finally have "lead_monom p = 0"
+    by simp
+  hence "vars p = {}"
+    by (simp add: lead_monom_eq_0_iff)
+  hence *: "p = Const (lead_coeff p)"
+    by (auto simp: vars_empty_iff)
+
+  have "1 = lead_coeff (1 :: 'a mpoly)"
+    by simp
+  also have "1 = p * r"
+    using r by simp
+  also have "lead_coeff (p * r) = lead_coeff p * lead_coeff r"
+    by (intro lead_coeff_mult) auto
+  finally have "lead_coeff p dvd 1"
+    using dvdI by blast
+  with * show ?thesis using that
+    by blast
+qed
+
+lemma Const_eq_Const_iff [simp]:
+  "Const c = Const c' \<longleftrightarrow> c = c'"
+  by (metis lead_coeff_Const)
+
+lemma is_unit_ConstI [intro]: "c dvd 1 \<Longrightarrow> Const c dvd 1"
+  by (metis dvd_def mpoly_Const_1 mpoly_Const_mult)
+
+lemma is_unit_Const_iff:
+  fixes c :: "'a :: {comm_semiring_1, semiring_no_zero_divisors}"
+  shows "Const c dvd 1 \<longleftrightarrow> c dvd 1"
+proof
+  assume "Const c dvd 1"
+  thus "c dvd 1"
+    by (auto elim!: mpoly_is_unitE)
+qed auto
+
+lemma vars_emptyE: "vars p = {} \<Longrightarrow> (\<And>c. p = Const c \<Longrightarrow> P) \<Longrightarrow> P"
+  by (auto simp: vars_empty_iff)
+
+lemma degree_geI:
+  assumes "MPoly_Type.coeff p m \<noteq> 0"
+  shows   "MPoly_Type.degree p i \<ge> Poly_Mapping.lookup m i"
+proof -
+  have "lookup m i \<le> Max (insert 0 ((\<lambda>m. lookup m i) ` keys (mapping_of p)))"
+  proof (rule Max.coboundedI)
+    show "lookup m i \<in> insert 0 ((\<lambda>m. lookup m i) ` keys (mapping_of p))"
+      using assms by (auto simp: coeff_keys)
+  qed auto
+  thus ?thesis unfolding MPoly_Type.degree_def by auto
+qed
+
+lemma monom_of_degree_exists:
+  assumes "p \<noteq> 0"
+  obtains m where "MPoly_Type.coeff p m \<noteq> 0" "Poly_Mapping.lookup m i = MPoly_Type.degree p i"
+proof (cases "MPoly_Type.degree p i = 0")
+  case False
+  have "MPoly_Type.degree p i = Max (insert 0 ((\<lambda>m. lookup m i) ` keys (mapping_of p)))"
+    by (simp add: MPoly_Type.degree_def)
+  also have "\<dots> \<in> insert 0 ((\<lambda>m. lookup m i) ` keys (mapping_of p))"
+    by (rule Max_in) auto
+  finally show ?thesis
+    using False that by (auto simp: coeff_keys)
+next
+  case [simp]: True
+  from assms obtain m where m: "MPoly_Type.coeff p m \<noteq> 0"
+    using coeff_all_0 by blast
+  show ?thesis using degree_geI[of p m i] m
+    by (intro that[of m]) auto
+qed
+
+lemma degree_leI:
+  assumes "\<And>m. Poly_Mapping.lookup m i > n \<Longrightarrow> MPoly_Type.coeff p m = 0"
+  shows   "MPoly_Type.degree p i \<le> n"
+proof (cases "p = 0")
+  case False
+  obtain m where m: "MPoly_Type.coeff p m \<noteq> 0" "Poly_Mapping.lookup m i = MPoly_Type.degree p i"
+    using monom_of_degree_exists False by blast
+  with assms show ?thesis
+    by force
+qed auto
+
+lemma coeff_gt_degree_eq_0:
+  assumes "Poly_Mapping.lookup m i > MPoly_Type.degree p i"
+  shows   "MPoly_Type.coeff p m = 0"
+  using assms degree_geI leD by blast
+
+lemma vars_altdef: "vars p = (\<Union>m\<in>{m. MPoly_Type.coeff p m \<noteq> 0}. keys m)"
+  unfolding vars_def
+  by (intro arg_cong[where f = "\<Union>"] image_cong refl) (simp flip: coeff_keys)
+
+lemma degree_pos_iff: "MPoly_Type.degree p x > 0 \<longleftrightarrow> x \<in> vars p"
+proof
+  assume "MPoly_Type.degree p x > 0"
+  hence "p \<noteq> 0" by auto
+  then obtain m where m: "lookup m x = MPoly_Type.degree p x" "MPoly_Type.coeff p m \<noteq> 0"
+    using monom_of_degree_exists[of p x] by metis
+    by (simp add: in_keys_iff)
+  with m show "x \<in> vars p"
+    by (auto simp: vars_altdef)
+next
+  assume "x \<in> vars p"
+  then obtain m where m: "x \<in> keys m" "MPoly_Type.coeff p m \<noteq> 0"
+    by (auto simp: vars_altdef)
+  have "0 < lookup m x"
+    using m by (auto simp: in_keys_iff)
+  also from m have "\<dots> \<le> MPoly_Type.degree p x"
+    by (intro degree_geI) auto
+  finally show "MPoly_Type.degree p x > 0" .
+qed 
+
+lemma degree_eq_0_iff: "MPoly_Type.degree p x = 0 \<longleftrightarrow> x \<notin> vars p"
+  using degree_pos_iff[of p x] by auto
+
+lemma MPoly_Type_monom_zero[simp]: "MPoly_Type.monom m 0 = 0"
+  by (simp add: More_MPoly_Type.coeff_monom coeff_all_0)
+
+lemma vars_monom_keys': "vars (MPoly_Type.monom m c) = (if c = 0 then {} else keys m)"
+  by (cases "c = 0") (auto simp: vars_monom_keys)
+
+lemma Const_eq_0_iff [simp]: "Const c = 0 \<longleftrightarrow> c = 0"
+  by (metis lead_coeff_Const mpoly_Const_0)
+
+lemma monom_remove_key: "MPoly_Type.monom m (a :: 'a :: semiring_1) = 
+  MPoly_Type.monom (remove_key x m) a * MPoly_Type.monom (Poly_Mapping.single x (lookup m x)) 1"
+  unfolding MPoly_Type.mult_monom
+  by (rule arg_cong2[of _ _ _ _ MPoly_Type.monom], auto simp: remove_key_sum)
+
+lemma MPoly_Type_monom_0_iff[simp]: "MPoly_Type.monom m x = 0 \<longleftrightarrow> x = 0"
+  by (metis (full_types) MPoly_Type_monom_zero More_MPoly_Type.coeff_monom when_def) 
+
+lemma vars_signof[simp]: "vars (signof x) = {}" 
+  by (simp add: sign_def)
+
+lemma prod_mset_Const: "prod_mset (image_mset Const A) = Const (prod_mset A)"
+  by (induction A) (auto simp: mpoly_Const_mult)
+
+lemma Const_eq_product_iff:
+  fixes c :: "'a :: idom"
+  assumes "c \<noteq> 0"
+  shows   "Const c = a * b \<longleftrightarrow> (\<exists>a' b'. a = Const a' \<and> b = Const b' \<and> c = a' * b')"
+proof
+  assume *: "Const c = a * b"
+  have "lead_monom (a * b) = 0"
+    by (auto simp flip: *)
+(* converts a multi-variate polynomial into a univariate polynomial with multivariate coefficients *)
+  and transfer_mult [transfer_rule]: "(R ===> R ===> R) (*) (*)"

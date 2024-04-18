@@ -1,0 +1,222 @@
+theory Sepref_Guide_Quickstart
+imports "../IICF/IICF"
+begin
+
+
+
+  definition min_of_list :: "'a::linorder list \<Rightarrow> 'a nres" where
+    "min_of_list l \<equiv> ASSERT (l\<noteq>[]) \<then> SPEC (\<lambda>x. \<forall>y\<in>set l. x\<le>y)"
+
+
+  definition min_of_list1 :: "'a::linorder list \<Rightarrow> 'a nres" 
+    where "min_of_list1 l \<equiv> ASSERT (l\<noteq>[]) \<then> RETURN (fold min (tl l) (hd l))"
+
+
+  lemma min_of_list1_refine: "(min_of_list1,min_of_list) \<in> Id \<rightarrow> \<langle>Id\<rangle>nres_rel"
+    apply (clarsimp intro!: nres_relI)
+    unfolding min_of_list_def min_of_list1_def
+    apply (refine_vcg)
+    by (auto simp: neq_Nil_conv Min.set_eq_fold[symmetric])
+
+  lemma "(min_of_list1,min_of_list) \<in> Id \<rightarrow> \<langle>Id\<rangle>nres_rel"  
+    unfolding min_of_list_def[abs_def] min_of_list1_def[abs_def]
+    apply (refine_vcg)
+    by (auto simp: neq_Nil_conv Min.set_eq_fold[symmetric])
+
+  definition min_of_list2 :: "'a::linorder list \<Rightarrow> 'a nres" 
+    where "min_of_list2 l \<equiv> ASSERT (l\<noteq>[]) \<then> RETURN (fold (\<lambda>i. min (l!(i+1))) [0..<length l - 1] (l!0))"
+
+  lemma min_of_list2_refine: "(min_of_list2, min_of_list1)\<in>Id \<rightarrow> \<langle>Id\<rangle>nres_rel"
+    unfolding min_of_list2_def[abs_def] min_of_list1_def[abs_def]
+    apply refine_vcg
+    apply clarsimp_all
+    apply (rewrite in "_=\<hole>" fold_idx_conv)
+    by (auto simp: nth_tl hd_conv_nth)
+
+  sepref_definition min_of_list3 is min_of_list2 :: "(array_assn nat_assn)\<^sup>k \<rightarrow>\<^sub>a nat_assn"
+    unfolding min_of_list2_def[abs_def] 
+    by sepref
+
+  thm min_of_list3_def  
+  export_code min_of_list3 checking SML_imp
+
+  thm sepref_opt_simps
+  thm sepref_opt_simps2
+    can be used to modify them.\<close>
+  text \<open>Moreover, a refinement theorem is generated, which states the correspondence between
+    @{const min_of_list3} and @{const min_of_list2}: \<close>
+  text \<open>It states the relations between the parameter and the result of 
+    the concrete and abstract function. The parameter is related by 
+    @{term "array_assn nat_assn"}. Here, @{term "array_assn A"} relates arrays 
+    with lists, such that the elements are related @{term A} --- in our case by 
+    The result is also implemented by natural numbers. 
+
+    Moreover, the parameters may be stored on the heap, and we have to indicate whether
+    \<close>
+  subsubsection \<open>Overall Correctness Statement\<close>
+  text \<open>Finally, we can use transitivity of refinement to link our implementation to
+    the specification. The @{attribute FCOMP} attribute is able to compose refinement 
+    theorems:\<close>
+  text \<open>While the above statement is suited to re-use the algorithm within the sepref-framework,
+    a more low-level correctness theorem can be stated using separation logic.
+    This has the advantage that understanding the statement depends on less 
+    definitional overhead:\<close>  
+    text \<open>The proof of this theorem has to unfold the several layers of the Sepref framework,
+      down to the separation logic layer. An explanation of these layers is out of scope of this
+      quickstart guide, we just present some proof techniques that often work. In the best case,
+      the fully automatic proof will work:\<close>
+  text \<open>If the automatic method does not work, here is a more explicit proof, 
+    that can be adapted for proving similar statements:\<close>  
+    text \<open>We inlined the definition of @{const min_of_list}. 
+      This will yield two proof obligations later, which we discharge as auxiliary lemmas here
+      \<close>
+    text \<open>This should yield a Hoare-triple for @{term "min_of_list3 a"}, 
+      which can now be used to prove the desired statement via a consequence rule\<close>
+      text \<open>The preconditions should match, however, @{method sep_auto} is also able to discharge
+        more complicated implications here. Be sure to simplify with @{thm [source] pure_def},
+        if you have parameters that are not stored on the heap (in our case, we don't, but include the
+        simplification anyway.)\<close> 
+      text \<open>The heap-parts of the postcondition should also match. 
+        The pure parts require the auxiliary statements that we proved above.\<close>
+  subsubsection \<open>Using the Algorithm\<close> 
+  text \<open>As an example, we now want to use our algorithm to compute the minimum value
+    of some concrete list. In order to use an algorithm, we have to declare both, 
+    it's abstract version and its implementation to the Sepref tool. 
+    \<close>
+    \<comment> \<open>This command registers the abstract version, and generates 
+        and only note that, by default, the interface type corresponds to the operation's
+        HOL type.\<close>
+    \<comment> \<open>This declares the implementation to Sepref\<close>
+  text \<open>Now we can define the abstract version of our example algorithm.
+    We compute the minimum value of pseudo-random lists of a given length
+    \<close>  
+  text \<open>And use Sepref to synthesize a concrete version\<close>
+  text \<open>We use a feature of Sepref to combine imperative and purely functional code,
+    and leave the generation of the list purely functional, then copy it into an array,
+    and invoke our algorithm. We have to declare the @{const rand_list} operation:\<close>
+  text \<open>Here, we use a feature of Sepref to import parametricity theorems.
+    Note that the parametricity theorem we provide here is trivial, as 
+    @{const nat_rel} is identity, and @{const list_rel} as well as @{term "(\<rightarrow>)"} 
+    preserve identity. 
+    However, we have to specify a parametricity theorem that reflects the 
+    structure of the involved types.
+  \<close>
+  text \<open>Finally, we can invoke Sepref\<close>
+    text \<open>We construct a plain list, however, the implementation of @{const min_of_list}
+      expects an array. We have to insert a conversion, which is conveniently done
+      with the @{method rewrite} method:
+      \<close>
+  text \<open>In the generated code, we see that the pure @{const rand_list} function 
+    is invoked, its result is converted to an array, which is then passed to 
+    @{const min_of_list3}.
+
+    Note that @{command sepref_definition} prints the generated theorems to the 
+    output on the end of the proof. Use the output panel, or hover the mouse over 
+    the by-command to see this output.
+  \<close>
+  text \<open>The generated algorithm can be exported\<close>
+  text \<open>and executed\<close>
+  ML_val \<open>@{code min_of_rand_list1} (@{code nat_of_integer} 100) ()\<close>
+  text \<open>Note that Imperative/HOL for ML generates a function from unit, 
+    and applying this function triggers execution.\<close>
+subsection \<open>Binary Search Example\<close>
+text \<open>As second example, we consider a simple binary search algorithm.
+  We specify the abstract problem, i.e., finding an element in a sorted list.
+\<close>
+text \<open>And give a standard iterative implementation:\<close>
+      ASSERT (i<length xs); \<comment> \<open>Added here to help synthesis to prove precondition for array indexing\<close>
+text \<open>Note that we can refine certain operations only if we can prove that their 
+  preconditions are matched. For example, we can refine list indexing to array 
+  indexing only if we can prove that the index is in range. This proof has to be 
+  done during the synthesis procedure. However, such precondition proofs may be 
+  hard, in particular for automatic methods, and we have to do them anyway when 
+  proving correct our abstract implementation. Thus, it is a good idea to assert
+  the preconditions in the abstract implementation. This way, they are immediately
+  available during synthesis (recall, when refining an assertion, you may assume
+  the asserted predicate @{thm le_ASSERTI}).
+  
+  An alternative is to use monadic list operations that already assert their precondition.
+  The advantage is that you cannot forget to assert the precondition, the disadvantage
+  is that the operation is monadic, and thus, nesting it into other operations is more cumbersome.
+  In our case, the operation would be @{const mop_list_get} 
+  (Look at it's simplified definition to get an impression what it does). 
+\<close>
+text \<open>We first prove the refinement correct\<close>
+text \<open>First, let's synthesize an implementation where the list elements are natural numbers. 
+  We will discuss later how to generalize the implementation for arbitrary types.
+
+  For technical reasons, the Sepref tool works with uncurried functions. That is, every
+  function has exactly one argument. You can use the @{term uncurry} function,
+  and we also provide abbreviations @{term uncurry2} up to @{term uncurry5}.
+  If a function has no parameters, @{term uncurry0} adds a unit parameter.
+\<close>
+subsection \<open>Basic Troubleshooting\<close>
+text \<open>
+  In this section, we will explain how to investigate problems with the Sepref tool.
+  Most cases where @{method sepref} fails are due to some 
+  missing operations, unsolvable preconditions, or an odd setup. 
+\<close>
+subsubsection \<open>Example\<close>
+text \<open>We start with an example. Recall the binary search algorithm. 
+  This time, we forget to assert the precondition of the indexing operation.
+\<close>
+      let xi = xs!i; \<comment> \<open>It's not trivial to show that \<open>i\<close> is in range\<close>
+text \<open>We try to synthesize the implementation. Note that @{command sepref_thm} behaves like 
+  @{command sepref_definition}, but actually defines no constant. It only generates a refinement theorem.\<close>
+  \<comment> \<open>If @{method sepref} fails, you can use @{method sepref_dbg_keep} to get some more information.\<close>
+  \<comment> \<open>This prints a trace of the different phases of sepref, and stops when the first phase fails.
+    It then returns the internal proof state of the tool, which can be inspected further.
+    
+    Here, the translation phase fails. The translation phase translates the control structures and operations of
+    the abstract program to their concrete counterparts. To inspect the actual problem, we let translation run 
+    until the operation where it fails:\<close>
+  supply [[goals_limit=1]] \<comment> \<open>There will be many subgoals during translation, and printing them takes very long with Isabelle :(\<close>
+  \<comment> \<open>Things get stuck at a goal with predicate @{const hn_refine}. This is the internal refinement predicate,
+    @{term "hn_refine \<Gamma> c \<Gamma>' R a"} means, that, for operands whose refinement is described by @{term \<Gamma>},
+    the concrete program @{term c} refines the abstract program @{term a}, such that, afterwards, the operands
+    are described by @{term \<Gamma>'}, and the results are refined by @{term R}.
+    
+    Inspecting the first subgoal reveals that we got stuck on refining the abstract operation
+    @{term "RETURN $ (op_list_get $ b $ xf)"}. Note that the @{term "($)"} is just a constant for function 
+    application, which is used to tame Isabelle's higher-order unification algorithms. You may use 
+
+    If a translation step fails, it may be helpful to execute as much of the translation step as possible:\<close>
+  \<comment> \<open>The translation step gets stuck at proving @{term "pre_list_get (b, xf)"}, which is the 
+    precondition for list indexing.\<close>
+  apply (sepref_dbg_side_keep) \<comment> \<open>If you think the side-condition should be provable, this command 
+    returns the left-over subgoals after some preprocessing and applying auto\<close>
+subsubsection \<open>Internals of Sepref\<close>
+text \<open>
+  Internally, @{method sepref} consists of multiple phases that are executed
+  one after the other. Each phase comes with its own debugging method, which 
+  only executes that phase. We illustrate this by repeating the refinement of
+  @{const "min_of_list2"}. This time, we use @{command sepref_thm}, which only
+  generates a refinement theorem, but defines no constants:
+\<close>
+  \<comment> \<open>The \<open>sepref_thm\<close> or \<open>sepref_definition\<close> command assembles a schematic 
+    of execution order. We use the \<open>nres\<close>-monad's bind operation as sequencing operator,
+    there is no applicable rule for the \<open>set\<close> operation on arrays.\<close>
+subsection \<open>The Isabelle Imperative Collection Framework (IICF)\<close>
+text \<open>
+  The IICF provides a library of imperative data structures, and some 
+  management infrastructure. The main idea is to have interfaces and implementations.
+
+  An interface specifies an abstract data type (e.g., @{typ "_ list"}) and some operations with preconditions 
+  on it (e.g., @{term "(@)"} or @{term "nth"} with in-range precondition). 
+
+  An implementation of an interface provides a refinement assertion from the abstract data type to
+  some concrete data type, as well as implementations for (a subset of) the interface's operations.
+  The implementation may add some more implementation specific preconditions.
+  
+\<close>
+subsubsection \<open>Map Example\<close>
+text \<open>Let's implement a function that maps a finite set to an initial 
+  segment of the natural numbers
+\<close>
+text \<open>We implement the function by iterating over the set, and building the map\<close>
+text \<open>We use hashsets @{term "hs.assn"} and hashmaps (@{term "hm.assn"}). \<close>
+  \<comment> \<open>We got stuck at \<open>op_map_empty\<close>. This is because Sepref is very conservative 
+  implementation has a problem here: Once the update a index \<open>i\<close> is done,
+  the old value cannot be read from index \<open>i\<close> any more. We try to implement the
+    Note: There are scenarios where a constraint gets deferred @{emph \<open>before\<close>} it becomes definitely unsolvable.
+    (the argument to \<open>op_arl_empty_sz\<close>) to the concrete program (the second argument of \<open>hn_refine\<close>).

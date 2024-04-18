@@ -1,0 +1,433 @@
+theory dhlvl2
+imports dhlvl1 Channels
+begin
+
+declare domIff [simp, iff del]
+
+
+consts
+  bad_init :: "agent set" 
+
+specification (bad_init)
+  bad_init_spec: "test_owner \<notin> bad_init \<and> test_partner \<notin> bad_init"
+by auto
+
+
+
+record l2_state = 
+  l1_state +
+  chan :: "chan set"
+  bad :: "agent set"
+
+
+type_synonym l2_obs = "l2_state"
+
+type_synonym
+  l2_pred = "l2_state set"
+
+type_synonym
+  l2_trans = "(l2_state \<times> l2_state) set"
+
+
+
+definition
+  l2_dy_fake_msg :: "msg \<Rightarrow> l2_trans"
+where
+  "l2_dy_fake_msg m \<equiv> {(s,s').
+    m \<in> dy_fake_msg (bad s) (ik s) (chan s) \<and>
+    s' = s\<lparr>ik := {m} \<union> ik s\<rparr>
+  }"
+
+definition
+  l2_dy_fake_chan :: "chan \<Rightarrow> l2_trans"
+where
+  "l2_dy_fake_chan M \<equiv> {(s,s').
+    M \<in> dy_fake_chan (bad s) (ik s) (chan s)\<and>
+    s' = s\<lparr>chan := {M} \<union> chan s\<rparr>
+  }"
+
+
+
+fun
+  role_comp :: "role_t \<Rightarrow> role_t"
+where
+  "role_comp Init = Resp"
+| "role_comp Resp = Init"
+
+definition
+  matching :: "frame \<Rightarrow> frame \<Rightarrow> bool"
+where
+  "matching sigma sigma' \<equiv> \<forall> x. x \<in> dom sigma \<inter> dom sigma' \<longrightarrow> sigma x = sigma' x"
+
+definition
+  partner_runs :: "rid_t \<Rightarrow> rid_t \<Rightarrow> bool"
+where
+  "partner_runs R R' \<equiv> 
+    role (guessed_runs R) = role_comp (role (guessed_runs R')) \<and>
+    owner (guessed_runs R) = partner (guessed_runs R') \<and>
+    owner (guessed_runs R') = partner (guessed_runs R) \<and>
+    matching (guessed_frame R) (guessed_frame R')
+  "
+
+lemma role_comp_inv [simp]:
+  "role_comp (role_comp x) = x"
+by (cases x, auto)
+
+lemma role_comp_inv_eq:
+  "y = role_comp x \<longleftrightarrow> x = role_comp y"
+by (auto elim!: role_comp.elims [OF sym])
+
+definition
+  partners :: "rid_t set"
+where
+  "partners \<equiv> {R. partner_runs test R}"
+
+lemma test_not_partner [simp]:
+  "test \<notin> partners"
+by (auto simp add: partners_def partner_runs_def, cases "role (guessed_runs test)", auto)
+
+
+lemma matching_symmetric:
+  "matching sigma sigma' \<Longrightarrow> matching sigma' sigma"
+by (auto simp add: matching_def)
+
+lemma partner_symmetric:
+  "partner_runs R R' \<Longrightarrow> partner_runs R' R"
+by (auto simp add: partner_runs_def matching_symmetric)
+
+
+lemma partner_unique:
+  "partner_runs R R'' \<Longrightarrow> partner_runs R R' \<Longrightarrow> R' = R''"
+proof -
+  assume H':"partner_runs R R'"
+  then have Hm': "matching (guessed_frame R) (guessed_frame R')"
+    by (auto simp add: partner_runs_def)
+  assume H'':"partner_runs R R''"
+  then have Hm'': "matching (guessed_frame R) (guessed_frame R'')"
+    by (auto simp add: partner_runs_def)
+  show ?thesis
+    proof (cases "role (guessed_runs R')")
+      case Init
+      with H' partner_symmetric [OF H''] have Hrole:"role (guessed_runs R) = Resp"
+                                                    "role (guessed_runs R'') = Init"
+        by (auto simp add: partner_runs_def)
+      with Init Hm' have "guessed_frame R xgnx = Some (Exp Gen (NonceF (R'$nx)))"
+        by (simp add: matching_def)
+      moreover from Hrole Hm'' have "guessed_frame R xgnx = Some (Exp Gen (NonceF (R''$nx)))"
+        by (simp add: matching_def)
+      ultimately show ?thesis by (auto dest: Exp_Gen_inj)
+    next
+      case Resp
+      with H' partner_symmetric [OF H''] have Hrole:"role (guessed_runs R) = Init"
+                                                    "role (guessed_runs R'') = Resp"
+        by (auto simp add: partner_runs_def)
+      with Resp Hm' have "guessed_frame R xgny = Some (Exp Gen (NonceF (R'$ny)))"
+        by (simp add: matching_def)
+      moreover from Hrole Hm'' have "guessed_frame R xgny = Some (Exp Gen (NonceF (R''$ny)))"
+        by (simp add: matching_def)
+      ultimately show ?thesis by (auto dest: Exp_Gen_inj)
+    qed
+qed
+
+lemma partner_test:
+  "R \<in> partners \<Longrightarrow> partner_runs R R' \<Longrightarrow> R' = test"
+by (auto intro!:partner_unique simp add:partners_def partner_symmetric)
+
+
+
+definition
+  l2_lkr_others :: "agent \<Rightarrow> l2_trans"
+where
+  "l2_lkr_others A \<equiv> {(s,s').
+    A \<noteq> test_owner \<and>
+    A \<noteq> test_partner \<and>
+    s' = s\<lparr>bad := {A} \<union> bad s\<rparr>
+  }"
+
+definition
+  l2_lkr_actor :: "agent \<Rightarrow> l2_trans"
+where
+  "l2_lkr_actor A \<equiv> {(s,s').
+    A = test_owner \<and>
+    A \<noteq> test_partner \<and>
+    s' = s\<lparr>bad := {A} \<union> bad s\<rparr>
+  }"
+
+definition
+  l2_lkr_after :: "agent \<Rightarrow> l2_trans"
+where
+  "l2_lkr_after A \<equiv> {(s,s').
+    test_ended s \<and>
+    s' = s\<lparr>bad := {A} \<union> bad s\<rparr>
+  }"
+
+definition
+  l2_skr :: "rid_t \<Rightarrow> msg \<Rightarrow> l2_trans"
+where
+  "l2_skr R K \<equiv> {(s,s').
+    R \<noteq> test \<and> R \<notin> partners \<and>
+    in_progress (progress s R) xsk \<and>
+    guessed_frame R xsk = Some K \<and>
+    s' = s\<lparr>ik := {K} \<union> ik s\<rparr>
+  }"
+
+
+
+definition
+    l2_step1 :: "rid_t \<Rightarrow> agent \<Rightarrow> agent \<Rightarrow> l2_trans"
+where
+  "l2_step1 Ra A B \<equiv> {(s, s').
+    Ra \<notin> dom (progress s) \<and>
+    guessed_runs Ra = \<lparr>role=Init, owner=A, partner=B\<rparr> \<and>
+    s' = s\<lparr>
+      progress := (progress s)(Ra \<mapsto> {xnx, xgnx}),
+      chan := {Insec A B (Exp Gen (NonceF (Ra$nx)))} \<union> (chan s)
+    \<rparr>
+  }"
+
+
+definition
+  l2_step2 :: "rid_t \<Rightarrow> agent \<Rightarrow> agent \<Rightarrow> msg \<Rightarrow> l2_trans"
+where
+  "l2_step2 Rb A B gnx \<equiv> {(s, s').
+    guessed_runs Rb = \<lparr>role=Resp, owner=B, partner=A\<rparr> \<and>
+    Rb \<notin> dom (progress s) \<and>
+    guessed_frame Rb xgnx = Some gnx \<and>
+    guessed_frame Rb xsk = Some (Exp gnx (NonceF (Rb$ny))) \<and>
+    Insec A B gnx \<in> chan s \<and>
+    s' = s\<lparr> progress := (progress s)(Rb \<mapsto> {xny, xgny, xgnx, xsk}),
+            chan := {Auth B A \<langle>Number 0, Exp Gen (NonceF (Rb$ny)), gnx\<rangle>} \<union> (chan s),
+            signalsInit := if can_signal s A B then
+                          addSignal (signalsInit s) (Running A B (Exp gnx (NonceF (Rb$ny))))
+                       else
+                          signalsInit s
+         \<rparr>
+  }"  
+
+
+definition
+  l2_step3 :: "rid_t \<Rightarrow> agent \<Rightarrow> agent \<Rightarrow> msg \<Rightarrow> l2_trans"
+where
+  "l2_step3 Ra A B gny \<equiv> {(s, s').
+    guessed_runs Ra = \<lparr>role=Init, owner=A, partner=B\<rparr> \<and>
+    progress s Ra = Some {xnx, xgnx} \<and>
+    guessed_frame Ra xgny = Some gny \<and>
+    guessed_frame Ra xsk = Some (Exp gny (NonceF (Ra$nx))) \<and>
+    Auth B A \<langle>Number 0, gny, Exp Gen (NonceF (Ra$nx))\<rangle> \<in> chan s \<and>
+    s' = s\<lparr> progress := (progress s)(Ra \<mapsto> {xnx, xgnx, xgny, xsk, xEnd}),
+            chan := {Auth A B \<langle>Number 1, Exp Gen (NonceF (Ra$nx)), gny\<rangle>} \<union> chan s,
+            secret := {x. x = Exp gny (NonceF (Ra$nx)) \<and> Ra = test} \<union> secret s,
+            signalsInit := if can_signal s A B then
+                         addSignal (signalsInit s) (Commit A B (Exp gny (NonceF (Ra$nx))))
+                       else
+                         signalsInit s,
+            signalsResp := if can_signal s A B then
+                         addSignal (signalsResp s) (Running A B (Exp gny (NonceF (Ra$nx))))
+                       else
+                         signalsResp s
+          \<rparr>
+  }"
+
+
+definition
+  l2_step4 :: "rid_t \<Rightarrow> agent \<Rightarrow> agent \<Rightarrow> msg \<Rightarrow> l2_trans"
+where
+  "l2_step4 Rb A B gnx \<equiv> {(s, s').
+    guessed_runs Rb = \<lparr>role=Resp, owner=B, partner=A\<rparr> \<and>
+    progress s Rb = Some {xny, xgnx, xgny, xsk} \<and>
+    guessed_frame Rb xgnx = Some gnx \<and>
+    Auth A B \<langle>Number 1, gnx, Exp Gen (NonceF (Rb$ny))\<rangle> \<in> chan s \<and>
+
+    s' = s\<lparr> progress := (progress s)(Rb \<mapsto> {xny, xgnx, xgny, xsk, xEnd}),
+            secret := {x. x = Exp gnx (NonceF (Rb$ny)) \<and> Rb = test} \<union> secret s,
+            signalsResp := if can_signal s A B then
+                             addSignal (signalsResp s) (Commit A B (Exp gnx (NonceF (Rb$ny))))
+                           else
+                             signalsResp s
+          \<rparr>
+  }"
+
+definition 
+  l2_init :: "l2_state set"
+where
+  "l2_init \<equiv> { \<lparr>
+    ik = {},
+    secret = {},
+    progress = Map.empty,
+    signalsInit = \<lambda>x. 0,
+    signalsResp = \<lambda>x. 0,
+    chan = {},
+    bad = bad_init
+    \<rparr>}"
+
+definition 
+  l2_trans :: "l2_trans" where
+  "l2_trans \<equiv> (\<Union>m M X Rb Ra A B K.
+     l2_step1 Ra A B \<union>
+     l2_step2 Rb A B X \<union>
+     l2_step3 Ra A B X \<union>
+     l2_step4 Rb A B X \<union>
+     l2_dy_fake_chan M \<union>
+     l2_dy_fake_msg m \<union>
+     l2_lkr_others A \<union>
+     l2_lkr_after A \<union>
+     l2_skr Ra K \<union>
+     Id 
+  )"
+
+
+definition 
+  l2 :: "(l2_state, l2_obs) spec" where
+  "l2 \<equiv> \<lparr>
+    init = l2_init,
+    trans = l2_trans,
+    obs = id
+  \<rparr>"
+
+lemmas l2_loc_defs = 
+  l2_step1_def l2_step2_def l2_step3_def l2_step4_def
+  l2_def l2_init_def l2_trans_def
+  l2_dy_fake_chan_def l2_dy_fake_msg_def
+  l2_lkr_after_def l2_lkr_others_def l2_skr_def
+
+lemmas l2_defs = l2_loc_defs ik_dy_def
+
+lemmas l2_nostep_defs = l2_def l2_init_def l2_trans_def
+
+
+lemma l2_obs_id [simp]: "obs l2 = id"
+by (simp add: l2_def)
+
+
+
+declare domIff [iff]
+lemma l2_run_ended_trans:
+  "run_ended (progress s R) \<Longrightarrow>
+   (s, s') \<in> trans l2 \<Longrightarrow>
+   run_ended (progress s' R)"
+apply (auto simp add: l2_nostep_defs)
+apply (auto simp add: l2_defs)
+done
+declare domIff [iff del]
+
+lemma l2_can_signal_trans:
+  "can_signal s' A B \<Longrightarrow>
+  (s, s') \<in> trans l2 \<Longrightarrow>
+  can_signal s A B"
+by (auto simp add: can_signal_def l2_run_ended_trans)
+
+
+
+
+
+definition
+  l2_inv1 :: "l2_state set"
+where
+  "l2_inv1 \<equiv> {s. \<forall>A B.
+    can_signal s A B \<longrightarrow>
+    A \<notin> bad s \<and> B \<notin> bad s
+  }"
+
+lemmas l2_inv1I = l2_inv1_def [THEN setc_def_to_intro, rule_format]
+lemmas l2_inv1E [elim] = l2_inv1_def [THEN setc_def_to_elim, rule_format]
+lemmas l2_inv1D = l2_inv1_def [THEN setc_def_to_dest, rule_format, rotated 1, simplified]
+
+lemma l2_inv1_init [iff]:
+  "init l2 \<subseteq> l2_inv1"
+by (auto simp add: l2_def l2_init_def l2_inv1_def can_signal_def bad_init_spec)
+
+lemma l2_inv1_trans [iff]:
+  "{l2_inv1} trans l2 {> l2_inv1}"
+proof (auto simp add: PO_hoare_defs intro!: l2_inv1I  del: conjI)
+  fix s' s :: l2_state
+  fix A B
+  assume HI:"s \<in> l2_inv1"  
+  assume HT:"(s, s') \<in> trans l2"
+  assume "can_signal s' A B"
+  with HT have HS:"can_signal s A B"
+    by (auto simp add: l2_can_signal_trans)
+  with HI have "A \<notin> bad s \<and> B \<notin> bad s"
+    by fast
+  with HS HT show "A \<notin> bad s' \<and> B \<notin> bad s'"
+    by (auto simp add: l2_nostep_defs can_signal_def)
+       (simp_all add: l2_defs)
+qed
+
+lemma PO_l2_inv1 [iff]: "reach l2 \<subseteq> l2_inv1"
+by (rule inv_rule_basic) (auto)
+
+
+
+
+definition
+  l2_inv2 :: "l2_state set"
+where
+  "l2_inv2 \<equiv> {s. \<forall> Ra A B gny.
+    Auth B A \<langle>Number 0, gny, Exp Gen (NonceF (Ra$nx))\<rangle> \<in> chan s  \<longrightarrow>
+    A \<notin> bad s \<and> B \<notin> bad s \<longrightarrow>
+    (\<exists> Rb. guessed_runs Rb = \<lparr>role=Resp, owner=B, partner=A\<rparr> \<and>
+           in_progressS (progress s Rb) {xny, xgnx, xgny, xsk} \<and>
+           gny = Exp Gen (NonceF (Rb$ny)) \<and>
+           guessed_frame Rb xgnx = Some (Exp Gen (NonceF (Ra$nx))))
+  }"
+
+lemmas l2_inv2I = l2_inv2_def [THEN setc_def_to_intro, rule_format]
+lemmas l2_inv2E [elim] = l2_inv2_def [THEN setc_def_to_elim, rule_format]
+lemmas l2_inv2D = l2_inv2_def [THEN setc_def_to_dest, rule_format, rotated 1, simplified]
+
+lemma l2_inv2_init [iff]:
+  "init l2 \<subseteq> l2_inv2"
+by (auto simp add: l2_def l2_init_def l2_inv2_def)
+
+lemma l2_inv2_trans [iff]:
+  "{l2_inv2} trans l2 {> l2_inv2}"
+apply (auto simp add: PO_hoare_defs l2_nostep_defs intro!: l2_inv2I)
+apply (auto simp add: l2_defs dy_fake_chan_def)
+apply force+
+done
+
+lemma PO_l2_inv2 [iff]: "reach l2 \<subseteq> l2_inv2"
+by (rule inv_rule_basic) (auto)
+
+
+
+  @{term "B"} are honest
+  then the message has indeed been sent by an initiator run (etc).\<close>
+subsubsection \<open>inv4\<close>
+text \<open>For an initiator, the session key is always \<open>gny^nx\<close>.\<close>
+subsubsection \<open>inv4'\<close>
+text \<open>For a responder, the session key is always \<open>gnx^ny\<close>.\<close>
+subsubsection \<open>inv5\<close>
+text \<open>The only confidential or secure messages on the channel have been put there
+  by the attacker.\<close>
+subsubsection \<open>inv6\<close>
+text \<open>For a run @{term "R"} (with any role), the session key always has the form
+$something^n$ where $n$ is a nonce generated by @{term "R"}.\<close>
+subsubsection \<open>inv7\<close>
+text \<open>Form of the messages in @{term "extr (bad s) (ik s) (chan s)"} =
+  @{term "synth (analz (generators))"}.\<close>
+text \<open>Auxiliary dest rule for inv7.\<close>
+subsubsection \<open>inv8: form of the secrets\<close>
+text \<open>Steps 3 and 4 are the hard part.\<close>
+text \<open>Auxiliary destruction rule for inv8.\<close>
+subsection \<open>Refinement\<close>
+text \<open>Mediator function.\<close>
+text \<open>Relation between states.\<close>
+text \<open>Protocol events.\<close>
+text \<open>For step3 and 4, we prove the level 1 guard, i.e.,
+"the future session key is not in @{term "synth (analz (ik s))"}"
+  using the fact that inv8 also holds for the future state in which the session key is already in 
+  @{term "secret s"}.\<close>
+text \<open>Attacker events.\<close>
+text \<open>Compromising events.\<close>
+text \<open>Refinement proof.\<close>
+subsection \<open>Derived invariants\<close>
+text \<open>
+  We want to prove @{term "l2_secrecy"}:
+  @{term "dy_fake_msg (bad s) (ik s) (chan s) \<inter> secret s = {}"}
+  but by refinement we only get @{term "l2_partial_secrecy"}:
+  @{term "synth (analz (ik s)) \<inter> secret s = {}"}
+  This is fine, since a message in
+  @{term "dy_fake_msg (bad s) (ik s) (chan s)"} could be added to @{term "ik s"},
+  and @{term "l2_partial_secrecy"} would still hold for this new state.
+\<close>

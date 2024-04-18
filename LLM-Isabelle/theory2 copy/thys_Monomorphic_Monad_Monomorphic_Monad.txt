@@ -1,0 +1,751 @@
+theory Monomorphic_Monad imports
+  "HOL-Probability.Probability"
+  "HOL-Library.Multiset"
+  "HOL-Library.Countable_Set_Type"
+begin
+
+
+lemma (in comp_fun_idem) fold_set_union:
+  "\<lbrakk> finite A; finite B \<rbrakk> \<Longrightarrow> Finite_Set.fold f x (A \<union> B) = Finite_Set.fold f (Finite_Set.fold f x A) B"
+by(induction A arbitrary: x rule: finite_induct)(simp_all add: fold_insert_idem2 del: fold_insert_idem)
+
+lemma (in comp_fun_idem) ffold_set_union: "ffold f x (A |\<union>| B) = ffold f (ffold f x A) B"
+including fset.lifting by(transfer fixing: f)(rule fold_set_union)
+
+lemma relcompp_top_top [simp]: "top OO top = top"
+by(auto simp add: fun_eq_iff)
+
+
+named_theorems monad_unfold "Defining equations for overloaded monad operations"
+
+context includes lifting_syntax begin
+
+inductive rel_itself :: "'a itself \<Rightarrow> 'b itself \<Rightarrow> bool"
+where "rel_itself TYPE(_) TYPE(_)"
+
+lemma type_parametric [transfer_rule]: "rel_itself TYPE('a) TYPE('b)"
+by(simp add: rel_itself.simps)
+lemma plus_multiset_parametric [transfer_rule]:
+  "(rel_mset A ===> rel_mset A ===> rel_mset A) (+) (+)"
+  apply(rule rel_funI)+
+  subgoal premises prems using prems by induction(auto intro: rel_mset_Plus)
+  done
+
+lemma Mempty_parametric [transfer_rule]: "rel_mset A {#} {#}"
+  by(fact rel_mset_Zero)
+
+lemma fold_mset_parametric:
+  assumes 12: "(A ===> B ===> B) f1 f2"
+  and "comp_fun_commute f1" "comp_fun_commute f2"
+  shows "(B ===> rel_mset A ===> B) (fold_mset f1) (fold_mset f2)"
+proof(rule rel_funI)+
+  interpret f1: comp_fun_commute f1 by fact
+  interpret f2: comp_fun_commute f2 by fact
+
+  show "B (fold_mset f1 z1 X) (fold_mset f2 z2 Y)" 
+    if "rel_mset A X Y" "B z1 z2" for z1 z2 X Y
+    using that(1) by(induction R\<equiv>A X Y)(simp_all add: that(2) 12[THEN rel_funD, THEN rel_funD])
+qed
+
+lemma rel_fset_induct [consumes 1, case_names empty step, induct pred: rel_fset]:
+  assumes XY: "rel_fset A X Y"
+    and empty: "P {||} {||}"
+    and step: "\<And>X Y x y. \<lbrakk> rel_fset A X Y; P X Y; A x y; x |\<notin>| X \<or> y |\<notin>| Y \<rbrakk> \<Longrightarrow> P (finsert x X) (finsert y Y)"
+  shows "P X Y"
+proof -
+  from XY obtain Z where X: "X = fst |`| Z" and Y: "Y = snd |`| Z" and Z: "fBall Z (\<lambda>(x, y). A x y)"
+    unfolding fset.in_rel by auto
+  from Z show ?thesis unfolding X Y
+  proof(induction Z)
+    case (insert xy Z)
+    obtain x y where [simp]: "xy = (x, y)" by(cases xy)
+    show ?case using insert
+      apply(cases "x |\<in>| fst |`| Z \<and> y |\<in>| snd |`| Z")
+       apply(simp add: finsert_absorb)
+      apply(auto intro!: step simp add: fset.in_rel; blast)
+      done
+  qed(simp add: assms)
+qed
+
+lemma ffold_parametric:
+  assumes 12: "(A ===> B ===> B) f1 f2"
+  and "comp_fun_idem f1" "comp_fun_idem f2"
+  shows "(B ===> rel_fset A ===> B) (ffold f1) (ffold f2)"
+proof(rule rel_funI)+
+  interpret f1: comp_fun_idem f1 by fact
+  interpret f2: comp_fun_idem f2 by fact
+
+  show "B (ffold f1 z1 X) (ffold f2 z2 Y)" 
+    if "rel_fset A X Y" "B z1 z2" for z1 z2 X Y
+    using that(1) by(induction)(simp_all add: that(2) 12[THEN rel_funD, THEN rel_funD])
+qed
+
+end
+
+lemma rel_set_Grp: "rel_set (BNF_Def.Grp A f) = BNF_Def.Grp {X. X \<subseteq> A} (image f)"
+  by(auto simp add: fun_eq_iff Grp_def rel_set_def)
+
+context includes cset.lifting begin
+
+lemma cUNION_assoc: "cUNION (cUNION A f) g = cUNION A (\<lambda>x. cUNION (f x) g)"
+  by transfer auto
+
+lemma cUnion_cempty [simp]: "cUnion cempty = cempty"
+  by transfer simp
+
+lemma cUNION_cempty [simp]: "cUNION cempty f = cempty"
+  by simp
+
+lemma cUnion_cinsert: "cUnion (cinsert x A) = cUn x (cUnion A)"
+  by transfer simp
+
+lemma cUNION_cinsert: "cUNION (cinsert x A) f = cUn (f x) (cUNION A f)"
+  by (simp add: cUnion_cinsert)
+
+lemma cUnion_csingle [simp]: "cUnion (csingle x) = x"
+  by (simp add: cUnion_cinsert)
+
+lemma cUNION_csingle [simp]: "cUNION (csingle x) f = f x"
+  by simp
+
+lemma cUNION_csingle2 [simp]: "cUNION A csingle = A"
+  by (fact cUN_csingleton)
+
+lemma cUNION_cUn: "cUNION (cUn A B) f = cUn (cUNION A f) (cUNION B f)"
+  by simp
+
+lemma cUNION_parametric [transfer_rule]: includes lifting_syntax shows
+  "(rel_cset A ===> (A ===> rel_cset B) ===> rel_cset B) cUNION cUNION"
+  unfolding rel_fun_def by transfer(blast intro: rel_set_UNION)
+
+end
+
+locale three =
+  fixes tytok :: "'a itself"
+  assumes ex_three: "\<exists>x y z :: 'a. x \<noteq> y \<and> x \<noteq> z \<and> y \<noteq> z"
+begin
+
+definition threes :: "'a \<times> 'a \<times> 'a" where
+  "threes = (SOME (x, y, z). x \<noteq> y \<and> x \<noteq> z \<and> y \<noteq> z)"
+definition three\<^sub>1 :: 'a ("\<^bold>1") where "\<^bold>1 = fst threes"
+definition three\<^sub>2 :: 'a ("\<^bold>2") where "\<^bold>2 = fst (snd threes)"
+definition three\<^sub>3 :: 'a ("\<^bold>3") where "\<^bold>3 = snd (snd (threes))"
+
+lemma three_neq_aux: "\<^bold>1 \<noteq> \<^bold>2" "\<^bold>1 \<noteq> \<^bold>3" "\<^bold>2 \<noteq> \<^bold>3"
+proof -
+  have "\<^bold>1 \<noteq> \<^bold>2 \<and> \<^bold>1 \<noteq> \<^bold>3 \<and> \<^bold>2 \<noteq> \<^bold>3"
+    unfolding three\<^sub>1_def three\<^sub>2_def three\<^sub>3_def threes_def split_def
+    by(rule someI_ex)(use ex_three in auto)
+  then show "\<^bold>1 \<noteq> \<^bold>2" "\<^bold>1 \<noteq> \<^bold>3" "\<^bold>2 \<noteq> \<^bold>3" by simp_all
+qed
+
+lemmas three_neq [simp] = three_neq_aux three_neq_aux[symmetric]
+
+inductive rel_12_23 :: "'a \<Rightarrow> 'a \<Rightarrow> bool" where
+  "rel_12_23 \<^bold>1 \<^bold>2"
+| "rel_12_23 \<^bold>2 \<^bold>3"
+
+lemma bi_unique_rel_12_23 [simp, transfer_rule]: "bi_unique rel_12_23"
+  by(auto simp add: bi_unique_def rel_12_23.simps)
+
+inductive rel_12_21 :: "'a \<Rightarrow> 'a \<Rightarrow> bool" where
+  "rel_12_21 \<^bold>1 \<^bold>2"
+| "rel_12_21 \<^bold>2 \<^bold>1"
+
+lemma bi_unique_rel_12_21 [simp, transfer_rule]: "bi_unique rel_12_21"
+  by(auto simp add: bi_unique_def rel_12_21.simps)
+
+end
+
+lemma bernoulli_pmf_0: "bernoulli_pmf 0 = return_pmf False"
+  by(rule pmf_eqI)(simp split: split_indicator)
+
+lemma bernoulli_pmf_1: "bernoulli_pmf 1 = return_pmf True"
+  by(rule pmf_eqI)(simp split: split_indicator)
+
+lemma bernoulli_Not: "map_pmf Not (bernoulli_pmf r) = bernoulli_pmf (1 - r)"
+  apply(rule pmf_eqI)
+  apply(rewrite in "pmf _ \<hole> = _" not_not[symmetric])
+  apply(subst pmf_map_inj')
+  apply(simp_all add: inj_on_def bernoulli_pmf.rep_eq min_def max_def)
+  done
+
+lemma pmf_eqI_avoid: "p = q" if "\<And>i. i \<noteq> x \<Longrightarrow> pmf p i = pmf q i"
+proof(rule pmf_eqI)
+  show "pmf p i = pmf q i" for i
+  proof(cases "i = x")
+    case [simp]: True
+    have "pmf p i = measure_pmf.prob p {i}" by(simp add: measure_pmf_single)
+    also have "\<dots> = 1 - measure_pmf.prob p (UNIV - {i})"
+      by(subst measure_pmf.prob_compl[unfolded space_measure_pmf]) simp_all
+    also have "measure_pmf.prob p (UNIV - {i}) = measure_pmf.prob q (UNIV - {i})"
+      unfolding integral_pmf[symmetric] by(rule Bochner_Integration.integral_cong)(auto intro: that)
+    also have "1 - \<dots> = measure_pmf.prob q {i}"
+      by(subst measure_pmf.prob_compl[unfolded space_measure_pmf]) simp_all
+    also have "\<dots> = pmf q i" by(simp add: measure_pmf_single)
+    finally show ?thesis .
+  next
+    case False
+    then show ?thesis by(rule that)
+  qed
+qed
+
+
+
+type_synonym ('a, 'm) bind = "'m \<Rightarrow> ('a \<Rightarrow> 'm) \<Rightarrow> 'm"
+type_synonym ('a, 'm) return = "'a \<Rightarrow> 'm"
+
+locale monad_base =
+  fixes return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+begin
+
+primrec sequence :: "'m list \<Rightarrow> ('a list \<Rightarrow> 'm) \<Rightarrow> 'm"
+where
+  "sequence [] f = f []"
+| "sequence (x # xs) f = bind x (\<lambda>a. sequence xs (f \<circ> (#) a))"
+
+definition lift :: "('a \<Rightarrow> 'a) \<Rightarrow> 'm \<Rightarrow> 'm"
+where "lift f x = bind x (\<lambda>x. return (f x))"
+
+end
+
+declare
+  monad_base.sequence.simps [code]
+  monad_base.lift_def [code]
+
+context includes lifting_syntax begin
+
+lemma sequence_parametric [transfer_rule]:
+  "((M ===> (A ===> M) ===> M) ===> list_all2 M ===> (list_all2 A ===> M) ===> M) monad_base.sequence monad_base.sequence"
+unfolding monad_base.sequence_def[abs_def] by transfer_prover
+
+lemma lift_parametric [transfer_rule]:
+  "((A ===> M) ===> (M ===> (A ===> M) ===> M) ===> (A ===> A) ===> M ===> M) monad_base.lift monad_base.lift"
+unfolding monad_base.lift_def by transfer_prover
+
+end
+
+locale monad = monad_base return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  +
+  assumes bind_assoc: "\<And>(x :: 'm) f g. bind (bind x f) g = bind x (\<lambda>y. bind (f y) g)" 
+  and return_bind: "\<And>x f. bind (return x) f = f x"
+  and bind_return: "\<And>x. bind x return = x"
+begin
+
+lemma bind_lift [simp]: "bind (lift f x) g = bind x (g \<circ> f)"
+by(simp add: lift_def bind_assoc return_bind o_def)
+
+lemma lift_bind [simp]: "lift f (bind m g) = bind m (\<lambda>x. lift f (g x))"
+by(simp add: lift_def bind_assoc)
+
+end
+
+
+type_synonym ('s, 'm) get = "('s \<Rightarrow> 'm) \<Rightarrow> 'm"
+type_synonym ('s, 'm) put = "'s \<Rightarrow> 'm \<Rightarrow> 'm"
+
+locale monad_state_base = monad_base return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  +
+  fixes get :: "('s, 'm) get"
+  and put :: "('s, 'm) put"
+begin
+
+definition update :: "('s \<Rightarrow> 's) \<Rightarrow> 'm \<Rightarrow> 'm"
+where "update f m = get (\<lambda>s. put (f s) m)"
+
+end
+
+declare monad_state_base.update_def [code]
+
+lemma update_parametric [transfer_rule]: includes lifting_syntax shows  
+  "(((S ===> M) ===> M) ===> (S ===> M ===> M) ===> (S ===> S) ===> M ===> M)
+   monad_state_base.update monad_state_base.update"
+unfolding monad_state_base.update_def by transfer_prover
+
+locale monad_state = monad_state_base return bind get put + monad return bind 
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and get :: "('s, 'm) get"
+  and put :: "('s, 'm) put"
+  +
+  assumes put_get: "\<And>f. put s (get f) = put s (f s)"
+  and get_get: "\<And>f. get (\<lambda>s. get (f s)) = get (\<lambda>s. f s s)"
+  and put_put: "put s (put s' m) = put s' m"
+  and get_put: "get (\<lambda>s. put s m) = m"
+  and get_const: "\<And>m. get (\<lambda>_. m) = m"
+  and bind_get: "\<And>f g. bind (get f) g = get (\<lambda>s. bind (f s) g)"
+  and bind_put: "\<And>f. bind (put s m) f = put s (bind m f)"
+begin
+
+lemma put_update: "put s (update f m) = put (f s) m"
+by(simp add: update_def put_get put_put)
+
+lemma update_put: "update f (put s m) = put s m"
+by(simp add: update_def put_put get_const)
+
+lemma bind_update: "bind (update f m) g = update f (bind m g)"
+by(simp add: update_def bind_get bind_put)
+
+lemma update_get: "update f (get g) = get (update f \<circ> g \<circ> f)"
+by(simp add: update_def put_get get_get o_def) 
+ 
+lemma update_const: "update (\<lambda>_. s) m = put s m"
+by(simp add: update_def get_const)
+
+lemma update_update: "update f (update g m) = update (g \<circ> f) m"
+by(simp add: update_def put_get put_put)
+
+lemma update_id: "update id m = m"
+by(simp add: update_def get_put)
+
+end
+
+
+type_synonym 'm fail = "'m"
+
+locale monad_fail_base = monad_base return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  +
+  fixes fail :: "'m fail"
+begin
+
+definition assert :: "('a \<Rightarrow> bool) \<Rightarrow> 'm \<Rightarrow> 'm"
+where "assert P m = bind m (\<lambda>x. if P x then return x else fail)"
+
+end
+
+declare monad_fail_base.assert_def [code]
+
+lemma assert_parametric [transfer_rule]: includes lifting_syntax shows
+  "((A ===> M) ===> (M ===> (A ===> M) ===> M) ===> M ===> (A ===> (=)) ===> M ===> M)
+   monad_fail_base.assert monad_fail_base.assert"
+unfolding monad_fail_base.assert_def by transfer_prover
+
+locale monad_fail = monad_fail_base return bind fail + monad return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and fail :: "'m fail"
+  +
+  assumes fail_bind: "\<And>f. bind fail f = fail"
+begin
+
+lemma assert_fail: "assert P fail = fail"
+by(simp add: assert_def fail_bind)
+
+end
+
+
+type_synonym 'm catch = "'m \<Rightarrow> 'm \<Rightarrow> 'm"
+
+locale monad_catch_base = monad_fail_base return bind fail
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and fail :: "'m fail"
+  +
+  fixes catch :: "'m catch"
+
+locale monad_catch = monad_catch_base return bind fail catch + monad_fail return bind fail
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and fail :: "'m fail"
+  and catch :: "'m catch"
+  +
+  assumes catch_return: "catch (return x) m = return x"
+  and catch_fail: "catch fail m = m"
+  and catch_fail2: "catch m fail = m"
+  and catch_assoc: "catch (catch m m') m'' = catch m (catch m' m'')"
+
+locale monad_catch_state = monad_catch return bind fail catch + monad_state return bind get put
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and fail :: "'m fail"
+  and catch :: "'m catch"
+  and get :: "('s, 'm) get"
+  and put :: "('s, 'm) put"
+  +
+  assumes catch_get: "catch (get f) m = get (\<lambda>s. catch (f s) m)"
+  and catch_put: "catch (put s m) m' = put s (catch m m')"
+begin
+
+lemma catch_update: "catch (update f m) m' = update f (catch m m')"
+by(simp add: update_def catch_get catch_put)
+
+end
+
+
+
+type_synonym ('r, 'm) ask = "('r \<Rightarrow> 'm) \<Rightarrow> 'm"
+
+locale monad_reader_base = monad_base return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  +
+  fixes ask :: "('r, 'm) ask"
+
+locale monad_reader = monad_reader_base return bind ask + monad return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and ask :: "('r, 'm) ask"
+  +
+  assumes ask_ask: "\<And>f. ask (\<lambda>r. ask (f r)) = ask (\<lambda>r. f r r)"
+  and ask_const: "ask (\<lambda>_. m) = m"
+  and bind_ask: "\<And>f g. bind (ask f) g = ask (\<lambda>r. bind (f r) g)"
+  and bind_ask2: "\<And>f. bind m (\<lambda>x. ask (f x)) = ask (\<lambda>r. bind m (\<lambda>x. f x r))"
+begin
+
+lemma ask_bind: "ask (\<lambda>r. bind (f r) (g r)) = bind (ask f) (\<lambda>x. ask (\<lambda>r. g r x))"
+by(simp add: bind_ask bind_ask2 ask_ask)
+
+end
+
+locale monad_reader_state =
+  monad_reader return bind ask +
+  monad_state return bind get put
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and ask :: "('r, 'm) ask"
+  and get :: "('s, 'm) get"
+  and put :: "('s, 'm) put"
+  +
+  assumes ask_get: "\<And>f. ask (\<lambda>r. get (f r)) = get (\<lambda>s. ask (\<lambda>r. f r s))"
+  and put_ask: "\<And>f. put s (ask f) = ask (\<lambda>r. put s (f r))"
+
+
+type_synonym ('p, 'm) sample = "'p pmf \<Rightarrow> ('p \<Rightarrow> 'm) \<Rightarrow> 'm"
+
+locale monad_prob_base = monad_base return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  +
+  fixes sample :: "('p, 'm) sample"
+
+locale monad_prob = monad return bind + monad_prob_base return bind sample
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and sample :: "('p, 'm) sample"
+  +
+  assumes sample_const: "\<And>p m. sample p (\<lambda>_. m) = m"
+  and sample_return_pmf: "\<And>x f. sample (return_pmf x) f = f x"
+  and sample_bind_pmf: "\<And>p f g. sample (bind_pmf p f) g = sample p (\<lambda>x. sample (f x) g)"
+  and sample_commute: "\<And>p q f. sample p (\<lambda>x. sample q (f x)) = sample q (\<lambda>y. sample p (\<lambda>x. f x y))"
+  and bind_sample1: "\<And>p f g. bind (sample p f) g = sample p (\<lambda>x. bind (f x) g)"
+  and bind_sample2: "\<And>m f p. bind m (\<lambda>y. sample p (f y)) = sample p (\<lambda>x. bind m (\<lambda>y. f y x))"
+  and sample_parametric: "\<And>R. bi_unique R \<Longrightarrow> rel_fun (rel_pmf R) (rel_fun (rel_fun R (=)) (=)) sample sample"
+begin
+
+lemma sample_cong: "(\<And>x. x \<in> set_pmf p \<Longrightarrow> f x = g x) \<Longrightarrow> sample p f = sample q g" if "p = q"
+  by(rule sample_parametric[where R="eq_onp (\<lambda>x. x \<in> set_pmf p)", THEN rel_funD, THEN rel_funD])
+    (simp_all add: bi_unique_def eq_onp_def rel_fun_def pmf.rel_refl_strong that)
+
+end
+
+
+locale monad_prob3 = monad_prob return bind sample + three "TYPE('p)"
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and sample :: "('p, 'm) sample"
+begin
+
+definition pchoose :: "real \<Rightarrow> 'm \<Rightarrow> 'm \<Rightarrow> 'm" where
+  "pchoose r m m' = sample (map_pmf (\<lambda>b. if b then \<^bold>1 else \<^bold>2) (bernoulli_pmf r)) (\<lambda>x. if x = \<^bold>1 then m else m')"
+
+abbreviation pchoose_syntax :: "'m \<Rightarrow> real \<Rightarrow> 'm \<Rightarrow> 'm" ("_ \<lhd> _ \<rhd> _" [100, 0, 100] 99) where
+  "m \<lhd> r \<rhd> m' \<equiv> pchoose r m m'"
+
+lemma pchoose_0: "m \<lhd> 0 \<rhd> m' = m'"
+  by(simp add: pchoose_def bernoulli_pmf_0 sample_return_pmf)
+
+lemma pchoose_1: "m \<lhd> 1 \<rhd> m' = m"
+  by(simp add: pchoose_def bernoulli_pmf_1 sample_return_pmf)
+
+lemma pchoose_idemp: "m \<lhd> r \<rhd> m = m"
+  by(simp add: pchoose_def sample_const)
+
+lemma pchoose_bind1: "bind (m \<lhd> r \<rhd> m') f = bind m f \<lhd> r \<rhd> bind m' f"
+  by(simp add: pchoose_def bind_sample1 if_distrib[where f="\<lambda>m. bind m _"])
+
+lemma pchoose_bind2: "bind m (\<lambda>x. f x \<lhd> p \<rhd> g x) = bind m f \<lhd> p \<rhd> bind m g"
+  by(auto simp add: pchoose_def bind_sample2 intro!: arg_cong2[where f=sample])
+
+lemma pchoose_commute: "m \<lhd> 1 - r \<rhd> m' = m' \<lhd> r \<rhd> m"
+  apply(simp add: pchoose_def bernoulli_Not[symmetric] pmf.map_comp o_def)
+  apply(rule sample_parametric[where R=rel_12_21, THEN rel_funD, THEN rel_funD])
+  subgoal by(simp)
+  subgoal by(rule pmf.map_transfer[where Rb="(=)", THEN rel_funD, THEN rel_funD])
+            (simp_all add: rel_fun_def rel_12_21.simps pmf.rel_eq)
+  subgoal by(simp add: rel_fun_def rel_12_21.simps)
+  done
+
+lemma pchoose_assoc: "m \<lhd> p \<rhd> (m' \<lhd> q \<rhd> m'') = (m \<lhd> r \<rhd> m') \<lhd> s \<rhd> m''" (is "?lhs = ?rhs")
+  if "min 1 (max 0 p) = min 1 (max 0 r) * min 1 (max 0 s)"
+  and "1 - min 1 (max 0 s) = (1 - min 1 (max 0 p)) * (1 - min 1 (max 0 q))"
+proof -
+  let ?f = "(\<lambda>x. if x = \<^bold>1 then m else if x = \<^bold>2 then m' else m'')"
+  let ?p = "bind_pmf (map_pmf (\<lambda>b. if b then \<^bold>1 else \<^bold>2) (bernoulli_pmf p))
+     (\<lambda>x. if x = \<^bold>1 then return_pmf \<^bold>1 else map_pmf (\<lambda>b. if b then \<^bold>2 else \<^bold>3) (bernoulli_pmf q))"
+  let ?q = "bind_pmf (map_pmf (\<lambda>b. if b then \<^bold>1 else \<^bold>2) (bernoulli_pmf s))
+     (\<lambda>x. if x = \<^bold>1 then map_pmf (\<lambda>b. if b then \<^bold>1 else \<^bold>2) (bernoulli_pmf r) else return_pmf \<^bold>3)"
+
+  have [simp]: "{x. \<not> x} = {False}" "{x. x} = {True}" by auto
+
+  have "?lhs = sample ?p ?f"
+    by(auto simp add: pchoose_def sample_bind_pmf if_distrib[where f="\<lambda>x. sample x _"] sample_return_pmf rel_fun_def rel_12_23.simps pmf.rel_eq cong: if_cong intro!: sample_cong[OF refl] sample_parametric[where R="rel_12_23", THEN rel_funD, THEN rel_funD] pmf.map_transfer[where Rb="(=)", THEN rel_funD, THEN rel_funD])
+  also have "?p = ?q"
+  proof(rule pmf_eqI_avoid)
+    fix i :: "'p"
+    assume "i \<noteq> \<^bold>2"
+    then consider (one) "i = \<^bold>1" | (three) "i = \<^bold>3" | (other) "i \<noteq> \<^bold>1" "i \<noteq> \<^bold>2" "i \<noteq> \<^bold>3" by metis
+    then show "pmf ?p i = pmf ?q i"
+    proof cases
+      case [simp]: one
+      have "pmf ?p i = measure_pmf.expectation (map_pmf (\<lambda>b. if b then \<^bold>1 else \<^bold>2) (bernoulli_pmf p)) (indicator {\<^bold>1})"
+        unfolding pmf_bind
+        by(rule arg_cong2[where f=measure_pmf.expectation, OF refl])(auto simp add: fun_eq_iff pmf_eq_0_set_pmf)
+      also have "\<dots> = min 1 (max 0 p)" 
+        by(simp add: vimage_def)(simp add: measure_pmf_single bernoulli_pmf.rep_eq)
+      also have "\<dots> = min 1 (max 0 s) * min 1 (max 0 r)" using that(1) by simp
+      also have "\<dots> = measure_pmf.expectation (bernoulli_pmf s)
+            (\<lambda>x. indicator {True} x * pmf (map_pmf (\<lambda>b. if b then \<^bold>1 else \<^bold>2) (bernoulli_pmf r)) \<^bold>1)"
+        by(simp add: pmf_map vimage_def measure_pmf_single)(simp add:  bernoulli_pmf.rep_eq)
+      also have "\<dots> = pmf ?q i"
+        unfolding pmf_bind integral_map_pmf
+        by(rule arg_cong2[where f=measure_pmf.expectation, OF refl])(auto simp add: fun_eq_iff pmf_eq_0_set_pmf)
+      finally show ?thesis .
+    next
+      case [simp]: three
+      have "pmf ?p i = measure_pmf.expectation (bernoulli_pmf p)
+            (\<lambda>x. indicator {False} x * pmf (map_pmf (\<lambda>b. if b then \<^bold>2 else \<^bold>3) (bernoulli_pmf q)) \<^bold>3)"
+        unfolding pmf_bind integral_map_pmf
+        by(rule arg_cong2[where f=measure_pmf.expectation, OF refl])(auto simp add: fun_eq_iff pmf_eq_0_set_pmf)
+      also have "\<dots> = (1 - min 1 (max 0 p)) * (1 - min 1 (max 0 q))" 
+        by(simp add: pmf_map vimage_def measure_pmf_single)(simp add:  bernoulli_pmf.rep_eq)
+      also have "\<dots> = 1 - min 1 (max 0 s)" using that(2) by simp
+      also have "\<dots> = measure_pmf.expectation (map_pmf (\<lambda>b. if b then \<^bold>1 else \<^bold>2) (bernoulli_pmf s)) (indicator {\<^bold>2})"
+        by(simp add: vimage_def)(simp add: measure_pmf_single bernoulli_pmf.rep_eq)
+      also have "\<dots> = pmf ?q i"
+        unfolding pmf_bind
+        by(rule Bochner_Integration.integral_cong_AE)(auto simp add: fun_eq_iff pmf_eq_0_set_pmf AE_measure_pmf_iff)
+      finally show ?thesis .
+    next
+      case other
+      then have "pmf ?p i = 0" "pmf ?q i = 0" by(auto simp add: pmf_eq_0_set_pmf)
+      then show ?thesis by simp
+    qed
+  qed
+  also have "sample ?q ?f = ?rhs"
+    by(auto simp add: pchoose_def sample_bind_pmf if_distrib[where f="\<lambda>x. sample x _"] sample_return_pmf cong: if_cong intro!: sample_cong[OF refl])
+  finally show ?thesis .
+qed
+
+lemma pchoose_assoc': "m \<lhd> p \<rhd> (m' \<lhd> q \<rhd> m'') = (m \<lhd> r \<rhd> m') \<lhd> s \<rhd> m''"
+  if "p = r * s" and "1 - s = (1 - p) * (1 - q)"
+  and "0 \<le> p" "p \<le> 1" "0 \<le> q" "q \<le> 1" "0 \<le> r" "r \<le> 1" "0 \<le> s" "s \<le> 1"
+
+end    
+
+locale monad_state_prob = monad_state return bind get put + monad_prob return bind sample
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and get :: "('s, 'm) get"
+  and put :: "('s, 'm) put"
+  and sample :: "('p, 'm) sample"
+  +
+  assumes sample_get: "sample p (\<lambda>x. get (f x)) = get (\<lambda>s. sample p (\<lambda>x. f x s))"
+begin
+
+lemma sample_put: "sample p (\<lambda>x. put s (m x)) = put s (sample p m)"
+proof -
+  fix UU
+  have "sample p (\<lambda>x. put s (m x)) = sample p (\<lambda>x. bind (put s (return UU)) (\<lambda>_. m x))"
+    by(simp add: bind_put return_bind)
+  also have "\<dots> = bind (put s (return UU)) (\<lambda>_. sample p m)"
+    by(simp add: bind_sample2)
+  also have "\<dots> = put s (sample p m)"
+    by(simp add: bind_put return_bind)
+  finally show ?thesis .
+qed
+
+lemma sample_update: "sample p (\<lambda>x. update f (m x)) = update f (sample p m)"
+by(simp add: update_def sample_get sample_put)
+
+end
+
+
+
+type_synonym 'm alt = "'m \<Rightarrow> 'm \<Rightarrow> 'm"
+
+locale monad_alt_base = monad_base return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  +
+  fixes alt :: "'m alt"
+
+locale monad_alt = monad return bind + monad_alt_base return bind alt
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and alt :: "'m alt"
+  assumes alt_assoc: "alt (alt m1 m2) m3 = alt m1 (alt m2 m3)"
+  and bind_alt1: "bind (alt m m') f = alt (bind m f) (bind m' f)"
+
+locale monad_fail_alt = monad_fail return bind fail + monad_alt return bind alt
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and fail :: "'m fail"
+  and alt :: "'m alt"
+  +
+  assumes alt_fail1: "alt fail m = m"
+  and alt_fail2: "alt m fail = m"
+begin
+
+lemma assert_alt: "assert P (alt m m') = alt (assert P m) (assert P m')"
+by(simp add: assert_def bind_alt1)
+
+end
+
+locale monad_state_alt = monad_state return bind get put + monad_alt return bind alt
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and get :: "('s, 'm) get"
+  and put :: "('s, 'm) put"
+  and alt :: "'m alt"
+  +
+  assumes alt_get: "alt (get f) (get g) = get (\<lambda>x. alt (f x) (g x))"
+  and alt_put: "alt (put s m) (put s m') = put s (alt m m')"
+begin
+
+lemma alt_update: "alt (update f m) (update f m') = update f (alt m m')"
+by(simp add: update_def alt_get alt_put)
+
+end
+
+
+type_synonym ('c, 'm) altc = "'c cset \<Rightarrow> ('c \<Rightarrow> 'm) \<Rightarrow> 'm"
+
+locale monad_altc_base = monad_base return bind
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  +
+  fixes altc :: "('c, 'm) altc"
+begin
+
+definition fail :: "'m fail" where "fail = altc cempty (\<lambda>_. undefined)"
+
+end
+
+declare monad_altc_base.fail_def [code]
+
+locale monad_altc = monad return bind + monad_altc_base return bind altc
+  for return :: "('a, 'm) return"
+  and bind :: "('a, 'm) bind"
+  and altc :: "('c, 'm) altc"
+  +
+  assumes bind_altc1: "\<And>C g f. bind (altc C g) f = altc C (\<lambda>c. bind (g c) f)"
+  and altc_single: "\<And>x f. altc (csingle x) f = f x"
+  and altc_cUNION: "\<And>C f g. altc (cUNION C f) g = altc C (\<lambda>x. altc (f x) g)"
+  and altc_parametric: "\<And>R. bi_unique R \<Longrightarrow> rel_fun (rel_cset R) (rel_fun (rel_fun R (=)) (=)) altc altc"
+begin
+
+lemma altc_cong: "cBall C (\<lambda>x. f x = g x) \<Longrightarrow> altc C f = altc C g"
+  apply(rule altc_parametric[where R="eq_onp (\<lambda>x. cin x C)", THEN rel_funD, THEN rel_funD])
+  subgoal by(simp add: bi_unique_def eq_onp_def)
+  subgoal by(simp add: cset.rel_eq_onp eq_onp_same_args pred_cset_def cin_def)
+  subgoal by(simp add: rel_fun_def eq_onp_def cBall_def cin_def)
+  done
+
+lemma monad_fail [locale_witness]: "monad_fail return bind fail"
+proof
+  show "bind fail f = fail" for f
+    by(simp add: fail_def bind_altc1 cong: altc_cong)
+qed
+
+end
+
+  many elements in the choice type @{typ 'c}. For the associativity law, we need at least
+  three elements.\<close>
+subsection \<open>Writer monad\<close>
+subsection \<open>Resumption monad\<close>
+subsection \<open>Commutative monad\<close>
+subsection \<open>Discardable monad\<close>
+subsection \<open>Duplicable monad\<close>
+section \<open>Monad implementations\<close>
+subsection \<open>Identity monad\<close>
+text \<open>We need a type constructor such that we can overload the monad operations\<close>
+subsubsection \<open>Plain monad\<close>
+subsection \<open>Probability monad\<close>
+text \<open>We don't know of a sensible probability monad transformer, so we define the plain probability monad.\<close>
+subsection \<open>Resumption\<close>
+text \<open>
+  We cannot define a resumption monad transformer because the codatatype recursion would have to
+  go through a type variable. If we plug in something like unbounded non-determinism, then the
+  HOL type does not exist.
+\<close>
+subsubsection \<open>Plain monad\<close>
+subsection \<open>Failure and exception monad transformer\<close>
+text \<open>
+  The phantom type variable @{typ 'a} is needed to avoid hidden polymorphism when overloading the
+  monad operations for the failure monad transformer.
+\<close>
+text \<open>
+  We define our own relator and mapper such that the phantom variable does not need any relation.
+\<close>
+subsubsection \<open>Plain monad, failure, and exceptions\<close>
+subsubsection \<open>Reader\<close>
+subsubsection \<open>State\<close>
+subsubsection \<open>Probability\<close>
+subsubsection \<open>Writer\<close>
+subsubsection \<open>Binary Non-determinism\<close>
+text \<open>
+  The @{term fail} of @{typ "(_, _) optionT"} does not combine with @{term "alt"} of the inner monad
+  because @{typ "(_, _) optionT"} injects failures with @{term "return None"} into the inner monad.
+\<close>
+subsubsection \<open>Countable Non-determinism\<close>
+subsubsection \<open>Resumption\<close>
+subsubsection \<open>Commutativity\<close>
+subsubsection \<open>Duplicability\<close>
+subsubsection \<open>Parametricity\<close>
+subsection \<open>Reader monad transformer\<close>
+subsubsection \<open>Plain monad and ask\<close>
+subsubsection \<open>Failure\<close>
+subsubsection \<open>State\<close>
+subsubsection \<open>Probability\<close>
+subsubsection \<open>Binary Non-determinism\<close>
+subsubsection \<open>Countable Non-determinism\<close>
+subsubsection \<open>Resumption\<close>
+subsubsection \<open>Writer\<close>
+subsubsection \<open>Commutativity\<close>
+subsubsection \<open>Discardability\<close>
+subsubsection \<open>Duplicability\<close>
+subsubsection \<open>Parametricity\<close>
+subsection \<open>Unbounded non-determinism\<close>
+subsection \<open>Non-determinism transformer\<close>
+text \<open>
+  We define our own relator and mapper such that the phantom variable does not need any relation.
+\<close>
+subsubsection \<open>Generic implementation\<close>
+text \<open>
+  The canonical lift of sampling into @{typ "(_, _) nondetT"} does not satisfy @{const monad_prob},
+  because sampling does not distribute over bind backwards. Intuitively, if we sample first,
+  then the same sample is used in all non-deterministic choices. But if we sample later,
+  each non-deterministic choice may sample a different value.
+\<close>
+  \<comment> \<open>It's not really sensible to assume a commutative state monad, but let's prove it anyway ...\<close>
+subsubsection \<open>Parametricity\<close>
+subsubsection \<open>Implementation using lists\<close>
+subsubsection \<open>Implementation using multisets\<close>
+subsubsection \<open>Implementation using finite sets\<close>
+subsubsection \<open>Implementation using countable sets\<close>
+text \<open>For non-finite choices, we cannot generically construct the merge operation. So we formalize
+  in a locale what can be proven generically and then prove instances of the locale for concrete
+  locale implementations.
+
+  We need two separate merge parameters because we must merge effects over choices (type @{typ 'c})
+  and effects over the non-deterministic results (type @{typ 'a}) of computations.
+\<close>
+paragraph \<open>Identity monad\<close>
+paragraph \<open>Reader monad transformer\<close>

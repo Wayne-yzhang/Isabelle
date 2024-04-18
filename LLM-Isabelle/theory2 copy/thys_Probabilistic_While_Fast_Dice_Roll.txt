@@ -1,0 +1,122 @@
+theory Fast_Dice_Roll imports
+  Bernoulli
+  While_SPMF
+begin
+
+
+lemma sample_bits_fusion:
+  fixes v :: nat
+  assumes "0 < v"
+  shows
+  "bind_pmf (pmf_of_set {..<v}) (\<lambda>c. bind_pmf (pmf_of_set UNIV) (\<lambda>b. f (2 * c + (if b then 1 else 0)))) =
+   bind_pmf (pmf_of_set {..<2 * v}) f"
+  (is "?lhs = ?rhs")
+proof -
+  have "?lhs = bind_pmf (map_pmf (\<lambda>(c, b). (2 * c + (if b then 1 else 0))) (pair_pmf (pmf_of_set {..<v}) (pmf_of_set UNIV))) f"
+    (is "_ = bind_pmf (map_pmf ?f _) _")
+    by(simp add: pair_pmf_def bind_map_pmf bind_assoc_pmf bind_return_pmf)
+  also have "map_pmf ?f (pair_pmf (pmf_of_set {..<v}) (pmf_of_set UNIV)) = pmf_of_set {..<2 * v}"
+    (is "?l = ?r" is "map_pmf ?f ?p = _")
+  proof(rule pmf_eqI)
+    fix i :: nat
+    have [simp]: "inj ?f" by(auto simp add: inj_on_def) arith+
+    define i' where "i' \<equiv> i div 2"
+    define b where "b \<equiv> odd i"
+    have i: "i = ?f (i', b)" by(simp add: i'_def b_def)
+    show "pmf ?l i = pmf ?r i"
+      by(subst i; subst pmf_map_inj')(simp_all add: pmf_pair i'_def assms lessThan_empty_iff split: split_indicator)
+  qed
+  finally show ?thesis .
+qed
+
+lemma sample_bits_fusion2:
+  fixes v :: nat
+  assumes "0 < v"
+  shows
+  "bind_pmf (pmf_of_set UNIV) (\<lambda>b. bind_pmf (pmf_of_set {..<v}) (\<lambda>c. f (c + v * (if b then 1 else 0)))) =
+   bind_pmf (pmf_of_set {..<2 * v}) f"
+  (is "?lhs = ?rhs")
+proof -
+  have "?lhs = bind_pmf (map_pmf (\<lambda>(c, b). (c + v * (if b then 1 else 0))) (pair_pmf (pmf_of_set {..<v}) (pmf_of_set UNIV))) f"
+    (is "_ = bind_pmf (map_pmf ?f _) _")
+    unfolding pair_pmf_def by(subst bind_commute_pmf)(simp add: bind_map_pmf bind_assoc_pmf bind_return_pmf)
+  also have "map_pmf ?f (pair_pmf (pmf_of_set {..<v}) (pmf_of_set UNIV)) = pmf_of_set {..<2 * v}"
+    (is "?l = ?r" is "map_pmf ?f ?p = _")
+  proof(rule pmf_eqI)
+    fix i :: nat
+    have [simp]: "inj_on ?f ({..<v} \<times> UNIV)" by(auto simp add: inj_on_def)
+    define i' where "i' \<equiv> if i \<ge> v then i - v else i"
+    define b where "b \<equiv> i \<ge> v"
+    have i: "i = ?f (i', b)" by(simp add: i'_def b_def)
+    show "pmf ?l i = pmf ?r i"
+    proof(cases "i < 2 * v")
+      case True
+      thus ?thesis
+        by(subst i; subst pmf_map_inj)(auto simp add: pmf_pair i'_def assms lessThan_empty_iff split: split_indicator)
+    next
+      case False
+      hence "i \<notin> set_pmf ?l" "i \<notin> set_pmf ?r" 
+        using assms by(auto simp add: lessThan_empty_iff split: if_split_asm)
+      thus ?thesis by(simp add: set_pmf_iff del: set_map_pmf)
+    qed
+  qed
+  finally show ?thesis .
+qed
+
+context fixes n :: nat notes [[function_internals]] begin
+
+
+partial_function (spmf) fast_dice_roll :: "nat \<Rightarrow> nat \<Rightarrow> nat spmf"
+where
+  "fast_dice_roll v c = 
+  (if v \<ge> n then if c < n then return_spmf c else fast_dice_roll (v - n) (c - n)
+   else do {
+     b \<leftarrow> coin_spmf;
+     fast_dice_roll (2 * v) (2 * c + (if b then 1 else 0)) } )"
+
+lemma fast_dice_roll_fixp_induct [case_names adm bottom step]:
+  assumes "spmf.admissible (\<lambda>fast_dice_roll. P (curry fast_dice_roll))"
+  and "P (\<lambda>v c. return_pmf None)"
+  and "\<And>fdr. P fdr \<Longrightarrow> P (\<lambda>v c. if v \<ge> n then if c < n then return_spmf c else fdr (v - n) (c - n)
+        else bind_spmf coin_spmf (\<lambda>b. fdr (2 * v) (2 * c + (if b then 1 else 0))))"
+  shows "P fast_dice_roll"
+using assms by(rule fast_dice_roll.fixp_induct)
+
+definition fast_uniform :: "nat spmf"
+where "fast_uniform = fast_dice_roll 1 0"
+
+lemma spmf_fast_dice_roll_ub:
+  assumes "0 < v"
+  shows "spmf (bind_pmf (pmf_of_set {..<v}) (fast_dice_roll v)) x \<le> (if x < n then 1 / n else 0)"
+  (is "?lhs \<le> ?rhs")
+proof -
+  have "ennreal ?lhs \<le> ennreal ?rhs" using assms
+  proof(induction arbitrary: v x rule: fast_dice_roll_fixp_induct)
+    case adm thus ?case 
+      by(rule cont_intro ccpo_class.admissible_leI)+ simp_all
+    case bottom thus ?case by simp
+    case (step fdr)
+    show ?case (is "?lhs \<le> ?rhs")
+    proof(cases "n \<le> v")
+      case le: True
+      then have "?lhs = spmf (bind_pmf (pmf_of_set {..<v}) (\<lambda>c. if c < n then return_spmf c else fdr (v - n) (c - n))) x"
+        by simp
+      also have "\<dots> = (\<integral>\<^sup>+ c'. indicator (if x < n then {x} else {}) c' \<partial>measure_pmf (pmf_of_set {..<v})) +
+        (\<integral>\<^sup>+ c'. indicator {n ..< v} c' * spmf (fdr (v - n) (c' - n)) x \<partial>measure_pmf (pmf_of_set {..<v}))"
+        (is "?then = ?found + ?continue") using step.prems
+        by(subst nn_integral_add[symmetric])(auto simp add: ennreal_pmf_bind AE_measure_pmf_iff lessThan_empty_iff split: split_indicator intro!: nn_integral_cong_AE)
+      also have "?found = (if x < n then 1 else 0) / v" using step.prems le
+        by(auto simp add: measure_pmf.emeasure_eq_measure measure_pmf_of_set lessThan_empty_iff Iio_Int_singleton)
+      also have "?continue = (\<integral>\<^sup>+ c'. indicator {n ..< v} c' * 1 / v * spmf (fdr (v - n) (c' - n)) x \<partial>count_space UNIV)"
+        using step.prems by(auto simp add: nn_integral_measure_pmf lessThan_empty_iff ennreal_mult[symmetric] intro!: nn_integral_cong split: split_indicator)
+      also have "\<dots> = (if v = n then 0 else ennreal ((v - n) / v) * spmf (bind_pmf (pmf_of_set {n..<v}) (\<lambda>c'. fdr (v - n) (c' - n))) x)"
+        using le step.prems
+        by(subst ennreal_pmf_bind)(auto simp add: ennreal_mult[symmetric] nn_integral_measure_pmf nn_integral_0_iff_AE AE_count_space nn_integral_cmult[symmetric] split: split_indicator)
+      also {
+        assume *: "n < v"
+        then have "pmf_of_set {n..<v} = map_pmf ((+) n) (pmf_of_set {..<v - n})"
+          by(subst map_pmf_of_set_inj)(auto 4 3 simp add: inj_on_def lessThan_empty_iff intro!: arg_cong[where f=pmf_of_set] intro: rev_image_eqI[where x="_ - n"] diff_less_mono)
+        also have "bind_pmf \<dots> (\<lambda>c'. fdr (v - n) (c' - n)) = bind_pmf (pmf_of_set {..<v - n}) (fdr (v - n))"
+          by(simp add: bind_map_pmf)
+        also have "ennreal (spmf \<dots> x) \<le> (if x < n then 1 / n else 0)" 
+          by(rule step.IH)(simp add: *)

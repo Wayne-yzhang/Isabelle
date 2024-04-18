@@ -1,0 +1,127 @@
+theory Cyc_Check
+imports "../DFS_Framework"
+  CAVA_Automata.Digraph_Impl
+  "../Misc/Impl_Rev_Array_Stack"
+begin
+
+record 'v cycc_state = "'v state" +
+  break :: bool
+
+lemma break_more_cong: "state.more s = state.more s' \<Longrightarrow> break s = break s'"
+  by (cases s, cases s', simp)
+
+lemma [simp]: "s\<lparr> state.more := \<lparr> break = foo \<rparr> \<rparr> = s \<lparr> break := foo \<rparr>"
+  by (cases s) simp
+
+definition cycc_params :: "('v,unit cycc_state_ext) parameterization"
+where "cycc_params \<equiv> dflt_parametrization state.more 
+  (RETURN \<lparr> break = False \<rparr>) \<lparr>
+  on_back_edge := \<lambda>_ _ _. RETURN \<lparr> break = True \<rparr>,
+  is_break := break \<rparr>"
+lemmas cycc_params_simp[simp] = 
+  gen_parameterization.simps[mk_record_simp, OF cycc_params_def[simplified]]
+
+interpretation cycc: param_DFS_defs where param=cycc_params for G .
+
+definition "cyc_checker G \<equiv> do {
+  ASSERT (fb_graph G);
+  s \<leftarrow> cycc.it_dfs TYPE('a) G;
+  RETURN (break s)
+}"
+
+definition "cyc_checkerT G \<equiv> do {
+  ASSERT (graph G \<and> finite (graph_defs.reachable G));
+  s \<leftarrow> cycc.it_dfsT TYPE('a) G;
+  RETURN (break s)
+}"
+
+
+lemma cycc_invar_eq[simp]:
+  shows "DFS_invar G cycc_params s \<longleftrightarrow> cycc_invar G s" 
+proof
+  assume "DFS_invar G cycc_params s"
+  interpret DFS_invar G cycc_params s by fact
+  show "cycc_invar G s" by unfold_locales
+next
+  assume "cycc_invar G s"
+  then interpret cycc_invar G s .
+  show "DFS_invar G cycc_params s" by unfold_locales
+qed
+
+  our cyclicity checker.
+\<close>
+  text \<open>We show that we break if and only if there are back edges. 
+    This is straightforward from our parameterization, and we can use the 
+    @{thm [source] establish_invarI} rule provided by the DFS framework.
+
+    We use this example to illustrate the general proof scheme:
+    \<close>
+  txt \<open>The @{thm establish_invarI} rule is used with the induction method, and 
+    yields cases\<close>
+    txt \<open>Our parameterization has only hooked into initialization and back-edges,
+      so only these two cases are non-trivial\<close>
+    txt \<open>For proving invariant preservation, we may assume that the invariant 
+      holds on the previous state. Interpreting the invariant locale makes 
+      available all invariants ever proved into this locale (i.e., the invariants 
+      from all loaded libraries, and the ones you proved yourself.).
+      \<close>
+    txt \<open>However, here we do not need them:\<close>
+  text \<open>For technical reasons, invariants are proved in the basic locale, 
+    and then transferred to the invariant locale:\<close>  
+  text \<open>The above lemma is simple enough to have a short apply-style proof:\<close>
+  text \<open>Now, when we know that the break flag indicates back-edges,
+    we can easily prove correctness, using a lemma from the invariant 
+    library:\<close>
+  text \<open>Again, we have a short two-line proof:\<close>
+text \<open>Finally, we define a specification for cyclicity checking,
+  and prove that our cyclicity checker satisfies the specification: \<close>
+text \<open>The same for the total correct variant:\<close>
+subsection \<open>Implementation\<close>
+text \<open>
+  The implementation has two aspects: Structural implementation and data implementation.
+  The framework provides recursive and tail-recursive implementations, as well as a variety
+  of data structures for the state.
+
+  a stack, an on-stack and a visited set, but no timing information.
+
+  Note that it is common for state implementations to omit details from the
+  very detailed abstract state. This means, that the algorithm's operations 
+  must not access these details (e.g. timing). However, the algorithm's 
+  correctness proofs may still use them.
+\<close>
+text \<open>We extend the state template to add a break flag\<close>
+text \<open>Definition of refinement relation: The break-flag is refined by identity.\<close>
+text \<open>Implementation of the parameters\<close>
+text \<open>Note: In this simple case, the reformulation of the extension state and 
+  parameterization is just redundant, However, in general the refinement will 
+  also affect the parameterization.\<close>
+text \<open>The above interpretation creates an iterative and a recursive implementation \<close>
+term cycc_impl.tailrec_implT \<comment> \<open>Note, for total correctness we currently only support tail-recursive implementations.\<close>
+text \<open>We use both to derive a tail-recursive and a recursive cyclicity checker:\<close>
+text \<open>To show correctness of the implementation, we integrate the
+  locale of the simple implementation into our cyclicity checker's locale:\<close>
+  text \<open>We get that our implementation refines the abstrct DFS algorithm.\<close>  
+  text \<open>Unfortunately, the combination of locales and abbreviations gets to its 
+    limits here, so we state the above lemma a bit more readable:\<close>
+text \<open>Finally, we get correctness of our cyclicity checker implementations\<close>
+subsection \<open>Synthesizing Executable Code\<close>
+text \<open>
+  Our algorithm's implementation is still abstract, as it uses abstract data 
+  structures like sets and relations. In a last step, we use the Autoref tool
+  to derive an implementation with efficient data structures.
+\<close>
+text \<open>Again, we derive our state implementation from the template provided by 
+  the framework. The break-flag is implemented by a Boolean flag. 
+  Note that, in general, the user-defined state extensions may be data-refined
+  in this step.\<close>
+text \<open>We define the refinement relation for the state extension\<close>
+text \<open>And register it with the Autoref tool:\<close>
+text \<open>We show that the record operations on our extended state are parametric,
+  and declare these facts to Autoref: \<close>
+text \<open>Finally, we can synthesize an implementation for our cyclicity checker,
+  using the standard Autoref-approach:\<close>
+text \<open>Combining the refinement steps yields a correctness 
+  theorem for the cyclicity checker implementation:\<close>
+text \<open>We can repeat the same boilerplate for the recursive version of the algorithm:\<close>
+text \<open>And, again, for the total correct version. 
+  Note that we generate a plain implementation, not inside a monad:\<close>

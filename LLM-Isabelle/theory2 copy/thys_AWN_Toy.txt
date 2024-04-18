@@ -1,0 +1,367 @@
+theory Toy
+imports Main AWN_Main Qmsg_Lifting
+begin
+
+subsection "Messages used in the protocol"
+
+datatype msg =
+    Pkt data ip
+  | Newpkt data ip
+
+instantiation msg :: msg
+begin
+definition newpkt_def [simp]: "newpkt \<equiv> \<lambda>(d,did). Newpkt d did"
+definition eq_newpkt_def: "eq_newpkt m \<equiv> case m of Newpkt d did  \<Rightarrow> True | _ \<Rightarrow> False" 
+
+instance by intro_classes (simp add: eq_newpkt_def)
+end
+
+definition pkt :: "nat \<times> nat \<Rightarrow> msg"
+where "pkt \<equiv> \<lambda>(no, sid). Pkt no sid"
+
+lemma pkt_simp [simp]:
+  "pkt(no, sid) = Pkt no sid"
+  unfolding pkt_def by simp
+
+lemma not_eq_newpkt_pkt [simp]: "\<not>eq_newpkt (Pkt no sid)"
+  unfolding eq_newpkt_def by simp
+
+subsection "Protocol model"
+
+record state =
+  id    :: "nat"
+  no    :: "nat"
+  nhid  :: "nat"
+  msg    :: "msg"
+  num    :: "nat"
+  sid    :: "nat"
+
+abbreviation toy_init :: "ip \<Rightarrow> state"
+where "toy_init i \<equiv> \<lparr>
+         id = i,
+         no = 0,
+         nhid = i,
+
+         msg    = (SOME x. True),
+         num    = (SOME x. True),
+         sid    = (SOME x. True)
+       \<rparr>"
+
+lemma some_neq_not_eq [simp]: "\<not>((SOME x :: nat. x \<noteq> i) = i)"
+  by (subst some_eq_ex) (metis zero_neq_numeral)
+
+definition clear_locals :: "state \<Rightarrow> state"
+where "clear_locals \<xi> = \<xi> \<lparr>
+    msg    := (SOME x. True),
+    num    := (SOME x. True),
+    sid    := (SOME x. True)
+  \<rparr>"
+
+lemma clear_locals_but_not_globals [simp]:
+  "id (clear_locals \<xi>) = id \<xi>"
+  "no (clear_locals \<xi>) = no \<xi>"
+  "nhid (clear_locals \<xi>) = nhid \<xi>"
+  unfolding clear_locals_def by auto
+
+definition is_newpkt
+where "is_newpkt \<xi> \<equiv> case msg \<xi> of
+                       Newpkt data did \<Rightarrow> { \<xi>\<lparr>num := data\<rparr> }
+                     | _ \<Rightarrow> {}"
+
+definition is_pkt
+where "is_pkt \<xi> \<equiv> case msg \<xi> of
+                    Pkt num' sid' \<Rightarrow> { \<xi>\<lparr> num := num', sid := sid' \<rparr> }
+                  | _ \<Rightarrow> {}"
+
+lemmas is_msg_defs =
+  is_pkt_def is_newpkt_def
+
+lemma is_msg_inv_id [simp]:
+  "\<xi>' \<in> is_pkt \<xi>    \<Longrightarrow> id \<xi>' = id \<xi>"
+  "\<xi>' \<in> is_newpkt \<xi> \<Longrightarrow> id \<xi>' = id \<xi>"
+  unfolding is_msg_defs
+  by (cases "msg \<xi>", clarsimp+)+
+
+lemma is_msg_inv_sid [simp]:
+  "\<xi>' \<in> is_newpkt \<xi> \<Longrightarrow> sid \<xi>' = sid \<xi>"
+  unfolding is_msg_defs
+  by (cases "msg \<xi>", clarsimp+)+
+
+lemma is_msg_inv_no [simp]:
+  "\<xi>' \<in> is_pkt \<xi>    \<Longrightarrow> no \<xi>' = no \<xi>"
+  "\<xi>' \<in> is_newpkt \<xi> \<Longrightarrow> no \<xi>' = no \<xi>"
+  unfolding is_msg_defs
+  by (cases "msg \<xi>", clarsimp+)+
+
+lemma is_msg_inv_nhid [simp]:
+  "\<xi>' \<in> is_pkt \<xi>    \<Longrightarrow> nhid \<xi>' = nhid \<xi>"
+  "\<xi>' \<in> is_newpkt \<xi> \<Longrightarrow> nhid \<xi>' = nhid \<xi>"
+  unfolding is_msg_defs
+  by (cases "msg \<xi>", clarsimp+)+
+
+lemma is_msg_inv_msg [simp]:
+  "\<xi>' \<in> is_pkt \<xi>    \<Longrightarrow> msg \<xi>' = msg \<xi>"
+  "\<xi>' \<in> is_newpkt \<xi> \<Longrightarrow> msg \<xi>' = msg \<xi>"
+  unfolding is_msg_defs
+  by (cases "msg \<xi>", clarsimp+)+
+
+datatype pseqp =
+    PToy
+
+fun nat_of_seqp :: "pseqp \<Rightarrow> nat"
+where
+  "nat_of_seqp PToy = 1"
+
+instantiation "pseqp" :: ord
+begin
+definition less_eq_seqp [iff]: "l1 \<le> l2 = (nat_of_seqp l1 \<le> nat_of_seqp l2)"
+definition less_seqp [iff]:    "l1 < l2 = (nat_of_seqp l1 < nat_of_seqp l2)"
+instance ..
+end
+
+abbreviation Toy
+where
+  "Toy \<equiv> \<lambda>_. \<lbrakk>clear_locals\<rbrakk> call(PToy)"
+
+fun \<Gamma>\<^sub>T\<^sub>O\<^sub>Y :: "(state, msg, pseqp, pseqp label) seqp_env"
+where
+  "\<Gamma>\<^sub>T\<^sub>O\<^sub>Y PToy = labelled PToy (
+     receive(\<lambda>msg' \<xi>. \<xi> \<lparr> msg := msg' \<rparr>).
+     \<lbrakk>\<xi>. \<xi> \<lparr>nhid := id \<xi>\<rparr>\<rbrakk>
+     (   \<langle>is_newpkt\<rangle> 
+         (
+             \<lbrakk>\<xi>. \<xi> \<lparr>no := max (no \<xi>) (num \<xi>)\<rparr>\<rbrakk>
+             broadcast(\<lambda>\<xi>. pkt(no \<xi>, id \<xi>)). Toy()
+         )
+       \<oplus> \<langle>is_pkt\<rangle>
+       (
+            \<langle>\<xi>. num \<xi> > no \<xi>\<rangle>
+               \<lbrakk>\<xi>. \<xi> \<lparr>no := num \<xi>\<rparr>\<rbrakk>
+               \<lbrakk>\<xi>. \<xi> \<lparr>nhid := sid \<xi>\<rparr>\<rbrakk>
+               broadcast(\<lambda>\<xi>. pkt(no \<xi>, id \<xi>)). Toy()
+         \<oplus> \<langle>\<xi>. num \<xi> \<le> no \<xi>\<rangle>
+               Toy()
+       )
+     ))"
+
+declare \<Gamma>\<^sub>T\<^sub>O\<^sub>Y.simps [simp del, code del]
+lemmas \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_simps [simp, code] = \<Gamma>\<^sub>T\<^sub>O\<^sub>Y.simps [simplified]
+
+fun \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_skeleton
+where "\<Gamma>\<^sub>T\<^sub>O\<^sub>Y_skeleton PToy = seqp_skeleton (\<Gamma>\<^sub>T\<^sub>O\<^sub>Y PToy)"
+
+lemma \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_skeleton_wf [simp]:
+  "wellformed \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_skeleton"
+  proof (rule, intro allI)
+    fix pn pn'
+    show "call(pn') \<notin> stermsl (\<Gamma>\<^sub>T\<^sub>O\<^sub>Y_skeleton pn)"
+      by (cases pn) simp_all
+  qed
+
+declare \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_skeleton.simps [simp del, code del]
+lemmas \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_skeleton_simps [simp, code] = \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_skeleton.simps [simplified \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_simps seqp_skeleton.simps]
+
+lemma toy_proc_cases [dest]:
+  fixes p pn
+  assumes "p \<in> ctermsl (\<Gamma>\<^sub>T\<^sub>O\<^sub>Y pn)"
+    shows "p \<in> ctermsl (\<Gamma>\<^sub>T\<^sub>O\<^sub>Y PToy)"
+  using assms
+  by (cases pn) simp_all
+
+definition \<sigma>\<^sub>T\<^sub>O\<^sub>Y :: "ip \<Rightarrow> (state \<times> (state, msg, pseqp, pseqp label) seqp) set"
+where "\<sigma>\<^sub>T\<^sub>O\<^sub>Y i \<equiv> {(toy_init i, \<Gamma>\<^sub>T\<^sub>O\<^sub>Y PToy)}"
+
+abbreviation ptoy
+  :: "ip \<Rightarrow> (state \<times> (state, msg, pseqp, pseqp label) seqp, msg seq_action) automaton"
+where
+  "ptoy i \<equiv> \<lparr> init = \<sigma>\<^sub>T\<^sub>O\<^sub>Y i, trans = seqp_sos \<Gamma>\<^sub>T\<^sub>O\<^sub>Y \<rparr>"
+
+lemma toy_trans: "trans (ptoy i) = seqp_sos \<Gamma>\<^sub>T\<^sub>O\<^sub>Y"
+  by simp
+
+lemma toy_control_within [simp]: "control_within \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (init (ptoy i))"
+  unfolding \<sigma>\<^sub>T\<^sub>O\<^sub>Y_def by (rule control_withinI) (auto simp del: \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_simps)
+
+lemma toy_wf [simp]:
+  "wellformed \<Gamma>\<^sub>T\<^sub>O\<^sub>Y"
+  proof (rule, intro allI)
+    fix pn pn'
+    show "call(pn') \<notin> stermsl (\<Gamma>\<^sub>T\<^sub>O\<^sub>Y pn)"
+      by (cases pn) simp_all
+  qed
+
+lemmas toy_labels_not_empty [simp] = labels_not_empty [OF toy_wf]
+
+lemma toy_ex_label [intro]: "\<exists>l. l\<in>labels \<Gamma>\<^sub>T\<^sub>O\<^sub>Y p"
+  by (metis toy_labels_not_empty all_not_in_conv)
+
+lemma toy_ex_labelE [elim]:
+  assumes "\<forall>l\<in>labels \<Gamma>\<^sub>T\<^sub>O\<^sub>Y p. P l p"
+      and "\<exists>p l. P l p \<Longrightarrow> Q"
+    shows "Q"
+ using assms by (metis toy_ex_label) 
+
+lemma toy_simple_labels [simp]: "simple_labels \<Gamma>\<^sub>T\<^sub>O\<^sub>Y"
+  proof
+    fix pn p
+    assume "p\<in>subterms(\<Gamma>\<^sub>T\<^sub>O\<^sub>Y pn)"
+    thus "\<exists>!l. labels \<Gamma>\<^sub>T\<^sub>O\<^sub>Y p = {l}"
+    by (cases pn) (simp_all cong: seqp_congs | elim disjE)+
+  qed
+
+lemma \<sigma>\<^sub>T\<^sub>O\<^sub>Y_labels [simp]: "(\<xi>, p) \<in> \<sigma>\<^sub>T\<^sub>O\<^sub>Y i \<Longrightarrow>  labels \<Gamma>\<^sub>T\<^sub>O\<^sub>Y p = {PToy-:0}"
+  unfolding \<sigma>\<^sub>T\<^sub>O\<^sub>Y_def by simp
+
+
+declare seqp_congs [cong]
+
+declare
+  \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_simps [cterms_env]
+  toy_proc_cases [ctermsl_cases]
+  seq_invariant_ctermsI [OF toy_wf toy_control_within toy_simple_labels toy_trans, cterms_intros]
+  seq_step_invariant_ctermsI [OF toy_wf toy_control_within toy_simple_labels toy_trans, cterms_intros]
+
+subsection "Define an open version of the protocol"
+
+definition \<sigma>\<^sub>O\<^sub>T\<^sub>O\<^sub>Y :: "((ip \<Rightarrow> state) \<times> ((state, msg, pseqp, pseqp label) seqp)) set"
+where "\<sigma>\<^sub>O\<^sub>T\<^sub>O\<^sub>Y \<equiv> {(toy_init, \<Gamma>\<^sub>T\<^sub>O\<^sub>Y PToy)}"
+
+abbreviation optoy
+  :: "ip \<Rightarrow> ((ip \<Rightarrow> state) \<times> (state, msg, pseqp, pseqp label) seqp, msg seq_action) automaton"
+where
+  "optoy i \<equiv> \<lparr> init = \<sigma>\<^sub>O\<^sub>T\<^sub>O\<^sub>Y, trans = oseqp_sos \<Gamma>\<^sub>T\<^sub>O\<^sub>Y i \<rparr>"
+
+lemma initiali_toy [intro!, simp]: "initiali i (init (optoy i)) (init (ptoy i))"
+  unfolding \<sigma>\<^sub>T\<^sub>O\<^sub>Y_def \<sigma>\<^sub>O\<^sub>T\<^sub>O\<^sub>Y_def by rule simp_all
+
+lemma oaodv_control_within [simp]: "control_within \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (init (optoy i))"
+  unfolding \<sigma>\<^sub>O\<^sub>T\<^sub>O\<^sub>Y_def by (rule control_withinI) (auto simp del: \<Gamma>\<^sub>T\<^sub>O\<^sub>Y_simps)
+
+lemma \<sigma>\<^sub>O\<^sub>T\<^sub>O\<^sub>Y_labels [simp]: "(\<sigma>, p) \<in> \<sigma>\<^sub>O\<^sub>T\<^sub>O\<^sub>Y \<Longrightarrow>  labels \<Gamma>\<^sub>T\<^sub>O\<^sub>Y p = {PToy-:0}"
+  unfolding \<sigma>\<^sub>O\<^sub>T\<^sub>O\<^sub>Y_def by simp
+
+lemma otoy_trans: "trans (optoy i) = oseqp_sos \<Gamma>\<^sub>T\<^sub>O\<^sub>Y i"
+  by simp
+
+declare
+  oseq_invariant_ctermsI [OF toy_wf oaodv_control_within toy_simple_labels otoy_trans, cterms_intros]
+  oseq_step_invariant_ctermsI [OF toy_wf oaodv_control_within toy_simple_labels otoy_trans, cterms_intros]
+
+subsection "Predicates"
+
+definition msg_sender :: "msg \<Rightarrow> ip"
+where "msg_sender m \<equiv> case m of Pkt _ ipc \<Rightarrow> ipc"
+
+lemma msg_sender_simps [simp]:
+  "\<And>d did sid. msg_sender (Pkt d sid) = sid"
+  unfolding msg_sender_def by simp_all
+
+abbreviation not_Pkt :: "msg \<Rightarrow> bool"
+where "not_Pkt m \<equiv> case m of Pkt _ _ \<Rightarrow> False | _ \<Rightarrow> True"
+
+definition nos_inc :: "state \<Rightarrow> state \<Rightarrow> bool"
+where "nos_inc \<xi> \<xi>' \<equiv> (no \<xi> \<le> no \<xi>')"
+
+definition msg_ok :: "(ip \<Rightarrow> state) \<Rightarrow> msg \<Rightarrow> bool"
+where "msg_ok \<sigma> m \<equiv> case m of Pkt num' sid' \<Rightarrow> num' \<le> no (\<sigma> sid') | _ \<Rightarrow> True"
+
+lemma msg_okI [intro]:
+  assumes "\<And>num' sid'. m = Pkt num' sid' \<Longrightarrow> num' \<le> no (\<sigma> sid')"
+    shows "msg_ok \<sigma> m"
+  using assms unfolding msg_ok_def
+  by (auto split: msg.split)
+
+lemma msg_ok_Pkt [simp]:
+  "msg_ok \<sigma> (Pkt data src) = (data \<le> no (\<sigma> src))"
+  unfolding msg_ok_def by simp
+
+lemma msg_ok_pkt [simp]:
+  "msg_ok \<sigma> (pkt(data, src)) = (data \<le> no (\<sigma> src))"
+  unfolding msg_ok_def by simp
+
+lemma msg_ok_Newpkt [simp]:
+  "msg_ok \<sigma> (Newpkt data dst)"
+  unfolding msg_ok_def by simp
+
+lemma msg_ok_newpkt [simp]:
+  "msg_ok \<sigma> (newpkt(data, dst))"
+  unfolding msg_ok_def by simp
+
+subsection "Sequential Invariants"
+
+lemma seq_no_leq_num:
+  "ptoy i \<TTurnstile> onl \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (\<lambda>(\<xi>, l). l\<in>{PToy-:7..PToy-:8} \<longrightarrow> no \<xi> \<le> num \<xi>)"
+  by inv_cterms
+
+lemma seq_nos_incs:
+  "ptoy i \<TTurnstile>\<^sub>A onll \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (\<lambda>((\<xi>, _), _, (\<xi>', _)). nos_inc \<xi> \<xi>')"
+  unfolding nos_inc_def
+  by (inv_cterms inv add: onl_invariant_sterms [OF toy_wf seq_no_leq_num])
+
+lemma seq_nos_incs':
+  "ptoy i \<TTurnstile>\<^sub>A (\<lambda>((\<xi>, _), _, (\<xi>', _)). nos_inc \<xi> \<xi>')"
+  by (rule step_invariant_weakenE [OF seq_nos_incs]) (auto dest!: onllD)
+
+lemma sender_ip_valid:
+  "ptoy i \<TTurnstile>\<^sub>A onll \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (\<lambda>((\<xi>, _), a, _). anycast (\<lambda>m. msg_sender m = id \<xi>) a)"
+  by inv_cterms
+
+lemma id_constant:
+  "ptoy i \<TTurnstile> onl \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (\<lambda>(\<xi>, _). id \<xi> = i)"
+  by inv_cterms (simp add: \<sigma>\<^sub>T\<^sub>O\<^sub>Y_def)
+
+lemma nhid_eq_id:
+  "ptoy i \<TTurnstile> onl \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (\<lambda>(\<xi>, l). l\<in>{PToy-:2..PToy-:8} \<longrightarrow> nhid \<xi> = id \<xi>)"
+  by inv_cterms
+
+lemma seq_msg_ok:
+  "ptoy i \<TTurnstile>\<^sub>A onll \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (\<lambda>((\<xi>, _), a, _).
+                anycast (\<lambda>m. case m of Pkt num' sid' \<Rightarrow> num' = no \<xi> \<and> sid' = i | _ \<Rightarrow> True) a)"
+  by (inv_cterms inv add: onl_invariant_sterms [OF toy_wf id_constant])
+
+lemma nhid_eq_i:
+  "ptoy i \<TTurnstile> onl \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (\<lambda>(\<xi>, l). l\<in>{PToy-:2..PToy-:8} \<longrightarrow> nhid \<xi> = i)"
+  proof (rule invariant_arbitraryI, clarify intro!: onlI impI)
+    fix \<xi> p l n
+    assume "(\<xi>, p) \<in> reachable (ptoy i) TT"
+       and "l \<in> labels \<Gamma>\<^sub>T\<^sub>O\<^sub>Y p"
+       and "l \<in> {PToy-:2..PToy-:8}"
+    from this(1-3) have "nhid \<xi> = id \<xi>"
+      by - (drule invariantD [OF nhid_eq_id], auto)
+      by (auto dest: invariantD [OF id_constant])
+    ultimately show "nhid \<xi> = i"
+      by simp
+  qed
+
+subsection "Global Invariants"
+
+lemma nos_incD [dest]:
+  assumes "nos_inc \<xi> \<xi>'"
+    shows "no \<xi> \<le> no \<xi>'"
+  using assms unfolding nos_inc_def .
+
+lemma nos_inc_simp [simp]:
+  "nos_inc \<xi> \<xi>' = (no \<xi> \<le> no \<xi>')"
+  unfolding nos_inc_def ..
+
+lemmas oseq_nos_incs =
+  open_seq_step_invariant [OF seq_nos_incs initiali_toy otoy_trans toy_trans,
+                           simplified seqll_onll_swap]
+
+lemmas oseq_no_leq_num =
+  open_seq_invariant [OF seq_no_leq_num initiali_toy otoy_trans toy_trans,
+                      simplified seql_onl_swap]
+
+lemma all_nos_inc:
+  shows "optoy i \<Turnstile>\<^sub>A (otherwith nos_inc {i} S,
+                      other nos_inc {i} \<rightarrow>)
+                       onll \<Gamma>\<^sub>T\<^sub>O\<^sub>Y (\<lambda>((\<sigma>, _), a, (\<sigma>', _)). (\<forall>j. nos_inc (\<sigma> j) (\<sigma>' j)))"
+  proof -
+    have *: "\<And>\<sigma> \<sigma>' a. \<lbrakk> otherwith nos_inc {i} S \<sigma> \<sigma>' a; no (\<sigma> i) \<le> no (\<sigma>' i) \<rbrakk>
+                       \<Longrightarrow> \<forall>j. no (\<sigma> j) \<le> no (\<sigma>' j)"
+      by (auto dest!: otherwith_syncD)
+    show ?thesis
+      by (inv_cterms
+            inv add: oseq_step_invariant_sterms [OF oseq_nos_incs [THEN oinvariant_step_anyact]
+                                                                                   toy_wf otoy_trans]
+            simp add: seqllsimp) (auto elim!: *)

@@ -1,0 +1,259 @@
+theory Turing_HaltingConditions
+  imports Turing_Hoare
+begin
+
+
+definition TMC_loops :: "tprog0 \<Rightarrow> nat list \<Rightarrow> bool"
+  where
+    "TMC_loops p ns \<equiv> (\<forall>stp.\<not> is_final (steps0 (1, [], <ns::nat list>) p stp))"
+
+
+definition reaches_final :: "tprog0 \<Rightarrow> nat list \<Rightarrow> bool"
+  where
+    "reaches_final p ns \<equiv> \<lbrace>(\<lambda>tap. tap = ([], <ns>))\<rbrace> p \<lbrace>(\<lambda>tap. True)\<rbrace>"
+
+
+lemma True_holds_for_all: "(\<lambda>tap. True) holds_for c"
+  by (cases c)(auto)
+
+lemma reaches_final_iff: "reaches_final p ns \<longleftrightarrow> (\<exists>n. is_final (steps0 (1, ([], <ns>)) p n))"
+  by (auto simp add: reaches_final_def Hoare_halt_def True_holds_for_all)
+
+
+
+
+lemma Hoare_halt_from_init_imp_reaches_final:
+  assumes "\<lbrace>\<lambda>tap. tap = ([], <ns>)\<rbrace> p \<lbrace>Q\<rbrace>"
+  shows "reaches_final p ns"
+proof -
+  from assms have "\<forall>tap. tap = ([], <ns>) \<longrightarrow> (\<exists>n. is_final (steps0 (1, tap) p n))"
+    using Hoare_halt_def by auto
+  then show ?thesis
+    using reaches_final_iff by auto
+qed
+
+lemma Hoare_unhalt_impl_not_reaches_final:
+  assumes "\<lbrace>(\<lambda>tap. tap = ([], <ns>))\<rbrace> p \<up>"
+  shows "\<not>(reaches_final p ns)"
+proof 
+  assume "reaches_final p ns"
+  then have "(\<exists>n. is_final (steps0 (1, ([], <ns>)) p n))" by (auto simp add: reaches_final_iff)
+  then obtain n where w_n: "is_final (steps0 (1, ([], <ns>)) p n)" by blast
+  from assms have "\<forall>tap. (\<lambda>tap. tap = ([], <ns>)) tap \<longrightarrow> (\<forall> n . \<not> (is_final (steps0 (1, tap) p n)))"
+    by (auto simp add: Hoare_unhalt_def)
+  then have "\<not> (is_final (steps0 (1, ([], <ns>)) p n))" by blast
+  with w_n show False by auto
+qed
+
+
+
+definition std_tap :: "tape \<Rightarrow> bool"
+  where
+    "std_tap tap  \<equiv> (\<exists>k n l. tap = (Bk \<up> k,  <n::nat> @ Bk \<up> l))"
+
+definition std_tap_list :: "tape \<Rightarrow> bool"
+  where
+    "std_tap_list tap  \<equiv> (\<exists>k ml l. tap = (Bk \<up> k,  <ml::nat list> @ Bk \<up> l))"
+
+
+lemma "std_tap tap \<Longrightarrow> std_tap_list tap"
+  unfolding std_tap_def std_tap_list_def
+  by (metis tape_of_list_def tape_of_nat_list.simps(2))
+
+
+
+definition TSTD':: "config \<Rightarrow> bool"
+  where
+    "TSTD' c = ((let (st, l, r) = c in 
+             st = 0 \<and> (\<exists> m. l = Bk\<up>(m)) \<and> (\<exists> rs n. r = Oc\<up>(Suc rs) @ Bk\<up>(n))))"
+
+
+lemma "TSTD' (st, l, r) = ((st = 0) \<and> std_tap (l,r))"
+  unfolding TSTD'_def std_tap_def
+proof -
+  have "(let (st, l, r) = (st, l, r) in st = 0 \<and> (\<exists>m. l = Bk \<up> m) \<and> (\<exists>rs n. r = Oc \<up> Suc rs @ Bk \<up> n))
+        = (st = 0 \<and> (\<exists>m. l = Bk \<up> m) \<and> (\<exists>rs n. r = Oc \<up> Suc rs @ Bk \<up> n))"
+    by auto
+  also have "... = (st = 0 \<and> (\<exists>m. l = Bk \<up> m) \<and> (\<exists>n la. r = (<n::nat> @ Bk \<up> la)))"
+    by (auto simp add: tape_of_nat_def)
+  finally have "(let (st, l, r) = (st, l, r) in st = 0 \<and> (\<exists>m. l = Bk \<up> m) \<and> (\<exists>rs n. r = Oc \<up> Suc rs @ Bk \<up> n))
+                = (st = 0 \<and> (\<exists>m. l = Bk \<up> m) \<and> (\<exists>n la. r = (<n::nat> @ Bk \<up> la)))"
+    by (auto simp add: tape_of_nat_def)
+  moreover have "((\<exists>m. l = Bk \<up> m) \<and> (\<exists>n la. r = <n::nat> @ Bk \<up> la)) = (\<exists>k n la. (l, r) = (Bk \<up> k, <n::nat> @ Bk \<up> la))"
+    by auto
+  ultimately show "(let (st, l, r) = (st, l, r)
+                    in  st = 0 \<and> (\<exists>m. l = Bk \<up> m) \<and> (\<exists>rs n. r = Oc \<up> Suc rs @ Bk \<up> n))
+                    = 
+                    (st = 0 \<and> (\<exists>k n la. (l, r) = (Bk \<up> k, <n::nat> @ Bk \<up> la)))"
+    by blast
+qed
+
+
+
+lemma Hoare_halt2_iff:
+"\<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, r @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>
+ \<longleftrightarrow>
+ (\<forall>kl ll. \<exists>n. is_final (steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n) \<and> (\<exists>kr lr. steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr)))"
+proof
+  assume "\<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, r @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>"
+  then show "\<forall>kl ll. \<exists>n. is_final (steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n) \<and> (\<exists>kr lr. steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+    by (smt Hoare_halt_def Pair_inject holds_for.elims(2) is_final.elims(2))
+next
+  assume "\<forall>kl ll. \<exists>n. is_final (steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n) \<and> (\<exists>kr lr. steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+  then show "\<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, r @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>"
+  unfolding Hoare_halt_def  
+  using holds_for.simps by fastforce
+qed
+
+lemma Hoare_halt_D:
+  assumes "\<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, r @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>"
+  shows "\<exists>n. is_final (steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n) \<and> (\<exists>kr lr. steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+proof -
+  from assms show "\<exists>n. is_final (steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n) \<and> (\<exists>kr lr. steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+    by (simp add: Hoare_halt2_iff is_final_eq)
+qed
+
+lemma Hoare_halt_I2:
+  assumes "\<And>kl ll. \<exists>n. is_final (steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n) \<and> (\<exists>kr lr. steps0 (1, (Bk \<up> kl, r @ Bk \<up> ll)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+  shows "\<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, r @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>"
+  unfolding Hoare_halt_def  
+  using assms holds_for.simps by fastforce
+
+
+lemma Hoare_halt_D_Nil:
+  assumes "\<lbrace>\<lambda>tap. tap = ([], r)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>"
+  shows "\<exists>n. is_final (steps0 (1, ([], r)) p n) \<and> (\<exists>kr lr. steps0 (1, ([], r)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+proof -
+  from assms have "\<lbrace>\<lambda>tap. tap = (Bk \<up> 0, r @ Bk \<up> 0)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>"
+    by simp
+  then have "\<exists>n. is_final (steps0 (1, (Bk \<up> 0, r @ Bk \<up> 0)) p n) \<and> (\<exists>kr lr. steps0 (1, (Bk \<up> 0, r @ Bk \<up> 0)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+    using Hoare_halt_E0 append_self_conv assms is_final_eq old.prod.inject prod.inject replicate_0
+    by force
+  then show ?thesis by auto
+qed
+
+lemma Hoare_halt_I2_Nil:
+  assumes "\<exists>n. is_final (steps0 (1, ([], r )) p n) \<and> (\<exists>kr lr. steps0 (1, ([], r )) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+  shows "\<lbrace>\<lambda>tap. tap = ([], r)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>"
+proof -
+  from assms have "\<exists>n. is_final (steps0 (1, (Bk \<up> 0, r @ Bk \<up> 0)) p n) \<and> (\<exists>kr lr. steps0 (1, (Bk \<up> 0, r @ Bk \<up> 0)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr))"
+    by auto
+  then have "\<lbrace>\<lambda>tap. tap = (Bk \<up> 0, r @ Bk \<up> 0)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>"
+    using Hoare_halt_iff by auto
+  then show ?thesis by auto
+qed
+
+lemma Hoare_halt2_Nil_iff:
+  "\<lbrace>\<lambda>tap. tap = ([], r)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, r' @ Bk \<up> lr)\<rbrace>
+   \<longleftrightarrow>
+   (\<exists>n. is_final (steps0 (1, ([], r)) p n) \<and> (\<exists>kr lr. steps0 (1, ([], r)) p n = (0, Bk \<up> kr, r' @ Bk \<up> lr)))"
+  using Hoare_halt_D_Nil Hoare_halt_I2_Nil by blast
+
+corollary Hoare_halt_left_tape_Nil_imp_All_left_and_right:
+  assumes "\<lbrace>\<lambda>tap.       tap = ([]    , r         )\<rbrace> p \<lbrace>\<lambda>tap. \<exists>k l. tap = (Bk \<up> k , r' @ Bk \<up> l)\<rbrace>"
+  shows   "\<lbrace>\<lambda>tap. \<exists>x y. tap = (Bk \<up> x, r @ Bk \<up> y)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>k l. tap = (Bk \<up> k , r' @ Bk \<up> l)\<rbrace>"
+proof -
+  from assms have "\<exists>n. is_final (steps0 (1, ([], r)) p n) \<and> (\<exists>k l. steps0 (1, ([], r)) p n = (0, Bk \<up> k,  r' @ Bk \<up> l))"
+    using Hoare_halt_D_Nil by auto
+  then have "\<And>x y. \<exists>n. is_final (steps0 (1, (Bk \<up> x, r @ Bk \<up> y)) p n) \<and> (\<exists>k l. steps0 (1, (Bk \<up> x, r @ Bk \<up> y)) p n = (0, Bk \<up> k,  r' @ Bk \<up> l))"
+    using ex_steps_left_tape_Nil_imp_All_left_and_right
+    using is_final.simps by force
+  then show ?thesis using Hoare_halt_I2
+    by auto
+qed
+
+
+
+
+lemma TMC_has_num_res_list_without_initial_Bks_imp_TMC_has_num_res_list_after_adding_Bks_to_initial_right_tape:
+  " \<lbrace>\<lambda>tap. tap = ([], <ns::nat list>)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>
+  \<Longrightarrow>
+    \<lbrace>\<lambda>tap. \<exists>ll. tap = ([], <ns::nat list> @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+proof -
+  assume A: "\<lbrace>\<lambda>tap. tap = ([], <ns::nat list>)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+  then have "\<exists>n. is_final (steps0 (1, ([], <ns::nat list>)) p n) \<and>
+                 (\<exists>ms kr lr. steps0 (1, ([], <ns::nat list>)) p n = (0, Bk \<up> kr, <ms::nat list> @ Bk \<up> lr))"
+    using Hoare_halt_E0 is_finalI by force
+  then obtain stp where
+    w_stp: "is_final (steps0 (1, ([], <ns::nat list>)) p stp) \<and>
+            (\<exists>ms kr lr. steps0 (1, ([], <ns::nat list>)) p stp = (0, Bk \<up> kr, <ms::nat list> @ Bk \<up> lr))"
+    by blast
+
+  then obtain ms where  "\<exists>kr lr. steps0 (1, ([], <ns::nat list>)) p stp = (0, Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)" by blast
+
+  then have "\<forall>ll. \<exists>kr lr. steps0 (1, ([], <ns::nat list>@ Bk \<up> ll)) p stp = (0, Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)"
+    using ex_steps_left_tape_Nil_imp_All_left_and_right steps_left_tape_ShrinkBkCtx_to_NIL by blast
+
+  then have "\<forall>ll. is_final (steps0 (1, ([], <ns::nat list>@ Bk \<up> ll)) p stp) \<and>
+                 (\<exists>ms kr lr. steps0 (1, ([], <ns::nat list>@ Bk \<up> ll)) p stp = (0, Bk \<up> kr, <ms::nat list> @ Bk \<up> lr))"   
+    by (metis is_finalI)
+
+  then have "\<forall>tap. (\<exists>ll. tap = ([], <ns::nat list> @ Bk \<up> ll))
+                    \<longrightarrow> (\<exists>n. is_final (steps0 (1, tap) p n) \<and>
+                             (\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)) holds_for steps0 (1, tap) p n)"
+    using holds_for.simps by force
+  then show ?thesis
+    unfolding Hoare_halt_def
+    by auto
+qed
+
+
+lemma TMC_has_num_res_list_without_initial_Bks_iff_TMC_has_num_res_list_after_adding_Bks_to_initial_right_tape:
+  "\<lbrace>\<lambda>tap.      tap = ([], <ns::nat list>)          \<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>
+    \<longleftrightarrow>
+   \<lbrace>\<lambda>tap. \<exists>ll. tap = ([], <ns::nat list> @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+proof
+  assume "\<lbrace>\<lambda>tap.      tap = ([], <ns::nat list>)          \<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+  then show "\<lbrace>\<lambda>tap. \<exists>ll. tap = ([], <ns::nat list> @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+  using  TMC_has_num_res_list_without_initial_Bks_imp_TMC_has_num_res_list_after_adding_Bks_to_initial_right_tape by blast
+next
+  assume "\<lbrace>\<lambda>tap. \<exists>ll. tap = ([], <ns::nat list> @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+  then show "\<lbrace>\<lambda>tap.      tap = ([], <ns::nat list>)          \<rbrace> p \<lbrace>\<lambda>tap. \<exists>ms kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+    by (simp add: Hoare_halt_def assert_imp_def)
+qed
+
+
+
+lemma TMC_has_num_res_list_without_initial_Bks_imp_TMC_has_num_res_list_after_adding_Bks_to_initial_left_and_right_tape:
+  " \<lbrace>\<lambda>tap. tap = ([], <ns::nat list>)\<rbrace> p \<lbrace>\<lambda>tap.\<exists>kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>
+  \<Longrightarrow>
+    \<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, <ns::nat list> @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+  using Hoare_halt_left_tape_Nil_imp_All_left_and_right by auto
+
+
+lemma TMC_has_num_res_list_without_initial_Bks_iff_TMC_has_num_res_list_after_adding_Bks_to_initial_left_and_right_tape:
+  " \<lbrace>\<lambda>tap. tap = ([], <ns::nat list>)\<rbrace> p \<lbrace>\<lambda>tap.\<exists>kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>
+  \<longleftrightarrow>
+    \<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, <ns::nat list> @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+proof
+  assume "\<lbrace>\<lambda>tap. tap = ([], <ns::nat list>)\<rbrace> p \<lbrace>\<lambda>tap.\<exists>kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+  then show "\<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, <ns::nat list> @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+    using TMC_has_num_res_list_without_initial_Bks_imp_TMC_has_num_res_list_after_adding_Bks_to_initial_left_and_right_tape by auto
+next
+  assume "\<lbrace>\<lambda>tap. \<exists>kl ll. tap = (Bk \<up> kl, <ns::nat list> @ Bk \<up> ll)\<rbrace> p \<lbrace>\<lambda>tap. \<exists>kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+  then show "\<lbrace>\<lambda>tap. tap = ([], <ns::nat list>)\<rbrace> p \<lbrace>\<lambda>tap.\<exists>kr lr. tap = (Bk \<up> kr, <ms::nat list> @ Bk \<up> lr)\<rbrace>"
+    by (simp add: Hoare_halt_def assert_imp_def)
+qed
+
+
+
+
+ and the final tape produced thereby is standard.
+ either a single numeral or a list of numerals.
+
+Since trailing blanks on the initial left or right tape do not matter,
+we may restrict our definitions to the case where
+ the initial left tape is empty and
+ there are no trailing blanks on the initial right tape!
+\<close>
+subsubsection \<open>Relation between TMC\_has\_num\_res and TMC\_has\_num\_list\_res\<close>
+text \<open>A computation of a Turing machine, which started on a list of numerals and halts in a
+ standard configuration with a single numeral result is a special case of a halt in a standard configuration that
+halts with a list of numerals.\<close>
+subsubsection \<open>Convenience Lemmas for Halting Problems \<close>
+subsubsection \<open>Hoare\_halt on numeral lists with single numeral result\<close>
+subsubsection \<open>Hoare\_halt on numeral lists with numeral list result\<close>
+subsection \<open>Trailing left blanks do not matter for computations with result\<close>
+    using Hoare_halt_iff \<open>\<forall>z. \<exists>stp k l. steps0 (1, Bk \<up> z, <ns>) p stp = (0, Bk \<up> k, <n> @ Bk \<up> l)\<close> by fastforce
+subsection \<open>About Turing Computations and the result they yield\<close>
+    using \<open>composable_tm0 tm1\<close>

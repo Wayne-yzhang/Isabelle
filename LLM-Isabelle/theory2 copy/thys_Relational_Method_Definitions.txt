@@ -1,0 +1,415 @@
+theory Definitions
+  imports Main
+begin
+
+
+
+subsection "Introduction"
+
+
+
+subsection "A sample protocol"
+
+
+
+subsection "Definitions"
+
+
+type_synonym agent_id = nat
+
+type_synonym key_id = nat
+
+type_synonym seskey_in = "key_id option \<times> key_id set \<times> key_id set"
+
+datatype agent =
+  Asset agent_id |
+  Owner agent_id |
+  Spy
+
+datatype key =
+  SigK |
+  VerK |
+  PriK key_id |
+  PubK key_id |
+  ShaK key_id |
+  SesK seskey_in
+
+datatype msg =
+  Num nat |
+  Agent agent_id |
+  Pwd agent_id |
+  Key key |
+  Mult key_id key_id (infixl "\<otimes>" 70) |
+  Hash msg |
+  Crypt key msg |
+  MPair msg msg |
+  IDInfo agent_id msg |
+  Log msg
+
+syntax
+  "_MPair"  :: "['a, args] \<Rightarrow> 'a * 'b"  ("(2\<lbrace>_,/ _\<rbrace>)")
+  "_IDInfo" :: "[agent_id, msg] \<Rightarrow> msg"      ("(2\<langle>_,/ _\<rangle>)")
+translations
+  "\<lbrace>X, Y, Z\<rbrace>" \<rightleftharpoons> "\<lbrace>X, \<lbrace>Y, Z\<rbrace>\<rbrace>"
+  "\<lbrace>X, Y\<rbrace>" \<rightleftharpoons> "CONST MPair X Y"
+  "\<langle>n, X\<rangle>" \<rightleftharpoons> "CONST IDInfo n X"
+
+
+abbreviation SigKey :: "msg" where
+"SigKey \<equiv> Key SigK"
+
+abbreviation VerKey :: "msg" where
+"VerKey \<equiv> Key VerK"
+
+abbreviation PriKey :: "key_id \<Rightarrow> msg" where
+"PriKey \<equiv> Key \<circ> PriK"
+
+abbreviation PubKey :: "key_id \<Rightarrow> msg" where
+"PubKey \<equiv> Key \<circ> PubK"
+
+abbreviation ShaKey :: "key_id \<Rightarrow> msg" where
+"ShaKey \<equiv> Key \<circ> ShaK"
+
+abbreviation SesKey :: "seskey_in \<Rightarrow> msg" where
+"SesKey \<equiv> Key \<circ> SesK"
+
+primrec InvK :: "key \<Rightarrow> key" where
+"InvK SigK = VerK" |
+"InvK VerK = SigK" |
+"InvK (PriK A) = PubK A" |
+"InvK (PubK A) = PriK A" |
+"InvK (ShaK SK) = ShaK SK" |
+"InvK (SesK SK) = SesK SK"
+
+abbreviation InvKey :: "key \<Rightarrow> msg" where
+"InvKey \<equiv> Key \<circ> InvK"
+
+
+inductive_set parts :: "msg set \<Rightarrow> msg set"
+  for H :: "msg set" where
+
+parts_used [intro]:
+  "X \<in> H \<Longrightarrow> X \<in> parts H" |
+
+parts_crypt [intro]:
+  "Crypt K X \<in> parts H \<Longrightarrow> X \<in> parts H" |
+
+parts_fst [intro]:
+  "\<lbrace>X, Y\<rbrace> \<in> parts H \<Longrightarrow> X \<in> parts H" |
+
+parts_snd [intro]:
+  "\<lbrace>X, Y\<rbrace> \<in> parts H \<Longrightarrow> Y \<in> parts H"
+
+
+inductive_set crypts :: "msg set \<Rightarrow> msg set"
+  for H :: "msg set" where
+
+crypts_used [intro]:
+  "X \<in> H \<Longrightarrow> X \<in> crypts H" |
+
+crypts_hash [intro]:
+  "foldr Crypt KS (Hash X) \<in> crypts H \<Longrightarrow> foldr Crypt KS X \<in> crypts H" |
+
+crypts_fst [intro]:
+  "foldr Crypt KS \<lbrace>X, Y\<rbrace> \<in> crypts H \<Longrightarrow> foldr Crypt KS X \<in> crypts H" |
+
+crypts_snd [intro]:
+  "foldr Crypt KS \<lbrace>X, Y\<rbrace> \<in> crypts H \<Longrightarrow> foldr Crypt KS Y \<in> crypts H"
+
+
+definition key_sets :: "msg \<Rightarrow> msg set \<Rightarrow> msg set set" where
+"key_sets X H \<equiv> {InvKey ` set KS | KS. foldr Crypt KS X \<in> H}"
+
+definition parts_msg :: "msg \<Rightarrow> msg set" where
+"parts_msg X \<equiv> parts {X}"
+
+definition crypts_msg :: "msg \<Rightarrow> msg set" where
+"crypts_msg X \<equiv> crypts {X}"
+
+definition key_sets_msg :: "msg \<Rightarrow> msg \<Rightarrow> msg set set" where
+"key_sets_msg X Y \<equiv> key_sets X {Y}"
+
+fun seskey_set :: "seskey_in \<Rightarrow> key_id set" where
+"seskey_set (Some S, U, V) = insert S (U \<union> V)" |
+"seskey_set (None, U, V) = U \<union> V"
+
+
+definition Auth_PriK :: "agent_id \<Rightarrow> key_id" where
+"Auth_PriK \<equiv> SOME f. infinite (- range f)"
+
+abbreviation Auth_PriKey :: "agent_id \<Rightarrow> msg" where
+"Auth_PriKey \<equiv> PriKey \<circ> Auth_PriK"
+
+abbreviation Auth_PubKey :: "agent_id \<Rightarrow> msg" where
+"Auth_PubKey \<equiv> PubKey \<circ> Auth_PriK"
+
+consts Auth_ShaK :: "agent_id \<Rightarrow> key_id"
+
+abbreviation Auth_ShaKey :: "agent_id \<Rightarrow> key" where
+"Auth_ShaKey \<equiv> ShaK \<circ> Auth_ShaK"
+
+abbreviation Sign :: "agent_id \<Rightarrow> key_id \<Rightarrow> msg" where
+"Sign n A \<equiv> Crypt SigK \<lbrace>Hash (Agent n), Hash (PubKey A)\<rbrace>"
+
+abbreviation Token :: "agent_id \<Rightarrow> key_id \<Rightarrow> key_id \<Rightarrow> key_id \<Rightarrow> seskey_in \<Rightarrow> msg"
+where "Token n A B C SK \<equiv> \<lbrace>Crypt (SesK SK) (PubKey C),
+  Crypt (SesK SK) (A \<otimes> B), Crypt (SesK SK) (Sign n A)\<rbrace>"
+
+
+consts bad_agent :: "agent_id set"
+
+consts bad_pwd :: "agent_id set"
+
+consts bad_shak :: "key_id set"
+
+consts bad_id_pwd :: "agent_id set"
+
+consts bad_id_prik :: "agent_id set"
+
+consts bad_id_pubk :: "agent_id set"
+
+consts bad_id_shak :: "agent_id set"
+
+definition bad_prik :: "key_id set" where
+"bad_prik \<equiv> SOME U. U \<subseteq> range Auth_PriK"
+
+abbreviation bad_prikey :: "agent_id set" where
+"bad_prikey \<equiv> Auth_PriK -` bad_prik"
+
+abbreviation bad_shakey :: "agent_id set" where
+"bad_shakey \<equiv> Auth_ShaK -` bad_shak"
+
+abbreviation bad_id_password :: "agent_id set" where
+"bad_id_password \<equiv> bad_id_pwd \<inter> bad_pwd"
+
+abbreviation bad_id_prikey :: "agent_id set" where
+"bad_id_prikey \<equiv> (bad_agent \<union> bad_id_pubk \<union> bad_id_prik) \<inter> bad_prikey"
+
+abbreviation bad_id_pubkey :: "agent_id set" where
+"bad_id_pubkey \<equiv> bad_agent \<union> bad_id_pubk \<union> bad_id_prik \<inter> bad_prikey"
+
+abbreviation bad_id_shakey :: "agent_id set" where
+"bad_id_shakey \<equiv> bad_id_shak \<inter> bad_shakey"
+
+
+type_synonym event = "agent \<times> msg"
+
+type_synonym state = "event set"
+
+abbreviation used :: "state \<Rightarrow> msg set" where
+"used s \<equiv> Range s"
+
+abbreviation spied :: "state \<Rightarrow> msg set" where
+"spied s \<equiv> s `` {Spy}"
+
+abbreviation s\<^sub>0 :: state where
+"s\<^sub>0 \<equiv> range (\<lambda>n. (Asset n, Auth_PriKey n)) \<union> {Spy} \<times> insert VerKey
+  (range Num \<union> range Auth_PubKey \<union> range (\<lambda>n. Sign n (Auth_PriK n)) \<union>
+   Agent ` bad_agent \<union> Pwd ` bad_pwd \<union> PriKey ` bad_prik \<union> ShaKey ` bad_shak \<union>
+   (\<lambda>n. \<langle>n, Pwd n\<rangle>) ` bad_id_password \<union>
+   (\<lambda>n. \<langle>n, Auth_PriKey n\<rangle>) ` bad_id_prikey \<union>
+   (\<lambda>n. \<langle>n, Auth_PubKey n\<rangle>) ` bad_id_pubkey \<union>
+   (\<lambda>n. \<langle>n, Key (Auth_ShaKey n)\<rangle>) ` bad_id_shakey)"
+
+
+abbreviation rel_asset_i :: "(state \<times> state) set" where
+"rel_asset_i \<equiv> {(s, s') | s s' n S.
+  s' = insert (Asset n, PriKey S) s \<union>
+    {Asset n, Spy} \<times> {Crypt (Auth_ShaKey n) (PriKey S)} \<union>
+    {(Spy, Log (Crypt (Auth_ShaKey n) (PriKey S)))} \<and>
+  PriKey S \<notin> used s}"
+
+abbreviation rel_owner_ii :: "(state \<times> state) set" where
+"rel_owner_ii \<equiv> {(s, s') | s s' n S A K.
+  s' = insert (Owner n, PriKey A) s \<union>
+    {Owner n, Spy} \<times> {\<lbrace>Num 1, PubKey A\<rbrace>} \<union>
+    {Spy} \<times> Log ` {Crypt K (PriKey S), \<lbrace>Num 1, PubKey A\<rbrace>} \<and>
+  Crypt K (PriKey S) \<in> used s \<and>
+  PriKey A \<notin> used s}"
+
+abbreviation rel_asset_ii :: "(state \<times> state) set" where
+"rel_asset_ii \<equiv> {(s, s') | s s' n A B.
+  s' = insert (Asset n, PriKey B) s \<union>
+    {Asset n, Spy} \<times> {\<lbrace>Num 2, PubKey B\<rbrace>} \<union>
+    {Spy} \<times> Log ` {\<lbrace>Num 1, PubKey A\<rbrace>, \<lbrace>Num 2, PubKey B\<rbrace>} \<and>
+  \<lbrace>Num 1, PubKey A\<rbrace> \<in> used s \<and>
+  PriKey B \<notin> used s}"
+
+abbreviation rel_owner_iii :: "(state \<times> state) set" where
+"rel_owner_iii \<equiv> {(s, s') | s s' n B C.
+  s' = insert (Owner n, PriKey C) s \<union>
+    {Owner n, Spy} \<times> {\<lbrace>Num 3, PubKey C\<rbrace>} \<union>
+    {Spy} \<times> Log ` {\<lbrace>Num 2, PubKey B\<rbrace>, \<lbrace>Num 3, PubKey C\<rbrace>} \<and>
+  \<lbrace>Num 2, PubKey B\<rbrace> \<in> used s \<and>
+  PriKey C \<notin> used s}"
+
+abbreviation rel_asset_iii :: "(state \<times> state) set" where
+"rel_asset_iii \<equiv> {(s, s') | s s' n C D.
+  s' = insert (Asset n, PriKey D) s \<union>
+    {Asset n, Spy} \<times> {\<lbrace>Num 4, PubKey D\<rbrace>} \<union>
+    {Spy} \<times> Log ` {\<lbrace>Num 3, PubKey C\<rbrace>, \<lbrace>Num 4, PubKey D\<rbrace>} \<and>
+  \<lbrace>Num 3, PubKey C\<rbrace> \<in> used s \<and>
+  PriKey D \<notin> used s}"
+
+abbreviation rel_owner_iv :: "(state \<times> state) set" where
+"rel_owner_iv \<equiv> {(s, s') | s s' n S A B C D K SK.
+  s' = insert (Owner n, SesKey SK) s \<union>
+    {Owner n, Spy} \<times> {Crypt (SesK SK) (PubKey D)} \<union>
+    {Spy} \<times> Log ` {\<lbrace>Num 4, PubKey D\<rbrace>, Crypt (SesK SK) (PubKey D)} \<and>
+  {Crypt K (PriKey S), \<lbrace>Num 2, PubKey B\<rbrace>, \<lbrace>Num 4, PubKey D\<rbrace>} \<subseteq> used s \<and>
+  {Owner n} \<times> {\<lbrace>Num 1, PubKey A\<rbrace>, \<lbrace>Num 3, PubKey C\<rbrace>} \<subseteq> s \<and>
+  SK = (if K = Auth_ShaKey n then Some S else None, {A, B}, {C, D})}"
+
+abbreviation rel_asset_iv :: "(state \<times> state) set" where
+"rel_asset_iv \<equiv> {(s, s') | s s' n S A B C D SK.
+  s' = s \<union> {Asset n} \<times> {SesKey SK, PubKey B} \<union>
+    {Asset n, Spy} \<times> {Token n (Auth_PriK n) B C SK} \<union>
+    {Spy} \<times> Log ` {Crypt (SesK SK) (PubKey D),
+      Token n (Auth_PriK n) B C SK} \<and>
+  {Asset n} \<times> {Crypt (Auth_ShaKey n) (PriKey S),
+    \<lbrace>Num 2, PubKey B\<rbrace>, \<lbrace>Num 4, PubKey D\<rbrace>} \<subseteq> s \<and>
+  {\<lbrace>Num 1, PubKey A\<rbrace>, \<lbrace>Num 3, PubKey C\<rbrace>,
+    Crypt (SesK SK) (PubKey D)} \<subseteq> used s \<and>
+  (Asset n, PubKey B) \<notin> s \<and>
+  SK = (Some S, {A, B}, {C, D})}"
+
+abbreviation rel_owner_v :: "(state \<times> state) set" where
+"rel_owner_v \<equiv> {(s, s') | s s' n A B C SK.
+  s' = s \<union> {Owner n, Spy} \<times> {Crypt (SesK SK) (Pwd n)} \<union>
+    {Spy} \<times> Log ` {Token n A B C SK, Crypt (SesK SK) (Pwd n)} \<and>
+  Token n A B C SK \<in> used s \<and>
+  (Owner n, SesKey SK) \<in> s \<and>
+  B \<in> fst (snd SK)}"
+
+abbreviation rel_asset_v :: "(state \<times> state) set" where
+"rel_asset_v \<equiv> {(s, s') | s s' n SK.
+  s' = s \<union> {Asset n, Spy} \<times> {Crypt (SesK SK) (Num 0)} \<union>
+    {Spy} \<times> Log ` {Crypt (SesK SK) (Pwd n), Crypt (SesK SK) (Num 0)} \<and>
+  (Asset n, SesKey SK) \<in> s \<and>
+  Crypt (SesK SK) (Pwd n) \<in> used s}"
+
+
+abbreviation rel_prik :: "(state \<times> state) set" where
+"rel_prik \<equiv> {(s, s') | s s' A.
+  s' = insert (Spy, PriKey A) s \<and>
+  PriKey A \<notin> used s}"
+
+abbreviation rel_pubk :: "(state \<times> state) set" where
+"rel_pubk \<equiv> {(s, s') | s s' A.
+  s' = insert (Spy, PubKey A) s \<and>
+  PriKey A \<in> spied s}"
+
+abbreviation rel_sesk :: "(state \<times> state) set" where
+"rel_sesk \<equiv> {(s, s') | s s' A B C D S.
+  s' = insert (Spy, SesKey (Some S, {A, B}, {C, D})) s \<and>
+  {PriKey S, PriKey A, PubKey B, PriKey C, PubKey D} \<subseteq> spied s}"
+
+abbreviation rel_fact :: "(state \<times> state) set" where
+"rel_fact \<equiv> {(s, s') | s s' A B.
+  s' = s \<union> {Spy} \<times> {PriKey A, PriKey B} \<and>
+  A \<otimes> B \<in> spied s \<and>
+  (PriKey A \<in> spied s \<or> PriKey B \<in> spied s)}"
+
+abbreviation rel_mult :: "(state \<times> state) set" where
+"rel_mult \<equiv> {(s, s') | s s' A B.
+  s' = insert (Spy, A \<otimes> B) s \<and>
+  {PriKey A, PriKey B} \<subseteq> spied s}"
+
+abbreviation rel_hash :: "(state \<times> state) set" where
+"rel_hash \<equiv> {(s, s') | s s' X.
+  s' = insert (Spy, Hash X) s \<and>
+  X \<in> spied s}"
+
+abbreviation rel_dec :: "(state \<times> state) set" where
+"rel_dec \<equiv> {(s, s') | s s' K X.
+  s' = insert (Spy, X) s \<and>
+  {Crypt K X, InvKey K} \<subseteq> spied s}"
+
+abbreviation rel_enc :: "(state \<times> state) set" where
+"rel_enc \<equiv> {(s, s') | s s' K X.
+  s' = insert (Spy, Crypt K X) s \<and>
+  {X, Key K} \<subseteq> spied s}"
+
+abbreviation rel_sep :: "(state \<times> state) set" where
+"rel_sep \<equiv> {(s, s') | s s' X Y.
+  s' = s \<union> {Spy} \<times> {X, Y} \<and>
+  \<lbrace>X, Y\<rbrace> \<in> spied s}"
+
+abbreviation rel_con :: "(state \<times> state) set" where
+"rel_con \<equiv> {(s, s') | s s' X Y.
+  s' = insert (Spy, \<lbrace>X, Y\<rbrace>) s \<and>
+  {X, Y} \<subseteq> spied s}"
+
+
+abbreviation rel_id_agent :: "(state \<times> state) set" where
+"rel_id_agent \<equiv> {(s, s') | s s' n.
+  s' = insert (Spy, \<langle>n, Agent n\<rangle>) s \<and>
+  Agent n \<in> spied s}"
+
+abbreviation rel_id_invk :: "(state \<times> state) set" where
+"rel_id_invk \<equiv> {(s, s') | s s' n K.
+  s' = insert (Spy, \<langle>n, InvKey K\<rangle>) s \<and>
+  {InvKey K, \<langle>n, Key K\<rangle>} \<subseteq> spied s}"
+
+abbreviation rel_id_sesk :: "(state \<times> state) set" where
+"rel_id_sesk \<equiv> {(s, s') | s s' n A SK X U.
+  s' = s \<union> {Spy} \<times> {\<langle>n, PubKey A\<rangle>, \<langle>n, SesKey SK\<rangle>} \<and>
+  {PubKey A, SesKey SK} \<subseteq> spied s \<and>
+  (\<langle>n, PubKey A\<rangle> \<in> spied s \<or> \<langle>n, SesKey SK\<rangle> \<in> spied s) \<and>
+  A \<in> seskey_set SK \<and>
+  SesKey SK \<in> U \<and>
+  U \<in> key_sets X (crypts (Log -` spied s))}"
+
+abbreviation rel_id_fact :: "(state \<times> state) set" where
+"rel_id_fact \<equiv> {(s, s') | s s' n A B.
+  s' = s \<union> {Spy} \<times> {\<langle>n, PriKey A\<rangle>, \<langle>n, PriKey B\<rangle>} \<and>
+  {PriKey A, PriKey B, \<langle>n, A \<otimes> B\<rangle>} \<subseteq> spied s}"
+
+abbreviation rel_id_mult :: "(state \<times> state) set" where
+"rel_id_mult \<equiv> {(s, s') | s s' n A B U.
+  s' = insert (Spy, \<langle>n, A \<otimes> B\<rangle>) s \<and>
+  U \<union> {PriKey A, PriKey B, A \<otimes> B} \<subseteq> spied s \<and>
+  (\<langle>n, PriKey A\<rangle> \<in> spied s \<or> \<langle>n, PriKey B\<rangle> \<in> spied s) \<and>
+  U \<in> key_sets (A \<otimes> B) (crypts (Log -` spied s))}"
+
+abbreviation rel_id_hash :: "(state \<times> state) set" where
+"rel_id_hash \<equiv> {(s, s') | s s' n X U.
+  s' = s \<union> {Spy} \<times> {\<langle>n, X\<rangle>, \<langle>n, Hash X\<rangle>} \<and>
+  U \<union> {X, Hash X} \<subseteq> spied s \<and>
+  (\<langle>n, X\<rangle> \<in> spied s \<or> \<langle>n, Hash X\<rangle> \<in> spied s) \<and>
+  U \<in> key_sets (Hash X) (crypts (Log -` spied s))}"
+
+abbreviation rel_id_crypt :: "(state \<times> state) set" where
+"rel_id_crypt \<equiv> {(s, s') | s s' n X U.
+  s' = s \<union> {Spy} \<times> IDInfo n ` insert X U \<and>
+  insert X U \<subseteq> spied s \<and>
+  (\<langle>n, X\<rangle> \<in> spied s \<or> (\<exists>K \<in> U. \<langle>n, K\<rangle> \<in> spied s)) \<and>
+  U \<in> key_sets X (crypts (Log -` spied s))}"
+
+abbreviation rel_id_sep :: "(state \<times> state) set" where
+"rel_id_sep \<equiv> {(s, s') | s s' n X Y.
+  s' = s \<union> {Spy} \<times> {\<langle>n, X\<rangle>, \<langle>n, Y\<rangle>} \<and>
+  {X, Y, \<langle>n, \<lbrace>X, Y\<rbrace>\<rangle>} \<subseteq> spied s}"
+
+abbreviation rel_id_con :: "(state \<times> state) set" where
+"rel_id_con \<equiv> {(s, s') | s s' n X Y U.
+  s' = insert (Spy, \<langle>n, \<lbrace>X, Y\<rbrace>\<rangle>) s \<and>
+  U \<union> {X, Y, \<lbrace>X, Y\<rbrace>} \<subseteq> spied s \<and>
+  (\<langle>n, X\<rangle> \<in> spied s \<or> \<langle>n, Y\<rangle> \<in> spied s) \<and>
+  U \<in> key_sets \<lbrace>X, Y\<rbrace> (crypts (Log -` spied s))}"
+
+
+definition rel :: "(state \<times> state) set" where
+"rel \<equiv> rel_asset_i \<union> rel_owner_ii \<union> rel_asset_ii \<union> rel_owner_iii \<union>
+  rel_asset_iii \<union> rel_owner_iv \<union> rel_asset_iv \<union> rel_owner_v \<union> rel_asset_v \<union>
+  rel_prik \<union> rel_pubk \<union> rel_sesk \<union> rel_fact \<union> rel_mult \<union> rel_hash \<union> rel_dec \<union>
+  rel_enc \<union> rel_sep \<union> rel_con \<union> rel_id_agent \<union> rel_id_invk \<union> rel_id_sesk \<union>
+  rel_id_fact \<union> rel_id_mult \<union> rel_id_hash \<union> rel_id_crypt \<union> rel_id_sep \<union> rel_id_con"
+
+abbreviation in_rel :: "state \<Rightarrow> state \<Rightarrow> bool" (infix "\<turnstile>" 60) where
+"s \<turnstile> s' \<equiv> (s, s') \<in> rel"
+
+abbreviation in_rel_rtrancl :: "state \<Rightarrow> state \<Rightarrow> bool" (infix "\<Turnstile>" 60) where
+"s \<Turnstile> s' \<equiv> (s, s') \<in> rel\<^sup>*"
+
+end

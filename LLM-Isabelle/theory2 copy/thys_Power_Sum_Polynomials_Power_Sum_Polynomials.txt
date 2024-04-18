@@ -1,0 +1,227 @@
+theory Power_Sum_Polynomials
+imports
+  "Symmetric_Polynomials.Symmetric_Polynomials"
+  "HOL-Computational_Algebra.Field_as_Ring"
+  Power_Sum_Polynomials_Library
+begin
+
+
+lift_definition powsum_mpoly_aux :: "nat set \<Rightarrow> nat \<Rightarrow> (nat \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a :: {semiring_1,zero_neq_one}" is
+  "\<lambda>X k mon. if infinite X \<or> k = 0 \<and> mon \<noteq> 0 then 0
+             else if k = 0 \<and> mon = 0 then of_nat (card X)
+             else if finite X \<and> (\<exists>x\<in>X. mon = Poly_Mapping.single x k) then 1 else 0"
+  by auto
+
+lemma lookup_powsum_mpoly_aux:
+  "Poly_Mapping.lookup (powsum_mpoly_aux X k) mon =
+     (if infinite X \<or> k = 0 \<and> mon \<noteq> 0 then 0
+             else if k = 0 \<and> mon = 0 then of_nat (card X)
+             else if finite X \<and> (\<exists>x\<in>X. mon = Poly_Mapping.single x k) then 1 else 0)"
+  by transfer' simp
+
+lemma lookup_sym_mpoly_aux_monom_singleton [simp]:
+  assumes "finite X" "x \<in> X" "k > 0"
+  shows   "Poly_Mapping.lookup (powsum_mpoly_aux X k) (Poly_Mapping.single x k) = 1"
+  using assms by (auto simp: lookup_powsum_mpoly_aux)
+
+lemma lookup_sym_mpoly_aux_monom_singleton':
+  assumes "finite X" "k > 0"
+  shows   "Poly_Mapping.lookup (powsum_mpoly_aux X k) (Poly_Mapping.single x k) = (if x \<in> X then 1 else 0)"
+  using assms by (auto simp: lookup_powsum_mpoly_aux)
+
+lemma keys_powsum_mpoly_aux: "m \<in> keys (powsum_mpoly_aux A k) \<Longrightarrow> keys m \<subseteq> A"
+  by transfer' (auto split: if_splits simp: keys_monom_of_set)
+
+
+lift_definition powsum_mpoly :: "nat set \<Rightarrow> nat \<Rightarrow> 'a :: {semiring_1,zero_neq_one} mpoly" is
+  "powsum_mpoly_aux" .
+
+lemma vars_powsum_mpoly_subset: "vars (powsum_mpoly A k) \<subseteq> A"
+  using keys_powsum_mpoly_aux by (auto simp: vars_def powsum_mpoly.rep_eq)
+
+lemma powsum_mpoly_infinite: "\<not>finite A \<Longrightarrow> powsum_mpoly A k = 0"
+  by (transfer, transfer) auto
+
+lemma coeff_powsum_mpoly:
+  "MPoly_Type.coeff (powsum_mpoly X k) mon =
+     (if infinite X \<or> k = 0 \<and> mon \<noteq> 0 then 0
+             else if k = 0 \<and> mon = 0 then of_nat (card X)
+             else if finite X \<and> (\<exists>x\<in>X. mon = Poly_Mapping.single x k) then 1 else 0)"
+  by transfer' (simp add: lookup_powsum_mpoly_aux)
+
+lemma coeff_powsum_mpoly_0_right:
+  "MPoly_Type.coeff (powsum_mpoly X 0) mon = (if mon = 0 then of_nat (card X) else 0)"
+  by transfer' (auto simp add: lookup_powsum_mpoly_aux)
+
+lemma coeff_powsum_mpoly_singleton:
+  assumes "finite X" "k > 0"
+  shows   "MPoly_Type.coeff (powsum_mpoly X k) (Poly_Mapping.single x k) = (if x \<in> X then 1 else 0)"
+  using assms by transfer' (simp add: lookup_powsum_mpoly_aux)
+
+lemma coeff_powsum_mpoly_singleton_eq_1 [simp]:
+  assumes "finite X" "x \<in> X" "k > 0"
+  shows   "MPoly_Type.coeff (powsum_mpoly X k) (Poly_Mapping.single x k) = 1"
+  using assms by (simp add: coeff_powsum_mpoly_singleton)
+
+lemma coeff_powsum_mpoly_singleton_eq_0 [simp]:
+  assumes "finite X" "x \<notin> X" "k > 0"
+  shows   "MPoly_Type.coeff (powsum_mpoly X k) (Poly_Mapping.single x k) = 0"
+  using assms by (simp add: coeff_powsum_mpoly_singleton)
+
+lemma powsum_mpoly_0 [simp]: "powsum_mpoly X 0 = of_nat (card X)"
+  by (intro mpoly_eqI ext) (auto simp: coeff_powsum_mpoly_0_right of_nat_mpoly_eq mpoly_coeff_Const)
+
+lemma powsum_mpoly_empty [simp]: "powsum_mpoly {} k = 0"
+  by (intro mpoly_eqI) (auto simp: coeff_powsum_mpoly)
+
+lemma powsum_mpoly_altdef: "powsum_mpoly X k = (\<Sum>x\<in>X. monom (Poly_Mapping.single x k) 1)"
+proof (cases "finite X")
+  case [simp]: True
+  show ?thesis
+  proof (cases "k = 0")
+    case True
+    thus ?thesis by auto
+  next
+    case False
+    show ?thesis
+    proof (intro mpoly_eqI, goal_cases)
+      case (1 mon)
+      show ?case using False
+        by (cases "\<exists>x\<in>X. mon = Poly_Mapping.single x k")
+           (auto simp: coeff_powsum_mpoly coeff_monom when_def)
+    qed
+  qed
+qed (auto simp: powsum_mpoly_infinite)
+
+lemma symmetric_powsum_mpoly [intro]:
+  assumes "A \<subseteq> B"
+  shows   "symmetric_mpoly A (powsum_mpoly B k)"
+  unfolding powsum_mpoly_altdef
+proof (rule symmetric_mpoly_symmetric_sum)
+  fix x \<pi>
+  assume "x \<in> B" "\<pi> permutes A"
+  thus "mpoly_map_vars \<pi> (MPoly_Type.monom (Poly_Mapping.single x k) 1) =
+        MPoly_Type.monom (Poly_Mapping.single (\<pi> x) k) 1"
+    using assms by (auto simp: mpoly_map_vars_monom permutes_bij permutep_single
+                               bij_imp_bij_inv permutes_inv_inv)
+
+lemma insertion_powsum_mpoly [simp]: "insertion f (powsum_mpoly X k) = (\<Sum>i\<in>X. f i ^ k)"
+  unfolding powsum_mpoly_altdef insertion_sum insertion_single by simp
+
+lemma powsum_mpoly_nz:
+  assumes "finite X" "X \<noteq> {}" "k > 0"
+  shows   "(powsum_mpoly X k :: 'a :: {semiring_1, zero_neq_one} mpoly) \<noteq> 0"
+proof -
+  from assms obtain x where "x \<in> X" by auto
+  hence "coeff (powsum_mpoly X k) (Poly_Mapping.single x k) = (1 :: 'a)"
+    using assms by (auto simp: coeff_powsum_mpoly)
+  thus ?thesis by auto
+qed
+
+lemma powsum_mpoly_eq_0_iff:
+  assumes "k > 0"
+  shows   "powsum_mpoly X k = 0 \<longleftrightarrow> infinite X \<or> X = {}"
+  using assms powsum_mpoly_nz[of X k] by (auto simp: powsum_mpoly_infinite)
+
+
+
+theorem Girard_Newton:
+  assumes "finite X"
+  shows   "(-1) ^ k * of_nat k * sym_mpoly X k +
+           (\<Sum>i<k. (-1) ^ i * sym_mpoly X i * powsum_mpoly X (k - i)) =
+             (0 :: 'a :: comm_ring_1 mpoly)"
+  (is "?lhs = 0")
+proof -
+  write Poly_Mapping.single ("sng")
+
+  define n where "n = card X"
+  define \<A> :: "(nat set \<times> nat) set"
+    where "\<A> = {(A, j). A \<subseteq> X \<and> card A \<le> k \<and> j \<in> X \<and> (card A = k \<longrightarrow> j \<in> A)}"
+  define \<A>1 :: "(nat set \<times> nat) set"
+    where "\<A>1 = {A\<in>Pow X. card A < k} \<times> X"
+  define \<A>2 :: "(nat set \<times> nat) set"
+    where "\<A>2 = (SIGMA A:{A\<in>Pow X. card A = k}. A)"
+
+  have \<A>_split: "\<A> = \<A>1 \<union> \<A>2" "\<A>1 \<inter> \<A>2 = {}"
+    by (auto simp: \<A>_def \<A>1_def \<A>2_def)
+  have [intro]: "finite \<A>1" "finite \<A>2"
+    using assms finite_subset[of _ X] by (auto simp: \<A>1_def \<A>2_def intro!: finite_SigmaI)
+  have [intro]: "finite \<A>"
+    by (subst \<A>_split) auto
+
+  define w :: "nat set \<times> nat \<Rightarrow> 'a mpoly"
+    where "w = (\<lambda>(A, j). monom (monom_of_set A + sng j (k - card A)) ((-1) ^ card A))"
+
+  have "?lhs = (\<Sum>x\<in>\<A>. w x)"
+  proof -
+    have "(\<Sum>x\<in>\<A>. w x) = (\<Sum>x\<in>\<A>1. w x) + (\<Sum>x\<in>\<A>2. w x)"
+      by (subst \<A>_split, subst sum.union_disjoint, use \<A>_split(2) in auto)
+
+    also have "(\<Sum>x\<in>\<A>1. w x) = (\<Sum>i<k. (-1) ^ i * sym_mpoly X i * powsum_mpoly X (k - i))"
+    proof -
+      have "(\<Sum>x\<in>\<A>1. w x) = (\<Sum>A | A \<subseteq> X \<and> card A < k. \<Sum>j\<in>X. w (A, j))"
+        using assms by (subst sum.Sigma) (auto simp: \<A>1_def)
+      also have "\<dots> = (\<Sum>A | A \<subseteq> X \<and> card A < k. \<Sum>j\<in>X.
+                        monom (monom_of_set A) ((-1) ^ card A) * monom (sng j (k - card A)) 1)"
+        unfolding w_def by (intro sum.cong) (auto simp: mult_monom)
+      also have "\<dots> = (\<Sum>A | A \<subseteq> X \<and> card A < k. monom (monom_of_set A) ((-1) ^ card A) *
+                        powsum_mpoly X (k - card A))"
+        by (simp add: sum_distrib_left powsum_mpoly_altdef)
+      also have "\<dots> = (\<Sum>(i,A) \<in> (SIGMA i:{..<k}. {A. A \<subseteq> X \<and> card A = i}).
+                        monom (monom_of_set A) ((-1) ^ i) * powsum_mpoly X (k - i))"
+        by (rule sum.reindex_bij_witness[of _ snd "\<lambda>A. (card A, A)"]) auto
+      also have "\<dots> = (\<Sum>i<k. \<Sum>A | A \<subseteq> X \<and> card A = i.
+                        monom (monom_of_set A) 1 * monom 0 ((-1) ^ i) * powsum_mpoly X (k - i))"
+        using assms by (subst sum.Sigma) (auto simp: mult_monom)
+      also have "\<dots> = (\<Sum>i<k. (-1) ^ i * sym_mpoly X i * powsum_mpoly X (k - i))"
+        by (simp add: sum_distrib_left sum_distrib_right mpoly_monom_0_eq_Const 
+                      mpoly_Const_power mpoly_Const_uminus algebra_simps sym_mpoly_altdef)
+      finally show ?thesis .
+    qed
+
+    also have "(\<Sum>x\<in>\<A>2. w x) = (-1) ^ k * of_nat k * sym_mpoly X k"
+    proof -
+      have "(\<Sum>x\<in>\<A>2. w x) = (\<Sum>(A,j)\<in>\<A>2. monom (monom_of_set A) ((- 1) ^ k))"
+        by (intro sum.cong) (auto simp: \<A>2_def w_def mpoly_monom_0_eq_Const intro!: sum.cong)
+      also have "\<dots> = (\<Sum>A | A \<subseteq> X \<and> card A = k. \<Sum>j\<in>A. monom (monom_of_set A) ((- 1) ^ k))"
+        using assms finite_subset[of _ X] by (subst sum.Sigma) (auto simp: \<A>2_def)
+      also have "(\<lambda>A. monom (monom_of_set A) ((- 1) ^ k) :: 'a mpoly) =
+                   (\<lambda>A. monom 0 ((-1) ^ k) * monom (monom_of_set A) 1)"
+        by (auto simp: fun_eq_iff mult_monom)
+      also have "monom 0 ((-1) ^ k) = (-1) ^ k"
+        by (auto simp: mpoly_monom_0_eq_Const mpoly_Const_power mpoly_Const_uminus)
+      also have "(\<Sum>A | A \<subseteq> X \<and> card A = k. \<Sum>j\<in>A. (- 1) ^ k * monom (monom_of_set A) 1) =
+                   ((-1) ^ k * of_nat k * sym_mpoly X k :: 'a mpoly)"
+        by (auto simp: sum_distrib_left sum_distrib_right mult_ac sym_mpoly_altdef)
+      finally show ?thesis .
+    qed
+
+    finally show ?thesis by (simp add: algebra_simps)
+  qed
+
+  also have "(\<Sum>x\<in>\<A>. w x) = 0"
+  proof -
+        own inverse function, i.\,e.\ $T(T(x)) = x$.\<close>
+    \<comment>\<open>Crucially, we show that \<^term>\<open>T\<close> flips the weight of each element:\<close>
+      \<comment> \<open>Since \<^term>\<open>T\<close> is an involution, we can assume w.\,l.\,o.\,g.\ that \<open>j \<in> A\<close>:\<close>
+          using \<open>k > 0\<close> \<open>card A \<le> k\<close> card_less by (subst card) auto
+    text \<open>
+      We can now show fairly easily that the sum is equal to zero.
+    \<close>
+      using \<open>finite \<A>\<close> by (subst *, subst sum.union_disjoint) auto
+text \<open>
+  linear recurrence relation with constant coefficients for $p_k$ in terms of
+  $e_0, \ldots, e_n$.
+\<close>
+text \<open>
+  The following variant is the Newton--Girard Theorem solved for $e_k$, giving us
+  an explicit way to determine $e_k$ from $e_0, \ldots, e_{k-1}$ and $p_1, \ldots, p_k$:
+\<close>
+text \<open>
+  Analogously, the following is the theorem solved for $p_k$, giving us a
+  way to determine $p_k$ from $e_0, \ldots, e_k$ and $p_1, \ldots, p_{k-1}$:
+\<close>
+text \<open>
+  Again, if we assume $k > n$, the above takes a much simpler form and is, in fact,
+  a linear recurrence with constant coefficients:
+\<close>

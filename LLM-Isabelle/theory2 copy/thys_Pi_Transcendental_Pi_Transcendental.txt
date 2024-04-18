@@ -1,0 +1,203 @@
+theory Pi_Transcendental
+imports
+  "E_Transcendental.E_Transcendental"
+  "Symmetric_Polynomials.Symmetric_Polynomials"
+  "HOL-Real_Asymp.Real_Asymp" 
+  Pi_Transcendental_Polynomial_Library
+begin
+
+lemma ring_homomorphism_to_poly [intro]: "ring_homomorphism (\<lambda>i. [:i:])"
+  by standard auto
+
+lemma (in ring_closed) coeff_power_closed:
+  "(\<And>m. coeff p m \<in> A) \<Longrightarrow> coeff (p ^ n) m \<in> A"
+  by (induction n arbitrary: m)
+     (auto simp: mpoly_coeff_1 coeff_mpoly_times intro!: prod_fun_closed)
+
+lemma (in ring_closed) coeff_prod_closed:
+  "(\<And>x m. x \<in> X \<Longrightarrow> coeff (f x) m \<in> A) \<Longrightarrow> coeff (prod f X) m \<in> A"
+  by (induction X arbitrary: m rule: infinite_finite_induct)
+     (auto simp: mpoly_coeff_1 coeff_mpoly_times intro!: prod_fun_closed)
+
+lemma map_of_rat_of_int_poly [simp]: "map_poly of_rat (of_int_poly p) = of_int_poly p"
+  by (intro poly_eqI) (auto simp: coeff_map_poly)
+
+lemma ratpoly_to_intpoly:
+  assumes "\<forall>i. poly.coeff p i \<in> \<rat>"
+  obtains q c where "c \<noteq> 0" "p = Polynomial.smult (inverse (of_nat c)) (of_int_poly q)"
+proof (cases "p = 0")
+  case True
+  with that[of 1 0] show ?thesis by auto
+next
+  case False
+  from assms obtain p' where p': "p = map_poly of_rat p'"
+    using ratpolyE by auto
+  define c where "c = Lcm ((nat \<circ> snd \<circ> quotient_of \<circ> poly.coeff p') ` {..Polynomial.degree p'})"
+  have "\<not>snd (quotient_of x) \<le> 0" for x
+    using quotient_of_denom_pos[of x, OF surjective_pairing] by auto
+  hence "c \<noteq> 0" by (auto simp: c_def)
+  define q where "q = Polynomial.smult (of_nat c) p'"
+
+  have "poly.coeff q i \<in> \<int>" for i
+  proof (cases "i > Polynomial.degree p'")
+    case False
+    define m n 
+      where "m = fst (quotient_of (poly.coeff p' i))"
+        and "n = nat (snd (quotient_of (poly.coeff p' i)))"
+    have mn: "n > 0" "poly.coeff p' i = of_int m / of_nat n"
+      using quotient_of_denom_pos[of "poly.coeff p' i", OF surjective_pairing]
+            quotient_of_div[of "poly.coeff p' i", OF surjective_pairing]
+      by (auto simp: m_def n_def)
+    from False have "n dvd c" unfolding c_def
+      by (intro dvd_Lcm) (auto simp: c_def n_def o_def not_less)
+    hence "of_nat c * (of_int m / of_nat n) = (of_nat (c div n) * of_int m :: rat)"
+      by (auto simp: of_nat_div)
+    also have "\<dots> \<in> \<int>" by auto
+    finally show ?thesis using mn by (auto simp: q_def)
+  qed (auto simp: q_def coeff_eq_0)
+  with int_polyE obtain q' where q': "q = of_int_poly q'" by auto
+  moreover have "p = Polynomial.smult (inverse (of_nat c)) (map_poly of_rat (of_int_poly q'))"
+    by (intro poly_eqI) (auto simp: coeff_map_poly q_def of_rat_mult)
+  ultimately show ?thesis
+qed
+
+lemma symmetric_mpoly_symmetric_sum:
+  assumes "\<And>\<pi>. \<pi> permutes A \<Longrightarrow> g \<pi> permutes X"
+  assumes "\<And>x \<pi>. x \<in> X \<Longrightarrow> \<pi> permutes A \<Longrightarrow> mpoly_map_vars \<pi> (f x) = f (g \<pi> x)"
+  shows "symmetric_mpoly A (\<Sum>x\<in>X. f x)"
+  unfolding symmetric_mpoly_def
+proof safe
+  fix \<pi> assume \<pi>: "\<pi> permutes A"
+  have "mpoly_map_vars \<pi> (sum f X) = (\<Sum>x\<in>X. mpoly_map_vars \<pi> (f x))"
+    by simp
+  also have "\<dots> = (\<Sum>x\<in>X. f (g \<pi> x))"
+    by (intro sum.cong assms \<pi> refl)
+  also have "\<dots> = (\<Sum>x\<in>g \<pi>`X. f x)"
+    using assms(1)[OF \<pi>] by (subst sum.reindex) (auto simp: permutes_inj_on)
+  also have "g \<pi> ` X = X"
+    using assms(1)[OF \<pi>] by (simp add: permutes_image)
+  finally show "mpoly_map_vars \<pi> (sum f X) = sum f X" .
+qed
+
+lemma symmetric_mpoly_symmetric_prod:
+  assumes "g permutes X"
+  assumes "\<And>x \<pi>. x \<in> X \<Longrightarrow> \<pi> permutes A \<Longrightarrow> mpoly_map_vars \<pi> (f x) = f (g x)"
+  shows "symmetric_mpoly A (\<Prod>x\<in>X. f x)"
+  unfolding symmetric_mpoly_def
+proof safe
+  fix \<pi> assume \<pi>: "\<pi> permutes A"
+  have "mpoly_map_vars \<pi> (prod f X) = (\<Prod>x\<in>X. mpoly_map_vars \<pi> (f x))"
+    by simp
+  also have "\<dots> = (\<Prod>x\<in>X. f (g x))"
+    by (intro prod.cong assms \<pi> refl)
+  also have "\<dots> = (\<Prod>x\<in>g`X. f x)"
+    using assms by (subst prod.reindex) (auto simp: permutes_inj_on)
+  also have "g ` X = X"
+    using assms by (simp add: permutes_image)
+  finally show "mpoly_map_vars \<pi> (prod f X) = prod f X" .
+qed
+
+
+lemma transcendental_i_pi: "\<not>algebraic (\<i> * pi)"
+proof
+  assume "algebraic (\<i> * pi)"
+  then obtain p
+    where p: "poly (of_int_poly p) (\<i> * pi) = 0" "p \<noteq> 0" "poly.coeff p 0 \<noteq> 0"
+    by (elim algebraicE'_nonzero) auto
+  define n where "n = Polynomial.degree p"
+
+  obtain root where "Polynomial.smult (Polynomial.lead_coeff (of_int_poly p))
+                       (\<Prod>i<n. [:-root i :: complex, 1:]) = of_int_poly p"
+    using complex_poly_decompose'[of "of_int_poly p"] unfolding n_def by auto
+  note root = this [symmetric]
+
+  from p and root obtain idx where idx: "idx < n" "root idx = \<i> * pi"
+    by (auto simp: poly_prod)
+
+  define root' where "root' = (\<lambda>X. (\<Sum>j\<in>X. root j))"
+  define P where "P = (\<lambda>i. \<Prod>X | X \<subseteq> {..<n} \<and> card X = i. [:-root' X, 1:])"
+  define P' where "P' = (\<Prod>i\<in>{0<..n}. P i)"
+  define A where "A = card {X\<in>Pow {..<n}. root' X = 0}"
+  have [simp]: "P' \<noteq> 0" by (auto simp: P'_def P_def)
+
+      is at least one, namely $\{i\pi\}$.\<close>
+  \<comment> \<open>Clearly, @{term A} is nonzero, since the empty set sums to 0.\<close>
+  \<comment> \<open>Since $e^{i\pi} + 1 = 0$, we know the following:\<close>
+  \<comment> \<open>We rearrange this product of sums into a sum of products and collect all summands that are
+      1 into a separate sum, which we call @{term A}:\<close>
+  \<comment> \<open>Finally, we obtain the fact that the sum of $\exp(u)$ with $u$ ranging over all the non-zero
+      roots of @{term P'} is a negative integer.\<close>
+  \<comment> \<open>Next, we show that \<open>P'\<close> is a rational polynomial since it can be written as a symmetric
+      polynomial expression (with rational coefficients) in the roots of \<open>p\<close>.\<close>
+        using \<open>p \<noteq> 0\<close> by (auto intro!: poly_eqI simp: field_simps)
+  \<comment> \<open>We clear the denominators and remove all powers of $X$ from @{term P'} to obtain a new
+  define Q' where "Q' = (\<Prod>X\<in>Roots'. [:- root' X, 1:])"
+  have "P' = (\<Prod>X\<in>Pow {..<n}-{{}}. [:-root' X, 1:])"
+    by (simp add: P'_altdef)
+  also have "Pow {..<n}-{{}} = Roots' \<union>
+               {X. X \<in> Pow {..<n} - {{}} \<and> root' X = 0}" by (auto simp: root'_def Roots'_def)
+  also have "(\<Prod>X\<in>\<dots>. [:-root' X, 1:]) =
+               Q' * [:0, 1:] ^ card {X. X \<subseteq> {..<n} \<and> X \<noteq> {} \<and> root' X = 0}"
+    by (subst prod.union_disjoint) (auto simp: Q'_def Roots'_def)
+  also have "{X. X \<subseteq> {..<n} \<and> X \<noteq> {} \<and> root' X = 0} = {X. X \<subseteq> {..<n} \<and> root' X = 0} - {{}}"
+    by auto
+  also have "card \<dots> = A - 1"  unfolding A_def
+    by (subst card_Diff_singleton) (auto simp: root'_def)
+  finally have Q': "P' = Polynomial.monom 1 (A - 1) * Q'"
+    by (simp add: Polynomial.monom_altdef)
+  have degree_Q': "Polynomial.degree P' = Polynomial.degree Q' + (A - 1)"
+    by (subst Q')
+       (auto simp: Q'_def Roots'_def degree_mult_eq Polynomial.degree_monom_eq degree_prod_eq)
+
+  have "\<forall>i. poly.coeff Q' i \<in> \<rat>"
+  proof
+    fix i :: nat
+    have "poly.coeff Q' i = Polynomial.coeff P' (i + (A - 1))"
+      by (simp add: Q' Polynomial.coeff_monom_mult)
+    finally show "poly.coeff Q' i \<in> \<rat>" .
+  qed
+  from ratpoly_to_intpoly[OF this] obtain c Q
+    where [simp]: "c \<noteq> 0" and Q: "Q' = Polynomial.smult (inverse (of_nat c)) (of_int_poly Q)"
+    by metis
+  have [simp]: "Q \<noteq> 0" using Q Q' by auto
+  have Q': "of_int_poly Q = Polynomial.smult (of_nat c) Q'"
+    using Q by simp
+  have degree_Q: "Polynomial.degree Q = Polynomial.degree Q'"
+    by (subst Q) auto
+  have "Polynomial.lead_coeff (of_int_poly Q :: complex poly) = c"
+    by (subst Q') (simp_all add: degree_Q Q'_def lead_coeff_prod)
+  hence lead_coeff_Q: "Polynomial.lead_coeff Q = int c"
+    using of_int_eq_iff[of "Polynomial.lead_coeff Q" "of_nat c"] by (auto simp del: of_int_eq_iff)  
+  have Q_decompose: "of_int_poly Q =
+               Polynomial.smult (of_nat c) (\<Prod>X\<in>Roots'. [:- root' X, 1:])"
+    by (subst Q') (auto simp: Q'_def lead_coeff_Q)
+  have "poly (of_int_poly Q) (\<i> * pi) = 0"
+    by (force simp: root'_def Q_decompose poly_prod)
+  have degree_Q: "Polynomial.degree (of_int_poly Q :: complex poly) = card Roots'"
+    by (subst Q') (auto simp: Q'_def degree_prod_eq)
+  have "poly (of_int_poly Q) (0 :: complex) \<noteq> 0"
+    by (subst Q') (auto simp: Q'_def Roots'_def poly_prod)
+  hence [simp]: "poly Q 0 \<noteq> 0" by simp
+  have [simp]: "poly (of_int_poly Q) (root' Y) = 0" if "Y \<in> Roots'" for Y
+
+  define r where "r = Polynomial.degree Q"
+  have "r > 0" using degree_Q card_Roots' by (auto simp: r_def)
+  define Radius where "Radius = Max ((\<lambda>Y. norm (root' Y)) ` Roots')"
+  have Radius: "norm (root' Y) \<le> Radius" if "Y \<in> Roots'" for Y
+  from Radius[of "{idx}"] have "Radius \<ge> pi"
+    using idx by (auto simp: Roots'_def norm_mult root'_def)
+  hence Radius_nonneg: "Radius \<ge> 0" and "Radius > 0" using pi_gt3 by linarith+
+
+  have "compact (poly (of_int_poly Q :: complex poly) ` cball 0 Radius)"
+    by (intro compact_continuous_image continuous_intros) auto
+  then obtain Q_ub
+    where Q_ub: "Q_ub > 0" 
+                "\<And>u :: complex. u \<in> cball 0 Radius \<Longrightarrow> norm (poly (of_int_poly Q) u) \<le> Q_ub"
+    by (auto dest!: compact_imp_bounded simp: bounded_pos cball_def)
+
+  define fp_ub
+    where "fp_ub = (\<lambda>p. \<bar>c\<bar> ^ (r * p - 1) / fact (p - 1) * (Radius ^ (p - 1) * Q_ub ^ p))"
+  have fp_ub_nonneg: "fp_ub p \<ge> 0" for p
+    by (intro mult_nonneg_nonneg divide_nonneg_pos zero_le_power) auto
+  define C where "C = card Roots' * Radius * exp Radius"
+

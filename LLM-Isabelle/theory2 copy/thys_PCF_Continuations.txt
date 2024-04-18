@@ -1,0 +1,184 @@
+theory Continuations
+imports
+  PCF
+begin
+
+
+type_synonym ('a, 'o) K = "('a \<rightarrow> 'o) \<rightarrow> 'o"
+
+domain 'o ValK
+  = ValKF (lazy appKF :: "('o ValK, 'o) K \<rightarrow> ('o ValK, 'o) K")
+  | ValKTT | ValKFF
+  | ValKN (lazy "nat")
+
+type_synonym 'o ValKM = "('o ValK, 'o) K"
+
+lemma ValK_case_ID [simp]:
+  "ValK_case\<cdot>ValKF\<cdot>ValKTT\<cdot>ValKFF\<cdot>ValKN = ID"
+  apply (rule cfun_eqI)
+  apply (case_tac x)
+  apply simp_all
+  done
+
+lemma below_monic_ValKF [iff]:
+  "below_monic_cfun ValKF"
+  by (rule below_monicI) simp
+
+lemma below_monic_ValKN [iff]:
+  "below_monic_cfun ValKN"
+  by (rule below_monicI) simp
+
+
+definition unitK :: "'o ValK \<rightarrow> 'o ValKM" where
+  "unitK \<equiv> \<Lambda> a. \<Lambda> c. c\<cdot>a"
+
+definition bindK :: "'o ValKM \<rightarrow> ('o ValK \<rightarrow> 'o ValKM) \<rightarrow> 'o ValKM" where
+  "bindK \<equiv> \<Lambda> m k. \<Lambda> c. m\<cdot>(\<Lambda> a. k\<cdot>a\<cdot>c)"
+
+definition appKM :: "'o ValKM \<rightarrow> 'o ValKM \<rightarrow> 'o ValKM" where
+  "appKM \<equiv> \<Lambda> fK xK. bindK\<cdot>fK\<cdot>(\<Lambda> (ValKF\<cdot>f). f\<cdot>xK)"
+
+lemma unitK_simps [simp]:
+  "unitK\<cdot>v\<cdot>c = c\<cdot>v"
+  unfolding unitK_def by simp
+
+lemma bindK_strict:
+  "bindK\<cdot>\<bottom> = \<bottom>"
+  unfolding bindK_def by (simp add: eta_cfun)
+
+lemma bindK_unitl:
+  "bindK\<cdot>(unitK\<cdot>e)\<cdot>f = f\<cdot>e"
+  unfolding bindK_def unitK_def by (simp add: eta_cfun)
+
+lemma bindK_unitr:
+  "bindK\<cdot>e\<cdot>unitK = e"
+  unfolding bindK_def unitK_def by (simp add: eta_cfun)
+
+lemma bindK_assoc:
+  "bindK\<cdot>(bindK\<cdot>f\<cdot>g)\<cdot>h = bindK\<cdot>f\<cdot>(\<Lambda> v. bindK\<cdot>(g\<cdot>v)\<cdot>h)"
+  unfolding bindK_def unitK_def by simp
+
+lemmas bindK_simps[simp] = bindK_strict bindK_unitl bindK_unitr bindK_assoc
+
+
+definition
+  condK :: "'o ValKM \<rightarrow> 'o ValKM \<rightarrow> 'o ValKM \<rightarrow> 'o ValKM"
+where
+  "condK \<equiv> \<Lambda> iK tK eK. bindK\<cdot>iK\<cdot>(\<Lambda> i. case i of
+                ValKF\<cdot>f \<Rightarrow> \<bottom> | ValKTT \<Rightarrow> tK | ValKFF \<Rightarrow> eK | ValKN\<cdot>n \<Rightarrow> \<bottom>)"
+
+definition succK :: "'o ValKM \<rightarrow> 'o ValKM" where
+  "succK \<equiv> \<Lambda> nK. bindK\<cdot>nK\<cdot>(\<Lambda> (ValKN\<cdot>n). unitK\<cdot>(ValKN\<cdot>(n + 1)))"
+
+definition predK :: "'o ValKM \<rightarrow> 'o ValKM" where
+  "predK \<equiv> \<Lambda> nK. bindK\<cdot>nK\<cdot>(\<Lambda> (ValKN\<cdot>n). case n of 0 \<Rightarrow> \<bottom> | Suc n \<Rightarrow> unitK\<cdot>(ValKN\<cdot>n))"
+
+definition isZeroK :: "'o ValKM \<rightarrow> 'o ValKM" where
+  "isZeroK \<equiv> \<Lambda> nK. bindK\<cdot>nK\<cdot>(\<Lambda> (ValKN\<cdot>n). unitK\<cdot>(if n = 0 then ValKTT else ValKFF))"
+
+
+type_synonym 'o EnvK = "'o ValKM Env"
+
+primrec
+  evalK :: "expr \<Rightarrow> 'o EnvK \<rightarrow> 'o ValKM"
+where
+  "evalK (Var v) = (\<Lambda> \<rho>. \<rho>\<cdot>v)"
+| "evalK (App f x) = (\<Lambda> \<rho>. appKM\<cdot>(evalK f\<cdot>\<rho>)\<cdot>(evalK x\<cdot>\<rho>))"
+| "evalK (AbsN v e) = (\<Lambda> \<rho>. unitK\<cdot>(ValKF\<cdot>(\<Lambda> x. evalK e\<cdot>(env_ext\<cdot>v\<cdot>x\<cdot>\<rho>))))"
+| "evalK (AbsV v e) = (\<Lambda> \<rho>. unitK\<cdot>(ValKF\<cdot>(\<Lambda> x c. x\<cdot>(\<Lambda> x'. evalK e\<cdot>(env_ext\<cdot>v\<cdot>(unitK\<cdot>x')\<cdot>\<rho>)\<cdot>c))))"
+| "evalK (Diverge) = (\<Lambda> \<rho>. \<bottom>)"
+| "evalK (Fix v e) = (\<Lambda> \<rho>. \<mu> x. evalK e\<cdot>(env_ext\<cdot>v\<cdot>x\<cdot>\<rho>))"
+| "evalK (tt) = (\<Lambda> \<rho>. unitK\<cdot>ValKTT)"
+| "evalK (ff) = (\<Lambda> \<rho>. unitK\<cdot>ValKFF)"
+| "evalK (Cond i t e) = (\<Lambda> \<rho>. condK\<cdot>(evalK i\<cdot>\<rho>)\<cdot>(evalK t\<cdot>\<rho>)\<cdot>(evalK e\<cdot>\<rho>))"
+| "evalK (Num n) = (\<Lambda> \<rho>. unitK\<cdot>(ValKN\<cdot>n))"
+| "evalK (Succ e) = (\<Lambda> \<rho>. succK\<cdot>(evalK e\<cdot>\<rho>))"
+| "evalK (Pred e) = (\<Lambda> \<rho>. predK\<cdot>(evalK e\<cdot>\<rho>))"
+| "evalK (IsZero e) = (\<Lambda> \<rho>. isZeroK\<cdot>(evalK e\<cdot>\<rho>))"
+
+
+locale at_least_two_elements =
+  fixes some_non_bottom_element :: "'o::domain"
+  assumes some_non_bottom_element: "some_non_bottom_element \<noteq> \<bottom>"
+
+
+\<close>
+text\<open>\<close>
+subsection\<open>Logical relation\<close>
+text\<open>
+
+defining a pair of relations over values and functions. Both are
+bottom-reflecting, in contrast to the situation for computational
+differs by assuming that values are always defined, and relates values
+and monadic computations.
+
+\<close>
+text\<open>
+
+Properties of the logical relation.
+
+\<close>
+text\<open>
+
+It takes some effort to set up the minimal invariant relating the two
+pairs of domains. One might hope this would be easier using deflations
+(which might compose) rather than ``copy'' functions (which certainly
+don't).
+
+We elide these as they are tedious.
+
+\<close>
+text\<open>
+
+Continuations: we need to ensure the observation type is always the
+same.
+
+\<close>
+text\<open>
+
+We need to respect the purported domain structure, and positive and
+negative occurrences.
+
+\<close>
+subsection\<open>A retraction between the two definitions\<close>
+text\<open>
+
+We can use the relation to establish a strong connection between the
+direct and continuation semantics.  All results depend on the
+observation type being rich enough.
+
+\<close>
+text\<open>
+
+
+\<close>
+text\<open>\<close>
+text\<open>
+
+The retraction between the two value and monadic value spaces.
+
+Note we need to work with an observation type that can represent the
+``explicit values'', i.e. @{typ "'o ValK"}.
+
+\<close>
+text\<open>
+
+
+\<close>
+text\<open>
+
+
+\<close>
+text\<open>
+
+will not be a retraction between direct and continuation semantics for
+languages with richer notions of effects.
+
+It should be routine to extend the above approach to the higher-order
+
+I wonder if it is possible to construct continuation semantics from
+direct semantics as proposed by
+retraction between two value domains to a retraction at higher types
+by synthesising a suitable logical relation.
+
+\<close>

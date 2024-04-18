@@ -1,0 +1,135 @@
+theory Projective_Space
+  imports Differentiable_Manifold "HOL-Library.Quotient_Set"
+begin
+
+
+
+lemma open_ne_zero: "open {x::'a::t1_space. x \<noteq> c}"
+proof -
+  have "{x::'a. x \<noteq> c} = UNIV - {c}" by auto
+  also have "open \<dots>" by (rule open_delete; rule open_UNIV)
+  finally show ?thesis .
+qed
+
+typedef (overloaded) 'a::euclidean_space nonzero = "UNIV - {0::'a::euclidean_space}" by auto
+
+setup_lifting type_definition_nonzero
+
+instantiation nonzero :: (euclidean_space) topological_space
+begin
+
+lift_definition open_nonzero::"'a nonzero set \<Rightarrow> bool" is "open::'a set \<Rightarrow> bool" .
+
+instance
+  apply standard
+  subgoal by transfer (auto simp: open_ne_zero)
+  subgoal by transfer auto
+  subgoal by transfer auto
+  done
+
+end
+
+lemma open_nonzero_openin_transfer:
+  "(rel_set (pcr_nonzero A) ===> (=)) (openin (top_of_set (Collect (Domainp (pcr_nonzero A))))) open"
+  if "is_equality A"
+  unfolding is_equality_def[THEN iffD1, OF that]
+proof
+  fix X::"'a set" and Y::"'a nonzero set"
+  assume t[transfer_rule]: "rel_set (pcr_nonzero (=)) X Y"
+  show "openin (top_of_set (Collect (Domainp (pcr_nonzero (=))))) X = open Y"
+    apply (auto simp: openin_subtopology)
+    subgoal by transfer (auto simp: nonzero.domain_eq open_ne_zero)
+    subgoal
+      apply transfer
+      apply (rule exI[where x=X])
+      using t
+      by (auto simp: rel_set_def)
+    done
+qed
+
+instantiation nonzero :: (euclidean_space) scaleR
+begin
+lift_definition scaleR_nonzero::"real \<Rightarrow> 'a nonzero \<Rightarrow> 'a nonzero" is "\<lambda>c x. if c = 0 then One else c *\<^sub>R x"
+  by auto
+instance ..
+
+end
+
+instantiation nonzero :: (euclidean_space) plus
+begin
+lift_definition plus_nonzero::"'a nonzero \<Rightarrow> 'a nonzero \<Rightarrow> 'a nonzero" is "\<lambda>x y. if x + y = 0 then One else x + y"
+  by auto
+instance ..
+end
+
+instantiation nonzero :: (euclidean_space) minus
+begin
+lift_definition minus_nonzero::"'a nonzero \<Rightarrow> 'a nonzero \<Rightarrow> 'a nonzero" is "\<lambda>x y. if x = y then One else x - y"
+  by auto
+instance ..
+end
+
+instantiation nonzero :: (euclidean_space) dist
+begin
+lift_definition dist_nonzero::"'a nonzero \<Rightarrow> 'a nonzero \<Rightarrow> real" is dist .
+instance ..
+end
+
+instantiation nonzero :: (euclidean_space) norm
+begin
+lift_definition norm_nonzero::"'a nonzero \<Rightarrow> real" is norm .
+instance ..
+end
+
+instance nonzero :: (euclidean_space) t2_space
+  apply standard
+  apply transfer
+  subgoal for x y
+    using hausdorff[of x y]
+    apply clarsimp
+    subgoal for U V
+      apply (rule exI[where x="U - {0}"])
+      apply clarsimp
+      apply (rule conjI) defer
+       apply (rule exI[where x="V - {0}"])
+      by auto
+    done
+  done
+
+lemma scaleR_one_nonzero[simp]: "1 *\<^sub>R x = (x::_ nonzero)"
+  by transfer auto
+
+lemma scaleR_scaleR_nonzero[simp]: "b \<noteq> 0 \<Longrightarrow> scaleR a (scaleR b x) = scaleR (a * b) (x::_ nonzero)"
+  by transfer auto
+
+instance nonzero :: (euclidean_space) second_countable_topology
+proof standard
+  from ex_countable_basis[where 'a='a] obtain A::"'a set set" where "countable A" "topological_basis A"
+    by auto
+  define B where "B = (\<lambda>X. Abs_nonzero ` (X - {0})) ` A"
+  have [transfer_rule]: "rel_set (rel_set (pcr_nonzero (=))) ((\<lambda>X. X - {0})`A) B"
+    by (clarsimp simp: B_def rel_set_def pcr_nonzero_def OO_def cr_nonzero_def)
+      (metis Abs_nonzero_inverse Diff_iff UNIV_I singleton_iff)
+  have "topological_basis B"
+    unfolding topological_basis_def
+    apply transfer
+    apply safe
+     apply force
+    subgoal for X
+      apply (drule spec[where x=X])
+      apply clarsimp
+      subgoal for B'
+        apply (rule exI[where x=B'])
+        by auto
+      done
+    done
+  then show "\<exists>B::'a nonzero set set. countable B \<and> open = generate_topology B"
+    apply (intro exI[where x=B])
+qed
+
+
+
+inductive proj_rel :: "'a::euclidean_space nonzero \<Rightarrow> 'a nonzero \<Rightarrow> bool" for x where
+  "c \<noteq> 0 \<Longrightarrow> proj_rel x (c *\<^sub>R x)"
+
+lemma proj_rel_parametric: "(pcr_nonzero A ===> pcr_nonzero A ===> (=)) proj_rel proj_rel"

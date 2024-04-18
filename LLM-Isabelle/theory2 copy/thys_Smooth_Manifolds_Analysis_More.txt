@@ -1,0 +1,303 @@
+theory Analysis_More
+  imports "HOL-Analysis.Equivalence_Lebesgue_Henstock_Integration"
+    "HOL-Library.Function_Algebras"
+    "HOL-Types_To_Sets.Linear_Algebra_On"
+begin
+
+
+lemma openin_open_Int'[intro]:
+  "open S \<Longrightarrow> openin (top_of_set U) (S \<inter> U)"
+  by (auto simp: openin_open)
+
+
+
+context includes lifting_syntax begin
+
+lemma Sigma_transfer[transfer_rule]:
+  "(rel_set A ===> (A ===> rel_set B) ===> rel_set (rel_prod A B)) Sigma Sigma"
+  unfolding Sigma_def
+  by transfer_prover
+
+lemma filterlim_transfer[transfer_rule]:
+  "((A ===> B) ===> rel_filter B ===> rel_filter A ===> (=)) filterlim filterlim"
+  if [transfer_rule]: "bi_unique B"
+  unfolding filterlim_iff
+  by transfer_prover
+
+lemma nhds_transfer[transfer_rule]:
+  "(A ===> rel_filter A) nhds nhds"
+  if [transfer_rule]: "bi_unique A" "bi_total A" "(rel_set A ===> (=)) open open"
+  unfolding nhds_def
+  by transfer_prover
+
+lemma at_within_transfer[transfer_rule]:
+  "(A ===> rel_set A ===> rel_filter A) at_within at_within"
+  if [transfer_rule]: "bi_unique A" "bi_total A" "(rel_set A ===> (=)) open open"
+  unfolding at_within_def
+  by transfer_prover
+
+lemma continuous_on_transfer[transfer_rule]:
+  "(rel_set A ===> (A ===> B) ===> (=)) continuous_on continuous_on"
+  if [transfer_rule]: "bi_unique A" "bi_total A" "(rel_set A ===> (=)) open open"
+    "bi_unique B" "bi_total B" "(rel_set B ===> (=)) open open"
+  unfolding continuous_on_def
+  by transfer_prover
+
+lemma continuous_on_transfer_right_total[transfer_rule]:
+  "(rel_set A ===> (A ===> B) ===> (=)) (\<lambda>X::'a::t2_space set. continuous_on (X \<inter> Collect AP)) (\<lambda>Y::'b::t2_space set. continuous_on Y)"
+  if DomainA: "Domainp A = AP"
+    and [folded DomainA, transfer_rule]: "bi_unique A" "right_total A" "(rel_set A ===> (=)) (openin (top_of_set (Collect AP))) open"
+    "bi_unique B" "bi_total B" "(rel_set B ===> (=)) open open"
+  unfolding DomainA[symmetric]
+proof (intro rel_funI)
+  fix X Y f g
+  assume H[transfer_rule]: "rel_set A X Y" "(A ===> B) f g"
+  from H(1) have XA: "x \<in> X \<Longrightarrow> Domainp A x" for x
+    by (auto simp: rel_set_def)
+  then have *: "X \<inter> Collect (Domainp A) = X" by auto
+  have "openin (top_of_set (Collect (Domainp A))) (Collect (Domainp A))" by auto
+  show " continuous_on (X \<inter> Collect (Domainp A)) f = continuous_on Y g"
+    unfolding continuous_on_eq_continuous_within continuous_within_topological *
+    apply transfer
+    apply safe
+    subgoal for x B
+      apply (drule bspec, assumption, drule spec, drule mp, assumption, drule mp, assumption)
+      apply clarsimp
+      subgoal for AA
+        apply (rule exI[where x="AA \<inter> Collect (Domainp A)"])
+        by (auto intro: XA)
+      done
+    subgoal using XA by (force simp: openin_subtopology)
+    done
+qed
+
+lemma continuous_on_transfer_right_total2[transfer_rule]:
+  "(rel_set A ===> (A ===> B) ===> (=)) (\<lambda>X::'a::t2_space set. continuous_on X) (\<lambda>Y::'b::t2_space set. continuous_on Y)"
+  if DomainB: "Domainp B = BP"
+  and [folded DomainB, transfer_rule]: "bi_unique A" "bi_total A" "(rel_set A ===> (=)) open open"
+    "bi_unique B" "right_total B" "(rel_set B ===> (=)) ((openin (top_of_set (Collect BP)))) open"
+  unfolding DomainB[symmetric]
+proof (intro rel_funI)
+  fix X Y f g
+  assume H[transfer_rule]: "rel_set A X Y" "(A ===> B) f g"
+  show "continuous_on X f = continuous_on Y g"
+    unfolding continuous_on_eq_continuous_within continuous_within_topological
+    apply transfer
+    apply safe
+    subgoal for x C
+      apply (clarsimp simp: openin_subtopology)
+      apply (drule bspec, assumption, drule spec, drule mp, assumption, drule mp, assumption)
+      apply clarsimp
+      by (meson Domainp_applyI H(1) H(2) rel_setD1)
+    subgoal for x C
+    proof -
+      let ?sub = "top_of_set (Collect (Domainp B))"
+      assume cont: "\<forall>x\<in>X. \<forall>Ba\<in>{A. Ball A (Domainp B)}.
+          openin (top_of_set (Collect (Domainp B))) Ba \<longrightarrow> f x \<in> Ba \<longrightarrow> (\<exists>Aa.  open Aa \<and> x \<in> Aa \<and> (\<forall>y\<in>X. y \<in> Aa \<longrightarrow> f y \<in> Ba))"
+        and x: "x \<in> X" "open C" "f x \<in> C"
+      let ?B = "C \<inter> Collect (Domainp B)"
+      have "?B \<in> {A. Ball A (Domainp B)}" by auto
+      have "openin ?sub (Collect (Domainp B))" by auto
+      moreover have "f x \<in> ?B" using x
+        apply transfer apply auto
+        by (meson Domainp_applyI H(1) H(2) rel_setD1)
+      ultimately obtain D where "open D \<and> x \<in> D \<and> (\<forall>y\<in>X. y \<in> D \<longrightarrow> f y \<in> ?B)"
+        using cont x
+        by blast
+      then show "\<exists>A. open A \<and> x \<in> A \<and> (\<forall>y\<in>X. y \<in> A \<longrightarrow> f y \<in> C)" by auto
+    qed
+    done
+qed
+
+
+lemma generate_topology_transfer[transfer_rule]:
+  includes lifting_syntax
+  assumes [transfer_rule]: "right_total A" "bi_unique A"
+  shows "(rel_set (rel_set A) ===> rel_set A ===> (=)) (generate_topology o (insert (Collect (Domainp A)))) generate_topology"
+proof (intro rel_funI)
+  fix B C X Y assume t[transfer_rule]: "rel_set (rel_set A) B C" "rel_set A X Y"
+  then have "X \<subseteq> Collect (Domainp A)" by (auto simp: rel_set_def)
+  with t have rI: "rel_set A (X \<inter> Collect (Domainp A)) Y"
+    by (auto simp: inf_absorb1)
+  have eq_UNIV_I: "Z = UNIV" if [transfer_rule]: "rel_set A {a. Domainp A a} Z" for Z
+    using that assms
+    apply (auto simp: right_total_def rel_set_def)
+    using bi_uniqueDr by fastforce
+  show "(generate_topology \<circ> insert (Collect (Domainp A))) B X = generate_topology C Y"
+    unfolding o_def
+  proof (rule iffI)
+    fix x
+    assume "generate_topology (insert (Collect (Domainp A)) B) X"
+    then show "generate_topology C Y" unfolding o_def
+      using rI
+    proof (induction X arbitrary: Y)
+      case [transfer_rule]: UNIV
+      with eq_UNIV_I[of Y] show ?case
+        by (simp add: generate_topology.UNIV)
+    next
+      case (Int a b)
+      note [transfer_rule] = Int(5)
+      obtain a' where a'[transfer_rule]: "rel_set A (a \<inter> Collect (Domainp A)) a'"
+        by (metis Domainp_iff Domainp_set Int_Collect)
+      obtain b' where b'[transfer_rule]: "rel_set A (b \<inter> Collect (Domainp A)) b'"
+        by (metis Domainp_iff Domainp_set Int_Collect)
+      from Int.IH(1)[OF a'] Int.IH(2)[OF b']
+      have "generate_topology C a'" "generate_topology C b'" by auto
+      from generate_topology.Int[OF this] have "generate_topology C (a' \<inter> b')" .
+      also have "a' \<inter> b' = Y"
+        by transfer auto
+      finally show ?case
+        by (simp add: generate_topology.Int)
+    next
+      case (UN K)
+      note [transfer_rule] = UN(3)
+      have "\<exists>K'. \<forall>k. rel_set A (k \<inter> Collect (Domainp A)) (K' k)"
+        by (rule choice) (metis Domainp_iff Domainp_set Int_Collect)
+      then obtain K' where K': "\<And>k. rel_set A (k \<inter> Collect (Domainp A)) (K' k)" by metis
+      from UN.IH[OF _ this] have "generate_topology C k'" if "k' \<in> K'`K" for k' using that by auto
+      from generate_topology.UN[OF this] have "generate_topology C (\<Union>(K' ` K))" .
+      also
+      from K' have [transfer_rule]: "(rel_set (=) ===> rel_set A) (\<lambda>x. x \<inter> Collect (Domainp A)) K'"
+        by (fastforce simp: rel_fun_def rel_set_def)
+      have "\<Union>(K' ` K) = Y"
+        by transfer auto
+      finally show ?case
+        by (simp add: generate_topology.UN)
+    next
+      case (Basis s)
+      from this(1) show ?case
+      proof
+        assume "s = Collect (Domainp A)" 
+        with eq_UNIV_I[of Y] Basis(2)
+        show ?case
+          by (simp add: generate_topology.UNIV)
+      next
+        assume "s \<in> B"
+        with Basis(2) obtain t where [transfer_rule]: "rel_set A (s \<inter> Collect (Domainp A)) t" by auto
+        from Basis(1) t(1) have s: "s \<inter> Collect (Domainp A) = s"
+          by (force simp: rel_set_def)
+          by transfer auto
+        also note [transfer_rule] = Basis(2)
+        have "t = Y"
+          by transfer auto
+        finally show ?case
+          by (rule generate_topology.Basis)
+      qed
+    qed
+  next
+    assume "generate_topology C Y"
+    then show "generate_topology (insert (Collect (Domainp A)) B) X"
+    proof (induction arbitrary: X)
+      case [transfer_rule]: UNIV
+      have "UNIV = (UNIV::'b set)" by auto
+      then have "X = {a. Domainp A a}" by transfer
+      then show ?case by (intro generate_topology.Basis) auto
+    next
+      case (Int a b)
+      obtain a' b' where [transfer_rule]: "rel_set A a' a" "rel_set A b' b"
+        by (meson assms(1) right_total_def right_total_rel_set)
+      from generate_topology.Int[OF Int.IH(1)[OF this(1)] Int.IH(2)[OF this(2)]]
+      have "generate_topology (insert {a. Domainp A a} B) (a' \<inter> b')" by simp
+      also
+      define I where "I = a \<inter> b"
+      from I_def
+      have "a' \<inter> b' = X" by transfer simp
+      finally show ?case .
+    next
+      case (UN K)
+      have "\<exists>K'. \<forall>k. rel_set A (K' k) k"
+        by (rule choice) (meson assms(1) right_total_def right_total_rel_set)
+      then obtain K' where K': "\<And>k. rel_set A (K' k) k" by metis
+      from UN.IH[OF _ this] have "generate_topology (insert {a. Domainp A a} B) k"
+        if "k \<in> K'`K" for k using that by auto
+      from generate_topology.UN[OF this]
+      have "generate_topology (insert {a. Domainp A a} B) (\<Union>(K'`K))" by auto
+      also
+      from K' have [transfer_rule]: "(rel_set (=) ===> rel_set A) K' id"
+        by (fastforce simp: rel_fun_def rel_set_def)
+      define U where "U =  (\<Union>(id ` K))"
+      from U_def have "\<Union>(K' ` K) = X" by transfer simp
+      finally show ?case .
+    next
+      case (Basis s)
+      then show ?case by (intro generate_topology.Basis) auto
+    qed
+  qed
+qed
+
+end
+
+
+
+lemmas [simp del] = mem_ball
+
+lemma in_closureI[intro, simp]: "x \<in> X \<Longrightarrow> x \<in> closure X"
+  using closure_subset by auto
+
+lemmas open_continuous_vimage = continuous_on_open_vimage[THEN iffD1, rule_format]
+lemma open_continuous_vimage': "open s \<Longrightarrow> continuous_on s f \<Longrightarrow> open B \<Longrightarrow> open (s \<inter> f -` B)"
+  using open_continuous_vimage[of s f B] by (auto simp: Int_commute)
+
+lemma support_on_mono: "support_on carrier f \<subseteq> support_on carrier g"
+  if "\<And>x. x \<in> carrier \<Longrightarrow> f x \<noteq> 0 \<Longrightarrow> g x \<noteq> 0"
+  using that
+  by (auto simp: support_on_def)
+
+
+lemma image_prod: "(\<lambda>(x, y). (f x, g y)) ` (A \<times> B) = f ` A \<times> g ` B" by auto
+
+
+
+definition "csupport_on X S = closure (support_on X S)"
+
+lemma closed_csupport_on[intro, simp]: "closed (csupport_on carrier \<phi>)"
+  by (auto simp: csupport_on_def)
+
+lemma not_in_csupportD: "x \<notin> csupport_on carrier \<phi> \<Longrightarrow> x \<in> carrier \<Longrightarrow> \<phi> x = 0"
+  by (auto simp: csupport_on_def support_on_def)
+
+lemma csupport_on_mono: "csupport_on carrier f \<subseteq> csupport_on carrier g"
+  if "\<And>x. x \<in> carrier \<Longrightarrow> f x \<noteq> 0 \<Longrightarrow> g x \<noteq> 0"
+  unfolding csupport_on_def
+  apply (rule closure_mono)
+  using that
+  by (rule support_on_mono)
+
+
+lemma homeomorphism_empty[simp]:
+  "homeomorphism {} t f f' \<longleftrightarrow> t = {}"
+  "homeomorphism s {} f f' \<longleftrightarrow> s = {}"
+  by (auto simp: homeomorphism_def)
+
+lemma homeomorphism_add:
+  "homeomorphism UNIV UNIV (\<lambda>x. x + c) (\<lambda>x. x - c)"
+  for c::"_::real_normed_vector"
+  unfolding homeomorphism_def
+  by (auto simp: algebra_simps continuous_intros intro!: image_eqI[where x="x - c" for x])
+
+qed
+
+lemma continuous_on_final_topologyI2:
+  "continuous_map (Y i) (final_topology X Y f) (f i)"
+  if "\<And>i. f i \<in> topspace (Y i) \<rightarrow> X"
+  using that
+  by (auto simp: openin_final_topology continuous_map_alt topspace_final_topology)
+
+lemma continuous_on_final_topologyI1:
+  "continuous_map (final_topology X Y f) Z g"
+  if hyp: "\<And>i. continuous_map (Y i) Z (g o f i)"
+    and that: "\<And>i. f i \<in> topspace (Y i) \<rightarrow> X" "g \<in> X \<rightarrow> topspace Z"
+  unfolding continuous_map_alt
+proof safe
+  fix V assume V: "openin Z V"
+  have oV: "openin (Y i) (f i -` g -` V \<inter> topspace (Y i))"
+    for i
+    using hyp[rule_format, of i] V
+    by (auto simp: continuous_map_alt vimage_comp dest!: spec[where x=V])
+  have *: "f i -` g -` V \<inter> f i -` X \<inter> topspace (Y i) =
+      f i -` g -` V \<inter> topspace (Y i)"
+    (is "_ = ?rhs i")
+    for i using that
+    by auto
+  show "openin (final_topology X Y f) (g -` V \<inter> topspace (final_topology X Y f))"
+    by (auto simp: openin_final_topology oV topspace_final_topology that *)

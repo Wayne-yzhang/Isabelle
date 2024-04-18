@@ -1,0 +1,374 @@
+theory MPoly_Type_Class_FMap
+  imports
+    MPoly_Type_Class_Ordered
+    Poly_Mapping_Finite_Map
+begin
+
+
+  theory is only included for being able to compare the two representations in terms of efficiency.\<close>
+subsection \<open>Power Products\<close>
+text\<open>Computing @{term lex} as below is certainly not the most efficient way, but it works.\<close>
+subsubsection \<open>Computations\<close>
+subsection \<open>Implementation of Multivariate Polynomials as Association Lists\<close>
+subsubsection \<open>Unordered Power-Products\<close>
+    using \<open>finite (dom f)\<close> by simp
+subsubsection \<open>restore constructor view\<close>
+text \<open>A simproc for postprocessing with \<open>mpoly_simps\<close> and not polluting \<open>[code_post]\<close>:\<close>
+ML \<open>val mpoly_simproc = Simplifier.make_simproc @{context} "multivariate polynomials"
+      {lhss = [@{term "Pm_fmap mpp::(_ \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 _"}],
+       proc = (K (fn ctxt => fn ct =>
+          SOME (Simplifier.rewrite (put_simpset HOL_basic_ss ctxt addsimps
+
+
+
+
+
+lemma foldl_assoc:
+  assumes "\<And>x y z. f (f x y) z = f x (f y z)"
+  shows "foldl f (f a b) xs = f a (foldl f b xs)"
+proof (induct xs arbitrary: a b)
+  fix a b
+  show "foldl f (f a b) [] = f a (foldl f b [])" by simp
+next
+  fix a b x xs
+  assume "\<And>a b. foldl f (f a b) xs = f a (foldl f b xs)"
+  from assms[of a b x] this[of a "f b x"]
+    show "foldl f (f a b) (x # xs) = f a (foldl f b (x # xs))" unfolding foldl_Cons by simp
+qed
+
+context ordered_term
+begin
+
+definition list_max::"'t list \<Rightarrow> 't" where
+  "list_max xs \<equiv> foldl ord_term_lin.max min_term xs"
+
+lemma list_max_Cons: "list_max (x # xs) = ord_term_lin.max x (list_max xs)"
+  unfolding list_max_def foldl_Cons
+proof -
+  have "foldl ord_term_lin.max (ord_term_lin.max x min_term) xs =
+          ord_term_lin.max x (foldl ord_term_lin.max min_term xs)"
+    by (rule foldl_assoc, rule ord_term_lin.max.assoc)
+  from this ord_term_lin.max.commute[of min_term x]
+    show "foldl ord_term_lin.max (ord_term_lin.max min_term x) xs =
+            ord_term_lin.max x (foldl ord_term_lin.max min_term xs)" by simp
+qed
+
+lemma list_max_empty: "list_max [] = min_term"
+  unfolding list_max_def by simp
+
+lemma list_max_in_list:
+  assumes "xs \<noteq> []"
+  shows "list_max xs \<in> set xs"
+  using assms
+proof (induct xs, simp)
+  fix x xs
+  assume IH: "xs \<noteq> [] \<Longrightarrow> list_max xs \<in> set xs"
+  show "list_max (x # xs) \<in> set (x # xs)"
+  proof (cases "xs = []")
+    case True
+    hence "list_max (x # xs) = ord_term_lin.max min_term x" unfolding list_max_def by simp
+    also have "\<dots> = x" unfolding ord_term_lin.max_def by (simp add: min_term_min)
+    finally show ?thesis by simp
+  next
+    assume "xs \<noteq> []"
+    show ?thesis
+    proof (cases "x \<preceq>\<^sub>t list_max xs")
+      case True
+      hence "list_max (x # xs) = list_max xs"
+        unfolding list_max_Cons ord_term_lin.max_def by simp
+    next
+      case False
+      hence "list_max (x # xs) = x" unfolding list_max_Cons ord_term_lin.max_def by simp
+      thus ?thesis by simp
+    qed
+  qed
+qed
+
+lemma list_max_maximum:
+  assumes "a \<in> set xs"
+  shows "a \<preceq>\<^sub>t (list_max xs)"
+  using assms
+proof (induct xs)
+  assume "a \<in> set []"
+  thus "a \<preceq>\<^sub>t list_max []" by simp
+next
+  fix x xs
+  assume IH: "a \<in> set xs \<Longrightarrow> a \<preceq>\<^sub>t list_max xs" and a_in: "a \<in> set (x # xs)"
+  from a_in have "a = x \<or> a \<in> set xs" by simp
+  thus "a \<preceq>\<^sub>t list_max (x # xs)" unfolding list_max_Cons
+  proof
+    assume "a = x"
+    thus "a \<preceq>\<^sub>t ord_term_lin.max x (list_max xs)" by simp
+  next
+    assume "a \<in> set xs"
+    from IH[OF this] show "a \<preceq>\<^sub>t ord_term_lin.max x (list_max xs)"
+      by (simp add: ord_term_lin.le_max_iff_disj)
+  qed
+qed
+
+lemma list_max_nonempty:
+  assumes "xs \<noteq> []"
+  shows "list_max xs = ord_term_lin.Max (set xs)"
+proof -
+  have fin: "finite (set xs)" by simp
+  have "ord_term_lin.Max (set xs) = list_max xs"
+  proof (rule ord_term_lin.Max_eqI[OF fin, of "list_max xs"])
+    fix y
+    assume "y \<in> set xs"
+    from list_max_maximum[OF this] show "y \<preceq>\<^sub>t list_max xs" .
+  next
+    from list_max_in_list[OF assms] show "list_max xs \<in> set xs" .
+  qed
+  thus ?thesis by simp
+qed
+
+lemma in_set_clearjunk_iff_map_of_eq_Some:
+  "(a, b) \<in> set (AList.clearjunk xs) \<longleftrightarrow> map_of xs a = Some b"
+  by (metis Some_eq_map_of_iff distinct_clearjunk map_of_clearjunk)
+
+lemma Pm_fmap_of_list_eq_zero_iff:
+  "Pm_fmap (fmap_of_list xs) = 0 \<longleftrightarrow> [(k, v)\<leftarrow>AList.clearjunk xs . v \<noteq> 0] = []"
+  by (auto simp: poly_mapping_eq_iff fmlookup_default_def fun_eq_iff
+    in_set_clearjunk_iff_map_of_eq_Some filter_empty_conv fmlookup_of_list split: option.splits)
+
+lemma fmdom'_clearjunk0: "fmdom' (clearjunk0 xs) = fmdom' xs - {x. fmlookup xs x = Some 0}"
+  by (metis (no_types, lifting) clearjunk0_def fmdom'_drop_set fmfilter_alt_defs(2) fmfilter_cong' mem_Collect_eq)
+
+lemma compute_lt_poly_mapping[code]:
+  "lt (Pm_fmap (fmap_of_list xs)) = list_max (map fst [(k, v) \<leftarrow> AList.clearjunk xs. v \<noteq> 0])"
+proof -
+  have "keys (Pm_fmap (fmap_of_list xs)) = fst ` {x \<in> set (AList.clearjunk xs). case x of (k, v) \<Rightarrow> v \<noteq> 0}"
+    by (auto simp: compute_keys_pp fmdom'_clearjunk0 fmap_of_list.rep_eq
+        in_set_clearjunk_iff_map_of_eq_Some fmdom'I image_iff fmlookup_dom'_iff)
+  then show ?thesis
+    unfolding lt_def
+    by (auto simp: Pm_fmap_of_list_eq_zero_iff list_max_empty list_max_nonempty)
+qed
+
+lemma compute_higher_poly_mapping [code]:
+  "higher (Pm_fmap xs) t = Pm_fmap (fmfilter (\<lambda>k. t \<prec>\<^sub>t k) xs)"
+  unfolding higher_def compute_except_poly_mapping
+  by (metis mem_Collect_eq ord_term_lin.leD ord_term_lin.leI)
+
+lemma compute_lower_poly_mapping [code]:
+  "lower (Pm_fmap xs) t = Pm_fmap (fmfilter (\<lambda>k. k \<prec>\<^sub>t t) xs)"
+  unfolding lower_def compute_except_poly_mapping
+  by (metis mem_Collect_eq ord_term_lin.leD ord_term_lin.leI)
+
+
+lifting_update poly_mapping.lifting
+lifting_forget poly_mapping.lifting
+
+
+
+type_synonym 'a mpoly_tc = "(nat \<Rightarrow>\<^sub>0 nat)\<Rightarrow>\<^sub>0'a"
+
+definition "shift_map_keys_punit = term_powerprod.shift_map_keys to_pair_unit fst"
+
+lemma compute_shift_map_keys_punit [code]:
+  "shift_map_keys_punit t f (fmap_of_list xs) = fmap_of_list (map (\<lambda>(k, v). (t + k, f v)) xs)"
+  by (simp add: punit.compute_shift_map_keys shift_map_keys_punit_def)
+
+global_interpretation punit: term_powerprod to_pair_unit fst
+  rewrites "punit.adds_term = (adds)"
+  and "punit.pp_of_term = (\<lambda>x. x)"
+  and "punit.component_of_term = (\<lambda>_. ())"
+  defines monom_mult_punit = punit.monom_mult
+  and mult_scalar_punit = punit.mult_scalar
+  apply (fact MPoly_Type_Class.punit.term_powerprod_axioms)
+  apply (fact MPoly_Type_Class.punit_adds_term)
+  apply (fact MPoly_Type_Class.punit_pp_of_term)
+  apply (fact MPoly_Type_Class.punit_component_of_term)
+  done
+
+lemma compute_monom_mult_punit [code]:
+  by (simp add: monom_mult_punit_def punit.compute_monom_mult_poly_mapping shift_map_keys_punit_def)
+
+lemma compute_mult_scalar_punit [code]:
+  "Pm_fmap (fmap_of_list xs) * q = (case xs of ((t, c) # ys) \<Rightarrow>
+    (monom_mult_punit c t q + except (Pm_fmap (fmap_of_list ys)) {t} * q) | _ \<Rightarrow>
+    Pm_fmap fmempty)"
+  by (simp only: punit_mult_scalar[symmetric] punit.compute_mult_scalar_poly_mapping monom_mult_punit_def)
+
+locale trivariate\<^sub>0_rat
+begin
+
+abbreviation X::"rat mpoly_tc" where "X \<equiv> Var\<^sub>0 (0::nat)"
+abbreviation Y::"rat mpoly_tc" where "Y \<equiv> Var\<^sub>0 (1::nat)"
+abbreviation Z::"rat mpoly_tc" where "Z \<equiv> Var\<^sub>0 (2::nat)"
+
+end
+
+locale trivariate
+begin
+
+abbreviation "X \<equiv> Var 0"
+abbreviation "Y \<equiv> Var 1"
+abbreviation "Z \<equiv> Var 2"
+
+end
+
+experiment begin interpretation trivariate\<^sub>0_rat .
+
+lemma
+  "keys (X\<^sup>2 * Z ^ 3 + 2 * Y ^ 3 * Z\<^sup>2) =
+    {monomial 2 0 + monomial 3 2, monomial 3 1 + monomial 2 2}"
+  by eval
+
+lemma
+  "keys (X\<^sup>2 * Z ^ 3 + 2 * Y ^ 3 * Z\<^sup>2) =
+    {monomial 2 0 + monomial 3 2, monomial 3 1 + monomial 2 2}"
+  by eval
+
+lemma
+  "- 1 * X\<^sup>2 * Z ^ 7 + - 2 * Y ^ 3 * Z\<^sup>2 = - X\<^sup>2 * Z ^ 7 + - 2 * Y ^ 3 * Z\<^sup>2"
+  by eval
+
+lemma
+  "X\<^sup>2 * Z ^ 7 + 2 * Y ^ 3 * Z\<^sup>2 + X\<^sup>2 * Z ^ 4 + - 2 * Y ^ 3 * Z\<^sup>2 = X\<^sup>2 * Z ^ 7 + X\<^sup>2 * Z ^ 4"
+  by eval
+
+lemma
+  "X\<^sup>2 * Z ^ 7 + 2 * Y ^ 3 * Z\<^sup>2 - X\<^sup>2 * Z ^ 4 + - 2 * Y ^ 3 * Z\<^sup>2 =
+    X\<^sup>2 * Z ^ 7 - X\<^sup>2 * Z ^ 4"
+  by eval
+
+lemma
+  "lookup (X\<^sup>2 * Z ^ 7 + 2 * Y ^ 3 * Z\<^sup>2 + 2) (sparse\<^sub>0 [(0, 2), (2, 7)]) = 1"
+  by eval
+
+lemma
+  "X\<^sup>2 * Z ^ 7 + 2 * Y ^ 3 * Z\<^sup>2 \<noteq>
+   X\<^sup>2 * Z ^ 4 + - 2 * Y ^ 3 * Z\<^sup>2"
+  by eval
+
+
+lemma
+  "0 * X^2 * Z^7 + 0 * Y^3*Z\<^sup>2 = 0"
+  by eval
+
+lemma
+  "monom_mult_punit 3 (sparse\<^sub>0 [(1, 2::nat)]) (X\<^sup>2 * Z + 2 * Y ^ 3 * Z\<^sup>2) =
+    3 * Y\<^sup>2 * Z * X\<^sup>2 + 6 * Y ^ 5 * Z\<^sup>2"
+  by eval
+
+lemma
+  "monomial (-4) (sparse\<^sub>0 [(0, 2::nat)]) = - 4 * X\<^sup>2"
+  by eval
+
+lemma "monomial (0::rat) (sparse\<^sub>0 [(0::nat, 2::nat)]) = 0"
+  by eval
+
+lemma
+  "(X\<^sup>2 * Z + 2 * Y ^ 3 * Z\<^sup>2) * (X\<^sup>2 * Z ^ 3 + - 2 * Y ^ 3 * Z\<^sup>2) =
+    X ^ 4 * Z ^ 4 + - 2 * X\<^sup>2 * Z ^ 3 * Y ^ 3 +
+ - 4 * Y ^ 6 * Z ^ 4 + 2 * Y ^ 3 * Z ^ 5 * X\<^sup>2"
+  by eval
+
+end
+
+
+type_synonym 'a vmpoly_tc = "((nat \<Rightarrow>\<^sub>0 nat) \<times> nat) \<Rightarrow>\<^sub>0 'a"
+
+definition "shift_map_keys_pprod = pprod.shift_map_keys"
+
+global_interpretation pprod: term_powerprod "\<lambda>x. x" "\<lambda>x. x"
+  rewrites "pprod.pp_of_term = fst"
+  and "pprod.component_of_term = snd"
+  defines splus_pprod = pprod.splus
+  and monom_mult_pprod = pprod.monom_mult
+  and mult_scalar_pprod = pprod.mult_scalar
+  and adds_term_pprod = pprod.adds_term
+  apply (fact MPoly_Type_Class.pprod.term_powerprod_axioms)
+  apply (fact MPoly_Type_Class.pprod_pp_of_term)
+  apply (fact MPoly_Type_Class.pprod_component_of_term)
+  done
+
+lemma compute_adds_term_pprod [code_unfold]:
+  "adds_term_pprod u v = (snd u = snd v \<and> adds_pp_add_linorder (fst u) (fst v))"
+  by (simp add: adds_term_pprod_def pprod.adds_term_def adds_pp_add_linorder_def)
+
+lemma compute_splus_pprod [code]: "splus_pprod t (s, i) = (t + s, i)"
+  by (simp add: splus_pprod_def pprod.splus_def)
+
+lemma compute_shift_map_keys_pprod [code]:
+  "shift_map_keys_pprod t f (fmap_of_list xs) = fmap_of_list (map (\<lambda>(k, v). (splus_pprod t k, f v)) xs)"
+  by (simp add: pprod.compute_shift_map_keys shift_map_keys_pprod_def splus_pprod_def)
+
+lemma compute_monom_mult_pprod [code]:
+  by (simp add: monom_mult_pprod_def pprod.compute_monom_mult_poly_mapping shift_map_keys_pprod_def)
+
+lemma compute_mult_scalar_pprod [code]:
+  "mult_scalar_pprod (Pm_fmap (fmap_of_list xs)) q = (case xs of ((t, c) # ys) \<Rightarrow>
+    (monom_mult_pprod c t q + mult_scalar_pprod (except (Pm_fmap (fmap_of_list ys)) {t}) q) | _ \<Rightarrow>
+    Pm_fmap fmempty)"
+  by (simp only: mult_scalar_pprod_def pprod.compute_mult_scalar_poly_mapping monom_mult_pprod_def)
+
+definition Vec\<^sub>0 :: "nat \<Rightarrow> (('a \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'b) \<Rightarrow> (('a \<Rightarrow>\<^sub>0 nat) \<times> nat) \<Rightarrow>\<^sub>0 'b::semiring_1" where
+  "Vec\<^sub>0 i p = mult_scalar_pprod p (Poly_Mapping.single (0, i) 1)"
+
+experiment begin interpretation trivariate\<^sub>0_rat .
+
+lemma
+  "keys (Vec\<^sub>0 0 (X\<^sup>2 * Z ^ 3) + Vec\<^sub>0 1 (2 * Y ^ 3 * Z\<^sup>2)) =
+    {(sparse\<^sub>0 [(0, 2), (2, 3)], 0), (sparse\<^sub>0 [(1, 3), (2, 2)], 1)}"
+  by eval
+
+lemma
+  "keys (Vec\<^sub>0 0 (X\<^sup>2 * Z ^ 3) + Vec\<^sub>0 2 (2 * Y ^ 3 * Z\<^sup>2)) =
+    {(sparse\<^sub>0 [(0, 2), (2, 3)], 0), (sparse\<^sub>0 [(1, 3), (2, 2)], 2)}"
+  by eval
+
+lemma
+  "Vec\<^sub>0 1 (X\<^sup>2 * Z ^ 7 + 2 * Y ^ 3 * Z\<^sup>2) + Vec\<^sub>0 3 (X\<^sup>2 * Z ^ 4) + Vec\<^sub>0 1 (- 2 * Y ^ 3 * Z\<^sup>2) =
+    Vec\<^sub>0 1 (X\<^sup>2 * Z ^ 7) + Vec\<^sub>0 3 (X\<^sup>2 * Z ^ 4)"
+  by eval
+
+lemma
+  "lookup (Vec\<^sub>0 0 (X\<^sup>2 * Z ^ 7) + Vec\<^sub>0 1 (2 * Y ^ 3 * Z\<^sup>2 + 2)) (sparse\<^sub>0 [(0, 2), (2, 7)], 0) = 1"
+  by eval
+
+lemma
+  "lookup (Vec\<^sub>0 0 (X\<^sup>2 * Z ^ 7) + Vec\<^sub>0 1 (2 * Y ^ 3 * Z\<^sup>2 + 2)) (sparse\<^sub>0 [(0, 2), (2, 7)], 1) = 0"
+  by eval
+
+lemma
+  "Vec\<^sub>0 0 (0 * X^2 * Z^7) + Vec\<^sub>0 1 (0 * Y^3*Z\<^sup>2) = 0"
+  by eval
+
+lemma
+  "monom_mult_pprod 3 (sparse\<^sub>0 [(1, 2::nat)]) (Vec\<^sub>0 0 (X\<^sup>2 * Z) + Vec\<^sub>0 1 (2 * Y ^ 3 * Z\<^sup>2)) =
+    Vec\<^sub>0 0 (3 * Y\<^sup>2 * Z * X\<^sup>2) + Vec\<^sub>0 1 (6 * Y ^ 5 * Z\<^sup>2)"
+  by eval
+
+end
+
+
+
+lemmas [code_post] =
+  plus_mpoly.abs_eq[symmetric]
+  times_mpoly.abs_eq[symmetric]
+  MPoly_numeral
+  MPoly_power
+  one_mpoly_def[symmetric]
+  Var.abs_eq[symmetric]
+  Const.abs_eq[symmetric]
+
+instantiation mpoly::("{equal, zero}")equal begin
+
+lift_definition equal_mpoly:: "'a mpoly \<Rightarrow> 'a mpoly \<Rightarrow> bool" is HOL.equal .
+
+instance proof standard qed (transfer, rule equal_eq)
+
+end
+
+experiment begin interpretation trivariate .
+
+lemmas [mpoly_simps] = plus_mpoly.abs_eq
+
+lemma "content_primitive (4 * X * Y^2 * Z^3 + 6 * X\<^sup>2 * Y^4 + 8 * X\<^sup>2 * Y^5) =
+    (2::int, 2 * X * Y\<^sup>2 * Z ^ 3 + 3 * X\<^sup>2 * Y ^ 4 + 4 * X\<^sup>2 * Y ^ 5)"
+  by eval
+
+end
+

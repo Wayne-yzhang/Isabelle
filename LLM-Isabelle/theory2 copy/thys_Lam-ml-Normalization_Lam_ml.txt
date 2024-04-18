@@ -1,0 +1,126 @@
+theory Lam_ml
+imports "HOL-Nominal.Nominal" "HOL-Library.LaTeXsugar"
+
+
+
+atom_decl name
+
+nominal_datatype trm = 
+    Var "name" 
+  | App "trm" "trm"
+  | Lam "\<guillemotleft>name\<guillemotright>trm"      ("\<Lambda> _ . _" [0,120] 120)
+  | To "trm" "\<guillemotleft>name\<guillemotright>trm" ("_ to _ in _" [141,0,140] 140) 
+  | Ret "trm" ("[_]")
+
+
+declare trm.inject[simp]
+lemmas name_swap_bij = pt_swap_bij''[OF pt_name_inst at_name_inst]
+lemmas ex_fresh = exists_fresh'[OF fin_supp]
+
+lemma alpha'' :
+  fixes x y :: name and t::trm
+  assumes a: "x \<sharp> t"
+  shows "[y].t = [x].([(y,x)] \<bullet> t)"
+proof -
+  from a have aux: "y \<sharp> [(y, x)] \<bullet> t"
+    by (subst fresh_bij[THEN sym, of _ _ "[(x,y)]"]) 
+        (auto simp add: perm_swap calc_atm)
+  thus ?thesis  
+    by(auto simp add: alpha perm_swap name_swap_bij fresh_bij)
+qed
+
+
+nominal_datatype ty =
+    TBase
+  | TFun "ty" "ty" (infix "\<rightarrow>" 200)
+  | T "ty" 
+
+
+inductive 
+  valid :: "(name\<times>ty) list \<Rightarrow> bool"
+where
+  v1[intro]: "valid []"
+| v2[intro]: "\<lbrakk>valid \<Gamma>;x\<sharp>\<Gamma>\<rbrakk>\<Longrightarrow> valid ((x,\<sigma>)#\<Gamma>)"
+equivariance valid 
+
+lemma fresh_ty: 
+  fixes x :: name and \<tau>::ty
+  shows "x \<sharp> \<tau>"
+by (induct \<tau> rule: ty.induct) (auto)
+
+lemma fresh_context: 
+  fixes  \<Gamma> :: "(name\<times>ty)list"
+  assumes a: "x \<sharp> \<Gamma>"
+  shows "\<not>(\<exists> \<tau> . (x,\<tau>)\<in>set \<Gamma>)"
+using a
+by (induct \<Gamma>) (auto simp add: fresh_prod fresh_list_cons fresh_atm)
+
+inductive 
+  typing :: "(name\<times>ty) list\<Rightarrow>trm\<Rightarrow>ty\<Rightarrow>bool" ("_ \<turnstile> _ : _" [60,60,60] 60)
+where
+  t1[intro]: "\<lbrakk>valid \<Gamma>; (x,\<tau>)\<in>set \<Gamma>\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> Var x : \<tau>"
+| t2[intro]: "\<lbrakk>\<Gamma> \<turnstile> s : \<tau>\<rightarrow>\<sigma>; \<Gamma> \<turnstile> t : \<tau>\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> App s t : \<sigma>"
+| t3[intro]: "\<lbrakk>x \<sharp> \<Gamma>; ((x,\<tau>)#\<Gamma>) \<turnstile> t : \<sigma>\<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> \<Lambda> x . t : \<tau>\<rightarrow>\<sigma>" 
+| t4[intro]: "\<lbrakk> \<Gamma> \<turnstile> s : \<sigma> \<rbrakk> \<Longrightarrow> \<Gamma> \<turnstile> [s] : T \<sigma>" 
+| t5[intro]: "\<lbrakk>x \<sharp> (\<Gamma>,s); \<Gamma> \<turnstile> s : T \<sigma> ; ((x,\<sigma>)#\<Gamma>) \<turnstile> t : T \<tau> \<rbrakk> 
+                \<Longrightarrow> \<Gamma> \<turnstile> s to x in t : T \<tau>" 
+equivariance typing
+nominal_inductive typing 
+  by(simp_all add: abs_fresh fresh_ty)
+
+
+
+inductive 
+  SN :: "trm \<Rightarrow> bool"
+where
+  SN_intro: "(\<And> t' . t \<mapsto> t' \<Longrightarrow> SN t') \<Longrightarrow> SN t" 
+
+
+lemma SN_preserved[intro]: 
+  assumes a: "SN t"   "t \<mapsto> t'"
+  shows "SN t'"
+using a by (cases) (auto)
+
+definition "NORMAL" :: "trm \<Rightarrow> bool"
+where
+  "NORMAL t \<equiv> \<not>(\<exists>t'. t \<mapsto> t')"
+
+lemma normal_var: "NORMAL (Var x)"
+unfolding NORMAL_def by (auto elim: reduction.cases)
+
+lemma normal_implies_sn : "NORMAL s \<Longrightarrow> SN s"
+unfolding NORMAL_def by(auto intro: SN_intro)
+
+
+the $\lambda_{ml}$-calculus does not lend itself to an easy definition of a
+logical relation along the type structure of the calculus. Therefore, we need to
+introduce stacks as an auxiliary notion to handle the monadic type constructor
+$T$. Stacks can be thought of as lists of term abstractions @{term "[x].t"}. The
+notation for stacks is chosen with this resemblance in mind.\<close>
+text\<open>Together with the stack datatype, we introduce the notion of dismantling
+a term onto a stack. Unfortunately, the dismantling operation has no easy
+primitive recursive formulation. The Nominal package, however, only provides a
+recursion combinator for primitive recursion. This means that for dismantling
+one has to prove pattern completeness, right uniqueness, and termination
+explicitly.\<close>
+proof -    \<comment> \<open>pattern completeness\<close>
+    \<comment> \<open>right uniqueness\<close>
+    \<comment> \<open>only the case of the second equation matching both args needs to be
+shown.\<close>
+  let ?g = dismantle_sumC \<comment> \<open>graph of dismantle\<close>
+qed (simp_all add: stack.inject) \<comment> \<open>all other cases are trivial\<close>
+text\<open>Like all our constructions, dismantling is equivariant. Also, freshness
+can be pushed over dismantling, and the freshness requirement in the second
+defining equation is not needed\<close>
+text \<open>We also need a notion of reduction on stacks. This reduction relation
+allows us to define strong normalization not only for terms but also for stacks
+and is needed to prove the properties of the logical relation later on.\<close>
+text \<open>Next we define a substitution operation for stacks. The main purpose of
+this is to distribute substitution over dismantling.\<close>
+section \<open>Reducibility for Terms and Stacks\<close>
+text_raw \<open>\label{sec:reducibility-formal}\<close>
+text \<open>Following \<^cite>\<open>"SN.thy"\<close>, we formalize the logical relation as a function
+\<^cite>\<open>"SN.thy"\<close>. Since we have generalized our notion of reduction from terms to
+\<^cite>\<open>"TT-lifting"\<close> use a case distinction on the reducts of @{term "t \<star> k"},
+on the type. Lindley and Stark \<^cite>\<open>"TT-lifting"\<close> only spell out the cases
+proofs from \<^cite>\<open>"SN.thy"\<close> for the other cases. To shorten the presentation,

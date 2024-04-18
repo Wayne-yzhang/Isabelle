@@ -1,0 +1,148 @@
+theory Minimal_Bad_Sequences
+imports
+  Almost_Full
+  Minimal_Elements
+begin
+
+locale mbs =
+  fixes A :: "('a :: size) set"
+begin
+
+lemma minimal:
+  assumes "x \<in> A" and "P x"
+  shows "\<exists>y \<in> A. size y \<le> size x \<and> P y \<and> (\<forall>z \<in> A. size z < size y \<longrightarrow> \<not> P z)"
+using assms
+proof (induction x taking: size rule: measure_induct)
+  case (1 x)
+  then show ?case
+  proof (cases "\<forall>y \<in> A. size y < size x \<longrightarrow> \<not> P y")
+    case True
+    with 1 show ?thesis by blast
+  next
+    case False
+    then obtain y where "y \<in> A" and "size y < size x" and "P y" by blast
+    with "1.IH" show ?thesis by (fastforce elim!: order_trans)
+  qed
+qed
+
+lemma less_not_eq [simp]:
+  "x \<in> A \<Longrightarrow> size x < size y \<Longrightarrow> x = y \<Longrightarrow> False"
+  by simp
+
+definition "BAD P = {f \<in> SEQ A. bad P f}"
+
+lemma BAD_iff [iff]:
+  "f \<in> BAD P \<longleftrightarrow> (\<forall>i. f i \<in> A) \<and> bad P f"
+  by (auto simp: BAD_def)
+
+definition geseq :: "((nat \<Rightarrow> 'a) \<times> (nat \<Rightarrow> 'a)) set"
+where
+  "geseq =
+    {(f, g). f \<in> SEQ A \<and> g \<in> SEQ A \<and> (f = g \<or> (\<exists>i. size (g i) < size (f i) \<and> (\<forall>j < i. f j = g j)))}"
+
+definition gseq :: "((nat \<Rightarrow> 'a) \<times> (nat \<Rightarrow> 'a)) set" where
+  "gseq = {(f, g). f \<in> SEQ A \<and> g \<in> SEQ A \<and> (\<exists>i. size (g i) < size (f i) \<and> (\<forall>j < i. f j = g j))}"
+
+lemma geseq_iff:
+  "(f, g) \<in> geseq \<longleftrightarrow>
+    f \<in> SEQ A \<and> g \<in> SEQ A \<and> (f = g \<or> (\<exists>i. size (g i) < size (f i) \<and> (\<forall>j < i. f j = g j)))"
+  by (auto simp: geseq_def)
+
+lemma gseq_iff:
+  "(f, g) \<in> gseq \<longleftrightarrow> f \<in> SEQ A \<and> g \<in> SEQ A \<and> (\<exists>i. size (g i) < size (f i) \<and> (\<forall>j < i. f j = g j))"
+  by (auto simp: gseq_def)
+
+lemma geseqE:
+  assumes "(f, g) \<in> geseq"
+    and "\<lbrakk>\<forall>i. f i \<in> A; \<forall>i. g i \<in> A; f = g\<rbrakk> \<Longrightarrow> Q"
+    and "\<And>i. \<lbrakk>\<forall>i. f i \<in> A; \<forall>i. g i \<in> A; size (g i) < size (f i); \<forall>j < i. f j = g j\<rbrakk> \<Longrightarrow> Q"
+  shows "Q"
+  using assms by (auto simp: geseq_iff)
+
+lemma gseqE:
+  assumes "(f, g) \<in> gseq"
+    and "\<And>i. \<lbrakk>\<forall>i. f i \<in> A; \<forall>i. g i \<in> A; size (g i) < size (f i); \<forall>j < i. f j = g j\<rbrakk> \<Longrightarrow> Q"
+  shows "Q"
+  using assms by (auto simp: gseq_iff)
+
+sublocale min_elt_size?: minimal_element "measure_on size UNIV" A
+rewrites "measure_on size UNIV \<equiv> \<lambda>x y. size x < size y"
+apply (unfold_locales)
+apply (auto simp: po_on_def irreflp_on_def transp_on_def simp del: wfp_on_UNIV intro: wfp_on_subset)
+apply (auto simp: measure_on_def inv_image_betw_def)
+done
+
+context
+  fixes P :: "'a \<Rightarrow> 'a \<Rightarrow> bool"
+begin
+
+abbreviation "lb \<equiv> lexmin (BAD P)"
+
+lemma eq_upto_BAD_mem:
+  assumes "f \<in> eq_upto (BAD P) g i"
+  shows "f j \<in> A"
+  using assms by (auto)
+
+context
+  fixes h :: "nat \<Rightarrow> 'a"
+  assumes BAD_ex: "h \<in> BAD P"
+begin
+
+lemma eq_upto_BAD_non_empty:
+  "eq_upto (BAD P) lb i \<noteq> {}"
+using eq_upto_lexmin_non_empty [of "BAD P"] and BAD_ex by auto
+
+lemma non_empty_ith:
+  shows "ith (eq_upto (BAD P) lb i) i \<subseteq> A"
+  and "ith (eq_upto (BAD P) lb i) i \<noteq> {}"
+  using eq_upto_BAD_non_empty [of i] by auto
+
+lemmas
+  lb_minimal = min_elt_minimal [OF non_empty_ith, folded lexmin] and
+  lb_mem = min_elt_mem [OF non_empty_ith, folded lexmin]
+
+lemma lb_BAD:
+  "lb \<in> BAD P"
+proof -
+  have *: "\<And>j. lb j \<in> ith (eq_upto (BAD P) lb j) j" by (rule lb_mem)
+  then have "\<forall>i. lb i \<in> A" by (auto simp: ith_conv) (metis eq_upto_BAD_mem)
+  moreover
+  { assume "good P lb"
+    then obtain i j where "i < j" and "P (lb i) (lb j)" by (auto simp: good_def)
+    from * have "lb j \<in> ith (eq_upto (BAD P) lb j) j" by (auto)
+    then obtain g where "g \<in> eq_upto (BAD P) lb j" and "g j = lb j" by force
+    then have "\<forall>k \<le> j. g k = lb k" by (auto simp: order_le_less)
+  ultimately show ?thesis by blast
+qed
+
+lemma lb_lower_bound:
+  "\<forall>g. (lb, g) \<in> gseq \<longrightarrow> g \<notin> BAD P"
+proof (intro allI impI)
+  fix g
+  assume "(lb, g) \<in> gseq"
+  then obtain i where "g i \<in> A" and "size (g i) < size (lb i)"
+    and "\<forall>j < i. lb j = g j" by (auto simp: gseq_iff)
+  moreover with lb_minimal
+    have "g i \<notin> ith (eq_upto (BAD P) lb i) i" by auto
+  ultimately show "g \<notin> BAD P" by blast
+qed
+
+lemma lower_bound_ex:
+  "\<exists>f \<in> BAD P. \<forall>g. (f, g) \<in> gseq \<longrightarrow> g \<notin> BAD P"
+  using lb_BAD and lb_lower_bound by blast
+
+lemma gseq_conv:
+  "(f, g) \<in> gseq \<longleftrightarrow> f \<noteq> g \<and> (f, g) \<in> geseq"
+  by (auto simp: gseq_def geseq_def dest: less_not_eq)
+
+lemma mbs:
+  "\<exists>f \<in> BAD P. \<forall>g. (f, g) \<in> gseq \<longrightarrow> good P g"
+  using lower_bound_ex by (auto simp: gseq_conv geseq_iff)
+
+end
+
+end
+
+end
+
+end

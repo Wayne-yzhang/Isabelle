@@ -1,0 +1,747 @@
+theory Expander_Graphs_Eigenvalues
+  imports 
+    Expander_Graphs_Algebra
+    Expander_Graphs_TTS 
+    Perron_Frobenius.HMA_Connect
+    Commuting_Hermitian.Commuting_Hermitian
+begin
+
+unbundle intro_cong_syntax
+
+hide_const Matrix_Legacy.transpose
+hide_const Matrix_Legacy.row
+hide_const Matrix_Legacy.mat
+hide_const Matrix.mat
+hide_const Matrix.row
+hide_fact Matrix_Legacy.row_def
+hide_fact Matrix_Legacy.mat_def
+hide_fact Matrix.vec_eq_iff
+hide_fact Matrix.mat_def
+hide_fact Matrix.row_def
+no_notation Matrix.scalar_prod  (infix "\<bullet>" 70)
+no_notation Ordered_Semiring.max ("Max\<index>")
+
+lemma mult_right_mono': "y \<ge> (0::real) \<Longrightarrow> x \<le> z \<or> y = 0 \<Longrightarrow> x * y \<le> z * y"  
+  by (metis mult_cancel_right mult_right_mono)
+
+lemma poly_prod_zero:
+  fixes x :: "'a :: idom"
+  assumes "poly (\<Prod>a\<in>#xs. [:- a, 1:]) x = 0"
+  shows "x \<in># xs"
+  using assms by (induction xs, auto)
+
+lemma poly_prod_inj_aux_1:
+  fixes xs ys :: "('a :: idom) multiset"
+  assumes "x \<in># xs"
+  assumes "(\<Prod>a\<in>#xs. [:- a, 1:]) = (\<Prod>a\<in>#ys. [:- a, 1:])"
+  shows "x \<in># ys"
+proof -
+  have "poly (\<Prod>a\<in>#ys. [:- a, 1:]) x = poly (\<Prod>a\<in>#xs. [:- a, 1:]) x" using assms(2) by simp
+  also have "... = poly (\<Prod>a\<in>#xs - {#x#} + {#x#}. [:- a, 1:]) x"
+    using assms(1) by simp
+  also have "... = 0"
+    by simp
+  finally have "poly (\<Prod>a\<in>#ys. [:- a, 1:]) x = 0" by simp
+  thus "x \<in># ys" using poly_prod_zero by blast
+qed
+
+lemma poly_prod_inj_aux_2:
+  fixes xs ys :: "('a :: idom) multiset"
+  assumes "x \<in># xs \<union># ys"
+  assumes "(\<Prod>a\<in>#xs. [:- a, 1:]) = (\<Prod>a\<in>#ys. [:- a, 1:])"
+  shows "x \<in># xs \<inter># ys"
+proof (cases "x \<in># xs")
+  case True
+  then show ?thesis using poly_prod_inj_aux_1[OF True assms(2)] by simp
+next
+  case False
+  hence a:"x \<in># ys"
+    using assms(1) by simp
+  then show ?thesis 
+    using poly_prod_inj_aux_1[OF a assms(2)[symmetric]] by simp
+qed
+
+lemma poly_prod_inj:
+  fixes xs ys :: "('a :: idom) multiset"
+  assumes "(\<Prod>a\<in>#xs. [:- a, 1:]) = (\<Prod>a\<in>#ys. [:- a, 1:])"
+  shows "xs = ys"
+  using assms
+proof (induction "size xs + size ys" arbitrary: xs ys rule:nat_less_induct)
+  case 1
+  show ?case
+  proof (cases "xs \<union># ys = {#}")
+    case True
+    then show ?thesis by simp
+  next
+    case False
+    then obtain x where "x \<in># xs \<union># ys" by auto
+    hence a:"x \<in># xs \<inter># ys"
+      by (intro poly_prod_inj_aux_2[OF _ 1(2)])
+    have b: "[:- x, 1:] \<noteq> 0" 
+      by simp
+    have c: "size (xs-{#x#}) + size (ys-{#x#}) < size xs + size ys" 
+      using a by (simp add: add_less_le_mono size_Diff1_le size_Diff1_less)
+
+    have "[:- x, 1:] * (\<Prod>a\<in>#xs - {#x#}. [:- a, 1:]) = (\<Prod>a\<in>#xs. [:- a, 1:])"
+      using a by (subst prod_mset.insert[symmetric]) simp
+    also have "... = (\<Prod>a\<in>#ys. [:- a, 1:])" using 1 by simp
+    also have "... = [:- x, 1:] * (\<Prod>a\<in>#ys - {#x#}. [:- a, 1:])"
+      using a by (subst prod_mset.insert[symmetric]) simp
+    finally have "[:- x, 1:]*(\<Prod>a\<in>#xs-{#x#}. [:- a, 1:])=[:-x, 1:]*(\<Prod>a\<in>#ys-{#x#}. [:- a, 1:])"
+      by simp
+    hence "(\<Prod>a\<in>#xs-{#x#}. [:- a, 1:]) = (\<Prod>a\<in>#ys-{#x#}. [:- a, 1:])" 
+      using mult_left_cancel[OF b] by simp
+    hence d:"xs - {#x#} = ys - {#x#}"
+      using 1 c by simp
+    have "xs = xs - {#x#} + {#x#}"
+      using a by simp
+    also have "... = ys - {#x#} + {#x#}"
+      unfolding d by simp
+    also have "... = ys"
+      using a by simp
+    finally show ?thesis by simp
+  qed
+qed
+
+definition eigenvalues :: "('a::comm_ring_1)^'n^'n \<Rightarrow> 'a multiset" 
+  where 
+    "eigenvalues A = (SOME as. charpoly A = (\<Prod>a\<in>#as. [:- a, 1:]) \<and> size as = CARD ('n))"
+
+lemma char_poly_factorized_hma: 
+  fixes A :: "complex^'n^'n"
+  shows "\<exists>as. charpoly A = (\<Prod>a\<leftarrow>as. [:- a, 1:]) \<and> length as = CARD ('n)"
+  by (transfer_hma rule:char_poly_factorized)
+
+lemma eigvals_poly_length:
+  fixes A :: "complex^'n^'n"
+  shows 
+    "charpoly A = (\<Prod>a\<in>#eigenvalues A. [:- a, 1:])" (is "?A") 
+    "size (eigenvalues A) = CARD ('n)" (is "?B")
+proof -
+  define f where "f as = (charpoly A = (\<Prod>a\<in>#as. [:- a, 1:]) \<and> size as = CARD('n))" for as
+  obtain as where as_def: "charpoly A = (\<Prod>a\<leftarrow>as. [:- a, 1:])" "length as = CARD('n)"
+    using char_poly_factorized_hma by auto
+
+  have "charpoly A = (\<Prod>a\<leftarrow>as. [:- a, 1:])"
+    unfolding as_def by simp
+  also have "... = (\<Prod>a\<in>#mset as. [:- a, 1:])" 
+    unfolding prod_mset_prod_list[symmetric] mset_map by simp
+  finally have "charpoly A = (\<Prod>a\<in>#mset as. [:- a, 1:])" by simp
+  moreover have "size (mset as)  = CARD('n)"
+    using as_def by simp
+  ultimately have "f (mset as)" 
+    unfolding f_def by auto
+  hence "f (eigenvalues A)" 
+    unfolding eigenvalues_def f_def[symmetric] using someI[where x = "mset as" and P="f"] by auto
+  thus ?A ?B
+    unfolding f_def by auto
+qed
+
+lemma similar_matrix_eigvals:
+  fixes A B :: "complex^'n^'n"
+  assumes "similar_matrix A B"
+  shows "eigenvalues A = eigenvalues B"
+proof -
+  have "(\<Prod>a\<in>#eigenvalues A. [:- a, 1:]) = (\<Prod>a\<in>#eigenvalues B. [:- a, 1:])"
+    using similar_matrix_charpoly[OF assms] unfolding eigvals_poly_length(1) by simp
+  thus ?thesis
+    by (intro poly_prod_inj) simp
+qed
+
+definition upper_triangular_hma :: "'a::zero^'n^'n \<Rightarrow> bool"
+  where "upper_triangular_hma A \<equiv>
+    \<forall>i. \<forall> j. (to_nat j < Bij_Nat.to_nat i \<longrightarrow> A $h i $h j = 0)"
+
+lemma for_all_reindex2:
+  assumes "range f = A"
+  shows "(\<forall>x \<in> A. \<forall>y \<in> A. P x y) \<longleftrightarrow> (\<forall>x y. P (f x) (f y))"
+  using assms by auto
+
+lemma upper_triangular_hma: 
+  fixes A :: "('a::zero)^'n^'n"
+  shows "upper_triangular (from_hma\<^sub>m A) = upper_triangular_hma A" (is "?L = ?R")
+proof -
+  have "?L \<longleftrightarrow> (\<forall>i\<in>{0..<CARD('n)}. \<forall>j\<in>{0..<CARD('n)}. j < i \<longrightarrow> A $h from_nat i $h from_nat j = 0)"
+    unfolding upper_triangular_def from_hma\<^sub>m_def by auto
+  also have "... \<longleftrightarrow>  (\<forall>(i::'n) (j::'n). to_nat j < to_nat i \<longrightarrow> A $h from_nat (to_nat i) $h from_nat (to_nat j) = 0)"
+    by (intro for_all_reindex2 range_to_nat[where 'a="'n"])
+  also have "... \<longleftrightarrow>  ?R"
+    unfolding upper_triangular_hma_def by auto
+  finally show ?thesis by simp
+qed
+
+lemma from_hma_carrier: 
+  fixes A :: "'a^('n::finite)^('m::finite)"
+  shows "from_hma\<^sub>m A \<in> carrier_mat (CARD ('m)) (CARD ('n))"
+  unfolding from_hma\<^sub>m_def by simp
+
+definition diag_mat_hma :: "'a^'n^'n \<Rightarrow> 'a multiset"
+  where "diag_mat_hma A = image_mset (\<lambda>i. A $h i $h i)  (mset_set UNIV)"
+
+lemma diag_mat_hma: 
+  fixes A :: "'a^'n^'n"
+  shows  "mset (diag_mat (from_hma\<^sub>m A)) = diag_mat_hma A" (is "?L = ?R")
+proof - 
+  have "?L = {#from_hma\<^sub>m A $$ (i, i). i \<in># mset [0..<CARD('n)]#}" 
+    using from_hma_carrier[where A="A"] unfolding diag_mat_def mset_map by simp
+  also have "... = {#from_hma\<^sub>m A $$ (i, i). i \<in># image_mset to_nat (mset_set (UNIV :: 'n set))#}"
+    using range_to_nat[where 'a="'n"]
+    by (intro arg_cong2[where f="image_mset"] refl) (simp add:image_mset_mset_set[OF inj_to_nat])
+  also have "... = {#from_hma\<^sub>m A $$ (to_nat i, to_nat i). i \<in># (mset_set (UNIV :: 'n set))#}"
+    by (simp add:image_mset.compositionality comp_def)
+  also have "... = ?R"
+    unfolding diag_mat_hma_def from_hma\<^sub>m_def using to_nat_less_card[where 'a="'n"]
+    by (intro image_mset_cong) auto
+  finally show ?thesis by simp
+qed
+
+definition adjoint_hma :: "complex^'m^'n \<Rightarrow> complex^'n^'m" where
+  "adjoint_hma A = map_matrix cnj (transpose A)"
+
+lemma adjoint_hma_eq: "adjoint_hma A $h i $h j = cnj (A $h j $h i)"
+  unfolding adjoint_hma_def map_matrix_def map_vector_def transpose_def by auto
+
+lemma adjoint_hma:
+  fixes A :: "complex^('n::finite)^('m::finite)"
+  shows "mat_adjoint (from_hma\<^sub>m A) = from_hma\<^sub>m (adjoint_hma A)"
+proof -
+  have "mat_adjoint (from_hma\<^sub>m A) $$ (i,j) = from_hma\<^sub>m (adjoint_hma A) $$ (i,j)"
+    if "i < CARD('n)" "j < CARD('m)"  for i j
+    using from_hma_carrier that unfolding mat_adjoint_def from_hma\<^sub>m_def adjoint_hma_def 
+      Matrix.mat_of_rows_def map_matrix_def map_vector_def transpose_def by auto
+  thus ?thesis
+    using from_hma_carrier
+    by (intro eq_matI) auto
+qed
+
+definition cinner where "cinner v w = scalar_product v (map_vector cnj w)"
+
+context 
+  includes lifting_syntax 
+begin
+
+lemma cinner_hma: 
+  fixes x y :: "complex^'n"
+  shows "cinner x y = (from_hma\<^sub>v x) \<bullet>c (from_hma\<^sub>v y)" (is "?L = ?R")
+proof -
+  have "?L = (\<Sum>i\<in>UNIV. x $h i * cnj (y $h i))" 
+    unfolding cinner_def map_vector_def  scalar_product_def by simp
+  also have "... = (\<Sum>i = 0..<CARD('n). x $h from_nat i * cnj (y $h from_nat i))"
+    using to_nat_less_card to_nat_from_nat_id
+    by (intro sum.reindex_bij_betw[symmetric] bij_betwI[where g="to_nat"]) auto
+  also have "... = ?R" 
+    unfolding Matrix.scalar_prod_def from_hma\<^sub>v_def
+    by simp
+  finally show ?thesis by simp
+qed
+
+lemma cinner_hma_transfer[transfer_rule]: 
+  "(HMA_V ===> HMA_V ===> (=)) (\<bullet>c) cinner"
+  unfolding  HMA_V_def  cinner_hma
+  by (auto simp:rel_fun_def)
+
+lemma adjoint_hma_transfer[transfer_rule]: 
+  "(HMA_M ===> HMA_M) (mat_adjoint) adjoint_hma"
+  unfolding HMA_M_def rel_fun_def by (auto simp add:adjoint_hma)
+
+end
+
+lemma adjoint_adjoint_id[simp]: "adjoint_hma (adjoint_hma A ) = A"
+  by (transfer) (simp add:adjoint_adjoint)
+
+lemma adjoint_def_alter_hma: 
+  "cinner (A *v v) w = cinner v (adjoint_hma A *v w)" 
+  by (transfer_hma rule:adjoint_def_alter)
+
+lemma cinner_0: "cinner 0 0 = 0"
+  by (transfer_hma)
+
+lemma cinner_scale_left: "cinner (a *s v) w = a * cinner v w"
+  by transfer_hma
+
+lemma cinner_scale_right: "cinner v (a *s w) = cnj a * cinner v w"
+  by transfer (simp add: inner_prod_smult_right)
+
+lemma norm_of_real: 
+  shows "norm (map_vector complex_of_real v) = norm v"
+  unfolding norm_vec_def map_vector_def
+  by (intro L2_set_cong) auto
+
+definition unitary_hma :: "complex^'n^'n \<Rightarrow> bool"
+  where "unitary_hma A \<longleftrightarrow> A ** adjoint_hma A = Finite_Cartesian_Product.mat 1"
+
+definition unitarily_equiv_hma where
+  "unitarily_equiv_hma A B U \<equiv> (unitary_hma U \<and> similar_matrix_wit A B U (adjoint_hma U))"
+
+definition diagonal_mat :: "('a::zero)^('n::finite)^'n \<Rightarrow> bool" where
+  "diagonal_mat A \<equiv> (\<forall>i. \<forall>j. i \<noteq> j \<longrightarrow> A $h i $h j = 0)"
+
+lemma diagonal_mat_ex: 
+  assumes "diagonal_mat A"
+  shows "A = diag (\<chi> i. A $h i $h i)"
+  using assms unfolding diagonal_mat_def diag_def 
+  by (intro iffD2[OF vec_eq_iff] allI) auto
+
+lemma diag_diagonal_mat[simp]: "diagonal_mat (diag x)"
+  unfolding diag_def diagonal_mat_def by auto
+
+lemma diag_imp_upper_tri: "diagonal_mat A \<Longrightarrow> upper_triangular_hma A"
+  unfolding diagonal_mat_def upper_triangular_hma_def  
+  by (metis nat_neq_iff)
+
+definition unitary_diag where
+    "unitary_diag A b U \<equiv> unitarily_equiv_hma A (diag b) U"
+
+definition real_diag_decomp_hma where
+  "real_diag_decomp_hma A d U \<equiv> unitary_diag A d U  \<and> 
+  (\<forall>i. d $h i \<in> Reals)"
+
+definition hermitian_hma :: "complex^'n^'n \<Rightarrow> bool" where 
+  "hermitian_hma A = (adjoint_hma A = A)"
+
+lemma from_hma_one:
+  "from_hma\<^sub>m (mat 1 :: (('a::{one,zero})^'n^'n)) = 1\<^sub>m CARD('n)"
+  unfolding Finite_Cartesian_Product.mat_def from_hma\<^sub>m_def using from_nat_inj
+  by (intro eq_matI) auto
+
+lemma from_hma_mult: 
+  fixes A :: "('a :: semiring_1)^'m^'n"
+  fixes B :: "'a^'k^'m::finite"
+  shows "from_hma\<^sub>m A * from_hma\<^sub>m B = from_hma\<^sub>m (A ** B)"
+  using HMA_M_mult unfolding rel_fun_def HMA_M_def by auto
+
+lemma hermitian_hma:
+  "hermitian_hma A = hermitian (from_hma\<^sub>m A)"
+   unfolding hermitian_def adjoint_hma hermitian_hma_def by auto
+
+lemma unitary_hma:
+  fixes A :: "complex^'n^'n"
+  shows  "unitary_hma A = unitary (from_hma\<^sub>m A)" (is "?L = ?R")
+proof -
+  have "?R \<longleftrightarrow> from_hma\<^sub>m A * mat_adjoint (from_hma\<^sub>m A) = 1\<^sub>m (CARD('n))"
+    using from_hma_carrier
+    unfolding unitary_def inverts_mat_def by simp
+  also have "... \<longleftrightarrow> from_hma\<^sub>m (A ** adjoint_hma A) = from_hma\<^sub>m (mat 1::complex^'n^'n)"
+    unfolding adjoint_hma from_hma_mult from_hma_one by simp
+  also have "... \<longleftrightarrow> A ** adjoint_hma A = Finite_Cartesian_Product.mat 1"
+    unfolding from_hma\<^sub>m_inj  by simp
+  also have "... \<longleftrightarrow> ?L" unfolding unitary_hma_def by simp
+  finally show ?thesis by simp
+qed
+
+lemma unitary_hmaD:
+  fixes A :: "complex^'n^'n"
+  assumes "unitary_hma A"
+  shows "adjoint_hma A ** A = mat 1" (is "?A") "A ** adjoint_hma A = mat 1" (is "?B")
+proof -
+  have "mat_adjoint (from_hma\<^sub>m A) * from_hma\<^sub>m A = 1\<^sub>m CARD('n)"
+    using assms unitary_hma by (intro unitary_simps from_hma_carrier ) auto
+  thus ?A
+    unfolding adjoint_hma from_hma_mult from_hma_one[symmetric] from_hma\<^sub>m_inj
+    by simp
+  show ?B
+    using assms unfolding unitary_hma_def by simp
+qed
+
+lemma unitary_hma_adjoint:
+  assumes "unitary_hma A"
+  shows "unitary_hma (adjoint_hma A)"
+  unfolding unitary_hma_def adjoint_adjoint_id unitary_hmaD[OF assms] by simp
+
+lemma unitarily_equiv_hma:
+  fixes A :: "complex^'n^'n"
+  shows  "unitarily_equiv_hma A B U = 
+    unitarily_equiv (from_hma\<^sub>m A) (from_hma\<^sub>m B) (from_hma\<^sub>m U)"
+    (is "?L = ?R")
+proof -
+  have "?R \<longleftrightarrow> (unitary_hma U \<and> similar_mat_wit (from_hma\<^sub>m A) (from_hma\<^sub>m B) (from_hma\<^sub>m U) (from_hma\<^sub>m (adjoint_hma U)))"
+    unfolding Spectral_Theory_Complements.unitarily_equiv_def unitary_hma[symmetric] adjoint_hma
+    by simp
+  also have "... \<longleftrightarrow> unitary_hma U \<and> similar_matrix_wit A B U (adjoint_hma U)"
+    using HMA_similar_mat_wit unfolding rel_fun_def HMA_M_def
+    by (intro arg_cong2[where f="(\<and>)"] refl) force 
+  also have "... \<longleftrightarrow> ?L"
+    unfolding unitarily_equiv_hma_def by auto
+  finally show ?thesis by simp
+qed
+
+lemma Matrix_diagonal_matD: 
+  assumes "Matrix.diagonal_mat A"
+  assumes "i<dim_row A" "j<dim_col A"
+  assumes "i \<noteq> j"
+  shows "A $$ (i,j) = 0"
+  using assms unfolding Matrix.diagonal_mat_def by auto
+
+lemma diagonal_mat_hma:
+  fixes A :: "('a :: zero)^('n :: finite)^'n"
+  shows  "diagonal_mat A = Matrix.diagonal_mat (from_hma\<^sub>m A)" (is "?L = ?R")
+proof 
+  show "?L \<Longrightarrow> ?R"
+    unfolding diagonal_mat_def Matrix.diagonal_mat_def from_hma\<^sub>m_def 
+    using from_nat_inj  by auto
+next
+  assume a:"?R"
+
+  have "A $h i $h j = 0" if "i \<noteq> j" for i j
+  proof -
+    have "A $h i $h j = (from_hma\<^sub>m A) $$ (to_nat i,to_nat j)"
+      unfolding from_hma\<^sub>m_def using to_nat_less_card[where 'a="'n"] by simp 
+    also have "... = 0"
+      using to_nat_less_card[where 'a="'n"] to_nat_inj that 
+      by (intro Matrix_diagonal_matD[OF a]) auto
+    finally show ?thesis by simp
+  qed
+  thus "?L"
+    unfolding diagonal_mat_def by auto
+qed
+
+lemma unitary_diag_hma:
+  fixes A :: "complex^'n^'n"
+  shows "unitary_diag A d U = 
+    Spectral_Theory_Complements.unitary_diag (from_hma\<^sub>m A) (from_hma\<^sub>m (diag d)) (from_hma\<^sub>m U)"
+proof -
+  have "Matrix.diagonal_mat (from_hma\<^sub>m (diag d))"
+    unfolding diagonal_mat_hma[symmetric] by simp
+  thus ?thesis
+    unfolding unitary_diag_def Spectral_Theory_Complements.unitary_diag_def unitarily_equiv_hma
+    by auto
+qed
+
+lemma real_diag_decomp_hma:
+  fixes A :: "complex^'n^'n"
+  shows "real_diag_decomp_hma A d U = 
+    real_diag_decomp (from_hma\<^sub>m A) (from_hma\<^sub>m (diag d)) (from_hma\<^sub>m U)"
+proof -
+  have 0:"(\<forall>i. d $h i \<in> \<real>) \<longleftrightarrow> (\<forall>i < CARD('n). from_hma\<^sub>m (diag d) $$ (i,i) \<in> \<real>)"
+    unfolding from_hma\<^sub>m_def diag_def using to_nat_less_card by fastforce
+  show ?thesis
+    unfolding real_diag_decomp_hma_def real_diag_decomp_def unitary_diag_hma 0
+    by auto
+qed
+
+lemma diagonal_mat_diag_ex_hma:
+  assumes "Matrix.diagonal_mat A" "A \<in> carrier_mat CARD('n) CARD ('n :: finite)"
+  shows "from_hma\<^sub>m (diag (\<chi> (i::'n). A $$ (to_nat i,to_nat i))) = A"
+  using assms from_nat_inj unfolding from_hma\<^sub>m_def diag_def Matrix.diagonal_mat_def
+  by (intro eq_matI) (auto simp add:to_nat_from_nat_id)
+
+theorem commuting_hermitian_family_diag_hma:
+  fixes Af :: "(complex^'n^'n) set"
+  assumes "finite Af"
+    and "Af \<noteq> {}"
+    and "\<And>A. A \<in> Af \<Longrightarrow> hermitian_hma A"
+    and "\<And>A B. A \<in> Af \<Longrightarrow> B\<in> Af \<Longrightarrow> A ** B = B ** A"
+  shows "\<exists> U. \<forall> A\<in> Af. \<exists>B. real_diag_decomp_hma A B U"  
+proof -
+  have 0:"finite (from_hma\<^sub>m ` Af)"
+    using assms(1)by (intro finite_imageI) 
+  have 1: "from_hma\<^sub>m ` Af \<noteq> {}"
+    using assms(2) by simp
+  have 2: "A \<in> carrier_mat (CARD ('n)) (CARD ('n))" if "A \<in> from_hma\<^sub>m ` Af" for A
+    using that unfolding from_hma\<^sub>m_def by (auto simp add:image_iff)
+  have 3: "0 < CARD('n)"
+    by simp
+  have 4: "hermitian A" if "A \<in> from_hma\<^sub>m ` Af" for A
+    using hermitian_hma assms(3) that by auto
+  have 5: "A * B = B * A" if "A \<in> from_hma\<^sub>m ` Af" "B \<in> from_hma\<^sub>m ` Af" for A B
+    using that assms(4) by (auto simp add:image_iff from_hma_mult)
+  have "\<exists>U. \<forall>A\<in> from_hma\<^sub>m ` Af. \<exists>B. real_diag_decomp A B U"
+    using commuting_hermitian_family_diag[OF 0 1 2 3 4 5] by auto
+  then obtain U Bmap where U_def: "\<And>A. A \<in> from_hma\<^sub>m ` Af \<Longrightarrow> real_diag_decomp A (Bmap A) U"
+    by metis
+  define U' :: "complex^'n^'n" where "U' = to_hma\<^sub>m U"
+  define Bmap' :: "complex^'n^'n \<Rightarrow> complex^'n" 
+    where "Bmap' = (\<lambda>M. (\<chi> i. (Bmap (from_hma\<^sub>m M)) $$ (to_nat i,to_nat i)))"
+
+  have "real_diag_decomp_hma A (Bmap' A) U'" if "A \<in> Af" for A 
+  proof -
+    have rdd: "real_diag_decomp (from_hma\<^sub>m A) (Bmap (from_hma\<^sub>m A)) U"
+      using U_def that by simp
+
+    have "U \<in> carrier_mat CARD('n) CARD('n)" "Bmap (from_hma\<^sub>m A) \<in> carrier_mat CARD('n) CARD('n)" 
+      "Matrix.diagonal_mat (Bmap (from_hma\<^sub>m A))"
+      using rdd unfolding real_diag_decomp_def Spectral_Theory_Complements.unitary_diag_def
+        Spectral_Theory_Complements.unitarily_equiv_def similar_mat_wit_def
+      by (auto simp add:Let_def)
+
+    hence "(from_hma\<^sub>m (diag (Bmap' A))) = Bmap (from_hma\<^sub>m A)" "(from_hma\<^sub>m U') = U"
+      unfolding Bmap'_def U'_def by (auto simp add:diagonal_mat_diag_ex_hma)
+    hence "real_diag_decomp (from_hma\<^sub>m A) (from_hma\<^sub>m (diag (Bmap' A))) (from_hma\<^sub>m U')"
+      using rdd by auto
+    thus "?thesis"
+      unfolding real_diag_decomp_hma by simp
+  qed
+  thus ?thesis
+    by (intro exI[where x="U'"]) auto
+qed
+
+lemma char_poly_upper_triangular: 
+  fixes A :: "complex^'n^'n"
+  assumes "upper_triangular_hma A"
+  shows "charpoly A = (\<Prod>a \<in># diag_mat_hma A. [:- a, 1:])"
+proof -
+  have "charpoly A = char_poly (from_hma\<^sub>m A)"
+    using HMA_char_poly unfolding rel_fun_def HMA_M_def
+    by (auto simp add:eq_commute)
+  also have "... = (\<Prod>a\<leftarrow>diag_mat (from_hma\<^sub>m A). [:- a, 1:])"
+    using assms unfolding upper_triangular_hma[symmetric]
+    by (intro char_poly_upper_triangular[where n="CARD('n)"] from_hma_carrier) auto
+  also have "... = (\<Prod>a\<in># mset (diag_mat (from_hma\<^sub>m A)). [:- a, 1:])"
+    unfolding prod_mset_prod_list[symmetric] mset_map by simp
+  also have "... = (\<Prod>a\<in># diag_mat_hma A. [:- a, 1:])"
+    unfolding diag_mat_hma by simp
+  finally show "charpoly A = (\<Prod>a\<in># diag_mat_hma A. [:- a, 1:])" by simp
+qed
+
+lemma upper_tri_eigvals:
+  fixes A :: "complex^'n^'n"
+  assumes "upper_triangular_hma A"
+  shows "eigenvalues A = diag_mat_hma A"
+proof -
+  have "(\<Prod>a\<in>#eigenvalues A. [:- a, 1:]) = charpoly A"
+    unfolding  eigvals_poly_length[symmetric] by simp
+  also have "... = (\<Prod>a\<in>#diag_mat_hma A. [:- a, 1:])"
+    by (intro char_poly_upper_triangular assms)
+  finally have "(\<Prod>a\<in>#eigenvalues A. [:- a, 1:]) = (\<Prod>a\<in>#diag_mat_hma A. [:- a, 1:])"
+    by simp
+  thus ?thesis
+    by (intro poly_prod_inj) simp
+qed
+
+lemma cinner_self:
+  fixes v :: "complex^'n"
+  shows "cinner v v = norm v^2"
+proof -
+  have 0: "x * cnj x = complex_of_real (x \<bullet> x)" for x :: complex 
+    unfolding inner_complex_def complex_mult_cnj by (simp add:power2_eq_square)
+  thus ?thesis
+    unfolding cinner_def power2_norm_eq_inner scalar_product_def inner_vec_def 
+      map_vector_def by simp 
+qed
+
+lemma unitary_iso:
+  assumes "unitary_hma U" 
+  shows "norm (U *v v) = norm v"
+proof -
+  have "norm (U *v v)^2 = cinner (U *v v) (U *v v)"
+    unfolding cinner_self by simp
+  also have "... = cinner v v"
+    unfolding adjoint_def_alter_hma matrix_vector_mul_assoc unitary_hmaD[OF assms] by simp
+  also have "... = norm v^2"
+    unfolding cinner_self by simp
+  finally have "complex_of_real (norm (U *v v)^2) = norm v^2" by simp
+  thus ?thesis
+    by (meson norm_ge_zero of_real_hom.injectivity power2_eq_iff_nonneg)
+qed
+
+lemma (in semiring_hom) mult_mat_vec_hma:
+  "map_vector hom (A *v v) = map_matrix hom A *v map_vector hom v"
+  using mult_mat_vec_hom by transfer auto
+
+lemma (in semiring_hom) mat_hom_mult_hma:
+  "map_matrix hom (A ** B) = map_matrix hom A ** map_matrix hom B"
+  using mat_hom_mult by transfer auto
+
+context regular_graph_tts 
+begin
+
+lemma to_nat_less_n: "to_nat (x::'n) < n"
+  using to_nat_less_card card_n by metis 
+
+lemma to_nat_from_nat: "x < n \<Longrightarrow> to_nat (from_nat x :: 'n) = x"
+  using to_nat_from_nat_id card_n by metis
+
+lemma hermitian_A: "hermitian_hma A"
+  using count_sym unfolding hermitian_hma_def adjoint_hma_def A_def map_matrix_def 
+    map_vector_def transpose_def by simp
+
+lemma nonneg_A: "nonneg_mat A"
+  unfolding nonneg_mat_def A_def by auto
+
+lemma g_step_1:
+  assumes "v \<in> verts G"
+  shows "g_step (\<lambda>_. 1) v = 1" (is "?L = ?R")
+proof -
+  have "?L = in_degree G v / d"
+    unfolding g_step_def in_degree_def by simp
+  also have "... = 1"
+    unfolding reg(2)[OF assms] using d_gt_0 by simp
+  finally show ?thesis by simp
+qed
+
+lemma markov: "markov (A :: real^'n^'n)"
+proof -
+  have "A *v 1 = (1::real ^'n)" (is "?L = ?R")
+  proof -
+    have "A *v 1 = (\<chi> i. g_step (\<lambda>_. 1) (enum_verts i))"
+      unfolding g_step_conv one_vec_def by simp
+    also have "... = (\<chi> i. 1)"
+      using bij_betw_apply[OF enum_verts] by (subst g_step_1) auto
+    also have "... = 1" unfolding one_vec_def by simp
+    finally show ?thesis by simp
+  qed
+  thus ?thesis
+    by (intro markov_symI nonneg_A symmetric_A)
+qed
+
+lemma nonneg_J: "nonneg_mat J"
+  unfolding nonneg_mat_def J_def by auto
+
+lemma J_eigvals: "eigenvalues J = {#1::complex#} + replicate_mset (n - 1) 0"
+proof -
+  define \<alpha> :: "nat \<Rightarrow> real" where "\<alpha> i = sqrt (i^2+i)" for i :: nat
+
+  define q :: "nat \<Rightarrow> nat \<Rightarrow> real"
+    where "q i j = (
+        if i = 0 then (1/sqrt n) else (
+        if j < i then ((-1) / \<alpha> i) else (
+        if j = i then (i / \<alpha> i) else 0)))" for i j
+
+  define Q :: "complex^'n^'n" where "Q = (\<chi> i j. complex_of_real (q (to_nat i) (to_nat j)))"
+
+  define D :: "complex^'n^'n" where 
+    "D = (\<chi> i j. if to_nat i = 0 \<and> to_nat j = 0 then 1 else 0)"
+
+  have 2: "[0..<n] = 0#[1..<n]"
+    using n_gt_0 upt_conv_Cons by auto
+
+  have aux0: "(\<Sum>k = 0..<n. q j k * q i k) = of_bool (i = j)" if 1:"i \<le> j" "j < n"  for i j
+  proof -
+    consider (a) "i = j \<and> j = 0" | (b) "i = 0 \<and> i < j" | (c) " 0 < i \<and> i < j" | (d) "0 < i \<and> i = j"
+      using 1 by linarith
+    thus ?thesis
+    proof (cases)
+      case a
+      then show ?thesis using n_gt_0 by (simp add:q_def)
+    next
+      case b
+      have "(\<Sum>k = 0..<n. q j k*q i k)=(\<Sum>k\<in>insert j ({0..<j} \<union> {j+1..<n}). q j k*q i k)"
+        using that(2) by (intro sum.cong) auto
+      also have "...=q j j*q i j+(\<Sum>k=0..<j. q j k * q i k)+(\<Sum>k=j+1..<n. q j k * q i k)"
+        by (subst sum.insert) (auto simp add: sum.union_disjoint)
+      also have "... = 0" using b unfolding q_def by simp
+      finally show ?thesis using b by simp
+    next
+      case c
+      have "(\<Sum>k = 0..<n. q j k*q i k)=(\<Sum>k\<in>insert i ({0..<i} \<union> {i+1..<n}). q j k*q i k)"
+        using that(2) c by (intro sum.cong) auto
+      also have "...=q j i*q i i+(\<Sum>k=0..<i. q j k * q i k)+(\<Sum>k=i+1..<n. q j k * q i k)"
+        by (subst sum.insert) (auto simp add: sum.union_disjoint)
+      also have "... =(-1) / \<alpha> j * i / \<alpha> i+ i * ((-1) / \<alpha> j *  (-1) / \<alpha> i)"
+        using c unfolding q_def by simp
+      also have "... = 0"
+        by (simp add:algebra_simps)
+      finally show ?thesis using c by simp
+    next
+      case d
+      have "real i + real i^2 = real (i + i^2)" by simp
+      also have "... \<noteq> real 0" 
+        unfolding of_nat_eq_iff using d by simp
+      finally have d_1: "real i  + real i^2 \<noteq> 0" by simp
+      have "(\<Sum>k = 0..<n. q j k*q i k)=(\<Sum>k\<in>insert i ({0..<i} \<union> {i+1..<n}). q j k*q i k)"
+        using that(2) d by (intro sum.cong) auto
+      also have "...=q j i*q i i+(\<Sum>k=0..<i. q j k * q i k)+(\<Sum>k=i+1..<n. q j k * q i k)"
+        by (subst sum.insert) (auto simp add: sum.union_disjoint)
+      also have "... = i/ \<alpha> i * i / \<alpha> i+ i * ((-1) / \<alpha> i *  (-1) / \<alpha> i)"
+        using d that unfolding q_def by simp
+      also have "... = (i^2 + i) / (\<alpha> i)^2"
+        by (simp add: power2_eq_square divide_simps)
+      also have "... = 1"
+        using d_1 unfolding \<alpha>_def by (simp add:algebra_simps) 
+      finally show ?thesis using d by simp
+    qed
+  qed
+
+  have 0:"(\<Sum>k = 0..<n. q j k * q i k) = of_bool (i = j)" (is "?L = ?R")  if "i < n" "j < n"  for i j
+  proof -
+    have "?L = (\<Sum>k = 0..<n. q (max i j) k * q (min i j) k)"
+      by (cases "i \<le> j") ( simp_all add:ac_simps cong:sum.cong)
+    also have "... = of_bool (min i j = max i j)"
+      using that by (intro aux0) auto
+    also have "... = ?R" 
+      by (cases "i \<le> j") auto
+    finally show ?thesis by simp
+  qed
+  
+  have "(\<Sum>k\<in>UNIV. Q $h j $h k * cnj (Q $h i $h k)) = of_bool (i=j)" (is "?L = ?R") for i j
+  proof -
+    have "?L = complex_of_real (\<Sum>k \<in> (UNIV::'n set). q (to_nat j) (to_nat k) * q (to_nat i) (to_nat k))" 
+      unfolding Q_def 
+      by (simp add:case_prod_beta scalar_prod_def map_vector_def inner_vec_def row_def inner_complex_def)
+    also have "... = complex_of_real (\<Sum>k=0..<n. q (to_nat j) k * q (to_nat i) k)"
+      using to_nat_less_n to_nat_from_nat
+      by (intro arg_cong[where f="of_real"] sum.reindex_bij_betw bij_betwI[where g="from_nat"]) (auto)
+    also have "... = complex_of_real (of_bool(to_nat i = to_nat j))"
+      using to_nat_less_n by (intro arg_cong[where f="of_real"] 0) auto
+    also have "... = ?R"
+      using to_nat_inj by auto
+    finally show ?thesis by simp
+  qed
+  hence "Q ** adjoint_hma Q = mat 1"
+    by (intro iffD2[OF vec_eq_iff]) (auto simp add:matrix_matrix_mult_def mat_def adjoint_hma_eq)
+  hence unit_Q: "unitary_hma Q"
+    unfolding unitary_hma_def by simp
+
+  have "card {(k::'n). to_nat k = 0} = card {from_nat 0 :: 'n}" 
+    using to_nat_from_nat[where x="0"] n_gt_0
+    by (intro arg_cong[where f="card"] iffD2[OF set_eq_iff]) auto
+  hence 5:"card {(k::'n). to_nat k = 0} = 1" by simp
+  hence 1:"adjoint_hma Q ** D = (\<chi> i j. (if to_nat j = 0 then complex_of_real (1/sqrt n) else 0))"
+    unfolding Q_def D_def by (intro iffD2[OF vec_eq_iff] allI)
+     (auto simp add:adjoint_hma_eq matrix_matrix_mult_def q_def if_distrib if_distribR sum.If_cases)
+
+  have "(adjoint_hma Q ** D ** Q) $h i $h j = J $h i $h j" (is "?L1 = ?R1") for i j 
+  proof - 
+    have "?L1 =1/((sqrt (real n)) * complex_of_real (sqrt (real n)))"
+      unfolding 1 unfolding Q_def using n_gt_0 5
+      by (auto simp add:matrix_matrix_mult_def q_def if_distrib if_distribR sum.If_cases) 
+    also have "... = 1/sqrt (real n)^2"
+      unfolding of_real_divide of_real_mult power2_eq_square
+      by simp
+    also have "... = J $h i $h j"
+      unfolding J_def card_n using n_gt_0 by simp
+    finally show ?thesis by simp
+  qed
+
+  hence "adjoint_hma Q ** D ** Q = J"
+    by (intro iffD2[OF vec_eq_iff] allI) auto 
+
+  hence "similar_matrix_wit J D (adjoint_hma Q) Q" 
+    unfolding similar_matrix_wit_def unitary_hmaD[OF unit_Q] by auto
+  hence "similar_matrix J D"
+    unfolding similar_matrix_def by auto
+  hence "eigenvalues J = eigenvalues D"
+    by (intro similar_matrix_eigvals)
+  also have "... = diag_mat_hma D"
+    by (intro upper_tri_eigvals diag_imp_upper_tri) (simp add:D_def diagonal_mat_def)
+  also have "... = {# of_bool (to_nat i = 0). i \<in># mset_set (UNIV :: 'n set)#}"
+    unfolding diag_mat_hma_def D_def of_bool_def by simp 
+  also have "... = {# of_bool (i = 0). i \<in># mset_set (to_nat ` (UNIV :: 'n set))#}"
+    unfolding image_mset_mset_set[OF inj_to_nat, symmetric] 
+    by (simp add:image_mset.compositionality comp_def)
+  also have "... = mset (map (\<lambda>i. of_bool(i=0)) [0..<n])"
+    unfolding range_to_nat card_n mset_map by simp
+  also have "... = mset (1 # map (\<lambda>i. 0) [1..<n])"
+    unfolding 2 by (intro arg_cong[where f="mset"]) simp
+  also have "... = {#1#} + replicate_mset (n-1) 0"
+    using n_gt_0 by (simp add:map_replicate_const mset_repl)
+  finally show ?thesis by simp
+qed
+
+lemma J_markov: "markov J"
+proof -
+  have "nonneg_mat J"
+    unfolding J_def nonneg_mat_def by auto
+  moreover have "transpose J = J" 
+    unfolding J_def transpose_def by auto
+  moreover have "J *v 1 = (1 :: real^'n)"
+    unfolding J_def by (simp add:matrix_vector_mult_def one_vec_def) 
+  ultimately show ?thesis
+    by (intro markov_symI) auto
+qed
+
+lemma markov_complex_apply: 
+  assumes "markov M"
+  shows "(map_matrix complex_of_real M) *v (1 :: complex^'n) = 1" (is "?L = ?R")
+proof -
+  have "?L = (map_matrix complex_of_real M) *v (map_vector complex_of_real 1)"

@@ -1,0 +1,133 @@
+theory SmallStep imports Termination
+begin
+
+
+primrec redex:: "('s,'p,'f)com \<Rightarrow> ('s,'p,'f)com"
+where
+"redex Skip = Skip" |
+"redex (Basic f) = (Basic f)" |
+"redex (Spec r) = (Spec r)" |
+"redex (Seq c\<^sub>1 c\<^sub>2) = redex c\<^sub>1" |
+"redex (Cond b c\<^sub>1 c\<^sub>2) = (Cond b c\<^sub>1 c\<^sub>2)" |
+"redex (While b c) = (While b c)" |
+"redex (Call p) = (Call p)" |
+"redex (DynCom d) = (DynCom d)" |
+"redex (Guard f b c) = (Guard f b c)" |
+"redex (Throw) = Throw" |
+"redex (Catch c\<^sub>1 c\<^sub>2) = redex c\<^sub>1"
+
+
+
+type_synonym ('s,'p,'f) config = "('s,'p,'f)com  \<times> ('s,'f) xstate"
+inductive "step"::"[('s,'p,'f) body,('s,'p,'f) config,('s,'p,'f) config] \<Rightarrow> bool"
+                                ("_\<turnstile> (_ \<rightarrow>/ _)" [81,81,81] 100)
+  for \<Gamma>::"('s,'p,'f) body"
+where
+
+  Basic: "\<Gamma>\<turnstile>(Basic f,Normal s) \<rightarrow> (Skip,Normal (f s))"
+
+| Spec: "(s,t) \<in> r \<Longrightarrow> \<Gamma>\<turnstile>(Spec r,Normal s) \<rightarrow> (Skip,Normal t)"
+| SpecStuck: "\<forall>t. (s,t) \<notin> r \<Longrightarrow> \<Gamma>\<turnstile>(Spec r,Normal s) \<rightarrow> (Skip,Stuck)"
+
+| Guard: "s\<in>g \<Longrightarrow> \<Gamma>\<turnstile>(Guard f g c,Normal s) \<rightarrow> (c,Normal s)"
+
+| GuardFault: "s\<notin>g \<Longrightarrow> \<Gamma>\<turnstile>(Guard f g c,Normal s) \<rightarrow> (Skip,Fault f)"
+
+
+| Seq: "\<Gamma>\<turnstile>(c\<^sub>1,s) \<rightarrow> (c\<^sub>1',s')
+        \<Longrightarrow>
+        \<Gamma>\<turnstile>(Seq c\<^sub>1 c\<^sub>2,s) \<rightarrow> (Seq c\<^sub>1' c\<^sub>2, s')"
+| SeqSkip: "\<Gamma>\<turnstile>(Seq Skip c\<^sub>2,s) \<rightarrow> (c\<^sub>2, s)"
+| SeqThrow: "\<Gamma>\<turnstile>(Seq Throw c\<^sub>2,Normal s) \<rightarrow> (Throw, Normal s)"
+
+| CondTrue:  "s\<in>b \<Longrightarrow> \<Gamma>\<turnstile>(Cond b c\<^sub>1 c\<^sub>2,Normal s) \<rightarrow> (c\<^sub>1,Normal s)"
+| CondFalse: "s\<notin>b \<Longrightarrow> \<Gamma>\<turnstile>(Cond b c\<^sub>1 c\<^sub>2,Normal s) \<rightarrow> (c\<^sub>2,Normal s)"
+
+| WhileTrue: "\<lbrakk>s\<in>b\<rbrakk>
+              \<Longrightarrow>
+              \<Gamma>\<turnstile>(While b c,Normal s) \<rightarrow> (Seq c (While b c),Normal s)"
+
+| WhileFalse: "\<lbrakk>s\<notin>b\<rbrakk>
+               \<Longrightarrow>
+               \<Gamma>\<turnstile>(While b c,Normal s) \<rightarrow> (Skip,Normal s)"
+
+| Call: "\<Gamma> p=Some bdy \<Longrightarrow>
+         \<Gamma>\<turnstile>(Call p,Normal s) \<rightarrow> (bdy,Normal s)"
+
+| CallUndefined: "\<Gamma> p=None \<Longrightarrow>
+         \<Gamma>\<turnstile>(Call p,Normal s) \<rightarrow> (Skip,Stuck)"
+
+| DynCom: "\<Gamma>\<turnstile>(DynCom c,Normal s) \<rightarrow> (c s,Normal s)"
+
+| Catch: "\<lbrakk>\<Gamma>\<turnstile>(c\<^sub>1,s) \<rightarrow> (c\<^sub>1',s')\<rbrakk>
+          \<Longrightarrow>
+          \<Gamma>\<turnstile>(Catch c\<^sub>1 c\<^sub>2,s) \<rightarrow> (Catch c\<^sub>1' c\<^sub>2,s')"
+
+| CatchThrow: "\<Gamma>\<turnstile>(Catch Throw c\<^sub>2,Normal s) \<rightarrow> (c\<^sub>2,Normal s)"
+| CatchSkip: "\<Gamma>\<turnstile>(Catch Skip c\<^sub>2,s) \<rightarrow> (Skip,s)"
+
+| FaultProp:  "\<lbrakk>c\<noteq>Skip; redex c = c\<rbrakk> \<Longrightarrow> \<Gamma>\<turnstile>(c,Fault f) \<rightarrow> (Skip,Fault f)"
+| StuckProp:  "\<lbrakk>c\<noteq>Skip; redex c = c\<rbrakk> \<Longrightarrow> \<Gamma>\<turnstile>(c,Stuck) \<rightarrow> (Skip,Stuck)"
+| AbruptProp: "\<lbrakk>c\<noteq>Skip; redex c = c\<rbrakk> \<Longrightarrow> \<Gamma>\<turnstile>(c,Abrupt f) \<rightarrow> (Skip,Abrupt f)"
+
+
+lemmas step_induct = step.induct [of _ "(c,s)" "(c',s')", split_format (complete), case_names
+Basic Spec SpecStuck Guard GuardFault Seq SeqSkip SeqThrow CondTrue CondFalse
+WhileTrue WhileFalse Call CallUndefined DynCom Catch CatchThrow CatchSkip
+FaultProp StuckProp AbruptProp, induct set]
+
+
+inductive_cases step_elim_cases [cases set]:
+ "\<Gamma>\<turnstile>(Skip,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Guard f g c,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Basic f,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Spec r,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Seq c1 c2,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Cond b c1 c2,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(While b c,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Call p,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(DynCom c,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Throw,s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Catch c1 c2,s) \<rightarrow> u"
+
+inductive_cases step_Normal_elim_cases [cases set]:
+ "\<Gamma>\<turnstile>(Skip,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Guard f g c,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Basic f,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Spec r,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Seq c1 c2,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Cond b c1 c2,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(While b c,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Call p,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(DynCom c,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Throw,Normal s) \<rightarrow> u"
+ "\<Gamma>\<turnstile>(Catch c1 c2,Normal s) \<rightarrow> u"
+
+
+termination, or @{term "(Throw,Normal s)"} in case the program was started in
+a @{term "Normal"} state and terminated abruptly. The @{const "Abrupt"} state is not used to
+model abrupt termination, in contrast to the big-step semantics. Only if the
+program starts in an @{const "Abrupt"} states it ends in the same @{term "Abrupt"}
+state.\<close>
+subsection \<open>Structural Properties of Small Step Computations\<close>
+subsection \<open>Equivalence between Small-Step and Big-Step Semantics\<close>
+subsection \<open>Infinite Computations: \<open>\<Gamma>\<turnstile>(c, s) \<rightarrow> \<dots>(\<infinity>)\<close>\<close>
+subsection \<open>Equivalence between Termination and the Absence of Infinite Computations\<close>
+ML \<open>
+  ML_Thms.bind_thm ("tranclp_induct2", Split_Rule.split_rule @{context}
+    (Rule_Insts.read_instantiate @{context}
+      [((("a", 0), Position.none), "(aa,ab)"), ((("b", 0), Position.none), "(ba,bb)")] []
+      @{thm tranclp_induct}));
+\<close>
+ML \<open>
+  ML_Thms.bind_thm ("trancl_induct2", Split_Rule.split_rule @{context}
+    (Rule_Insts.read_instantiate @{context}
+      [((("a", 0), Position.none), "(aa, ab)"), ((("b", 0), Position.none), "(ba, bb)")] []
+      @{thm trancl_induct}));
+\<close>
+subsection \<open>Generalised Redexes\<close>
+text \<open>
+For an important lemma for the completeness proof of the Hoare-logic for
+total correctness we need a generalisation of @{const "redex"} that not only
+yield the redex itself but all the enclosing statements as well.
+\<close>

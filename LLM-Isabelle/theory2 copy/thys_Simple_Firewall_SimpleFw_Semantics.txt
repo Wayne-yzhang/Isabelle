@@ -1,0 +1,56 @@
+theory SimpleFw_Semantics
+imports SimpleFw_Syntax
+        IP_Addresses.IP_Address
+        IP_Addresses.Prefix_Match
+begin
+
+
+  fun simple_match_ip :: "('i::len word \<times> nat) \<Rightarrow> 'i::len word \<Rightarrow> bool" where
+    "simple_match_ip (base, len) p_ip \<longleftrightarrow> p_ip \<in> ipset_from_cidr base len"
+
+  lemma wordinterval_to_set_ipcidr_tuple_to_wordinterval_simple_match_ip_set:
+    "wordinterval_to_set (ipcidr_tuple_to_wordinterval ip) = {d. simple_match_ip ip d}"
+    proof -
+      { fix s and d :: "'a::len word \<times> nat"
+        from wordinterval_to_set_ipcidr_tuple_to_wordinterval have
+          "s \<in> wordinterval_to_set (ipcidr_tuple_to_wordinterval d) \<longleftrightarrow> simple_match_ip d s"
+        by(cases d) auto
+      } thus ?thesis by blast
+    qed
+
+  lemma "{(253::8 word) .. 8} = {}" by simp 
+
+  fun simple_match_port :: "(16 word \<times> 16 word) \<Rightarrow> 16 word \<Rightarrow> bool" where
+    "simple_match_port (s,e) p_p \<longleftrightarrow> p_p \<in> {s..e}"
+
+  fun simple_matches :: "'i::len simple_match \<Rightarrow> ('i, 'a) simple_packet_scheme \<Rightarrow> bool" where
+    "simple_matches m p \<longleftrightarrow>
+      (match_iface (iiface m) (p_iiface p)) \<and>
+      (match_iface (oiface m) (p_oiface p)) \<and>
+      (simple_match_ip (src m) (p_src p)) \<and>
+      (simple_match_ip (dst m) (p_dst p)) \<and>
+      (match_proto (proto m) (p_proto p)) \<and>
+      (simple_match_port (sports m) (p_sport p)) \<and>
+      (simple_match_port (dports m) (p_dport p))"
+
+
+  fun simple_fw :: "'i::len simple_rule list \<Rightarrow> ('i, 'a) simple_packet_scheme \<Rightarrow> state" where
+    "simple_fw [] _ = Undecided" |
+    "simple_fw ((SimpleRule m Accept)#rs) p = (if simple_matches m p then Decision FinalAllow else simple_fw rs p)" |
+    "simple_fw ((SimpleRule m Drop)#rs) p = (if simple_matches m p then Decision FinalDeny else simple_fw rs p)"
+ 
+  fun simple_fw_alt where
+    "simple_fw_alt [] _ = Undecided" |
+    "simple_fw_alt (r#rs) p = (if simple_matches (match_sel r) p then 
+    	(case action_sel r of Accept \<Rightarrow> Decision FinalAllow | Drop \<Rightarrow> Decision FinalDeny) else simple_fw_alt rs p)"
+ 
+  lemma simple_fw_alt: "simple_fw r p = simple_fw_alt r p" by(induction rule: simple_fw.induct) simp_all
+
+  definition simple_match_any :: "'i::len simple_match" where
+    "simple_match_any \<equiv> \<lparr>iiface=ifaceAny, oiface=ifaceAny, src=(0,0), dst=(0,0), proto=ProtoAny, sports=(0,65535), dports=(0,65535) \<rparr>"
+  lemma simple_match_any: "simple_matches simple_match_any p"
+    proof -
+      have *: "(65535::16 word) = - 1"
+        by simp
+      show ?thesis
+        by (simp add: simple_match_any_def ipset_from_cidr_0 match_ifaceAny *)

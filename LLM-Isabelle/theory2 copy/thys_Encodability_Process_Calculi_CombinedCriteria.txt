@@ -1,0 +1,587 @@
+theory CombinedCriteria
+  imports DivergenceReflection SuccessSensitiveness FullAbstraction OperationalCorrespondence
+begin
+
+
+
+lemma (in encoding) criterion_iff_source_target_relation_impl_indRelR:
+  fixes Cond :: "('procS \<Rightarrow> 'procT) \<Rightarrow> bool"
+    and Pred :: "(('procS, 'procT) Proc \<times> ('procS, 'procT) Proc) set \<Rightarrow> bool"
+  assumes "Cond enc = (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> Pred Rel)"
+  shows "Cond enc = (\<exists>Rel'. Pred (indRelR \<union> Rel'))"
+proof (rule iffI)
+  assume "Cond enc"
+  with assms obtain Rel where A1: "\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel" and A2: "Pred Rel"
+    by blast
+  from A1 have "Rel = indRelR \<union> (Rel - indRelR)"
+    by (auto simp add: indRelR.simps)
+  with A2 have "Pred (indRelR \<union> (Rel - indRelR))"
+    by simp
+  thus "\<exists>Rel'. Pred (indRelR \<union> Rel')"
+    by blast
+next
+  assume "\<exists>Rel'. Pred (indRelR \<union> Rel')"
+  from this obtain Rel' where "Pred (indRelR \<union> Rel')"
+    by blast
+  moreover have "\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> (indRelR \<union> Rel')"
+    by (simp add: indRelR.encR)
+  ultimately show "Cond enc"
+      using assms
+    by blast
+qed
+
+lemma (in encoding) combine_conditions_on_pairs_of_relations:
+  fixes RelA RelB   :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) set"
+    and CondA CondB :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) \<Rightarrow> bool"
+  assumes "\<forall>(P, Q) \<in> RelA. CondA (P, Q)"
+      and "\<forall>(P, Q) \<in> RelB. CondB (P, Q)"
+  shows "(\<forall>(P, Q) \<in> RelA \<inter> RelB. CondA (P, Q)) \<and> (\<forall>(P, Q) \<in> RelA \<inter> RelB. CondB (P, Q))"
+      using assms
+    by blast
+
+lemma (in encoding) combine_conditions_on_sets_of_relations:
+  fixes Rel RelA :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) set"
+    and Cond     :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) set \<Rightarrow> bool"
+    and CondA    :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) \<Rightarrow> bool"
+  assumes "\<forall>(P, Q) \<in> RelA. CondA (P, Q)"
+      and "Cond Rel \<and> Rel \<subseteq> RelA"
+  shows "Cond Rel \<and> (\<forall>(P, Q) \<in> Rel. CondA (P, Q))"
+      using assms
+    by blast
+
+lemma (in encoding) combine_conditions_on_sets_and_pairs_of_relations:
+  fixes Rel RelA RelB :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) set"
+    and Cond          :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) set \<Rightarrow> bool"
+    and CondA CondB   :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) \<Rightarrow> bool"
+  assumes "\<forall>(P, Q) \<in> RelA. CondA (P, Q)"
+      and "\<forall>(P, Q) \<in> RelB. CondB (P, Q)"
+      and "Cond Rel \<and> Rel \<subseteq> RelA \<and> Rel \<subseteq> RelB"
+  shows "Cond Rel \<and> (\<forall>(P, Q) \<in> Rel. CondA (P, Q)) \<and> (\<forall>(P, Q) \<in> Rel. CondB (P, Q))"
+      using assms
+    by blast
+
+
+lemma (in encoding) combine_conditions_on_relations_indRelR:
+  fixes RelA RelB   :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) set"
+    and Cond        :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) set \<Rightarrow> bool"
+    and CondA CondB :: "(('procS, 'procT) Proc \<times>('procS, 'procT) Proc) \<Rightarrow> bool"
+  assumes A1: "\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> RelA"
+      and A2: "\<forall>(P, Q) \<in> RelA. CondA (P, Q)"
+      and A3: "\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> RelB"
+      and A4: "\<forall>(P, Q) \<in> RelB. CondB (P, Q)"
+  shows "\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> (\<forall>(P, Q) \<in> Rel. CondA (P, Q))
+          \<and> (\<forall>(P, Q) \<in> Rel. CondB (P, Q))"
+    and "Cond indRelR \<Longrightarrow> (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel)
+         \<and> (\<forall>(P, Q) \<in> Rel. CondA (P, Q)) \<and> (\<forall>(P, Q) \<in> Rel. CondB (P, Q)) \<and> Cond Rel)"
+proof -
+  have A5: "\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> indRelR"
+    by (simp add: indRelR.encR)
+  moreover have A6: "indRelR \<subseteq> RelA"
+  proof clarify
+    fix P Q
+    assume "(P, Q) \<in> indRelR"
+    from this A1 show "(P, Q) \<in> RelA"
+      by (induct, simp)
+  qed
+  moreover have A7: "indRelR \<subseteq> RelB"
+  proof clarify
+    fix P Q
+    assume "(P, Q) \<in> indRelR"
+    from this A3 show "(P, Q) \<in> RelB"
+      by (induct, simp)
+  qed
+  ultimately show "\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel)
+                   \<and> (\<forall>(P, Q) \<in> Rel. CondA (P, Q)) \<and> (\<forall>(P, Q) \<in> Rel. CondB (P, Q))"
+      using combine_conditions_on_sets_and_pairs_of_relations[where RelA="RelA" and RelB="RelB"
+            and CondA="CondA" and CondB="CondB" and Rel="indRelR"
+            and Cond="\<lambda>R. \<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> R"] A2 A4
+    by blast
+  from A2 A4 A5 A6 A7
+  show "Cond indRelR \<Longrightarrow> (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel)
+        \<and> (\<forall>(P, Q) \<in> Rel. CondA (P, Q)) \<and> (\<forall>(P, Q) \<in> Rel. CondB (P, Q)) \<and> Cond Rel)"
+      using combine_conditions_on_sets_and_pairs_of_relations[where RelA="RelA" and RelB="RelB"
+            and CondA="CondA" and CondB="CondB" and Rel="indRelR"
+            and Cond="\<lambda>R. \<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> R \<and> Cond R"]
+    by blast
+qed
+
+lemma (in encoding) indRelR_cond_respects_predA_and_reflects_predB:
+  fixes PredA PredB :: "('procS, 'procT) Proc \<Rightarrow> bool"
+  shows "((\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_respects_pred Rel PredA)
+          \<and> (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_reflects_pred Rel PredB))
+         = (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_respects_pred Rel PredA
+            \<and> rel_reflects_pred Rel PredB)"
+proof (rule iffI, erule conjE)
+  assume "\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_respects_pred Rel PredA"
+  from this obtain RelA where A1: "\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> RelA"
+                          and A2: "rel_respects_pred RelA PredA"
+    by blast
+  assume "\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_reflects_pred Rel PredB"
+  from this obtain RelB where A3: "\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> RelB"
+                          and A4: "rel_reflects_pred RelB PredB"
+    by blast
+  from A2 have "\<forall>(P, Q) \<in> RelA. PredA P \<longleftrightarrow> PredA Q"
+    by blast
+  moreover from A4 have "\<forall>(P, Q) \<in> RelB. PredB Q \<longrightarrow> PredB P"
+    by blast
+  ultimately have "\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel)
+                   \<and> (\<forall>(P, Q)\<in>Rel. PredA P = PredA Q) \<and> (\<forall>(P, Q)\<in>Rel. PredB Q \<longrightarrow> PredB P)"
+      using combine_conditions_on_relations_indRelR(1)[where RelA="RelA" and RelB="RelB" and
+            CondA="\<lambda>(P, Q). PredA P \<longleftrightarrow> PredA Q" and CondB="\<lambda>(P, Q). PredB Q \<longrightarrow> PredB P"] A1 A3
+    by simp
+  thus "\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_respects_pred Rel PredA
+        \<and> rel_reflects_pred Rel PredB"
+    by blast
+next
+  assume "\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_respects_pred Rel PredA
+          \<and> rel_reflects_pred Rel PredB"
+  thus "(\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_respects_pred Rel PredA) \<and>
+        (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel) \<and> rel_reflects_pred Rel PredB)"
+    by blast
+qed
+
+
+
+lemma (in encoding_wrt_barbs) WSS_DR_iff_source_target_rel:
+  fixes success :: "'barbs"
+  shows "(enc_weakly_respects_barb_set {success} \<and> enc_reflects_divergence)
+         = (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel)
+            \<and> rel_weakly_respects_barb_set Rel (STCalWB SWB TWB) {success}
+            \<and> rel_reflects_divergence Rel (STCal Source Target))"
+proof -
+  have "\<forall>Rel. rel_reflects_divergence Rel (STCal Source Target)
+        = rel_reflects_pred Rel divergentST"
+    by (simp add: divergentST_STCal_divergent)
+  moreover have "\<forall>Rel. (rel_weakly_respects_barb_set Rel (STCalWB SWB TWB) {success}
+                 = rel_respects_pred Rel (\<lambda>P. P\<Down>.success))"
+    by (simp add: STCalWB_reachesBarbST)
+  ultimately show "(enc_weakly_respects_barb_set {success} \<and> enc_reflects_divergence)
+    = (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel)
+       \<and> rel_weakly_respects_barb_set Rel (STCalWB SWB TWB) {success}
+       \<and> rel_reflects_divergence Rel (STCal Source Target))"
+      using success_sensitive_iff_source_target_rel_weakly_respects_success(1)
+            divergence_reflection_iff_source_target_rel_reflects_divergence
+            indRelR_cond_respects_predA_and_reflects_predB[where
+              PredA="\<lambda>P. P\<Down>.success" and PredB="divergentST"]
+    by simp
+qed
+
+lemma (in encoding_wrt_barbs) SS_DR_iff_source_target_rel:
+  fixes success :: "'barbs"
+  shows "(enc_respects_barb_set {success} \<and> enc_reflects_divergence)
+         = (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel)
+            \<and> rel_respects_barb_set Rel (STCalWB SWB TWB) {success}
+            \<and> rel_reflects_divergence Rel (STCal Source Target))"
+proof -
+  have "\<forall>Rel. rel_reflects_divergence Rel (STCal Source Target)
+        = rel_reflects_pred Rel divergentST"
+    by (simp add: divergentST_STCal_divergent)
+  moreover have "\<forall>Rel. (rel_respects_barb_set Rel (STCalWB SWB TWB) {success}
+                 = rel_respects_pred Rel (\<lambda>P. P\<down>.success))"
+    by (simp add: STCalWB_hasBarbST)
+  ultimately show "(enc_respects_barb_set {success} \<and> enc_reflects_divergence)
+    = (\<exists>Rel. (\<forall>S. (SourceTerm S, TargetTerm (\<lbrakk>S\<rbrakk>)) \<in> Rel)
+       \<and> rel_respects_barb_set Rel (STCalWB SWB TWB) {success}
+       \<and> rel_reflects_divergence Rel (STCal Source Target))"
+      using success_sensitive_iff_source_target_rel_respects_success(1)
+            divergence_reflection_iff_source_target_rel_reflects_divergence
+            indRelR_cond_respects_predA_and_reflects_predB[where
+              PredA="\<lambda>P. P\<down>.success" and PredB="divergentST"]
+    by simp
+qed
+
+
+
+lemma (in encoding_wrt_barbs) enc_and_TRel_impl_indRelRTPO_weakly_respects_success:
+  fixes success :: "'barbs"
+    and TRel    :: "('procT \<times> 'procT) set"
+  assumes encRS:  "enc_weakly_respects_barb_set {success}"
+      and trelPS: "rel_weakly_preserves_barb_set TRel TWB {success}"
+      and trelRS: "rel_weakly_reflects_barb_set TRel TWB {success}"
+  shows "rel_weakly_respects_barb_set (indRelRTPO TRel) (STCalWB SWB TWB) {success}"
+proof auto
+  fix P Q P'
+  assume "P \<lesssim>\<lbrakk>\<cdot>\<rbrakk>RT<TRel> Q" and "P \<longmapsto>(Calculus (STCalWB SWB TWB))* P'"
+     and "P'\<down><STCalWB SWB TWB>success"
+  thus "Q\<Down><STCalWB SWB TWB>success"
+  proof (induct arbitrary: P')
+    case (encR S)
+    assume "SourceTerm S \<longmapsto>(Calculus (STCalWB SWB TWB))* P'" and "P'\<down><STCalWB SWB TWB>success"
+    hence "S\<Down><SWB>success"
+        using STCalWB_reachesBarbST
+      by blast
+    with encRS have "\<lbrakk>S\<rbrakk>\<Down><TWB>success"
+      by simp
+    thus "TargetTerm (\<lbrakk>S\<rbrakk>)\<Down><STCalWB SWB TWB>success"
+        using STCalWB_reachesBarbST
+      by blast
+  next
+    case (source S)
+    assume "SourceTerm S \<longmapsto>(Calculus (STCalWB SWB TWB))* P'" and "P'\<down><STCalWB SWB TWB>success"
+    thus "SourceTerm S\<Down><STCalWB SWB TWB>success"
+      by blast
+  next
+    case (target T1 T2)
+    assume "(T1, T2) \<in> TRel"
+    moreover assume "TargetTerm T1 \<longmapsto>(Calculus (STCalWB SWB TWB))* P'"
+                and "P'\<down><STCalWB SWB TWB>success"
+    hence "T1\<Down><TWB>success"
+        using STCalWB_reachesBarbST
+      by blast
+    ultimately have "T2\<Down><TWB>success"
+        using trelPS
+      by simp
+    thus "TargetTerm T2\<Down><STCalWB SWB TWB>success"
+        using STCalWB_reachesBarbST
+      by blast
+  next
+    case (trans P Q R)
+    assume "P \<longmapsto>(Calculus (STCalWB SWB TWB))* P'" and "P'\<down><STCalWB SWB TWB>success"
+       and "\<And>P'. P \<longmapsto>(Calculus (STCalWB SWB TWB))* P' \<Longrightarrow> P'\<down><STCalWB SWB TWB>success
+            \<Longrightarrow> Q\<Down><STCalWB SWB TWB>success"
+    hence "Q\<Down><STCalWB SWB TWB>success"
+      by simp
+    moreover assume "\<And>Q'. Q \<longmapsto>(Calculus (STCalWB SWB TWB))* Q' \<Longrightarrow> Q'\<down><STCalWB SWB TWB>success
+                     \<Longrightarrow> R\<Down><STCalWB SWB TWB>success"
+    ultimately show "R\<Down><STCalWB SWB TWB>success"
+      by blast
+  qed
+next
+  fix P Q Q'
+  assume "P \<lesssim>\<lbrakk>\<cdot>\<rbrakk>RT<TRel> Q" and "Q \<longmapsto>(Calculus (STCalWB SWB TWB))* Q'"
+     and "Q'\<down><STCalWB SWB TWB>success"
+  thus "P\<Down><STCalWB SWB TWB>success"
+  proof (induct arbitrary: Q')
+    case (encR S)
+    assume "TargetTerm (\<lbrakk>S\<rbrakk>) \<longmapsto>(Calculus (STCalWB SWB TWB))* Q'"
+       and "Q'\<down><STCalWB SWB TWB>success"
+    hence "\<lbrakk>S\<rbrakk>\<Down><TWB>success"
+        using STCalWB_reachesBarbST
+      by blast
+    with encRS have "S\<Down><SWB>success"
+        by simp
+    thus "SourceTerm S\<Down><STCalWB SWB TWB>success"
+        using STCalWB_reachesBarbST
+      by blast
+  next
+    case (source S)
+    assume "SourceTerm S \<longmapsto>(Calculus (STCalWB SWB TWB))* Q'" and "Q'\<down><STCalWB SWB TWB>success"
+    thus "SourceTerm S\<Down><STCalWB SWB TWB>success"
+      by blast
+  next
+    case (target T1 T2)
+    assume "(T1, T2) \<in> TRel"
+    moreover assume "TargetTerm T2 \<longmapsto>(Calculus (STCalWB SWB TWB))* Q'"
+                and "Q'\<down><STCalWB SWB TWB>success"
+    hence "T2\<Down><TWB>success"
+        using STCalWB_reachesBarbST
+      by blast
+    ultimately have "T1\<Down><TWB>success"
+        using trelRS
+      by blast
+  thus "TargetTerm T1\<Down><STCalWB SWB TWB>success"
+        using STCalWB_reachesBarbST
+      by blast
+  next
+    case (trans P Q R R')
+    assume "R \<longmapsto>(Calculus (STCalWB SWB TWB))* R'" and "R'\<down><STCalWB SWB TWB>success"
+       and "\<And>R'. R \<longmapsto>(Calculus (STCalWB SWB TWB))* R' \<Longrightarrow> R'\<down><STCalWB SWB TWB>success
+            \<Longrightarrow> Q\<Down><STCalWB SWB TWB>success"
+    hence "Q\<Down><STCalWB SWB TWB>success"
+      by simp
+    moreover assume "\<And>Q'. Q \<longmapsto>(Calculus (STCalWB SWB TWB))* Q' \<Longrightarrow> Q'\<down><STCalWB SWB TWB>success
+                     \<Longrightarrow> P\<Down><STCalWB SWB TWB>success"
+    ultimately show "P\<Down><STCalWB SWB TWB>success"
+      by blast
+  qed
+qed
+
+lemma (in encoding_wrt_barbs) enc_and_TRel_impl_indRelRTPO_weakly_respects_barbs:
+  fixes TRel :: "('procT \<times> 'procT) set"
+  assumes encRS:  "enc_weakly_respects_barbs"
+      and trelPS: "rel_weakly_preserves_barbs TRel TWB"
+      and trelRS: "rel_weakly_reflects_barbs TRel TWB"
+  shows "rel_weakly_respects_barbs (indRelRTPO TRel) (STCalWB SWB TWB)"
+proof auto
+  fix P Q x P'
+  assume "P \<lesssim>\<lbrakk>\<cdot>\<rbrakk>RT<TRel> Q" and "P \<longmapsto>(Calculus (STCalWB SWB TWB))* P'"
+     and "P'\<down><STCalWB SWB TWB>x"
+  thus "Q\<Down><STCalWB SWB TWB>x"
+  proof (induct arbitrary: P')
+    case (encR S)
+    assume "SourceTerm S \<longmapsto>(Calculus (STCalWB SWB TWB))* P'" and "P'\<down><STCalWB SWB TWB>x"
+    hence "S\<Down><SWB>x"
+        using STCalWB_reachesBarbST
+      by blast
+    with encRS have "\<lbrakk>S\<rbrakk>\<Down><TWB>x"
+      by simp
+    thus "TargetTerm (\<lbrakk>S\<rbrakk>)\<Down><STCalWB SWB TWB>x"
+        using STCalWB_reachesBarbST
+      by blast
+  next
+    case (source S)
+    assume "SourceTerm S \<longmapsto>(Calculus (STCalWB SWB TWB))* P'" and "P'\<down><STCalWB SWB TWB>x"
+    thus "SourceTerm S\<Down><STCalWB SWB TWB>x"
+      by blast
+  next
+    case (target T1 T2)
+    assume "(T1, T2) \<in> TRel"
+    moreover assume "TargetTerm T1 \<longmapsto>(Calculus (STCalWB SWB TWB))* P'"
+                and "P'\<down><STCalWB SWB TWB>x"
+    hence "T1\<Down><TWB>x"
+        using STCalWB_reachesBarbST
+      by blast
+    ultimately have "T2\<Down><TWB>x"
+        using trelPS
+      by simp
+    thus "TargetTerm T2\<Down><STCalWB SWB TWB>x"
+        using STCalWB_reachesBarbST
+      by blast
+  next
+    case (trans P Q R)
+    assume "P \<longmapsto>(Calculus (STCalWB SWB TWB))* P'" and "P'\<down><STCalWB SWB TWB>x"
+       and "\<And>P'. P \<longmapsto>(Calculus (STCalWB SWB TWB))* P' \<Longrightarrow> P'\<down><STCalWB SWB TWB>x
+            \<Longrightarrow> Q\<Down><STCalWB SWB TWB>x"
+    hence "Q\<Down><STCalWB SWB TWB>x"
+      by simp
+    moreover assume "\<And>Q'. Q \<longmapsto>(Calculus (STCalWB SWB TWB))* Q' \<Longrightarrow> Q'\<down><STCalWB SWB TWB>x
+                     \<Longrightarrow> R\<Down><STCalWB SWB TWB>x"
+    ultimately show "R\<Down><STCalWB SWB TWB>x"
+      by blast
+  qed
+next
+  fix P Q x Q'
+  assume "P \<lesssim>\<lbrakk>\<cdot>\<rbrakk>RT<TRel> Q" and "Q \<longmapsto>(Calculus (STCalWB SWB TWB))* Q'"
+     and "Q'\<down><STCalWB SWB TWB>x"
+  thus "P\<Down><STCalWB SWB TWB>x"
+  proof (induct arbitrary: Q')
+    case (encR S)
+    assume "TargetTerm (\<lbrakk>S\<rbrakk>) \<longmapsto>(Calculus (STCalWB SWB TWB))* Q'"
+       and "Q'\<down><STCalWB SWB TWB>x"
+    hence "\<lbrakk>S\<rbrakk>\<Down><TWB>x"
+        using STCalWB_reachesBarbST
+      by blast
+    with encRS have "S\<Down><SWB>x"
+        by simp
+    thus "SourceTerm S\<Down><STCalWB SWB TWB>x"
+        using STCalWB_reachesBarbST
+      by blast
+  next
+    case (source S)
+    assume "SourceTerm S \<longmapsto>(Calculus (STCalWB SWB TWB))* Q'" and "Q'\<down><STCalWB SWB TWB>x"
+    thus "SourceTerm S\<Down><STCalWB SWB TWB>x"
+      by blast
+  next
+    case (target T1 T2)
+    assume "(T1, T2) \<in> TRel"
+    moreover assume "TargetTerm T2 \<longmapsto>(Calculus (STCalWB SWB TWB))* Q'"
+                and "Q'\<down><STCalWB SWB TWB>x"
+    hence "T2\<Down><TWB>x"
+        using STCalWB_reachesBarbST
+      by blast
+    ultimately have "T1\<Down><TWB>x"
+        using trelRS
+      by blast
+  thus "TargetTerm T1\<Down><STCalWB SWB TWB>x"
+        using STCalWB_reachesBarbST
+      by blast
+  next
+    case (trans P Q R R')
+    assume "R \<longmapsto>(Calculus (STCalWB SWB TWB))* R'" and "R'\<down><STCalWB SWB TWB>x"
+       and "\<And>R'. R \<longmapsto>(Calculus (STCalWB SWB TWB))* R' \<Longrightarrow> R'\<down><STCalWB SWB TWB>x
+            \<Longrightarrow> Q\<Down><STCalWB SWB TWB>x"
+    hence "Q\<Down><STCalWB SWB TWB>x"
+      by simp
+    moreover assume "\<And>Q'. Q \<longmapsto>(Calculus (STCalWB SWB TWB))* Q' \<Longrightarrow> Q'\<down><STCalWB SWB TWB>x
+                     \<Longrightarrow> P\<Down><STCalWB SWB TWB>x"
+    ultimately show "P\<Down><STCalWB SWB TWB>x"
+      by blast
+  qed
+qed
+
+lemma (in encoding_wrt_barbs) enc_and_TRel_impl_indRelRTPO_respects_success:
+  fixes success :: "'barbs"
+    and TRel    :: "('procT \<times> 'procT) set"
+  assumes encRS:  "enc_respects_barb_set {success}"
+      and trelPS: "rel_preserves_barb_set TRel TWB {success}"
+      and trelRS: "rel_reflects_barb_set TRel TWB {success}"
+  shows "rel_respects_barb_set (indRelRTPO TRel) (STCalWB SWB TWB) {success}"
+proof auto
+  fix P Q
+  assume "P \<lesssim>\<lbrakk>\<cdot>\<rbrakk>RT<TRel> Q" and "P\<down><STCalWB SWB TWB>success"
+  thus "Q\<down><STCalWB SWB TWB>success"
+  proof induct
+    case (encR S)
+    assume "SourceTerm S\<down><STCalWB SWB TWB>success"
+    hence "S\<down><SWB>success"
+        using STCalWB_hasBarbST
+      by blast
+    with encRS have "\<lbrakk>S\<rbrakk>\<down><TWB>success"
+      by simp
+    thus "TargetTerm (\<lbrakk>S\<rbrakk>)\<down><STCalWB SWB TWB>success"
+        using STCalWB_hasBarbST
+      by blast
+  next
+    case (source S)
+    assume "SourceTerm S\<down><STCalWB SWB TWB>success"
+    thus "SourceTerm S\<down><STCalWB SWB TWB>success"
+      by simp
+  next
+    case (target T1 T2)
+    assume "(T1, T2) \<in> TRel"
+    moreover assume "TargetTerm T1\<down><STCalWB SWB TWB>success"
+    hence "T1\<down><TWB>success"
+        using STCalWB_hasBarbST
+      by blast
+    ultimately have "T2\<down><TWB>success"
+        using trelPS
+      by simp
+    thus "TargetTerm T2\<down><STCalWB SWB TWB>success"
+        using STCalWB_hasBarbST
+      by blast
+  next
+    case (trans P Q R)
+    assume "P\<down><STCalWB SWB TWB>success"
+       and "P\<down><STCalWB SWB TWB>success \<Longrightarrow> Q\<down><STCalWB SWB TWB>success"
+       and "Q\<down><STCalWB SWB TWB>success \<Longrightarrow> R\<down><STCalWB SWB TWB>success"
+    thus "R\<down><STCalWB SWB TWB>success"
+      by simp
+  qed
+next
+  fix P Q
+  assume "P \<lesssim>\<lbrakk>\<cdot>\<rbrakk>RT<TRel> Q" and "Q\<down><STCalWB SWB TWB>success"
+  thus "P\<down><STCalWB SWB TWB>success"
+  proof induct
+    case (encR S)
+    assume "TargetTerm (\<lbrakk>S\<rbrakk>)\<down><STCalWB SWB TWB>success"
+    hence "\<lbrakk>S\<rbrakk>\<down><TWB>success"
+        using STCalWB_hasBarbST
+      by blast
+    with encRS have "S\<down><SWB>success"
+        by simp
+    thus "SourceTerm S\<down><STCalWB SWB TWB>success"
+        using STCalWB_hasBarbST
+      by blast
+  next
+    case (source S)
+    assume "SourceTerm S\<down><STCalWB SWB TWB>success"
+    thus "SourceTerm S\<down><STCalWB SWB TWB>success"
+      by simp
+  next
+    case (target T1 T2)
+    assume "(T1, T2) \<in> TRel"
+    moreover assume "TargetTerm T2\<down><STCalWB SWB TWB>success"
+    hence "T2\<down><TWB>success"
+        using STCalWB_hasBarbST
+      by blast
+    ultimately have "T1\<down><TWB>success"
+        using trelRS
+      by blast
+  thus "TargetTerm T1\<down><STCalWB SWB TWB>success"
+        using STCalWB_hasBarbST
+      by blast
+  next
+    case (trans P Q R)
+    assume "R\<down><STCalWB SWB TWB>success"
+       and "R\<down><STCalWB SWB TWB>success \<Longrightarrow> Q\<down><STCalWB SWB TWB>success"
+       and "Q\<down><STCalWB SWB TWB>success \<Longrightarrow> P\<down><STCalWB SWB TWB>success"
+    thus "P\<down><STCalWB SWB TWB>success"
+      by simp
+  qed
+qed
+
+lemma (in encoding_wrt_barbs) enc_and_TRel_impl_indRelRTPO_respects_barbs:
+  fixes TRel    :: "('procT \<times> 'procT) set"
+  assumes encRS:  "enc_respects_barbs"
+      and trelPS: "rel_preserves_barbs TRel TWB"
+      and trelRS: "rel_reflects_barbs TRel TWB"
+  shows "rel_respects_barbs (indRelRTPO TRel) (STCalWB SWB TWB)"
+proof auto
+  fix P Q x
+  assume "P \<lesssim>\<lbrakk>\<cdot>\<rbrakk>RT<TRel> Q" and "P\<down><STCalWB SWB TWB>x"
+  thus "Q\<down><STCalWB SWB TWB>x"
+  proof induct
+    case (encR S)
+    assume "SourceTerm S\<down><STCalWB SWB TWB>x"
+    hence "S\<down><SWB>x"
+        using STCalWB_hasBarbST
+      by blast
+    with encRS have "\<lbrakk>S\<rbrakk>\<down><TWB>x"
+      by simp
+    thus "TargetTerm (\<lbrakk>S\<rbrakk>)\<down><STCalWB SWB TWB>x"
+        using STCalWB_hasBarbST
+      by blast
+  next
+    case (source S)
+    assume "SourceTerm S\<down><STCalWB SWB TWB>x"
+    thus "SourceTerm S\<down><STCalWB SWB TWB>x"
+      by simp
+  next
+    case (target T1 T2)
+    assume "(T1, T2) \<in> TRel"
+    moreover assume "TargetTerm T1\<down><STCalWB SWB TWB>x"
+    hence "T1\<down><TWB>x"
+        using STCalWB_hasBarbST
+      by blast
+    ultimately have "T2\<down><TWB>x"
+        using trelPS
+      by simp
+    thus "TargetTerm T2\<down><STCalWB SWB TWB>x"
+        using STCalWB_hasBarbST
+      by blast
+  next
+    case (trans P Q R)
+    assume "P\<down><STCalWB SWB TWB>x"
+       and "P\<down><STCalWB SWB TWB>x \<Longrightarrow> Q\<down><STCalWB SWB TWB>x"
+       and "Q\<down><STCalWB SWB TWB>x \<Longrightarrow> R\<down><STCalWB SWB TWB>x"
+    thus "R\<down><STCalWB SWB TWB>x"
+      by simp
+  qed
+next
+  fix P Q x
+  assume "P \<lesssim>\<lbrakk>\<cdot>\<rbrakk>RT<TRel> Q" and "Q\<down><STCalWB SWB TWB>x"
+  thus "P\<down><STCalWB SWB TWB>x"
+  proof induct
+    case (encR S)
+    assume "TargetTerm (\<lbrakk>S\<rbrakk>)\<down><STCalWB SWB TWB>x"
+    hence "\<lbrakk>S\<rbrakk>\<down><TWB>x"
+        using STCalWB_hasBarbST
+      by blast
+    with encRS have "S\<down><SWB>x"
+        by simp
+    thus "SourceTerm S\<down><STCalWB SWB TWB>x"
+        using STCalWB_hasBarbST
+      by blast
+  next
+    case (source S)
+    assume "SourceTerm S\<down><STCalWB SWB TWB>x"
+    thus "SourceTerm S\<down><STCalWB SWB TWB>x"
+      by simp
+  next
+    case (target T1 T2)
+    assume "(T1, T2) \<in> TRel"
+    moreover assume "TargetTerm T2\<down><STCalWB SWB TWB>x"
+    hence "T2\<down><TWB>x"
+        using STCalWB_hasBarbST
+      by blast
+    ultimately have "T1\<down><TWB>x"
+        using trelRS
+      by blast
+  thus "TargetTerm T1\<down><STCalWB SWB TWB>x"
+        using STCalWB_hasBarbST
+      by blast
+  next
+    case (trans P Q R)
+    assume "R\<down><STCalWB SWB TWB>x"
+       and "R\<down><STCalWB SWB TWB>x \<Longrightarrow> Q\<down><STCalWB SWB TWB>x"
+       and "Q\<down><STCalWB SWB TWB>x \<Longrightarrow> P\<down><STCalWB SWB TWB>x"
+    thus "P\<down><STCalWB SWB TWB>x"
+      by simp
+  qed
+qed
+
+
+lemma (in encoding_wrt_barbs) OC_SS_iff_source_target_rel:
+  fixes success :: "'barbs"
+    and TRel    :: "('procT \<times> 'procT) set"
+  shows "(operational_corresponding (TRel\<^sup>*)

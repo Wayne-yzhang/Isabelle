@@ -1,0 +1,488 @@
+theory Relators
+imports "../Lib/Refine_Lib"
+begin
+
+
+
+
+definition relAPP 
+  :: "(('c1\<times>'a1) set \<Rightarrow> _) \<Rightarrow> ('c1\<times>'a1) set \<Rightarrow> _" 
+  where "relAPP f x \<equiv> f x"
+
+syntax "_rel_APP" :: "args \<Rightarrow> 'a \<Rightarrow> 'b" ("\<langle>_\<rangle>_" [0,900] 900)
+
+translations
+  "\<langle>x,xs\<rangle>R" == "\<langle>xs\<rangle>(CONST relAPP R x)"
+  "\<langle>x\<rangle>R" == "CONST relAPP R x"
+
+
+
+setup Refine_Relators_Thms.rel_comb_def_rules.setup
+
+definition fun_rel where 
+  fun_rel_def_internal: "fun_rel A B \<equiv> { (f,f'). \<forall>(a,a')\<in>A. (f a, f' a')\<in>B }"
+abbreviation fun_rel_syn (infixr "\<rightarrow>" 60) where "A\<rightarrow>B \<equiv> \<langle>A,B\<rangle>fun_rel"
+
+lemma fun_rel_def[refine_rel_defs]: 
+  "A\<rightarrow>B \<equiv> { (f,f'). \<forall>(a,a')\<in>A. (f a, f' a')\<in>B }"
+  by (simp add: relAPP_def fun_rel_def_internal)
+
+lemma fun_relI[intro!]: "\<lbrakk>\<And>a a'. (a,a')\<in>A \<Longrightarrow> (f a,f' a')\<in>B\<rbrakk> \<Longrightarrow> (f,f')\<in>A\<rightarrow>B"
+  by (auto simp: fun_rel_def)
+
+lemma fun_relD: 
+  shows " ((f,f')\<in>(A\<rightarrow>B)) \<Longrightarrow> 
+  (\<And>x x'. \<lbrakk> (x,x')\<in>A \<rbrakk> \<Longrightarrow> (f x, f' x')\<in>B)"
+  apply rule
+  by (auto simp: fun_rel_def)
+
+lemma fun_relD1:
+  assumes "(f,f')\<in>Ra\<rightarrow>Rr"
+  assumes "f x = r"
+  shows "\<forall>x'. (x,x')\<in>Ra \<longrightarrow> (r,f' x')\<in>Rr"
+  using assms by (auto simp: fun_rel_def)
+
+lemma fun_relD2:
+  assumes "(f,f')\<in>Ra\<rightarrow>Rr"
+  assumes "f' x' = r'"
+  shows "\<forall>x. (x,x')\<in>Ra \<longrightarrow> (f x,r')\<in>Rr"
+  using assms by (auto simp: fun_rel_def)
+
+lemma fun_relE1:
+  assumes "(f,f')\<in>Id \<rightarrow> Rv"
+  assumes "t' = f' x"
+  shows "(f x,t')\<in>Rv" using assms
+  by (auto elim: fun_relD)
+
+lemma fun_relE2:
+  assumes "(f,f')\<in>Id \<rightarrow> Rv"
+  assumes "t = f x"
+  shows "(t,f' x)\<in>Rv" using assms
+  by (auto elim: fun_relD)
+
+abbreviation unit_rel :: "(unit\<times>unit) set" where "unit_rel == Id"
+
+abbreviation "nat_rel \<equiv> Id::(nat\<times>_) set"
+abbreviation "int_rel \<equiv> Id::(int\<times>_) set"
+abbreviation "bool_rel \<equiv> Id::(bool\<times>_) set"
+
+definition prod_rel where
+  prod_rel_def_internal: "prod_rel R1 R2 
+    \<equiv> { ((a,b),(a',b')) . (a,a')\<in>R1 \<and> (b,b')\<in>R2 }"
+
+abbreviation prod_rel_syn (infixr "\<times>\<^sub>r" 70) where "a\<times>\<^sub>rb \<equiv> \<langle>a,b\<rangle>prod_rel" 
+
+lemma prod_rel_def[refine_rel_defs]: 
+  "(\<langle>R1,R2\<rangle>prod_rel) \<equiv> { ((a,b),(a',b')) . (a,a')\<in>R1 \<and> (b,b')\<in>R2 }"
+  by (simp add: prod_rel_def_internal relAPP_def)
+
+lemma prod_relI: "\<lbrakk>(a,a')\<in>R1; (b,b')\<in>R2\<rbrakk> \<Longrightarrow> ((a,b),(a',b'))\<in>\<langle>R1,R2\<rangle>prod_rel"
+  by (auto simp: prod_rel_def)
+lemma prod_relE: 
+  assumes "(p,p')\<in>\<langle>R1,R2\<rangle>prod_rel"
+  obtains a b a' b' where "p=(a,b)" and "p'=(a',b')" 
+  and "(a,a')\<in>R1" and "(b,b')\<in>R2"
+  using assms
+  by (auto simp: prod_rel_def)
+
+lemma prod_rel_simp[simp]: 
+  "((a,b),(a',b'))\<in>\<langle>R1,R2\<rangle>prod_rel \<longleftrightarrow> (a,a')\<in>R1 \<and> (b,b')\<in>R2"
+  by (auto intro: prod_relI elim: prod_relE)
+
+lemma in_Domain_prod_rel_iff[iff]: "(a,b)\<in>Domain (A\<times>\<^sub>rB) \<longleftrightarrow> a\<in>Domain A \<and> b\<in>Domain B"
+  by (auto simp: prod_rel_def)
+
+lemma prod_rel_comp: "(A \<times>\<^sub>r B) O (C \<times>\<^sub>r D) = (A O C) \<times>\<^sub>r (B O D)"
+  unfolding prod_rel_def
+  by auto
+    
+    
+definition option_rel where
+  option_rel_def_internal:
+  "option_rel R \<equiv> { (Some a,Some a') | a a'. (a,a')\<in>R } \<union> {(None,None)}"
+
+lemma option_rel_def[refine_rel_defs]: 
+  "\<langle>R\<rangle>option_rel \<equiv> { (Some a,Some a') | a a'. (a,a')\<in>R } \<union> {(None,None)}"
+  by (simp add: option_rel_def_internal relAPP_def)
+
+lemma option_relI:
+  "(None,None)\<in>\<langle>R\<rangle> option_rel"
+  "\<lbrakk> (a,a')\<in>R \<rbrakk> \<Longrightarrow> (Some a, Some a')\<in>\<langle>R\<rangle>option_rel"
+  by (auto simp: option_rel_def)
+
+lemma option_relE:
+  assumes "(x,x')\<in>\<langle>R\<rangle>option_rel"
+  obtains "x=None" and "x'=None"
+  | a a' where "x=Some a" and "x'=Some a'" and "(a,a')\<in>R"
+  using assms by (auto simp: option_rel_def)
+
+lemma option_rel_simp[simp]:
+  "(None,a)\<in>\<langle>R\<rangle>option_rel \<longleftrightarrow> a=None"
+  "(c,None)\<in>\<langle>R\<rangle>option_rel \<longleftrightarrow> c=None"
+  "(Some x,Some y)\<in>\<langle>R\<rangle>option_rel \<longleftrightarrow> (x,y)\<in>R"
+  by (auto intro: option_relI elim: option_relE)
+
+
+definition sum_rel where sum_rel_def_internal: 
+  "sum_rel Rl Rr 
+   \<equiv> { (Inl a, Inl a') | a a'. (a,a')\<in>Rl } \<union>
+     { (Inr a, Inr a') | a a'. (a,a')\<in>Rr }"
+
+lemma sum_rel_def[refine_rel_defs]: 
+  "\<langle>Rl,Rr\<rangle>sum_rel \<equiv> 
+     { (Inl a, Inl a') | a a'. (a,a')\<in>Rl } \<union>
+     { (Inr a, Inr a') | a a'. (a,a')\<in>Rr }"
+  by (simp add: sum_rel_def_internal relAPP_def)
+
+lemma sum_rel_simp[simp]:
+  "\<And>a a'. (Inl a, Inl a') \<in> \<langle>Rl,Rr\<rangle>sum_rel \<longleftrightarrow> (a,a')\<in>Rl"
+  "\<And>a a'. (Inr a, Inr a') \<in> \<langle>Rl,Rr\<rangle>sum_rel \<longleftrightarrow> (a,a')\<in>Rr"
+  "\<And>a a'. (Inl a, Inr a') \<notin> \<langle>Rl,Rr\<rangle>sum_rel"
+  "\<And>a a'. (Inr a, Inl a') \<notin> \<langle>Rl,Rr\<rangle>sum_rel"
+  unfolding sum_rel_def by auto
+
+lemma sum_relI: 
+  "(l,l')\<in>Rl \<Longrightarrow> (Inl l, Inl l') \<in> \<langle>Rl,Rr\<rangle>sum_rel"
+  "(r,r')\<in>Rr \<Longrightarrow> (Inr r, Inr r') \<in> \<langle>Rl,Rr\<rangle>sum_rel"
+  by simp_all
+  
+lemma sum_relE:
+  assumes "(x,x')\<in>\<langle>Rl,Rr\<rangle>sum_rel"
+  obtains 
+    l l' where "x=Inl l" and "x'=Inl l'" and "(l,l')\<in>Rl"
+  | r r' where "x=Inr r" and "x'=Inr r'" and "(r,r')\<in>Rr"
+  using assms by (auto simp: sum_rel_def)
+
+
+definition list_rel where list_rel_def_internal:
+  "list_rel R \<equiv> {(l,l'). list_all2 (\<lambda>x x'. (x,x')\<in>R) l l'}"
+
+lemma list_rel_def[refine_rel_defs]: 
+  "\<langle>R\<rangle>list_rel \<equiv> {(l,l'). list_all2 (\<lambda>x x'. (x,x')\<in>R) l l'}"
+  by (simp add: list_rel_def_internal relAPP_def)
+
+lemma list_rel_induct[induct set,consumes 1, case_names Nil Cons]:
+  assumes "(l,l')\<in>\<langle>R\<rangle> list_rel"
+  assumes "P [] []"
+  assumes "\<And>x x' l l'. \<lbrakk> (x,x')\<in>R; (l,l')\<in>\<langle>R\<rangle>list_rel; P l l' \<rbrakk> 
+    \<Longrightarrow> P (x#l) (x'#l')"
+  shows "P l l'"
+  using assms unfolding list_rel_def
+  apply simp
+  by (rule list_all2_induct)
+
+lemma list_rel_eq_listrel: "list_rel = listrel"
+  apply (rule ext)
+  apply safe
+proof goal_cases
+  case (1 x a b) thus ?case
+    unfolding list_rel_def_internal
+    apply simp
+    apply (induct a b rule: list_all2_induct)
+    apply (auto intro: listrel.intros)
+    done
+next
+  case 2 thus ?case
+    apply (induct)
+    apply (auto simp: list_rel_def_internal)
+    done
+qed
+
+lemma list_relI: 
+  "([],[])\<in>\<langle>R\<rangle>list_rel"
+  "\<lbrakk> (x,x')\<in>R; (l,l')\<in>\<langle>R\<rangle>list_rel \<rbrakk> \<Longrightarrow> (x#l,x'#l')\<in>\<langle>R\<rangle>list_rel"
+  by (auto simp: list_rel_def)
+
+lemma list_rel_simp[simp]:
+  "([],l')\<in>\<langle>R\<rangle>list_rel \<longleftrightarrow> l'=[]"
+  "(l,[])\<in>\<langle>R\<rangle>list_rel \<longleftrightarrow> l=[]"
+  "([],[])\<in>\<langle>R\<rangle>list_rel"
+  "(x#l,x'#l')\<in>\<langle>R\<rangle>list_rel \<longleftrightarrow> (x,x')\<in>R \<and> (l,l')\<in>\<langle>R\<rangle>list_rel"
+  by (auto simp: list_rel_def)
+
+lemma list_relE1:
+  assumes "(l,[])\<in>\<langle>R\<rangle>list_rel" obtains "l=[]" using assms by auto
+
+lemma list_relE2:
+  assumes "([],l)\<in>\<langle>R\<rangle>list_rel" obtains "l=[]" using assms by auto
+
+lemma list_relE3:
+  assumes "(x#xs,l')\<in>\<langle>R\<rangle>list_rel" obtains x' xs' where 
+  "l'=x'#xs'" and "(x,x')\<in>R" and "(xs,xs')\<in>\<langle>R\<rangle>list_rel"
+  using assms 
+  apply (cases l')
+  apply auto
+  done
+
+lemma list_relE4:
+  assumes "(l,x'#xs')\<in>\<langle>R\<rangle>list_rel" obtains x xs where 
+  "l=x#xs" and "(x,x')\<in>R" and "(xs,xs')\<in>\<langle>R\<rangle>list_rel"
+  using assms 
+  apply (cases l)
+  apply auto
+  done
+
+lemmas list_relE = list_relE1 list_relE2 list_relE3 list_relE4
+
+lemma list_rel_imp_same_length: 
+    "(l, l') \<in> \<langle>R\<rangle>list_rel \<Longrightarrow> length l = length l'"
+  unfolding list_rel_eq_listrel relAPP_def
+  by (rule listrel_eq_len)
+
+lemma list_rel_split_right_iff: 
+  "(x#xs,l)\<in>\<langle>R\<rangle>list_rel \<longleftrightarrow> (\<exists>y ys. l=y#ys \<and> (x,y)\<in>R \<and> (xs,ys)\<in>\<langle>R\<rangle>list_rel)"
+  by (cases l) auto
+lemma list_rel_split_left_iff: 
+  "(l,y#ys)\<in>\<langle>R\<rangle>list_rel \<longleftrightarrow> (\<exists>x xs. l=x#xs \<and> (x,y)\<in>R \<and> (xs,ys)\<in>\<langle>R\<rangle>list_rel)"
+  by (cases l) auto
+    
+  
+definition set_rel where
+  set_rel_def_internal: 
+    "set_rel R \<equiv> {(A,B). (\<forall>x\<in>A. \<exists>y\<in>B. (x,y)\<in>R) \<and> (\<forall>y\<in>B. \<exists>x\<in>A. (x,y)\<in>R)}"
+  
+term set_rel    
+    
+lemma set_rel_def[refine_rel_defs]: 
+  "\<langle>R\<rangle>set_rel \<equiv> {(A,B). (\<forall>x\<in>A. \<exists>y\<in>B. (x,y)\<in>R) \<and> (\<forall>y\<in>B. \<exists>x\<in>A. (x,y)\<in>R)}"
+  by (simp add: set_rel_def_internal relAPP_def)
+    
+lemma set_rel_alt: "\<langle>R\<rangle>set_rel = {(A,B). A \<subseteq> R\<inverse>``B \<and> B \<subseteq> R``A}"
+  unfolding set_rel_def by auto
+
+    
+    
+lemma set_relI[intro?]:
+  assumes "\<And>x. x\<in>A \<Longrightarrow> \<exists>y\<in>B. (x,y)\<in>R"
+  assumes "\<And>y. y\<in>B \<Longrightarrow> \<exists>x\<in>A. (x,y)\<in>R"
+  shows "(A,B)\<in>\<langle>R\<rangle>set_rel"  
+  using assms unfolding set_rel_def by blast
+    
+    
+  Abandoned in favour of more symmetric definition above: \<close>    
+text \<open>Old definition coincides with new definition for single-valued 
+  element relations. This is probably the reason why the old definition worked 
+  for most applications.\<close>
+subsection \<open>Automation\<close> 
+subsubsection \<open>A solver for relator properties\<close>
+ML \<open>
+  structure relator_props = Named_Thms (
+    val name = @{binding relator_props}
+    val description = "Additional relator properties"
+  )
+
+  structure solve_relator_props = Named_Thms (
+    val name = @{binding solve_relator_props}
+    val description = "Relator properties that solve goal"
+  )
+
+\<close>
+declaration \<open>
+  Tagged_Solver.declare_solver 
+    @{thms relprop_triggers} 
+    @{binding relator_props_solver}
+    "Additional relator properties solver"
+    (fn ctxt => (REPEAT_ALL_NEW (CHANGED o (
+      match_tac ctxt (solve_relator_props.get ctxt) ORELSE'
+      match_tac ctxt (relator_props.get ctxt)
+    ))))
+\<close>
+declaration \<open>
+  Tagged_Solver.declare_solver 
+    []
+    @{binding force_relator_props_solver}
+    "Additional relator properties solver (instantiate schematics)"
+    (fn ctxt => (REPEAT_ALL_NEW (CHANGED o (
+      resolve_tac ctxt (solve_relator_props.get ctxt) ORELSE'
+      match_tac ctxt (relator_props.get ctxt)
+    ))))
+\<close>
+subsubsection \<open>ML-Level utilities\<close>
+ML \<open>
+  signature RELATORS = sig
+    val mk_relT: typ * typ -> typ
+    val dest_relT: typ -> typ * typ
+
+    val mk_relAPP: term -> term -> term
+    val list_relAPP: term list -> term -> term
+    val strip_relAPP: term -> term list * term 
+    val mk_fun_rel: term -> term -> term
+
+    val list_rel: term list -> term -> term
+
+    val rel_absT: term -> typ
+    val rel_concT: term -> typ
+
+    val mk_prodrel: term * term -> term
+    val is_prodrel: term -> bool
+    val dest_prodrel: term -> term * term
+
+    val strip_prodrel_left: term -> term list
+    val list_prodrel_left: term list -> term
+
+
+    val declare_natural_relator: 
+      (string*string) -> Context.generic -> Context.generic
+    val remove_natural_relator: string -> Context.generic -> Context.generic
+    val natural_relator_of: Proof.context -> string -> string option
+
+    val mk_natural_relator: Proof.context -> term list -> string -> term option
+
+    val setup: theory -> theory
+  end
+
+  structure Relators :RELATORS = struct
+    val mk_relT = HOLogic.mk_prodT #> HOLogic.mk_setT
+
+    fun dest_relT (Type (@{type_name set},[Type (@{type_name prod},[cT,aT])])) 
+      = (cT,aT)
+      | dest_relT ty = raise TYPE ("dest_relT",[ty],[])
+
+    fun mk_relAPP x f = let
+      val xT = fastype_of x
+      val fT = fastype_of f
+      val rT = range_type fT
+    in 
+      Const (@{const_name relAPP},fT-->xT-->rT)$f$x
+    end
+
+    val list_relAPP = fold mk_relAPP
+
+    fun strip_relAPP R = let
+      fun aux @{mpat "\<langle>?R\<rangle>?S"} l = aux S (R::l)
+        | aux R l = (l,R)
+    in aux R [] end
+
+    val rel_absT = fastype_of #> HOLogic.dest_setT #> HOLogic.dest_prodT #> snd
+    val rel_concT = fastype_of #> HOLogic.dest_setT #> HOLogic.dest_prodT #> fst
+
+    fun mk_fun_rel r1 r2 = let
+      val (r1T,r2T) = (fastype_of r1,fastype_of r2)
+      val (c1T,a1T) = dest_relT r1T
+      val (c2T,a2T) = dest_relT r2T
+      val (cT,aT) = (c1T --> c2T, a1T --> a2T)
+      val rT = mk_relT (cT,aT)
+    in 
+      list_relAPP [r1,r2] (Const (@{const_name fun_rel},r1T-->r2T-->rT))
+    end
+
+    val list_rel = fold_rev mk_fun_rel
+
+    fun mk_prodrel (A,B) = @{mk_term "?A \<times>\<^sub>r ?B"}
+    fun is_prodrel @{mpat "_ \<times>\<^sub>r _"} = true | is_prodrel _ = false
+    fun dest_prodrel @{mpat "?A \<times>\<^sub>r ?B"} = (A,B) | dest_prodrel t = raise TERM("dest_prodrel",[t])
+
+    fun strip_prodrel_left @{mpat "?A \<times>\<^sub>r ?B"} = strip_prodrel_left A @ [B]
+      | strip_prodrel_left @{mpat (typs) "unit_rel"} = []
+      | strip_prodrel_left R = [R]
+
+    val list_prodrel_left = Refine_Util.list_binop_left @{term unit_rel} mk_prodrel
+
+    structure natural_relators = Generic_Data (
+      type T = string Symtab.table
+      val empty = Symtab.empty
+      val merge = Symtab.join (fn _ => fn (_,cn) => cn)
+    )
+
+    fun declare_natural_relator tcp =
+      natural_relators.map (Symtab.update tcp)
+
+    fun remove_natural_relator tname =
+      natural_relators.map (Symtab.delete_safe tname)
+
+    fun natural_relator_of ctxt =
+      Symtab.lookup (natural_relators.get (Context.Proof ctxt))
+
+    fun mk_natural_relator ctxt args Tname = 
+      case natural_relator_of ctxt Tname of
+        NONE => NONE
+      | SOME Cname => SOME let
+          val argsT = map fastype_of args
+          val (cTs, aTs) = map dest_relT argsT |> split_list
+          val aT = Type (Tname,aTs)
+          val cT = Type (Tname,cTs)
+          val rT = mk_relT (cT,aT)
+        in
+          list_relAPP args (Const (Cname,argsT--->rT))
+        end
+
+    fun 
+      natural_relator_from_term (t as Const (name,T)) = let
+        fun err msg = raise TERM (msg,[t])
+  
+        val (argTs,bodyT) = strip_type T
+        val (conTs,absTs) = argTs |> map (HOLogic.dest_setT #> HOLogic.dest_prodT) |> split_list
+        val (bconT,babsT) = bodyT |> HOLogic.dest_setT |> HOLogic.dest_prodT
+        val (Tcon,bconTs) = dest_Type bconT
+        val (Tcon',babsTs) = dest_Type babsT
+  
+        val _ = Tcon = Tcon' orelse err "Type constructors do not match"
+        val _ = conTs = bconTs orelse err "Concrete types do not match"
+        val _ = absTs = babsTs orelse err "Abstract types do not match"
+
+      in 
+        (Tcon,name)
+      end
+    | natural_relator_from_term t = 
+
+    local
+      fun decl_natrel_aux t context = let
+        fun warn msg = let
+          val tP = 
+            Context.cases Syntax.pretty_term_global Syntax.pretty_term 
+              context t
+          val m = Pretty.block [
+            Pretty.str "Ignoring invalid natural_relator declaration:",
+            Pretty.brk 1,
+            Pretty.str msg,
+            Pretty.brk 1,
+            tP
+          ] |> Pretty.string_of
+          val _ = warning m
+        in context end 
+      in
+        declare_natural_relator (natural_relator_from_term t) context
+        handle 
+          TERM (msg,_) => warn msg
+        | exn => if Exn.is_interrupt exn then Exn.reraise exn else warn ""
+      end
+    in
+      val natural_relator_attr = Scan.repeat1 Args.term >> (fn ts => 
+        Thm.declaration_attribute ( fn _ => fold decl_natrel_aux ts)
+      )
+    end
+  
+
+    val setup = I
+      #> Attrib.setup 
+        @{binding natural_relator} natural_relator_attr "Declare natural relator"
+
+  end
+\<close>
+subsection \<open>Setup\<close>
+ML_val \<open>
+  Relators.mk_natural_relator 
+    @{context} 
+    [@{term "Ra::('c\<times>'a) set"},@{term "\<langle>Rb\<rangle>option_rel"}] 
+    @{type_name prod}
+  |> the
+  |> Thm.cterm_of @{context}
+;
+  Relators.mk_fun_rel @{term "\<langle>Id\<rangle>option_rel"} @{term "\<langle>Id\<rangle>list_rel"}
+  |> Thm.cterm_of @{context}
+\<close>
+text \<open>Pointwise refinement for set types:\<close>
+subsection \<open>Invariant and Abstraction\<close>
+text \<open>
+  Quite often, a relation can be described as combination of an
+  abstraction function and an invariant, such that the invariant describes valid
+  values on the concrete domain, and the abstraction function maps valid 
+  concrete values to its corresponding abstract value.
+\<close>
+subsection \<open>Miscellanneous\<close>
+subsection \<open>Conversion between Predicate and Set Based Relators\<close>    
+text \<open>
+  transfer and lifting package of Isabelle/HOL uses predicate based relators
+  to convert between the two.
+\<close>  
+subsection \<open>More Properties\<close>    

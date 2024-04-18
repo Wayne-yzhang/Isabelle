@@ -1,0 +1,313 @@
+theory GenClock imports Complex_Main begin
+
+
+
+type_synonym process = nat
+type_synonym time = real
+type_synonym Clocktime = real
+
+axiomatization
+  \<delta> :: real and
+  \<mu> :: real and
+  \<rho> :: real and
+  rmin :: real and
+  rmax :: real and
+  \<beta> :: real and
+  \<Lambda> :: real and
+  np :: process and
+  maxfaults :: process and
+  PC :: "[process, time] \<Rightarrow> Clocktime" and
+  VC :: "[process, time] \<Rightarrow> Clocktime" and
+  te :: "[process, event] \<Rightarrow> time" and
+  \<theta> :: "[process, event] \<Rightarrow> (process \<Rightarrow> Clocktime)" and
+  IC :: "[process, event, time] \<Rightarrow> Clocktime" and
+  correct :: "[process, time] \<Rightarrow> bool" and
+  cfn :: "[process, (process \<Rightarrow> Clocktime)] \<Rightarrow> Clocktime" and
+
+  \<pi> :: "[Clocktime, Clocktime] \<Rightarrow> Clocktime" and
+
+  \<alpha> :: "Clocktime \<Rightarrow> Clocktime"
+
+definition
+  count :: "[process \<Rightarrow> bool, process] \<Rightarrow> nat" where
+  "count f n = card {p. p < n \<and> f p}"
+
+definition
+  Adj :: "[process, event] \<Rightarrow> Clocktime" where
+  "Adj = (\<lambda> p i. if 0 < i then cfn p (\<theta> p i) - PC p (te p i)
+                 else 0)"
+
+definition
+  okRead1 :: "[process \<Rightarrow> Clocktime, Clocktime, process \<Rightarrow> bool] \<Rightarrow> bool" where
+  "okRead1 f x ppred \<longleftrightarrow> (\<forall> l m. ppred l \<and> ppred m \<longrightarrow> \<bar>f l - f m\<bar> \<le> x)"
+
+definition
+  okRead2 :: "[process \<Rightarrow> Clocktime, process \<Rightarrow> Clocktime, Clocktime,
+               process \<Rightarrow> bool] \<Rightarrow> bool" where
+  "okRead2 f g x ppred \<longleftrightarrow> (\<forall> p. ppred p \<longrightarrow> \<bar>f p - g p\<bar> \<le> x)"
+
+definition
+  rho_bound1 :: "[[process, time] \<Rightarrow> Clocktime] \<Rightarrow> bool" where
+  "rho_bound1 C \<longleftrightarrow> (\<forall> p s t. correct p t \<and> s \<le> t \<longrightarrow> C p t - C p s \<le> (t - s)*(1 + \<rho>))"
+definition
+  rho_bound2 :: "[[process, time] \<Rightarrow> Clocktime] \<Rightarrow> bool" where
+  "rho_bound2 C \<longleftrightarrow> (\<forall> p s t. correct p t \<and> s \<le> t \<longrightarrow> (t - s)*(1 - \<rho>) \<le> C p t - C p s)"
+
+
+axiomatization where
+  constants_ax: "0 < \<beta> \<and> 0 < \<mu> \<and> 0 < rmin
+  \<and> rmin \<le> rmax \<and> 0 < \<rho> \<and> 0 < np \<and> maxfaults \<le> np"
+
+axiomatization where
+  PC_monotone: "\<forall> p s t. correct p t \<and> s \<le> t \<longrightarrow> PC p s \<le> PC p t"
+
+axiomatization where
+  VClock: "\<forall> p t i. correct p t \<and> te p i \<le> t \<and> t < te p (i + 1) \<longrightarrow> VC p t = IC p i t"
+
+axiomatization where
+  IClock: "\<forall> p t i. correct p t \<longrightarrow> IC p i t = PC p t + Adj p i"
+
+axiomatization where
+  init: "\<forall> p. correct p 0 \<longrightarrow> 0 \<le> PC p 0 \<and> PC p 0 \<le> \<mu>"
+
+axiomatization where
+  rate_1: "\<forall> p s t. correct p t \<and> s \<le> t \<longrightarrow> PC p t - PC p s \<le> (t - s)*(1 + \<rho>)" and
+  rate_2: "\<forall> p s t. correct p t \<and> s \<le> t \<longrightarrow> (t - s)*(1 - \<rho>) \<le> PC p t - PC p s"
+
+axiomatization where
+  rts0: "\<forall> p t i. correct p t \<and> t \<le> te p (i+1) \<longrightarrow> t - te p i \<le> rmax" and
+  rts1: "\<forall> p t i. correct p t \<and> te p (i+1) \<le> t \<longrightarrow> rmin \<le> t - te p i"
+
+axiomatization where
+  rts2a: "\<forall> p q t i. correct p t \<and> correct q t \<and> te q i + \<beta> \<le> t \<longrightarrow> te p i \<le> t"  and
+  rts2b: "\<forall> p q i. correct p (te p i) \<and> correct q (te q i) \<longrightarrow> abs(te p i - te q i) \<le> \<beta>"
+
+axiomatization where
+  synch0: "\<forall> p. te p 0 = 0"
+
+axiomatization where
+  nonoverlap: "\<beta> \<le> rmin"
+
+axiomatization where
+  readerror: "\<forall> p q i. correct p (te p (i+1)) \<and> correct q (te p (i+1)) \<longrightarrow>
+              abs(\<theta> p (i+1) q - IC q i (te p (i+1))) \<le> \<Lambda>"
+
+axiomatization where
+  correct_closed: "\<forall> p s t. s \<le> t \<and> correct p t \<longrightarrow> correct p s" and
+  correct_count:  "\<forall> t. np - maxfaults \<le> count (\<lambda> p. correct p t) np"
+
+axiomatization where
+  trans_inv: "\<forall> p f x. 0 \<le> x \<longrightarrow> cfn p (\<lambda> y. f y + x) = cfn p f + x"
+
+axiomatization where
+  prec_enh:
+  "\<forall> ppred p q f g x y.
+          np - maxfaults \<le> count ppred np \<and>
+          okRead1 f y ppred \<and> okRead1 g y ppred \<and>
+          okRead2 f g x ppred \<and> ppred p \<and> ppred q
+      \<longrightarrow> abs(cfn p f - cfn q g) \<le> \<pi> x y"
+
+axiomatization where
+  acc_prsv:
+  "\<forall> ppred p q f x. okRead1 f x ppred \<and> np - maxfaults \<le> count ppred np
+          \<and> ppred p \<and> ppred q \<longrightarrow> abs(cfn p f - f q) \<le> \<alpha> x"
+
+
+
+lemma rts0d:
+assumes cp: "correct p (te p (i+1))"
+shows "te p (i+1) - te p i \<le> rmax"
+using cp rts0 by simp
+
+lemma rts1d:
+assumes cp: "correct p (te p (i+1))"
+shows "rmin \<le> te p (i+1) - te p i"
+using cp rts1 by simp
+
+lemma rte:
+assumes cp: "correct p (te p (i+1))"
+shows "te p i \<le> te p (i+1)"
+proof-
+  from cp rts1d have "rmin \<le> te p (i+1) - te p i"
+    by simp
+  from this constants_ax show ?thesis by arith
+qed
+
+lemma beta_bound1:
+assumes corr_p: "correct p (te p (i+1))"
+and corr_q: "correct q (te p (i+1))"
+shows "0 \<le> te p (i+1) - te q i"
+proof-
+  from corr_p rte have "te p i \<le> te p (i+1)"
+    by simp
+  from this corr_p correct_closed have corr_pi: "correct p (te p i)"
+    by blast
+  from corr_p rts1d nonoverlap have "rmin \<le> te p (i+1) - te p i"
+    by simp
+  from this nonoverlap have "\<beta> \<le> te p (i+1) - te p i" by simp
+  hence "te p i + \<beta> \<le> te p (i+1)" by simp
+
+  from this corr_p corr_q rts2a
+  have "te q i \<le> te p (i+1)"
+    by blast
+  thus ?thesis by simp
+qed
+
+lemma beta_bound2:
+assumes corr_p: "correct p (te p (i+1))"
+and corr_q: "correct q (te q i)"
+shows "te p (i+1) - te q i \<le> rmax + \<beta>"
+proof-
+  from corr_p rte have "te p i \<le> te p (i+1)"
+    by simp
+  from this corr_p correct_closed have corr_pi: "correct p (te p i)"
+    by blast
+
+  have split: "te p (i+1) - te q i =
+    (te p (i+1) - te p i) + (te p i - te q i)"
+    by (simp)
+
+  from corr_q corr_pi rts2b have Eq1: "abs(te p i - te q i) \<le> \<beta>"
+    by simp
+  have Eq2: "te p i - te q i \<le> \<beta>"
+  proof cases
+    assume "te q i \<le> te p i"
+    from this Eq1 show ?thesis
+      by (simp add: abs_if)
+  next
+    assume "\<not> (te q i \<le> te p i)"
+    from this Eq1 show ?thesis
+      by (simp add: abs_if)
+  qed
+
+  from corr_p rts0d have "te p (i+1) - te p i \<le> rmax"
+    by simp
+  from this split Eq2 show ?thesis by simp
+qed
+
+
+lemma bd:
+  assumes ie: "s \<le> t"
+  and rb1: "rho_bound1 C"
+  and rb2: "rho_bound2 D"
+  and PC_ie: "D q t - D q s \<le> C p t - C p s"
+  and corr_p: "correct p t"
+  and corr_q: "correct q t"
+  shows "\<bar> C p t - D q t \<bar>  \<le> \<bar> C p s - D q s \<bar> + 2*\<rho>*(t - s)"
+proof-
+  let ?Dt = "C p t - D q t"
+  let ?Ds = "C p s - D q s"
+  let ?Bp = "C p t - C p s"
+  let ?Bq = "D q t - D q s"
+  let ?I = "t - s"
+
+  have "\<bar> ?Bp - ?Bq \<bar> \<le> 2*\<rho>*(t - s)"
+  proof-
+    from PC_ie have Eq1: "\<bar> ?Bp - ?Bq \<bar> = ?Bp - ?Bq" by (simp add: abs_if)
+    from corr_p ie rb1 have Eq2: "?Bp - ?Bq \<le> ?I*(1+\<rho>) - ?Bq" (is "?E1 \<le> ?E2")
+      by(simp add: rho_bound1_def)
+    from corr_q ie rb2 have "?I*(1 - \<rho>) \<le> ?Bq"
+      by(simp add: rho_bound2_def)
+    from this have Eq3: "?E2 \<le> ?I*(1+\<rho>) - ?I*(1 - \<rho>)"
+      by(simp)
+    have Eq4: "?I*(1+\<rho>) - ?I*(1 - \<rho>) = 2*\<rho>*?I"
+      by(simp add: algebra_simps)
+    from Eq1 Eq2 Eq3 Eq4 show ?thesis by simp
+  qed
+  moreover
+  have "\<bar>?Dt\<bar>  \<le> \<bar>?Bp - ?Bq\<bar>  + \<bar>?Ds\<bar>"
+    by(simp add: abs_if)
+  ultimately show ?thesis by simp
+qed
+
+lemma bounded_drift:
+  assumes ie: "s \<le> t"
+  and rb1: "rho_bound1 C"
+  and rb2: "rho_bound2 C"
+  and rb3: "rho_bound1 D"
+  and rb4: "rho_bound2 D"
+  and corr_p: "correct p t"
+  and corr_q: "correct q t"
+  shows "\<bar>C p t - D q t\<bar> \<le> \<bar>C p s - D q s\<bar>  + 2*\<rho>*(t - s)"
+proof-
+  let ?Bp = "C p t - C p s"
+  let ?Bq = "D q t - D q s"
+
+  show ?thesis
+  proof cases
+    assume "?Bq \<le> ?Bp"
+    from this ie rb1 rb4 corr_p corr_q bd show ?thesis by simp
+  next
+    assume "\<not> (?Bq \<le> ?Bp)"
+    hence "?Bp \<le> ?Bq" by simp
+    from this ie rb2 rb3 corr_p corr_q bd
+    have "\<bar>D q t - C p t\<bar>  \<le> \<bar>D q s - C p s\<bar> + 2*\<rho>*(t - s)"
+      by simp
+    from this show ?thesis by (simp add: abs_minus_commute)
+  qed
+qed
+
+
+lemma IC_rate1:
+"rho_bound1 (\<lambda> p t. IC p i t)"
+proof-
+  {
+    fix p::process
+    fix s::time
+    fix t::time
+    assume cp: "correct p t"
+    assume ie: "s \<le> t"
+    from cp ie correct_closed have cps: "correct p s"
+      by blast
+    have "IC p i t - IC p i s \<le> (t - s)*(1+\<rho>)"
+    proof-
+      from cp IClock have "IC p i t = PC p t + Adj p i"
+        by simp
+      moreover
+      from cps IClock have "IC p i s = PC p s + Adj p i"
+        by simp
+      moreover
+      from cp ie rate_1 have "PC p t - PC p s \<le> (t - s)*(1+\<rho>)"
+        by simp
+      ultimately show ?thesis by simp
+    qed
+  }
+  thus ?thesis by (simp add: rho_bound1_def)
+qed
+
+lemma IC_rate2:
+"rho_bound2 (\<lambda> p t. IC p i t)"
+proof-
+  {
+    fix p::process
+    fix s::time
+    fix t::time
+    assume cp: "correct p t"
+    assume ie: "s \<le> t"
+    from cp ie correct_closed have cps: "correct p s"
+      by blast
+    have "(t - s)*(1 - \<rho>) \<le> IC p i t - IC p i s"
+    proof-
+      from cp IClock have "IC p i t = PC p t + Adj p i"
+        by simp
+      moreover
+      from cps IClock have "IC p i s = PC p s + Adj p i"
+        by simp
+      moreover
+      from cp ie rate_2 have "(t - s)*(1-\<rho>) \<le> PC p t - PC p s"
+        by simp
+      ultimately show ?thesis by simp
+    qed
+  }
+  thus ?thesis by (simp add: rho_bound2_def)
+qed
+
+unification problem in some tactic of isabelle.\<close>
+subsection\<open>Agreement property\<close>
+text\<open>This lemma (and the next one pe-cond2) proves an assumption used
+in the precision enhancement.\<close>
+text\<open>Theorem 4.1 in Shankar's paper.\<close>
+text\<open>Lemma for the inductive case in Theorem 4.2\<close>
+text\<open>Theorem 4.2 in Shankar's paper.\<close>
+text\<open>The main theorem: all correct clocks are synchronized within the
+bound delta.\<close>

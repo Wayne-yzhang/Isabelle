@@ -1,0 +1,91 @@
+theory Challenge1_short
+imports "lib/VTcomp"
+begin
+
+
+  datatype 'a textbuffer = BUF ("pos": "nat") ("text": "'a list")
+
+  primrec move_left where "move_left (BUF p t) = BUF (p-1) t" 
+  primrec move_right where "move_right (BUF p t) = BUF (min (length t) (p+1)) t"
+  primrec insert where "insert x (BUF p t) = BUF (p+1) (take p t@x#drop p t)"
+  primrec delete where "delete (BUF p t) = BUF (p-1) (take (p-1) t@drop p t)"
+  
+  
+  type_synonym 'a gap_buffer = "nat \<times> nat \<times> 'a list"
+
+  definition "gap_\<alpha> \<equiv> \<lambda>(l,r,buf). BUF l (take l buf @ drop r buf)"
+  definition "gap_invar \<equiv> \<lambda>(l,r,buf). l\<le>r \<and> r\<le>length buf"
+  abbreviation "gap_rel \<equiv> br gap_\<alpha> gap_invar"
+
+  
+  
+  definition "move_left1 \<equiv> \<lambda>(l,r,buf). doN {
+    if l\<noteq>0 then doN {
+      ASSERT(r-1<length buf \<and> l-1<length buf);
+      RETURN (l-1,r-1,buf[r-1:=buf!(l-1)])
+    } else RETURN (l,r,buf)
+  }"
+
+  lemma move_left1_correct: 
+    "(move_left1, RETURN o move_left) \<in> gap_rel \<rightarrow> \<langle>gap_rel\<rangle>nres_rel"
+    apply clarsimp
+    unfolding move_left1_def
+    apply refine_vcg
+    apply (auto 
+      simp: in_br_conv gap_\<alpha>_def gap_invar_def move_left1_def 
+      split: prod.splits)
+    by (smt Cons_nth_drop_Suc Suc_pred append.assoc append_Cons append_Nil 
+      diff_Suc_less drop_update_cancel hd_drop_conv_nth length_list_update 
+      less_le_trans nth_list_update_eq take_hd_drop)  
+
+  definition "move_right1 \<equiv> \<lambda>(l,r,buf). doN {
+    if r<length buf then doN {
+      ASSERT (l<length buf);
+      RETURN (l+1,r+1,buf[l:=buf!r])
+    } else RETURN (l,r,buf)
+  }"
+    
+  lemma move_right1_correct: 
+    "(move_right1,RETURN o move_right) \<in> gap_rel \<rightarrow> \<langle>gap_rel\<rangle>nres_rel"
+    apply clarsimp
+    unfolding move_right1_def
+    apply refine_vcg
+    unfolding gap_\<alpha>_def gap_invar_def
+    apply (auto simp: in_br_conv split: prod.split)
+    apply (rule nth_equalityI)
+     apply (simp_all add: Cons_nth_drop_Suc take_update_last)
+    done
+
+     
+  definition "can_insert \<equiv> \<lambda>(l,r,buf). l<r"
+  
+  definition "grow1 K \<equiv> \<lambda>(l,r,buf). doN {
+    let b = op_array_replicate (length buf + K) default;
+    b \<leftarrow> mop_list_blit buf 0 b 0 l;
+    b \<leftarrow> mop_list_blit buf r b (r+K) (length buf - r);
+    RETURN (l,r+K,b)
+  }"
+    These are defined in the refinement monad and already contain the assertion 
+    of their precondition. The backside is that they cannot be easily used in as part
+    of expressions, e.g., in @{term "buf[l:=buf!r]"}, we would have to explicitly bind
+    each intermediate value: @{term "doN { v \<leftarrow> mop_list_get buf r; mop_list_set buf l v }"}.
+  \<close>
+    \<comment> \<open>Declares this as a rule to be used by the VCG\<close>
+    apply refine_vcg \<comment> \<open>VCG knows the rule for grow1 already\<close>
+  subsubsection \<open>Delete\<close>
+subsection \<open>Imperative Arrays\<close>  
+  text \<open>The following indicates how we will further refine the gap-buffer:
+    The list will become an array, the indices and the content will not be 
+    refined (expressed by @{const nat_assn} and @{const id_assn}).
+  \<close>
+    \<comment> \<open>We inline @{const grow1} here\<close>
+  text \<open>Finally, we combine the two refinement steps, to get overall correctness theorems\<close>  
+    \<comment> \<open>@{const hr_comp} is composition of refinement relations\<close>
+    text \<open>Proves:
+      @{thm [display] move_left_impl_correct}
+      @{thm [display] move_right_impl_correct}
+      @{thm [display] insert_impl_correct}
+      @{thm [display] delete_impl_correct}
+    \<close>
+subsection \<open>Executable Code\<close>  
+  text \<open>Isabelle/HOL can generate code in various target languages.\<close>

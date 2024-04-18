@@ -1,0 +1,228 @@
+theory Morse_Gromov_Theorem
+  imports "HOL-Decision_Procs.Approximation" Gromov_Hyperbolicity Hausdorff_Distance
+begin
+
+hide_const (open) Approximation.Min
+hide_const (open) Approximation.Max
+
+
+
+definition quasiconvex::"real \<Rightarrow> ('a::metric_space) set \<Rightarrow> bool"
+  where "quasiconvex C X = (C \<ge> 0 \<and> (\<forall>x\<in>X. \<forall>y\<in>X. \<exists>G. geodesic_segment_between G x y \<and> (\<forall>z\<in>G. infdist z X \<le> C)))"
+
+lemma quasiconvexD:
+  assumes "quasiconvex C X" "x \<in> X" "y \<in> X"
+  shows "\<exists>G. geodesic_segment_between G x y \<and> (\<forall>z\<in>G. infdist z X \<le> C)"
+using assms unfolding quasiconvex_def by auto
+
+lemma quasiconvexC:
+  assumes "quasiconvex C X"
+  shows "C \<ge> 0"
+using assms unfolding quasiconvex_def by auto
+
+lemma quasiconvexI:
+  assumes "C \<ge> 0"
+          "\<And>x y. x \<in> X \<Longrightarrow> y \<in> X \<Longrightarrow> (\<exists>G. geodesic_segment_between G x y \<and> (\<forall>z\<in>G. infdist z X \<le> C))"
+  shows "quasiconvex C X"
+using assms unfolding quasiconvex_def by auto
+
+lemma quasiconvex_of_geodesic:
+  assumes "geodesic_segment G"
+  shows "quasiconvex 0 G"
+proof (rule quasiconvexI, simp)
+  fix x y assume *: "x \<in> G" "y \<in> G"
+  obtain H where H: "H \<subseteq> G" "geodesic_segment_between H x y"
+    using geodesic_subsegment_exists[OF assms(1) *] by auto
+  have "infdist z G \<le> 0" if "z \<in> H" for z
+    using H(1) that by auto
+  then show "\<exists>H. geodesic_segment_between H x y \<and> (\<forall>z\<in>H. infdist z G \<le> 0)"
+    using H(2) by auto
+qed
+
+lemma quasiconvex_empty:
+  assumes "C \<ge> 0"
+  shows "quasiconvex C {}"
+unfolding quasiconvex_def using assms by auto
+
+lemma quasiconvex_mono:
+  assumes "C \<le> D"
+          "quasiconvex C G"
+  shows "quasiconvex D G"
+using assms unfolding quasiconvex_def by (auto, fastforce)
+
+
+lemma (in Gromov_hyperbolic_space_geodesic) quasiconvex_thickening:
+  assumes "quasiconvex C (X::'a set)" "r \<ge> 0"
+  shows "quasiconvex (C + 8 *deltaG(TYPE('a))) (\<Union>x\<in>X. cball x r)"
+proof (rule quasiconvexI)
+  show "C + 8 *deltaG(TYPE('a)) \<ge> 0" using quasiconvexC[OF assms(1)] by simp
+next
+  fix y z assume *: "y \<in> (\<Union>x\<in>X. cball x r)" "z \<in> (\<Union>x\<in>X. cball x r)"
+  have A: "infdist w (\<Union>x\<in>X. cball x r) \<le> C + 8 * deltaG TYPE('a)" if "w \<in> {y--z}" for w
+  proof -
+    obtain py where py: "py \<in> X" "y \<in> cball py r"
+      using * by auto
+    obtain pz where pz: "pz \<in> X" "z \<in> cball pz r"
+      using * by auto
+    obtain G where G: "geodesic_segment_between G py pz" "(\<forall>p\<in>G. infdist p X \<le> C)"
+    have A: "infdist w ({y--py} \<union> G \<union> {pz--z}) \<le> 8 * deltaG(TYPE('a))"
+    have "\<exists>u \<in> {y--py} \<union> G \<union> {pz--z}. infdist w ({y--py} \<union> G \<union> {pz--z}) = dist w u"
+      apply (rule infdist_proper_attained, auto intro!: proper_Un simp add: geodesic_segment_topology(7))
+      by (meson G(1) geodesic_segmentI geodesic_segment_topology(7))
+    then obtain u where u: "u \<in> {y--py} \<union> G \<union> {pz--z}" "infdist w ({y--py} \<union> G \<union> {pz--z}) = dist w u"
+      by auto
+    then consider "u \<in> {y--py}" | "u \<in> G" | "u \<in> {pz--z}" by auto
+    then have "infdist u (\<Union>x\<in>X. cball x r) \<le> C"
+    proof (cases)
+      case 1
+      then have "dist py u \<le> dist py y"
+        using geodesic_segment_dist_le local.some_geodesic_is_geodesic_segment(1) some_geodesic_commute some_geodesic_endpoints(1) by blast
+      also have "... \<le> r"
+        using py(2) by auto
+      finally have "u \<in> cball py r"
+        by auto
+      then have "u \<in> (\<Union>x\<in>X. cball x r)"
+        using py(1) by auto
+      then have "infdist u (\<Union>x\<in>X. cball x r) = 0"
+        by auto
+      then show ?thesis
+        using quasiconvexC[OF assms(1)] by auto
+    next
+      case 3
+      then have "dist pz u \<le> dist pz z"
+        using geodesic_segment_dist_le local.some_geodesic_is_geodesic_segment(1) some_geodesic_commute some_geodesic_endpoints(1) by blast
+      also have "... \<le> r"
+        using pz(2) by auto
+      finally have "u \<in> cball pz r"
+        by auto
+      then have "u \<in> (\<Union>x\<in>X. cball x r)"
+        using pz(1) by auto
+      then have "infdist u (\<Union>x\<in>X. cball x r) = 0"
+        by auto
+      then show ?thesis
+        using quasiconvexC[OF assms(1)] by auto
+    next
+      case 2
+      have "infdist u (\<Union>x\<in>X. cball x r) \<le> infdist u X"
+        apply (rule infdist_mono) using assms(2) py(1) by auto
+      then show ?thesis using 2 G(2) by auto
+    qed
+    moreover have "infdist w (\<Union>x\<in>X. cball x r) \<le> infdist u (\<Union>x\<in>X. cball x r) + dist w u"
+      by (intro mono_intros)
+    ultimately show ?thesis
+      using A u(2) by auto
+  qed
+  show "\<exists>G. geodesic_segment_between G y z \<and> (\<forall>w\<in>G. infdist w (\<Union>x\<in>X. cball x r) \<le> C + 8 * deltaG TYPE('a))"
+    apply (rule exI[of _ "{y--z}"]) using A by auto
+qed
+
+
+lemma (in Gromov_hyperbolic_space_geodesic) dist_along_quasiconvex:
+  assumes "quasiconvex C G" "p \<in> proj_set x G" "y \<in> G"
+  shows "dist x p + dist p y \<le> dist x y + 4 * deltaG(TYPE('a)) + 2 * C"
+proof -
+  have *: "p \<in> G"
+    using assms proj_setD by auto
+  obtain H where H: "geodesic_segment_between H p y" "\<And>q. q \<in> H \<Longrightarrow> infdist q G \<le> C"
+    using quasiconvexD[OF assms(1) * assms(3)] by auto
+  have "\<exists>m\<in>H. infdist x H = dist x m"
+    apply (rule infdist_proper_attained[of H x]) using geodesic_segment_topology[OF geodesic_segmentI[OF H(1)]] by auto
+  then obtain m where m: "m \<in> H" "infdist x H = dist x m" by auto
+  then have I: "dist x m \<le> Gromov_product_at x p y + 2 * deltaG(TYPE('a))"
+    using infdist_triangle_side[OF H(1), of x] by auto
+  have "dist x p - dist x m - C \<le> e" if "e > 0" for e
+  proof -
+    have "\<exists>r\<in>G. dist m r < infdist m G + e"
+    then obtain r where r: "r \<in> G" "dist m r < infdist m G + e"
+      by auto
+    have "dist x p \<le> dist x r"
+    also have "... \<le> dist x m + dist m r"
+      by (intro mono_intros)
+    finally show ?thesis using * by (auto simp add: metric_space_class.dist_commute)
+  qed
+  then have "dist x p - dist x m - C \<le> 0"
+    using dense_ge by blast
+  then show ?thesis
+    using I unfolding Gromov_product_at_def by (auto simp add: algebra_simps divide_simps)
+qed
+
+constants. It states that the distance between the projections
+on a quasi-convex set is controlled by the distance of the original points, with a gain given by the
+distances of the points to the set.\<close>
+    using dist_along_quasiconvex[OF assms(1) assms(2) \<open>py \<in> G\<close>] dist_along_quasiconvex[OF assms(1) assms(3) \<open>px \<in> G\<close>] by auto
+text \<open>The projection on a quasi-convex set is $1$-Lipschitz up to an additive error.\<close>
+text \<open>We can in particular specialize the previous statements to geodesics, which are
+$0$-quasi-convex.\<close>
+text \<open>If one projects a continuous curve on a quasi-convex set, the image does not have to be
+connected (the projection is discontinuous), but since the projections of nearby points are within
+uniformly bounded distance one can find in the projection a point with almost prescribed distance
+to the starting point, say. For further applications, we also pick the first such point, i.e.,
+all the previous points are also close to the starting point.\<close>
+  text \<open>The idea is to define the desired point as the last point $u$ for which there is a projection
+  at distance at most $d$ of the starting point. Then the projection can not be much closer to
+  the starting point, or one could point another such point further away by almost continuity, giving
+  a contradiction. The technical implementation requires some care, as the "last point" may not
+  satisfy the property, for lack of continuity. If it does, then fine. Otherwise, one should go just
+  a little bit to its left to find the desired point.\<close>
+    using \<open>a \<le> b\<close> \<open>d \<ge> 0\<close> unfolding I_def by auto
+    unfolding u_def apply (rule cSup_upper) using \<open>a \<in> I\<close> \<open>bdd_above I\<close> by auto
+    unfolding u_def apply (rule cSup_least) using \<open>a \<in> I\<close> apply auto unfolding I_def by auto
+      using \<open>a \<in> I\<close> \<open>bdd_above I\<close> using \<open>s < u\<close> unfolding u_def by auto
+    then have "s \<in> {a..t}" using \<open>a \<le> s\<close> by auto
+    using assms(1) by (simp add: \<open>a \<le> u\<close> \<open>u \<le> b\<close> continuous_on_eq_continuous_within)
+    unfolding continuous_within_eps_delta using \<open>deltaG(TYPE('a)) < delta\<close> by (auto simp add: metric_space_class.dist_commute)
+    text \<open>First, consider the case where $u$ does not satisfy the defining property. Then the
+    desired point $t$ is taken slightly to its left.\<close>
+      using \<open>d \<ge> 0\<close> by auto
+    then have "a < u" using \<open>a \<le> u\<close> by auto
+    then have "e > 0" using \<open>a < u\<close> \<open>e0 > 0\<close> by auto
+    then have "t < u" using \<open>e > 0\<close> by auto
+      using \<open>e > 0\<close> \<open>u \<le> b\<close> unfolding e_def by (auto simp add: min_def)
+      unfolding t_def e_def dist_real_def using \<open>e0 > 0\<close> \<open>a \<le> u\<close> by auto
+      using A \<open>t < u\<close> by auto
+      apply (rule proj_along_quasiconvex_contraction'[OF \<open>quasiconvex C G\<close>])
+      using assms (4) \<open>t \<in> {a..b}\<close> \<open>a \<le> u\<close> \<open>u \<le> b\<close> by auto
+      using e0(2)[OF \<open>t \<in> {a..b}\<close> \<open>dist u t < e0\<close>] by (auto simp add: metric_space_class.dist_commute)
+      using \<open>delta > deltaG(TYPE('a))\<close> by simp
+      apply (rule bexI[OF _ \<open>t \<in> {a..b}\<close>]) using * ** \<open>t \<in> {a..b}\<close> by auto
+    text \<open>Next, consider the case where $u$ satisfies the defining property. Then we will take $t = u$.
+    The only nontrivial point to check is that the distance of $f(u)$ to the starting point is not
+    too small. For this, we need to separate the case where $u = b$ (in which case one argues directly)
+    and the case where $u < b$, where one can use a point slightly to the right of $u$ which has a
+    projection at distance $ > d$ of the starting point, and use almost continuity.\<close>
+        apply (intro mono_intros proj_along_quasiconvex_contraction'[OF \<open>quasiconvex C G\<close>])
+        using assms \<open>a \<le> u\<close> \<open>u \<le> b\<close> by auto
+        unfolding True using \<open>deltaG(TYPE('a)) < delta\<close> by auto
+        using \<open>u \<le> b\<close> by auto
+      then have "e > 0" using \<open>u < b\<close> \<open>e0 > 0\<close> by auto
+        using \<open>e > 0\<close> by auto
+        using \<open>e > 0\<close> \<open>a \<le> u\<close> unfolding e_def by (auto simp add: min_def)
+        using \<open>u < v\<close> \<open>bdd_above I\<close> cSup_upper not_le unfolding u_def by auto
+        using w(1) \<open>v \<in> {a..b}\<close> by auto
+        unfolding dist_real_def using \<open>u < w\<close> by auto
+        unfolding v_def e_def min_def using \<open>e0 > 0\<close> by auto
+        apply (rule proj_along_quasiconvex_contraction'[OF \<open>quasiconvex C G\<close>])
+        using assms \<open>a \<le> u\<close> \<open>u \<le> b\<close> \<open>w \<in> {a..b}\<close> by auto
+        using e0(2)[OF \<open>w \<in> {a..b}\<close> \<open>dist u w < e0\<close>] by (auto simp add: metric_space_class.dist_commute)
+        using \<open>delta > deltaG(TYPE('a))\<close> by simp
+      using B \<open>a \<le> u\<close> \<open>u \<le> b\<close> C by auto
+text \<open>Same lemma, except that one exchanges the roles of the beginning and the end point.\<close>
+section \<open>The Morse-Gromov Theorem\<close>
+text \<open>The goal of this section is to prove a central basic result in the theory of hyperbolic spaces,
+usually called the Morse Lemma. It is really
+a theorem, and we add the name Gromov the avoid the confusion with the other Morse lemma
+on the existence of good coordinates for $C^2$ functions with non-vanishing hessian.
+
+It states that a quasi-geodesic remains within bounded distance of a geodesic with the same
+endpoints, the error depending only on $\delta$ and on the parameters $(\lambda, C)$ of the
+quasi-geodesic, but not on its length.
+
+gets an optimal dependency in terms of the parameters of the quasi-isometry, contrary to all
+previous proofs. The price to pay is that the proof is more involved (relying in particular on
+the fact that the closest point projection on quasi-convex sets is exponentially contracting).
+
+up interesting tools, although the dependency it gives is worse.\<close>
+text \<open>The next lemma (for $C = 0$, Lemma 2 in~\<^cite>\<open>"shchur"\<close>) asserts that, if two points are not too far apart (at distance at most
+of Shchur~\<^cite>\<open>"shchur"\<close>, with optimal control in terms of the parameters of the quasi-isometry.
+on hyperbolic spaces in~\<^cite>\<open>"bridson_haefliger"\<close> (Proposition III.H.1.6). We follow their proof.
+in~\<^cite>\<open>"bridson_haefliger"\<close>. It is more direct than the one we have given above, but it gives

@@ -1,0 +1,95 @@
+theory HS_ODEs
+  imports "HS_Preliminaries"
+begin
+
+
+notation image ("\<P>")
+
+lemma image_le_pred[simp]: "(\<P> f A \<subseteq> {s. G s}) = (\<forall>x\<in>A. G (f x))"
+  unfolding image_def by force
+
+definition ivp_sols :: "(real \<Rightarrow> 'a \<Rightarrow> ('a::real_normed_vector)) \<Rightarrow> ('a \<Rightarrow> real set) \<Rightarrow> 'a set \<Rightarrow> 
+  real \<Rightarrow> 'a \<Rightarrow> (real \<Rightarrow> 'a) set" ("Sols")
+  where "Sols f U S t\<^sub>0 s = {X \<in> U s \<rightarrow> S. (D X = (\<lambda>t. f t (X t)) on U s) \<and> X t\<^sub>0 = s \<and> t\<^sub>0 \<in> U s}"
+
+lemma ivp_solsI: 
+  assumes "D X = (\<lambda>t. f t (X t)) on U s" and "X t\<^sub>0 = s" 
+      and "X \<in> U s \<rightarrow> S" and "t\<^sub>0 \<in> U s"
+    shows "X \<in> Sols f U S t\<^sub>0 s"
+  using assms unfolding ivp_sols_def by blast
+
+lemma ivp_solsD:
+  assumes "X \<in> Sols f U S t\<^sub>0 s"
+  shows "D X = (\<lambda>t. f t (X t)) on U s" and "X t\<^sub>0 = s" 
+    and "X \<in> U s \<rightarrow> S" and "t\<^sub>0 \<in> U s"
+  using assms unfolding ivp_sols_def by auto
+
+lemma in_ivp_sols_subset:
+  "t\<^sub>0 \<in> (U s) \<Longrightarrow> (U s) \<subseteq> (T s) \<Longrightarrow> X \<in> Sols f T S t\<^sub>0 s \<Longrightarrow> X \<in> Sols f U S t\<^sub>0 s "
+  apply(rule ivp_solsI)
+  using ivp_solsD(1,2) has_vderiv_on_subset 
+     apply blast+
+  by (drule ivp_solsD(3)) auto
+
+abbreviation "down U t \<equiv> {\<tau> \<in> U. \<tau> \<le> t}"
+
+definition g_orbit :: "(('a::ord) \<Rightarrow> 'b) \<Rightarrow> ('b \<Rightarrow> bool) \<Rightarrow> 'a set \<Rightarrow> 'b set" ("\<gamma>")
+  where "\<gamma> X G U = \<Union>{\<P> X (down U t) |t. \<P> X (down U t) \<subseteq> {s. G s}}"
+
+lemma g_orbit_eq: 
+  fixes X::"('a::preorder) \<Rightarrow> 'b"
+  shows "\<gamma> X G U = {X t |t. t \<in> U \<and> (\<forall>\<tau>\<in>down U t. G (X \<tau>))}"
+  unfolding g_orbit_def using order_trans by auto blast
+
+definition g_orbital :: "(real \<Rightarrow> 'a \<Rightarrow> 'a) \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow> ('a \<Rightarrow> real set) \<Rightarrow> 'a set \<Rightarrow> real \<Rightarrow> 
+  ('a::real_normed_vector) \<Rightarrow> 'a set" 
+  where "g_orbital f G U S t\<^sub>0 s = \<Union>{\<gamma> X G (U s) |X. X \<in> ivp_sols f U S t\<^sub>0 s}"
+
+lemma g_orbital_eq: "g_orbital f G U S t\<^sub>0 s = 
+  {X t |t X. t \<in> U s \<and> \<P> X (down (U s) t) \<subseteq> {s. G s} \<and> X \<in> Sols f U S t\<^sub>0 s }" 
+  unfolding g_orbital_def ivp_sols_def g_orbit_eq by auto
+
+lemma g_orbitalI:
+  assumes "X \<in> Sols f U S t\<^sub>0 s"
+    and "t \<in> U s" and "(\<P> X (down (U s) t) \<subseteq> {s. G s})"
+  shows "X t \<in> g_orbital f G U S t\<^sub>0 s"
+  using assms unfolding g_orbital_eq(1) by auto
+
+lemma g_orbitalD:
+  assumes "s' \<in> g_orbital f G U S t\<^sub>0 s"
+  obtains X and t where "X \<in> Sols f U S t\<^sub>0 s"
+  and "X t = s'" and "t \<in> U s" and "(\<P> X (down (U s) t) \<subseteq> {s. G s})"
+  using assms unfolding g_orbital_def g_orbit_eq by auto
+
+lemma "g_orbital f G U S t\<^sub>0 s = {X t |t X. X t \<in> \<gamma> X G (U s) \<and> X \<in> Sols f U S t\<^sub>0 s}"
+  unfolding g_orbital_eq g_orbit_eq by auto
+
+lemma "X \<in> Sols f U S t\<^sub>0 s \<Longrightarrow> \<gamma> X G (U s) \<subseteq> g_orbital f G U S t\<^sub>0 s"
+  unfolding g_orbital_eq g_orbit_eq by auto
+
+lemma "g_orbital f G U S t\<^sub>0 s \<subseteq> g_orbital f (\<lambda>s. True) U S t\<^sub>0 s"
+  unfolding g_orbital_eq by auto
+
+no_notation g_orbit ("\<gamma>")
+
+
+
+definition diff_invariant :: "('a \<Rightarrow> bool) \<Rightarrow> (real \<Rightarrow> ('a::real_normed_vector) \<Rightarrow> 'a) \<Rightarrow> 
+  ('a \<Rightarrow> real set) \<Rightarrow> 'a set \<Rightarrow> real \<Rightarrow> ('a \<Rightarrow> bool) \<Rightarrow> bool" 
+  where "diff_invariant I f U S t\<^sub>0 G \<equiv> (\<Union> \<circ> (\<P> (g_orbital f G U S t\<^sub>0))) {s. I s} \<subseteq> {s. I s}"
+
+lemma diff_invariant_eq: "diff_invariant I f U S t\<^sub>0 G = 
+  (\<forall>s. I s \<longrightarrow> (\<forall>X\<in>Sols f U S t\<^sub>0 s. (\<forall>t\<in>U s.(\<forall>\<tau>\<in>(down (U s) t). G (X \<tau>)) \<longrightarrow> I (X t))))"
+  unfolding diff_invariant_def g_orbital_eq image_le_pred by auto
+
+lemma diff_inv_eq_inv_set:
+  "diff_invariant I f U S t\<^sub>0 G = (\<forall>s. I s \<longrightarrow> (g_orbital f G U S t\<^sub>0 s) \<subseteq> {s. I s})"
+  unfolding diff_invariant_eq g_orbital_eq image_le_pred by auto
+
+lemma "diff_invariant I f U S t\<^sub>0 (\<lambda>s. True) \<Longrightarrow> diff_invariant I f U S t\<^sub>0 G"
+  unfolding diff_invariant_eq by auto
+
+named_theorems diff_invariant_rules "rules for certifying differential invariants."
+
+lemma diff_invariant_eq_rule [diff_invariant_rules]:
+  assumes Uhyp: "\<And>s. s \<in> S \<Longrightarrow> is_interval (U s)"

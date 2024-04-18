@@ -1,0 +1,378 @@
+theory Containers_Userguide imports
+  Card_Datatype
+  List_Proper_Interval
+  Containers
+begin
+
+
+
+value "({True}, {1 :: int}, - {2 :: int, 3}, {\<lambda>x :: int. x * x, \<lambda>y. y + 1})"
+
+
+
+value [code] "{1 :: int}"
+
+
+
+type_synonym vname = string
+datatype expr = Var vname | Lit int | Add expr expr
+fun vars :: "expr \<Rightarrow> vname set" where
+  "vars (Var v) = {v}"
+| "vars (Lit i) = {}"
+| "vars (Add e\<^sub>1 e\<^sub>2) = vars e\<^sub>1 \<union> vars e\<^sub>2"
+
+value "vars (Var ''x'')"
+
+
+datatype 'a expr' = Var' 'a | Lit' int | Add' "'a expr'" "'a expr'"
+fun vars' ::  "'a expr' \<Rightarrow> 'a set" where
+  "vars' (Var' v) = {v}"
+| "vars' (Lit' i) = {}"
+| "vars' (Add' e\<^sub>1 e\<^sub>2) = vars' e\<^sub>1 \<union> vars' e\<^sub>2"
+
+value "vars' (Var' (1 :: int))"
+
+
+
+
+
+derive (eq) ceq expr
+
+datatype example = Example
+derive (no) ceq example
+
+typedecl simple_tycon
+axiomatization where simple_tycon_equal: "OFCLASS(simple_tycon, equal_class)"
+instance simple_tycon :: equal by (rule simple_tycon_equal)
+
+instantiation simple_tycon :: ceq begin
+definition "CEQ(simple_tycon) = Some (=)"
+instance by(intro_classes)(simp add: ceq_simple_tycon_def)
+end
+
+
+context fixes R :: "'a \<Rightarrow> 'b \<Rightarrow> bool" begin
+fun expr'_rel :: "'a expr' \<Rightarrow> 'b expr' \<Rightarrow> bool"
+where
+  "expr'_rel (Var' v)      (Var' v')        \<longleftrightarrow> R v v'"
+| "expr'_rel (Lit' i)        (Lit' i')         \<longleftrightarrow> i = i'"
+| "expr'_rel (Add' e\<^sub>1 e\<^sub>2) (Add' e\<^sub>1' e\<^sub>2') \<longleftrightarrow> expr'_rel e\<^sub>1 e\<^sub>1' \<and> expr'_rel e\<^sub>2 e\<^sub>2'"
+| "expr'_rel _                 _                \<longleftrightarrow> False"
+end
+
+
+lemma expr'_rel_eq: "expr'_rel (=) e\<^sub>1 e\<^sub>2 \<longleftrightarrow> e\<^sub>1 = e\<^sub>2"
+by(induct e\<^sub>1 e\<^sub>2 rule: expr'_rel.induct) simp_all
+instantiation expr' :: (ceq) ceq begin
+definition
+  "CEQ('a expr') =
+  (case ID CEQ('a) of None \<Rightarrow> None | Some eq \<Rightarrow> Some (expr'_rel eq))"
+instance
+  by(intro_classes)
+    (auto simp add: ceq_expr'_def expr'_rel_eq[abs_def] 
+          dest: Collection_Eq.ID_ceq 
+          split: option.split_asm)
+end
+
+
+derive ccompare expr
+
+axiomatization where simple_tycon_compare: "OFCLASS(simple_tycon, compare_class)"
+instance simple_tycon :: compare by (rule simple_tycon_compare)
+
+derive (compare) ccompare simple_tycon
+
+
+
+derive ccompare expr'
+
+thm ccompare_expr'_def comparator_expr'_simps
+
+
+derive (rbt) set_impl expr
+derive (choose) mapping_impl expr
+derive (choose) set_impl expr'
+
+
+instantiation expr' :: (mapping_impl) mapping_impl begin
+definition
+  "MAPPING_IMPL('a expr') = 
+   Phantom('a expr') (of_phantom MAPPING_IMPL('a))"
+instance ..
+end
+
+locale mynamespace begin
+definition empty where "empty = Mapping.empty" 
+declare (in -) mynamespace.empty_def [code]
+  value [code] "{} :: expr set"
+  value [code] "empty :: (expr, unit) mapping"
+  value [code] "{} :: string expr' set"
+  value [code] "{} :: (nat \<Rightarrow> nat) expr' set"
+  value [code] "{} :: bool expr' set"
+  value [code] "empty :: (bool expr', unit) mapping"
+
+
+
+instantiation expr :: cenum begin
+definition "CENUM(expr) = None"
+instance by(intro_classes)(simp_all add: cEnum_expr_def)
+end
+
+derive (no) cenum expr'
+derive compare_order expr
+
+value "({b. b = True}, {x. compare x (Lit 0) = Lt})"
+
+declare Set_uminus_code[code del] Set_uminus_cenum[code]
+
+
+
+
+lemma inj_expr [simp]: "inj Lit" "inj Var" "inj Add" "inj (Add e)"
+by(simp_all add: fun_eq_iff inj_on_def)
+
+lemma infinite_UNIV_expr: "\<not> finite (UNIV :: expr set)"
+  including card_datatype
+proof -
+  have "rangeIt (Lit 0) (Add (Lit 0)) \<subseteq> UNIV" by simp
+  from finite_subset[OF this] show ?thesis by auto
+qed
+
+instantiation expr :: card_UNIV begin
+definition "finite_UNIV = Phantom(expr) False"
+definition "card_UNIV = Phantom(expr) 0"
+instance
+  by intro_classes
+     (simp_all add: finite_UNIV_expr_def card_UNIV_expr_def infinite_UNIV_expr)
+end
+
+lemma inj_expr' [simp]: "inj Lit'" "inj Var'" "inj Add'" "inj (Add' e)"
+by(simp_all add: fun_eq_iff inj_on_def)
+
+lemma infinite_UNIV_expr': "\<not> finite (UNIV :: 'a expr' set)"
+  including card_datatype
+proof -
+  have "rangeIt (Lit' 0) (Add' (Lit' 0)) \<subseteq> UNIV" by simp
+  from finite_subset[OF this] show ?thesis by auto
+qed
+
+instantiation expr' :: (type) card_UNIV begin
+definition "finite_UNIV = Phantom('a expr') False"
+definition "card_UNIV = Phantom('a expr') 0"
+instance
+  by intro_classes
+     (simp_all add: finite_UNIV_expr'_def card_UNIV_expr'_def infinite_UNIV_expr')
+end
+
+
+instantiation expr :: cproper_interval begin
+definition cproper_interval_expr :: "expr proper_interval" 
+  where "cproper_interval_expr _ _ = undefined"
+instance by(intro_classes)(simp add: infinite_UNIV_expr)
+end
+
+instantiation expr' :: (ccompare) cproper_interval begin
+definition cproper_interval_expr' :: "'a expr' proper_interval" 
+  where "cproper_interval_expr' _ _ = undefined"
+instance by(intro_classes)(simp add: infinite_UNIV_expr')
+end
+
+
+value "{{Lit 1}}"
+value "{{{Lit 1}}}"
+value "{{{{Lit 1}}}}"
+
+
+typedecl 'v trie_raw
+
+
+type_synonym trie_key = "bool list"
+axiomatization
+  trie_empty :: "'v trie_raw" and
+  trie_update :: "trie_key \<Rightarrow> 'v \<Rightarrow> 'v trie_raw \<Rightarrow> 'v trie_raw" and
+  trie_lookup :: "'v trie_raw \<Rightarrow> trie_key \<Rightarrow> 'v option" and
+  trie_keys :: "'v trie_raw \<Rightarrow> trie_key set"
+where trie_lookup_empty: "trie_lookup trie_empty = Map.empty"
+  and trie_lookup_update: 
+    "trie_lookup (trie_update k v t) = (trie_lookup t)(k \<mapsto> v)"
+  and trie_keys_dom_lookup: "trie_keys t = dom (trie_lookup t)"
+
+
+code_datatype trie_empty trie_update
+lemmas [code] = trie_lookup_empty trie_lookup_update
+
+lemma trie_keys_empty [code]: "trie_keys trie_empty = {}"
+by(simp add: trie_keys_dom_lookup trie_lookup_empty)
+
+lemma trie_keys_update [code]:
+  "trie_keys (trie_update k v t) = insert k (trie_keys t)"
+by(simp add: trie_keys_dom_lookup trie_lookup_update)
+
+type_synonym 'a cbl = "(('a \<Rightarrow> bool list) \<times> (bool list \<Rightarrow> 'a)) option"
+class cbl =
+  fixes cbl :: "'a cbl"
+  assumes inj_to_bl: "ID cbl = Some (to_bl, from_bl) \<Longrightarrow> inj to_bl"
+  and to_bl_inverse: "ID cbl = Some (to_bl, from_bl) \<Longrightarrow> from_bl (to_bl a) = a"
+begin
+abbreviation from_bl where "from_bl \<equiv> snd (the (ID cbl))"
+abbreviation to_bl where "to_bl \<equiv> fst (the (ID cbl))"
+end
+
+instantiation unit :: cbl begin
+definition "cbl = Some (\<lambda>_. [], \<lambda>_. ())"
+instance by(intro_classes)(auto simp add: cbl_unit_def ID_Some intro: injI)
+end
+
+instantiation "fun" :: (type, type) cbl begin
+definition "cbl = (None :: ('a \<Rightarrow> 'b) cbl)"
+instance by intro_classes(simp_all add: cbl_fun_def ID_None)
+end
+
+typedef (overloaded) ('k :: cbl, 'v) trie = 
+  "{t :: 'v trie_raw. 
+    trie_keys t \<subseteq> range (to_bl :: 'k \<Rightarrow> trie_key) \<or> ID (cbl :: 'k cbl) = None}"
+proof
+  show "trie_empty \<in> ?trie"
+    by(simp add: trie_keys_dom_lookup trie_lookup_empty)
+qed
+
+
+
+lift_definition empty :: "('k :: cbl, 'v) trie" 
+  is trie_empty
+  by(simp add: trie_keys_empty)
+
+lift_definition lookup :: "('k :: cbl, 'v) trie \<Rightarrow> 'k \<Rightarrow> 'v option"
+  is "\<lambda>t. trie_lookup t \<circ> to_bl" .
+
+lift_definition update :: "'k \<Rightarrow> 'v \<Rightarrow> ('k :: cbl, 'v) trie \<Rightarrow> ('k, 'v) trie"
+  is "trie_update \<circ> to_bl"
+  by(auto simp add: trie_keys_dom_lookup trie_lookup_update)
+
+lift_definition keys :: "('k :: cbl, 'v) trie \<Rightarrow> 'k set"
+  is "\<lambda>t. from_bl ` trie_keys t" .
+
+
+lemma lookup_empty: "lookup empty = Map.empty"
+by transfer(simp add: trie_lookup_empty fun_eq_iff)
+
+context
+  fixes t :: "('k :: cbl, 'v) trie"
+  assumes ID_cbl: "ID (cbl :: 'k cbl) \<noteq> None"
+begin
+
+lemma lookup_update: "lookup (update k v t) = (lookup t)(k \<mapsto> v)"
+using ID_cbl
+by transfer(auto simp add: trie_lookup_update fun_eq_iff dest: inj_to_bl[THEN injD])
+
+lemma keys_conv_dom_lookup: "keys t = dom (lookup t)"
+using ID_cbl
+by transfer(force simp add: trie_keys_dom_lookup to_bl_inverse intro: rev_image_eqI)
+
+end
+
+
+
+
+definition Trie_Mapping :: "('k :: cbl, 'v) trie \<Rightarrow> ('k, 'v) mapping" 
+where [simp, code del]: "Trie_Mapping t = Mapping.Mapping (lookup t)"
+
+code_datatype Assoc_List_Mapping RBT_Mapping Mapping Trie_Mapping
+
+
+context fixes t :: "('k :: cbl, 'v) trie" begin
+
+lemma lookup_Trie_Mapping [code]:
+  "Mapping.lookup (Trie_Mapping t) = lookup t"
+by simp(transfer, simp)
+
+lemma update_Trie_Mapping [code]:
+  "Mapping.update k v (Trie_Mapping t) = 
+  (case ID cbl :: 'k cbl of
+     None \<Rightarrow> Code.abort (STR ''update Trie_Mapping: cbl = None'') (\<lambda>_. Mapping.update k v (Trie_Mapping t))
+   | Some _ \<Rightarrow> Trie_Mapping (update k v t))"
+by(simp split: option.split add: lookup_update Mapping.update.abs_eq)
+
+lemma keys_Trie_Mapping [code]:
+  "Mapping.keys (Trie_Mapping t) =
+  (case ID cbl :: 'k cbl of
+     None \<Rightarrow> Code.abort (STR ''keys Trie_Mapping: cbl = None'') (\<lambda>_. Mapping.keys (Trie_Mapping t))
+   | Some _ \<Rightarrow> keys t)"
+by(simp add: Mapping.keys.abs_eq keys_conv_dom_lookup split: option.split)
+
+end
+
+
+
+definition mapping_Trie :: mapping_impl 
+where [simp]: "mapping_Trie = Mapping_IMPL"
+
+code_datatype 
+  mapping_Choose mapping_Assoc_List mapping_RBT mapping_Mapping mapping_Trie
+
+
+lemma mapping_empty_choose_code [code]:
+  "(mapping_empty_choose :: ('a :: {ccompare, cbl}, 'b) mapping) =
+   (case ID CCOMPARE('a) of Some _  \<Rightarrow> RBT_Mapping RBT_Mapping2.empty
+    | None \<Rightarrow>
+      case ID (cbl :: 'a cbl) of Some _ \<Rightarrow> Trie_Mapping empty 
+      | None \<Rightarrow> Assoc_List_Mapping DAList.empty)"
+by(auto split: option.split simp add: DAList.lookup_empty[abs_def] Mapping.empty_def lookup_empty)
+
+lemma mapping_empty_code [code]:
+  "mapping_empty mapping_Trie = Trie_Mapping empty"
+by(simp add: lookup_empty Mapping.empty_def)
+
+
+lemma mapping_impl_choose2_Trie [code]:
+  "mapping_impl_choose2 mapping_Trie mapping_Trie = mapping_Trie"
+by(simp add: mapping_Trie_def)
+
+
+lemma mapping_impl_unit_Trie [code]:
+  "MAPPING_IMPL(unit) = Phantom(unit) mapping_Trie"
+by(simp add: mapping_impl_unit_def)
+
+value "Mapping.empty :: (unit, int) mapping"
+
+derive (mapping_Trie) mapping_impl simple_tycon
+
+
+
+
+
+
+
+
+
+
+declare set_complement_code[code del]
+code_datatype Collect_set DList_set RBT_set Set_Monad
+datatype minimal_sorts = Minimal_Sorts bool
+derive (eq) ceq minimal_sorts
+derive (no) ccompare minimal_sorts
+derive (monad) set_impl minimal_sorts
+derive (no) cenum minimal_sorts
+value "{Minimal_Sorts True} \<union> {} \<inter> Minimal_Sorts ` {True, False}"
+
+
+
+definition test_set_impl_unsupported_operation1 :: "unit \<Rightarrow> (int \<Rightarrow> int) set"
+where "test_set_impl_unsupported_operation1 _ = RBT_set RBT_Set2.empty \<union> {}"
+
+definition test_set_impl_unsupported_operation2 :: "unit \<Rightarrow> bool set"
+where "test_set_impl_unsupported_operation2 _ = {i < 4 | i :: int. i > 2}"
+
+definition test_mapping_impl_unsupported_operation :: "unit \<Rightarrow> bool"
+where 
+  "test_mapping_impl_unsupported_operation _ = 
+   Mapping.is_empty (RBT_Mapping (RBT_Mapping2.empty) :: (Enum.finite_4, unit) mapping)"
+
+
+
+definition tiny_set :: "nat set"
+where tiny_set_code: "tiny_set = {1, 2}"
+lemma empty_Set_Monad: "{} = Set_Monad []" by simp
+declare tiny_set_code[code del, unfolded empty_Set_Monad, code]
+
+end

@@ -1,0 +1,269 @@
+theory Chordal_Metric
+  imports Homogeneous_Coordinates Riemann_Sphere Oriented_Circlines "HOL-Analysis.Inner_Product" "HOL-Analysis.Euclidean_Space"
+begin
+
+
+definition inprod_cvec :: "complex_vec \<Rightarrow> complex_vec \<Rightarrow> complex" where
+ [simp]: "inprod_cvec z w =
+             (let (z1, z2) = z;
+                  (w1, w2) = w
+               in vec_cnj (z1, z2) *\<^sub>v\<^sub>v (w1, w2))"
+syntax
+  "_inprod_cvec" :: "complex_vec \<Rightarrow> complex_vec \<Rightarrow> complex"  ("\<langle>_,_\<rangle>")
+translations
+  "\<langle>z,w\<rangle>" == "CONST inprod_cvec z w"
+
+lemma real_inprod_cvec [simp]:
+  shows "is_real \<langle>z,z\<rangle>"
+  by (cases z, simp add: vec_cnj_def)
+
+lemma inprod_cvec_ge_zero [simp]:
+  shows "Re \<langle>z,z\<rangle> \<ge> 0"
+  by (cases z, simp add: vec_cnj_def)
+
+lemma inprod_cvec_bilinear1 [simp]:
+  assumes "z' = k *\<^sub>s\<^sub>v  z"
+  shows "\<langle>z',w\<rangle> = cnj k * \<langle>z,w\<rangle>"
+  using assms
+  by (cases z, cases z', cases w) (simp add: vec_cnj_def field_simps)
+
+lemma inprod_cvec_bilinear2 [simp]:
+  assumes "z' = k *\<^sub>s\<^sub>v z"
+  shows "\<langle>w, z'\<rangle> = k * \<langle>w, z\<rangle>"
+  using assms
+  by (cases z, cases z', cases w) (simp add: vec_cnj_def field_simps)
+
+lemma inprod_cvec_g_zero [simp]:
+  assumes "z \<noteq> vec_zero"
+  shows "Re \<langle>z, z\<rangle> > 0"
+proof-
+  have "\<forall> a b. a \<noteq> 0 \<or> b \<noteq> 0 \<longrightarrow> 0 < (Re a * Re a + Im a * Im a) + (Re b * Re b + Im b * Im b)"
+    by (smt complex_eq_0 not_sum_squares_lt_zero power2_eq_square)
+  thus ?thesis
+    using assms
+    by (cases z, simp add: vec_cnj_def)
+qed
+
+definition norm_cvec :: "complex_vec \<Rightarrow> real" where
+  [simp]: "norm_cvec z = sqrt (Re \<langle>z,z\<rangle>)"
+syntax
+  "_norm_cvec" :: "complex_vec \<Rightarrow> complex"  ("\<langle>_\<rangle>")
+translations
+  "\<langle>z\<rangle>" == "CONST norm_cvec z"
+
+lemma norm_cvec_square:
+  shows "\<langle>z\<rangle>\<^sup>2 = Re (\<langle>z,z\<rangle>)"
+  by (simp del: inprod_cvec_def)
+
+lemma norm_cvec_gt_0:
+  assumes "z \<noteq> vec_zero"
+  shows "\<langle>z\<rangle> > 0"
+  using assms
+  by (simp del: inprod_cvec_def)
+
+lemma norm_cvec_scale:
+  assumes "z' = k *\<^sub>s\<^sub>v z"
+  shows "\<langle>z'\<rangle>\<^sup>2 = Re (cnj k * k) * \<langle>z\<rangle>\<^sup>2"
+  unfolding norm_cvec_square
+  using inprod_cvec_bilinear1[OF assms, of z']
+  using inprod_cvec_bilinear2[OF assms, of z]
+  by (simp del: inprod_cvec_def add: field_simps)
+
+lift_definition inprod_hcoords :: "complex_homo_coords \<Rightarrow> complex_homo_coords \<Rightarrow> complex" is inprod_cvec
+  done
+
+lift_definition norm_hcoords :: "complex_homo_coords \<Rightarrow> real" is norm_cvec
+  done
+
+
+
+definition dist_fs_cvec :: "complex_vec \<Rightarrow> complex_vec \<Rightarrow> real" where [simp]:
+  "dist_fs_cvec z1 z2 =
+     (let (z1x, z1y) = z1;
+          (z2x, z2y) = z2;
+          num = (z1x*z2y - z2x*z1y) * (cnj z1x*cnj z2y - cnj z2x*cnj z1y);
+          den = (z1x*cnj z1x + z1y*cnj z1y) * (z2x*cnj z2x + z2y*cnj z2y)
+       in 2*sqrt(Re num / Re den))"
+
+lemma dist_fs_cvec_iff:
+  assumes "z \<noteq> vec_zero" and "w \<noteq> vec_zero"
+  shows "dist_fs_cvec z w = 2*sqrt(1 - (cmod \<langle>z,w\<rangle>)\<^sup>2 / (\<langle>z\<rangle>\<^sup>2 * \<langle>w\<rangle>\<^sup>2))"
+proof-
+  obtain z1 z2 w1 w2 where *: "z = (z1, z2)" "w = (w1, w2)"
+    by (cases "z", cases "w") auto
+  have 1: "2*sqrt(1 - (cmod \<langle>z,w\<rangle>)\<^sup>2 / (\<langle>z\<rangle>\<^sup>2 * \<langle>w\<rangle>\<^sup>2)) = 2*sqrt((\<langle>z\<rangle>\<^sup>2 * \<langle>w\<rangle>\<^sup>2 - (cmod \<langle>z,w\<rangle>)\<^sup>2) / (\<langle>z\<rangle>\<^sup>2 * \<langle>w\<rangle>\<^sup>2))"
+    using norm_cvec_gt_0[of z] norm_cvec_gt_0[of w] assms
+    by (simp add: field_simps)
+
+  have 2: "\<langle>z\<rangle>\<^sup>2 * \<langle>w\<rangle>\<^sup>2 = Re ((z1*cnj z1 + z2*cnj z2) * (w1*cnj w1 + w2*cnj w2))"
+    using assms *
+    by (simp add: vec_cnj_def)
+
+  have 3: "\<langle>z\<rangle>\<^sup>2 * \<langle>w\<rangle>\<^sup>2 - (cmod \<langle>z,w\<rangle>)\<^sup>2 = Re ((z1*w2 - w1*z2) * (cnj z1*cnj w2 - cnj w1*cnj z2))"
+    apply (subst cmod_square, (subst norm_cvec_square)+)
+    using *
+    by (simp add: vec_cnj_def field_simps)
+
+  thus ?thesis
+    using 1 2 3
+    using *
+    unfolding dist_fs_cvec_def Let_def
+    by simp
+qed
+
+lift_definition dist_fs_hcoords :: "complex_homo_coords \<Rightarrow> complex_homo_coords \<Rightarrow> real" is dist_fs_cvec
+  done
+
+lift_definition dist_fs :: "complex_homo \<Rightarrow> complex_homo \<Rightarrow> real" is dist_fs_hcoords
+proof transfer
+  fix z1 z2 z1' z2' :: complex_vec
+  obtain z1x z1y z2x z2y z1'x z1'y z2'x z2'y where
+    zz: "z1 = (z1x, z1y)" "z2 = (z2x, z2y)" "z1' = (z1'x, z1'y)" "z2' = (z2'x, z2'y)"
+    by (cases "z1", cases "z2", cases "z1'", cases "z2'") blast
+
+  assume 1: "z1 \<noteq> vec_zero" "z2 \<noteq> vec_zero" "z1' \<noteq> vec_zero" "z2' \<noteq> vec_zero" "z1 \<approx>\<^sub>v z1'" "z2 \<approx>\<^sub>v z2'"
+  then obtain k1 k2 where
+    *: "k1 \<noteq> 0" "z1' = k1 *\<^sub>s\<^sub>v z1" and
+    **: "k2 \<noteq> 0" "z2' = k2 *\<^sub>s\<^sub>v z2"
+    by auto
+  have "(cmod \<langle>z1,z2\<rangle>)\<^sup>2 / (\<langle>z1\<rangle>\<^sup>2 * \<langle>z2\<rangle>\<^sup>2) = (cmod \<langle>z1',z2'\<rangle>)\<^sup>2 / (\<langle>z1'\<rangle>\<^sup>2 * \<langle>z2'\<rangle>\<^sup>2)"
+    using cmod_square[symmetric, of k1] cmod_square[symmetric, of k2]
+    apply (subst norm_cvec_scale[OF *(2)])
+    apply (subst norm_cvec_scale[OF **(2)])
+    apply (subst inprod_cvec_bilinear1[OF *(2)])
+    apply (subst inprod_cvec_bilinear2[OF **(2)])
+    by (simp add: power2_eq_square norm_mult)
+  thus "dist_fs_cvec z1 z2 = dist_fs_cvec z1' z2'"
+    using 1 dist_fs_cvec_iff
+    by simp
+qed
+
+lemma dist_fs_finite:
+  shows "dist_fs (of_complex z1) (of_complex z2) = 2 * cmod(z1 - z2) / (sqrt (1+(cmod z1)\<^sup>2) * sqrt (1+(cmod z2)\<^sup>2))"
+  apply transfer
+  apply transfer
+  apply (subst cmod_square)+
+  apply (simp add: real_sqrt_divide cmod_def power2_eq_square)
+  apply (subst real_sqrt_mult[symmetric])
+  apply (simp add: field_simps)
+  done
+
+lemma dist_fs_infinite1:
+  shows "dist_fs (of_complex z1) \<infinity>\<^sub>h = 2 / sqrt (1+(cmod z1)\<^sup>2)"
+  by (transfer, transfer) (subst cmod_square, simp add: real_sqrt_divide)
+
+lemma dist_fs_infinite2:
+  shows "dist_fs \<infinity>\<^sub>h (of_complex z1) = 2 / sqrt (1+(cmod z1)\<^sup>2)"
+  by (transfer, transfer) (subst cmod_square, simp add: real_sqrt_divide)
+
+lemma dist_fs_cvec_zero:
+  assumes "z \<noteq> vec_zero" and "w \<noteq> vec_zero"
+  shows  "dist_fs_cvec z w = 0 \<longleftrightarrow> (cmod \<langle>z,w\<rangle>)\<^sup>2 = (\<langle>z\<rangle>\<^sup>2 * \<langle>w\<rangle>\<^sup>2)"
+  using assms norm_cvec_gt_0[of z]  norm_cvec_gt_0[of w]
+  by (subst dist_fs_cvec_iff) auto
+
+lemma dist_fs_zero1 [simp]:
+  shows "dist_fs z z = 0"
+  by (transfer, transfer)
+     (subst dist_fs_cvec_zero, simp, (subst norm_cvec_square)+, subst cmod_square, simp del: inprod_cvec_def)
+
+lemma dist_fs_zero2 [simp]:
+  assumes "dist_fs z1 z2 = 0"
+  shows "z1 = z2"
+  using assms
+proof (transfer, transfer)
+  fix z w :: complex_vec
+  obtain z1 z2 w1 w2 where *: "z = (z1, z2)" "w = (w1, w2)"
+    by (cases "z", cases "w", auto)
+  let ?x = "(z1*w2 - w1*z2) * (cnj z1*cnj w2 - cnj w1*cnj z2)"
+  assume "z \<noteq> vec_zero" "w \<noteq> vec_zero" "dist_fs_cvec z w = 0"
+  hence "(cmod \<langle>z,w\<rangle>)\<^sup>2 = \<langle>z\<rangle>\<^sup>2 * \<langle>w\<rangle>\<^sup>2"
+    by (subst (asm) dist_fs_cvec_zero, simp_all)
+  hence "Re ?x = 0"
+    using *
+    by (subst (asm) cmod_square) ((subst (asm) norm_cvec_square)+, simp add: vec_cnj_def field_simps)
+  hence "?x = 0"
+    using complex_mult_cnj_cmod[of "z1*w2 - w1*z2"] zero_complex.simps
+    by (subst complex_eq_if_Re_eq[of ?x 0]) (simp add: power2_eq_square, simp, linarith)
+  moreover
+  have "z1 * w2 - w1 * z2 = 0 \<longleftrightarrow> cnj z1 * cnj w2 - cnj w1 * cnj z2 = 0"
+    by (metis complex_cnj_diff complex_cnj_mult complex_cnj_zero_iff)
+  ultimately
+  show "z \<approx>\<^sub>v w"
+    using complex_cvec_eq_mix[of z1 z2 w1 w2]
+    by auto
+qed
+
+lemma dist_fs_sym:
+  shows "dist_fs z1 z2 = dist_fs z2 z1"
+  by (transfer, transfer) (simp add: split_def field_simps)
+
+
+lemma dist_fs_triangle_finite:
+  shows "cmod(a - b) / (sqrt (1+(cmod a)\<^sup>2) * sqrt (1+(cmod b)\<^sup>2)) \<le> cmod (a - c) / (sqrt (1+(cmod a)\<^sup>2) * sqrt (1+(cmod c)\<^sup>2)) + cmod (c - b) / (sqrt (1+(cmod b)\<^sup>2) * sqrt (1+(cmod c)\<^sup>2))"
+proof-
+  let ?cc = "1+(cmod c)\<^sup>2" and ?bb = "1+(cmod b)\<^sup>2" and ?aa = "1+(cmod a)\<^sup>2"
+  have "sqrt ?cc > 0" "sqrt ?aa > 0" "sqrt ?bb > 0"
+    by (smt real_sqrt_gt_zero zero_compare_simps(12))+
+  have "(a - b)*(1+cnj c*c) = (a-c)*(1+cnj c*b) + (c-b)*(1 + cnj c*a)"
+    by (simp add: field_simps)
+  moreover
+  have "1 + cnj c * c = 1 + (cmod c)\<^sup>2"
+    using complex_norm_square
+    by auto
+  hence "cmod ((a - b)*(1+cnj c*c)) = cmod(a - b) * (1+(cmod c)\<^sup>2)"
+    by (smt norm_mult norm_of_real zero_compare_simps(12))
+  ultimately
+  have "cmod(a - b) * (1+(cmod c)\<^sup>2) \<le> cmod (a-c) * cmod (1+cnj c*b) + cmod (c-b) * cmod(1 + cnj c*a)"
+    using complex_mod_triangle_ineq2[of "(a-c)*(1+cnj c*b)" "(c-b)*(1 + cnj c*a)"]
+    by (simp add: norm_mult)
+  moreover
+  have *: "\<And> a b c d b' d'. \<lbrakk>b \<le> b'; d \<le> d'; a \<ge> (0::real); c \<ge> 0\<rbrakk> \<Longrightarrow> a*b + c*d \<le> a*b' + c*d'"
+    by (simp add: add_mono_thms_linordered_semiring(1) mult_left_mono)
+  have "cmod (a-c) * cmod (1+cnj c*b) + cmod (c-b) * cmod(1 + cnj c*a) \<le> cmod (a - c) * (sqrt (1+(cmod c)\<^sup>2) * sqrt (1+(cmod b)\<^sup>2)) + cmod (c - b) * (sqrt (1+(cmod c)\<^sup>2) * sqrt (1+(cmod a)\<^sup>2))"
+    using *[OF cmod_1_plus_mult_le[of "cnj c" b] cmod_1_plus_mult_le[of "cnj c" a], of "cmod (a-c)" "cmod (c-b)"]
+    by (simp add: field_simps real_sqrt_mult[symmetric])
+  ultimately
+  have "cmod(a - b) * ?cc \<le> cmod (a - c) * sqrt ?cc * sqrt ?bb + cmod (c - b) * sqrt ?cc * sqrt ?aa"
+    by simp
+  moreover
+  hence "0 \<le> ?cc * sqrt ?aa * sqrt ?bb"
+    using mult_right_mono[of 0 "sqrt ?aa"  "sqrt ?bb"]
+    using mult_right_mono[of 0 "?cc" "sqrt ?aa * sqrt ?bb"]
+    by simp
+  moreover
+  have "sqrt ?cc / ?cc = 1 / sqrt ?cc"
+    by (simp add: field_simps)
+  hence "sqrt ?cc / (?cc * sqrt ?aa) = 1 / (sqrt ?aa * sqrt ?cc)"
+    using times_divide_eq_right[of "1/sqrt ?aa" "sqrt ?cc" "?cc"]
+    by simp
+  hence "cmod (a - c) * sqrt ?cc / (?cc * sqrt ?aa) = cmod (a - c) / (sqrt ?aa * sqrt ?cc)"
+    using times_divide_eq_right[of "cmod (a - c)" "sqrt ?cc" "(?cc * sqrt ?aa)"]
+    by simp
+  moreover
+  have "sqrt ?cc / ?cc = 1 / sqrt ?cc"
+    by (simp add: field_simps)
+  hence "sqrt ?cc / (?cc * sqrt ?bb) = 1 / (sqrt ?bb * sqrt ?cc)"
+    using times_divide_eq_right[of "1/sqrt ?bb" "sqrt ?cc" "?cc"]
+    by simp
+  hence "cmod (c - b) * sqrt ?cc / (?cc * sqrt ?bb) = cmod (c - b) / (sqrt ?bb * sqrt ?cc)"
+    using times_divide_eq_right[of "cmod (c - b)" "sqrt ?cc" "?cc * sqrt ?bb"]
+    by simp
+  ultimately
+  show ?thesis
+    by (simp add: add_divide_distrib)
+qed
+
+lemma dist_fs_triangle_infinite1: 
+  shows "1 / sqrt(1 + (cmod b)\<^sup>2) \<le> 1 / sqrt(1 + (cmod c)\<^sup>2) + cmod (b - c) / (sqrt(1 + (cmod b)\<^sup>2) * sqrt(1 + (cmod c)\<^sup>2))"
+proof-
+  let ?bb = "sqrt (1 + (cmod b)\<^sup>2)" and ?cc = "sqrt (1 + (cmod c)\<^sup>2)"
+  have "?bb > 0" "?cc > 0"
+    by (metis add_strict_increasing real_sqrt_gt_0_iff zero_le_power2 zero_less_one)+
+  hence *: "?bb * ?cc \<ge> 0"
+    by simp
+  have **: "(?cc - ?bb) / (?bb * ?cc) = 1 / ?bb - 1 / ?cc"
+    by (simp add: field_simps)
+  show "1 / ?bb \<le> 1 / ?cc + cmod (b - c) / (?bb * ?cc)"
+    using divide_right_mono[OF cmod_diff_ge[of c b] *]
+    by (subst (asm) **) (simp add: field_simps norm_minus_commute)

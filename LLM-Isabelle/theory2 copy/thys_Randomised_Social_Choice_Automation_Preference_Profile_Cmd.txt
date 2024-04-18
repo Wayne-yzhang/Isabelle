@@ -1,0 +1,171 @@
+theory Preference_Profile_Cmd
+imports
+  Complex_Main
+  "../Elections"
+keywords
+  "preference_profile" :: thy_goal
+begin
+
+
+
+context election
+begin
+
+lemma preferred_alts_prefs_from_table:
+  assumes "prefs_from_table_wf agents alts xs" "i \<in> set (map fst xs)"
+  shows   "preferred_alts (prefs_from_table xs i) x = 
+             of_weak_ranking_Collect_ge (rev (the (map_of xs i))) x"
+proof -
+  interpret pref_profile_wf agents alts "prefs_from_table xs"
+    by (intro pref_profile_from_tableI assms)
+  from assms have [simp]: "i \<in> agents" by (auto simp: prefs_from_table_wf_def)
+  have "of_weak_ranking_Collect_ge (rev (the (map_of xs i))) x = 
+          Collect (of_weak_ranking (the (map_of xs i)) x)"
+    by (rule eval_Collect_of_weak_ranking [symmetric])
+  also from assms(2) have "the (map_of xs i) \<in> set (map snd xs)"
+    by (cases "map_of xs i") (force simp: map_of_eq_None_iff dest: map_of_SomeD)+
+  from prefs_from_table_wfD(5)[OF assms(1) this]
+    have "Collect (of_weak_ranking (the (map_of xs i)) x) = 
+            {y\<in>alts. of_weak_ranking (the (map_of xs i)) x y}"
+    by safe (force elim!: of_weak_ranking.cases)
+  also from assms 
+    have "of_weak_ranking (the (map_of xs i)) = prefs_from_table xs i"
+    by (subst prefs_from_table_map_of[OF assms(1)])
+       (auto simp: prefs_from_table_wf_def)
+  finally show ?thesis by (simp add: of_weak_ranking_Collect_ge_def preferred_alts_altdef)
+qed
+
+lemma favorites_prefs_from_table:
+  assumes wf: "prefs_from_table_wf agents alts xs" and i: "i \<in> agents"
+  shows   "favorites (prefs_from_table xs) i = hd (the (map_of xs i))"
+proof (cases "map_of xs i")
+  case None
+  with assms show ?thesis
+    by (auto simp: map_of_eq_None_iff prefs_from_table_wf_def)
+next
+  case (Some y)
+  with assms have "is_finite_weak_ranking y" "y \<noteq> []"
+    by (auto simp: prefs_from_table_wf_def)
+  with Some show ?thesis
+    unfolding favorites_def using assms
+    by (simp add: prefs_from_table_def is_finite_weak_ranking_def 
+                  Max_wrt_of_weak_ranking prefs_from_table_wfD)
+qed 
+
+lemma has_unique_favorites_prefs_from_table:
+  assumes wf: "prefs_from_table_wf agents alts xs"
+  shows   "has_unique_favorites (prefs_from_table xs) = 
+             list_all (\<lambda>z. is_singleton (hd (snd z))) xs"
+proof -
+  interpret pref_profile_wf agents alts "prefs_from_table xs"
+    by (intro pref_profile_from_tableI assms)
+  from wf have "agents = set (map fst xs)" "distinct (map fst xs)"
+    by (auto simp: prefs_from_table_wf_def)
+  thus ?thesis
+    unfolding has_unique_favorites_altdef using assms
+    by (auto simp: favorites_prefs_from_table list_all_iff)
+qed
+
+end
+
+
+
+function favorites_prefs_from_table where
+  "i = j \<Longrightarrow> favorites_prefs_from_table ((j,x)#xs) i = hd x"
+| "i \<noteq> j \<Longrightarrow> favorites_prefs_from_table ((j,x)#xs) i =
+               favorites_prefs_from_table xs i"
+| "favorites_prefs_from_table [] i = {}"
+  by (metis list.exhaust old.prod.exhaust) auto
+termination by lexicographic_order
+
+lemma (in election) eval_favorites_prefs_from_table:
+  assumes "prefs_from_table_wf agents alts xs"
+  shows   "favorites_prefs_from_table xs i = 
+             favorites (prefs_from_table xs) i"
+proof (cases "i \<in> agents")
+  assume i: "i \<in> agents"
+  with assms have "favorites (prefs_from_table xs) i = hd (the (map_of xs i))"
+    by (simp add: favorites_prefs_from_table)
+  also from assms i have "i \<in> set (map fst xs)"
+    by (auto simp: prefs_from_table_wf_def)
+  hence "hd (the (map_of xs i)) = favorites_prefs_from_table xs i"
+    by (induction xs i rule: favorites_prefs_from_table.induct) simp_all
+  finally show ?thesis ..
+next
+  assume i: "i \<notin> agents"
+  with assms have i': "i \<notin> set (map fst xs)"
+    by (simp add: prefs_from_table_wf_def)
+  hence "map_of xs i = None" 
+    by (simp add: map_of_eq_None_iff)
+  hence "prefs_from_table xs i = (\<lambda>_ _. False)"
+    by (intro ext) (auto simp: prefs_from_table_def)
+  hence "favorites (prefs_from_table xs) i = {}"
+    by (simp add: favorites_def Max_wrt_altdef)
+  also from i' have "\<dots> = favorites_prefs_from_table xs i"
+    by (induction xs i rule: favorites_prefs_from_table.induct) simp_all
+  finally show ?thesis ..
+qed
+
+function weak_ranking_prefs_from_table where
+  "i \<noteq> j \<Longrightarrow> weak_ranking_prefs_from_table ((i,x)#xs) j = weak_ranking_prefs_from_table xs j"
+| "i = j \<Longrightarrow> weak_ranking_prefs_from_table ((i,x)#xs) j = x"
+| "weak_ranking_prefs_from_table [] j = []"
+  by (metis list.exhaust old.prod.exhaust) auto
+termination by lexicographic_order
+
+lemma eval_weak_ranking_prefs_from_table:
+  assumes "prefs_from_table_wf agents alts xs"
+  shows   "weak_ranking_prefs_from_table xs i = weak_ranking (prefs_from_table xs i)"
+proof (cases "i \<in> agents")
+  assume i: "i \<in> agents"
+  with assms have "weak_ranking (prefs_from_table xs i) = the (map_of xs i)"
+    by (auto simp: prefs_from_table_def prefs_from_table_wf_def weak_ranking_of_weak_ranking
+             split: option.splits)
+  also from assms i have "i \<in> set (map fst xs)"
+    by (auto simp: prefs_from_table_wf_def)
+  hence "the (map_of xs i) = weak_ranking_prefs_from_table xs i"
+    by (induction xs i rule: weak_ranking_prefs_from_table.induct) simp_all
+  finally show ?thesis ..
+next
+  assume i: "i \<notin> agents"
+  with assms have i': "i \<notin> set (map fst xs)"
+    by (simp add: prefs_from_table_wf_def)
+  hence "map_of xs i = None" 
+    by (simp add: map_of_eq_None_iff)
+  hence "prefs_from_table xs i = (\<lambda>_ _. False)"
+    by (intro ext) (auto simp: prefs_from_table_def)
+  hence "weak_ranking (prefs_from_table xs i) = []" by simp
+  also from i' have "\<dots> = weak_ranking_prefs_from_table xs i"
+    by (induction xs i rule: weak_ranking_prefs_from_table.induct) simp_all
+  finally show ?thesis ..
+qed
+
+lemma eval_prefs_from_table_aux:
+  assumes "R \<equiv> prefs_from_table xs" "prefs_from_table_wf agents alts xs"
+  shows   "R i a b \<longleftrightarrow> prefs_from_table xs i a b"
+          "a \<prec>[R i] b \<longleftrightarrow> prefs_from_table xs i a b \<and> \<not>prefs_from_table xs i b a"
+          "anonymous_profile R = mset (map snd xs)"
+          "election agents alts \<Longrightarrow> i \<in> set (map fst xs) \<Longrightarrow> 
+             preferred_alts (R i) x = 
+             of_weak_ranking_Collect_ge (rev (the (map_of xs i))) x"
+          "election agents alts \<Longrightarrow> i \<in> set (map fst xs) \<Longrightarrow>
+             favorites R i = favorites_prefs_from_table xs i"
+          "election agents alts \<Longrightarrow> i \<in> set (map fst xs) \<Longrightarrow>
+             weak_ranking (R i) = weak_ranking_prefs_from_table xs i"
+          "election agents alts \<Longrightarrow> i \<in> set (map fst xs) \<Longrightarrow>
+             favorite R i = the_elem (favorites_prefs_from_table xs i)"
+          "election agents alts \<Longrightarrow> 
+             has_unique_favorites R \<longleftrightarrow> list_all (\<lambda>z. is_singleton (hd (snd z))) xs"
+  using assms prefs_from_table_wfD[OF assms(2)]
+  by (simp_all add: strongly_preferred_def favorite_def anonymise_prefs_from_table
+        election.preferred_alts_prefs_from_table election.eval_favorites_prefs_from_table
+        election.has_unique_favorites_prefs_from_table eval_weak_ranking_prefs_from_table)
+
+lemma pref_profile_from_tableI':
+  assumes "R1 \<equiv> prefs_from_table xss" "prefs_from_table_wf agents alts xss"
+  shows   "pref_profile_wf agents alts R1"
+  using assms by (simp add: pref_profile_from_tableI)
+
+
+
+end

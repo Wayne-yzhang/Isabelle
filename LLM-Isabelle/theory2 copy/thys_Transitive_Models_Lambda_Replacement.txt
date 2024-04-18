@@ -1,0 +1,626 @@
+theory Lambda_Replacement
+  imports
+    Discipline_Function
+begin
+
+
+
+definition
+  lam_replacement :: "[i\<Rightarrow>o,i\<Rightarrow>i] \<Rightarrow> o" where
+  "lam_replacement(M,b) \<equiv> strong_replacement(M, \<lambda>x y. y = \<langle>x, b(x)\<rangle>)"
+
+lemma separation_univ :
+  shows "separation(M,M)"
+  unfolding separation_def by auto
+
+context M_trivial
+begin
+
+lemma lam_replacement_iff_lam_closed:
+  assumes "\<forall>x[M]. M(b(x))"
+  shows "lam_replacement(M, b) \<longleftrightarrow>  (\<forall>A[M]. M(\<lambda>x\<in>A. b(x)))"
+  using assms lam_closed lam_funtype[of _ b, THEN Pi_memberD]
+  unfolding lam_replacement_def strong_replacement_def
+  by (auto intro:lamI dest:transM)
+    (rule lam_closed, auto simp add:strong_replacement_def dest:transM)
+
+lemma lam_replacement_imp_lam_closed:
+  assumes "lam_replacement(M, b)" "M(A)" "\<forall>x\<in>A. M(b(x))"
+  shows "M(\<lambda>x\<in>A. b(x))"
+  using assms unfolding lam_replacement_def
+  by (rule_tac lam_closed, auto simp add:strong_replacement_def dest:transM)
+
+lemma lam_replacement_cong:
+  assumes "lam_replacement(M,f)" "\<forall>x[M]. f(x) = g(x)" "\<forall>x[M]. M(f(x))"
+  shows "lam_replacement(M,g)"
+proof -
+  note assms
+  moreover from this
+  have "\<forall>A[M]. M(\<lambda>x\<in>A. f(x))"
+    using lam_replacement_iff_lam_closed
+    by simp
+  moreover from calculation
+  have "(\<lambda>x\<in>A . f(x)) = (\<lambda>x\<in>A . g(x))" if "M(A)" for A
+    using lam_cong[OF refl,of A f g] transM[OF _ that]
+    by simp
+  ultimately
+  show ?thesis
+    using lam_replacement_iff_lam_closed
+    by simp
+qed
+
+
+context M_basic
+begin
+
+lemma separation_iff':
+  assumes "separation(M,\<lambda>x . P(x))" "separation(M,\<lambda>x . Q(x))"
+  shows "separation(M,\<lambda>x . P(x) \<longleftrightarrow> Q(x))"
+  using assms separation_conj separation_imp iff_def
+  by auto
+
+lemma separation_in_constant :
+  assumes "M(a)"
+  shows "separation(M,\<lambda>x . x\<in>a)"
+proof -
+  have "{x\<in>A . x\<in>a} = A \<inter> a" for A by auto
+  show ?thesis using separation_iff Collect_abs
+    by simp
+qed
+
+lemma separation_equal :
+  shows "separation(M,\<lambda>x . x=a)"
+proof -
+  have "{x\<in>A . x=a} = (if a\<in>A then {a} else 0)" for A
+    by auto
+  then
+  have "M({x\<in>A . x=a})" if "M(A)" for A
+  then
+  show ?thesis using separation_iff Collect_abs
+    by simp
+qed
+
+lemma (in M_basic) separation_in_rev:
+  assumes "(M)(a)"
+  shows "separation(M,\<lambda>x . a\<in>x)"
+proof -
+  have eq: "{x\<in>A. a\<in>x} = Memrel(A\<union>{a}) `` {a}" for A
+    unfolding ZF_Base.image_def
+    by(intro equalityI,auto simp:mem_not_refl)
+  moreover from assms
+  have "M(Memrel(A\<union>{a}) `` {a})" if "M(A)" for A
+    using that by simp
+  ultimately
+  show ?thesis
+    using separation_iff Collect_abs
+    by simp
+qed
+
+lemma lam_replacement_imp_strong_replacement_aux:
+  assumes "lam_replacement(M, b)" "\<forall>x[M]. M(b(x))"
+  shows "strong_replacement(M, \<lambda>x y. y = b(x))"
+proof -
+  {
+    fix A
+    note assms
+    moreover
+    assume "M(A)"
+    moreover from calculation
+    have "M(\<lambda>x\<in>A. b(x))" using lam_replacement_iff_lam_closed by auto
+    ultimately
+    have "M((\<lambda>x\<in>A. b(x))``A)" "\<forall>z[M]. z \<in> (\<lambda>x\<in>A. b(x))``A \<longleftrightarrow> (\<exists>x\<in>A. z = b(x))"
+      by (auto simp:lam_def)
+  }
+  then
+  show ?thesis unfolding strong_replacement_def
+    by clarsimp (rule_tac x="(\<lambda>x\<in>A. b(x))``A" in rexI, auto)
+qed
+
+lemma strong_lam_replacement_imp_strong_replacement :
+  assumes  "strong_replacement(M,\<lambda> x z . P(fst(x),snd(x)) \<and> z=\<langle>x,f(fst(x),snd(x))\<rangle>)"
+    "\<And>A . M(A) \<Longrightarrow> \<forall>x\<in>A. P(X,x) \<longrightarrow> M(f(X,x))" "M(X)"
+  shows "strong_replacement(M,\<lambda> x z . P(X,x) \<and> z=f(X,x))"
+  unfolding strong_replacement_def
+proof(clarsimp)
+  fix A
+  assume "M(A)"
+  have "M({X}\<times>A)" (is "M(?A)")
+    by simp
+  moreover
+  have "fst(x) = X" if "x\<in>?A" for x
+    using that by auto
+  moreover from calculation assms
+  have "M({z . x\<in>?A , P(fst(x),snd(x)) \<and> z=\<langle>x,f(fst(x),snd(x))\<rangle>})" (is "M(?F)")
+    using transM[of _ ?A]
+    by(rule_tac strong_replacement_closed,simp_all)
+  moreover
+  have "?F=({\<langle>x,f(fst(x),snd(x))\<rangle> . x\<in> {x\<in>?A .  P(fst(x),snd(x))}})" (is "_=(?G)")
+    by auto
+  moreover
+  ultimately
+  have "M(?G``?A)"
+    by simp
+  moreover
+  have "?G``?A = {y . x\<in>?A , P(fst(x),snd(x)) \<and> y = f(fst(x),snd(x))}" (is "_=(?H)")
+    by auto
+  ultimately
+  show "\<exists>Y[M]. \<forall>b[M]. b \<in> Y \<longleftrightarrow> (\<exists>x\<in>A. P(X,x) \<and> b = f(X,x))"
+    by(rule_tac rexI[of _ ?H],auto,force)
+qed
+
+lemma lam_replacement_imp_RepFun_Lam:
+  assumes "lam_replacement(M, f)" "M(A)"
+  shows "M({y . x\<in>A , M(y) \<and> y=\<langle>x,f(x)\<rangle>})"
+proof -
+  from assms
+  obtain Y where 1:"M(Y)" "\<forall>b[M]. b \<in> Y \<longleftrightarrow> (\<exists>x[M]. x \<in> A \<and> b = \<langle>x,f(x)\<rangle>)"
+    unfolding lam_replacement_def strong_replacement_def
+    by auto
+  moreover from calculation
+  have "Y = {y . x\<in>A , M(y) \<and> y = \<langle>x,f(x)\<rangle>}" (is "Y=?R")
+  proof(intro equalityI subsetI)
+    fix y
+    assume "y\<in>Y"
+    moreover from this 1
+    obtain x where "x\<in>A" "y=\<langle>x,f(x)\<rangle>" "M(y)"
+    ultimately
+    show "y\<in>?R"
+      by auto
+  next
+    fix z
+    assume "z\<in>?R"
+    moreover from this
+    obtain a where "a\<in>A" "z=\<langle>a,f(a)\<rangle>" "M(a)" "M(f(a))"
+      by auto
+    ultimately
+    show "z\<in>Y" using 1 by simp
+  qed
+  ultimately
+  show ?thesis by auto
+qed
+
+lemma lam_closed_imp_closed:
+  assumes "\<forall>A[M]. M(\<lambda>x\<in>A. f(x))"
+  shows "\<forall>x[M]. M(f(x))"
+proof
+  fix x
+  assume "M(x)"
+  moreover from this and assms
+  have "M(\<lambda>x\<in>{x}. f(x))" by simp
+  ultimately
+  show "M(f(x))"
+    using image_lam[of "{x}" "{x}" f]
+      image_closed[of "{x}" "(\<lambda>x\<in>{x}. f(x))"] by (auto dest:transM)
+qed
+
+lemma lam_replacement_if:
+  assumes "lam_replacement(M,f)" "lam_replacement(M,g)" "separation(M,b)"
+    "\<forall>x[M]. M(f(x))" "\<forall>x[M]. M(g(x))"
+  shows "lam_replacement(M, \<lambda>x. if b(x) then f(x) else g(x))"
+proof -
+  let ?G="\<lambda>x. if b(x) then f(x) else g(x)"
+  let ?b="\<lambda>A . {x\<in>A. b(x)}" and ?b'="\<lambda>A . {x\<in>A. \<not>b(x)}"
+  have eq:"(\<lambda>x\<in>A . ?G(x)) = (\<lambda>x\<in>?b(A) . f(x)) \<union> (\<lambda>x\<in>?b'(A).g(x))" for A
+    unfolding lam_def by auto
+  have "?b'(A) = A - ?b(A)" for A by auto
+  moreover
+  have "M(?b(A))" if "M(A)" for A using assms that by simp
+  moreover from calculation
+  have "M(?b'(A))" if "M(A)" for A using that by simp
+  moreover from calculation assms
+  have "M(\<lambda>x\<in>?b(A). f(x))" "M(\<lambda>x\<in>?b'(A) . g(x))" if "M(A)" for A
+    using lam_replacement_iff_lam_closed that
+    by simp_all
+  moreover from this
+  have "M((\<lambda>x\<in>?b(A) . f(x)) \<union> (\<lambda>x\<in>?b'(A).g(x)))" if "M(A)" for A
+    using that by simp
+  ultimately
+  have "M(\<lambda>x\<in>A. if b(x) then f(x) else g(x))" if "M(A)" for A
+    using that eq by simp
+  with assms
+  show ?thesis using lam_replacement_iff_lam_closed by simp
+qed
+
+lemma lam_replacement_constant: "M(b) \<Longrightarrow> lam_replacement(M,\<lambda>_. b)"
+  unfolding lam_replacement_def strong_replacement_def
+  by safe (rule_tac x="_\<times>{b}" in rexI; blast)
+
+
+
+lemma not_functional_Replace_0:
+  assumes "\<not>(\<forall>y y'. P(y) \<and> P(y') \<longrightarrow> y=y')"
+  shows "{y . x \<in> A, P(y)} = 0"
+  using assms by (blast elim!: ReplaceE)
+
+lemma Replace_in_Pow_rel:
+  assumes "\<And>x b. x \<in> A \<Longrightarrow> P(x,b) \<Longrightarrow> b \<in> U" "\<forall>x\<in>A. \<forall>y y'. P(x,y) \<and> P(x,y') \<longrightarrow> y=y'"
+    "separation(M, \<lambda>y. \<exists>x[M]. x \<in> A \<and> P(x, y))"
+    "M(U)" "M(A)"
+  shows "{y . x \<in> A, P(x, y)} \<in> Pow\<^bsup>M\<^esup>(U)"
+proof -
+  from assms
+  have "{y . x \<in> A, P(x, y)} \<subseteq> U"
+    "z \<in> {y . x \<in> A, P(x, y)} \<Longrightarrow> M(z)" for z
+    by (auto dest:transM)
+  with assms
+  have "{y . x \<in> A, P(x, y)} = {y\<in>U . \<exists>x[M]. x\<in>A \<and> P(x,y)}"
+    by (intro equalityI) (auto, blast)
+  with assms
+  have "M({y . x \<in> A, P(x, y)})"
+    by simp
+  with assms
+  show ?thesis
+    using mem_Pow_rel_abs by auto
+qed
+
+lemma Replace_sing_0_in_Pow_rel:
+  assumes "\<And>b. P(b) \<Longrightarrow> b \<in> U"
+    "separation(M, \<lambda>y. P(y))" "M(U)"
+  shows "{y . x \<in> {0}, P(y)} \<in> Pow\<^bsup>M\<^esup>(U)"
+proof (cases "\<forall>y y'. P(y) \<and> P(y') \<longrightarrow> y=y'")
+  case True
+  with assms
+  show ?thesis by (rule_tac Replace_in_Pow_rel) auto
+next
+  case False
+  with assms
+  show ?thesis
+    using nonempty not_functional_Replace_0[of P "{0}"] Pow_rel_char by auto
+qed
+
+lemma The_in_Pow_rel_Union:
+  assumes "\<And>b. P(b) \<Longrightarrow> b \<in> U" "separation(M, \<lambda>y. P(y))" "M(U)"
+  shows "(THE i. P(i)) \<in> Pow\<^bsup>M\<^esup>(\<Union>U)"
+proof -
+  note assms
+  moreover from this
+  have "(THE i. P(i)) \<in> Pow(\<Union>U)"
+    unfolding the_def by auto
+  moreover from assms
+  have "M(THE i. P(i))"
+    using Replace_sing_0_in_Pow_rel[of P U] unfolding the_def
+    by (auto dest:transM)
+  ultimately
+  show ?thesis
+    using Pow_rel_char by auto
+qed
+
+lemma separation_least: "separation(M, \<lambda>y. Ord(y) \<and> P(y) \<and> (\<forall>j. j < y \<longrightarrow> \<not> P(j)))"
+  unfolding separation_def
+proof
+  fix z
+  assume "M(z)"
+  have "M({x \<in> z . x \<in> z \<and> Ord(x) \<and> P(x) \<and> (\<forall>j. j < x \<longrightarrow> \<not> P(j))})"
+    (is "M(?y)")
+  proof (cases "\<exists>x\<in>z. Ord(x) \<and> P(x) \<and> (\<forall>j. j < x \<longrightarrow> \<not> P(j))")
+    case True
+    have "\<exists>x[M]. ?y = {x}"
+      by (safe, rename_tac x, rule_tac x=x in rexI)
+        (auto dest:transM, intro equalityI, auto elim:Ord_linear_lt)
+    then
+    show ?thesis
+      by auto
+  next
+    case False
+    then
+    have "{x \<in> z . x \<in> z \<and> Ord(x) \<and> P(x) \<and> (\<forall>j. j < x \<longrightarrow> \<not> P(j))} = 0"
+      by auto
+    then
+    show ?thesis by auto
+  qed
+  moreover from this
+  have "\<forall>x[M]. x \<in> ?y \<longleftrightarrow> x \<in> z \<and> Ord(x) \<and> P(x) \<and> (\<forall>j. j < x \<longrightarrow> \<not> P(j))" by simp
+  ultimately
+  show "\<exists>y[M]. \<forall>x[M]. x \<in> y \<longleftrightarrow> x \<in> z \<and> Ord(x) \<and> P(x) \<and> (\<forall>j. j < x \<longrightarrow> \<not> P(j))"
+    by blast
+qed
+
+lemma Least_in_Pow_rel_Union:
+  assumes "\<And>b. P(b) \<Longrightarrow> b \<in> U"
+    "M(U)"
+  shows "(\<mu> i. P(i)) \<in> Pow\<^bsup>M\<^esup>(\<Union>U)"
+  using assms separation_least unfolding Least_def
+  by (rule_tac The_in_Pow_rel_Union) simp
+
+lemma bounded_lam_replacement:
+  fixes U
+  assumes "\<forall>X[M]. \<forall>x\<in>X. f(x) \<in> U(X)"
+    and separation_f:"\<forall>A[M]. separation(M,\<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, f(x)\<rangle>)"
+    and U_closed [intro,simp]: "\<And>X. M(X) \<Longrightarrow> M(U(X))"
+  shows "lam_replacement(M, f)"
+proof -
+  have "M(\<lambda>x\<in>A. f(x))" if "M(A)" for A
+  proof -
+    have "(\<lambda>x\<in>A. f(x)) = {y\<in> Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(A \<union> U(A))). \<exists>x[M]. x\<in>A \<and> y = \<langle>x, f(x)\<rangle>}"
+    proof (intro equalityI, auto)
+      fix x
+      assume "x\<in>A"
+      moreover
+      moreover from calculation assms
+      have "f(x) \<in> U(A)" by simp
+      moreover from calculation
+      have "{x, f(x)} \<in> Pow\<^bsup>M\<^esup>(A \<union> U(A))" "{x,x} \<in> Pow\<^bsup>M\<^esup>(A \<union> U(A))"
+        using Pow_rel_char[of "A \<union> U(A)"] by (auto dest:transM)
+      ultimately
+      show "\<langle>x, f(x)\<rangle> \<in> Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(A \<union> U(A)))"
+        using Pow_rel_char[of "Pow\<^bsup>M\<^esup>(A \<union> U(A))"] unfolding Pair_def
+        by (auto dest:transM)
+    qed
+    have "M({y\<in> Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(A \<union> U(A))). \<exists>x[M]. x\<in>A \<and> y = \<langle>x, f(x)\<rangle>})"
+      using separation_f
+      by (rule_tac separation_closed) simp_all
+    ultimately
+    show ?thesis
+      by simp
+  qed
+  moreover from this
+  have "\<forall>x[M]. M(f(x))"
+    using lam_closed_imp_closed by simp
+  ultimately
+  show ?thesis
+    using assms
+    by (rule_tac lam_replacement_iff_lam_closed[THEN iffD2]) simp_all
+qed
+
+lemma fst_in_double_Union:
+  assumes "x\<in>X"
+  shows "fst(x) \<in> {0} \<union> \<Union>\<Union>X"
+proof -
+  have "fst(x) \<in> {0} \<union> \<Union>x" for x
+    unfolding fst_def
+    using the_0 fst_conv
+    by(cases "\<exists>!a.\<exists>b. x = \<langle>a,b\<rangle>", auto, simp add:Pair_def)
+  with assms
+  show ?thesis by auto
+qed
+
+lemma snd_in_double_Union:
+  assumes "x\<in>X"
+  shows "snd(x) \<in> {0} \<union> \<Union>\<Union>X"
+proof -
+  have "snd(x) \<in> {0} \<union> \<Union>x" for x
+    unfolding snd_def
+    using the_0 snd_conv
+    by(cases "\<exists>!a.\<exists>b. x = \<langle>a,b\<rangle>", auto, simp add:Pair_def)
+  with assms
+  show ?thesis by auto
+qed
+
+lemma bounded_lam_replacement_binary:
+  fixes U
+  assumes "\<forall>X[M]. \<forall>x\<in>X. \<forall>y\<in>X. f(x,y) \<in> U(X)"
+    and separation_f:"\<forall>A[M]. separation(M,\<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, f(fst(x),snd(x))\<rangle>)"
+    and U_closed [intro,simp]: "\<And>X. M(X) \<Longrightarrow> M(U(X))"
+  shows "lam_replacement(M, \<lambda>r . f(fst(r),snd(r)))"
+proof -
+  have "M(\<lambda>x\<in>A. f(fst(x),snd(x)))" if "M(A)" for A
+  proof -
+    have "(\<lambda>x\<in>A. f(fst(x),snd(x))) =
+      {y\<in> Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(A \<union> U({0} \<union> \<Union>\<Union>A))). \<exists>x[M]. x\<in>A \<and> y = \<langle>x, f(fst(x),snd(x))\<rangle>}"
+    proof (intro equalityI, auto)
+      fix x
+      assume "x\<in>A"
+      moreover
+      moreover from calculation assms
+      have "f(fst(x),snd(x)) \<in> U({0} \<union> \<Union>\<Union>A)"
+        using fst_in_double_Union snd_in_double_Union by simp
+      moreover from calculation
+      have "{x, f(fst(x),snd(x))} \<in> Pow\<^bsup>M\<^esup>(A \<union> U({0} \<union> \<Union>\<Union>A))"
+        "{x,x} \<in> Pow\<^bsup>M\<^esup>(A \<union> U({0} \<union> \<Union>\<Union>A))"
+        using Pow_rel_char[of "A \<union> U({0} \<union> \<Union>\<Union>A)"] by (auto dest:transM)
+      ultimately
+      show "\<langle>x, f(fst(x),snd(x))\<rangle> \<in> Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(A \<union> U({0} \<union> \<Union>\<Union>A)))"
+        using Pow_rel_char[of "Pow\<^bsup>M\<^esup>(A \<union> U({0} \<union> \<Union>\<Union>A))"] unfolding Pair_def
+        by (auto dest:transM)
+    qed
+    have "M({y\<in> Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(A \<union> U({0} \<union> \<Union>\<Union>A))). \<exists>x[M]. x\<in>A \<and> y = \<langle>x, f(fst(x),snd(x))\<rangle>})"
+      using separation_f
+      by (rule_tac separation_closed) simp_all
+    ultimately
+    show ?thesis
+      by simp
+  qed
+  moreover from this
+  have "\<forall>x[M]. M(f(fst(x),snd(x)))"
+    using lam_closed_imp_closed[of "\<lambda>x. f(fst(x),snd(x))"] by simp
+  ultimately
+  show ?thesis
+    using assms
+    by (rule_tac lam_replacement_iff_lam_closed[THEN iffD2]) simp_all
+qed
+
+lemma lam_replacement_fst':
+  assumes "\<forall>A[M]. separation(M, \<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, fst(x)\<rangle>)"
+  shows "lam_replacement(M,fst)"
+  using fst_in_double_Union assms
+    bounded_lam_replacement[of fst "\<lambda>X. {0} \<union> \<Union>\<Union>X"] by simp
+
+lemma lam_replacement_snd':
+  assumes "\<forall>A[M]. separation(M, \<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, snd(x)\<rangle>)"
+  shows "lam_replacement(M,snd)"
+  using snd_in_double_Union assms
+    bounded_lam_replacement[of snd "\<lambda>X. {0} \<union> \<Union>\<Union>X"] by simp
+
+lemma lam_replacement_restrict:
+  assumes "\<forall>A[M]. separation(M, \<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, restrict(x,B)\<rangle>)"  "M(B)"
+  shows "lam_replacement(M, \<lambda>r . restrict(r,B))"
+proof -
+  from assms
+  have "restrict(r,B)\<in>Pow\<^bsup>M\<^esup>(\<Union>R)" if "M(R)" "r\<in>R" for r R
+    using Union_upper subset_Pow_Union subset_trans[OF restrict_subset]
+      Pow_rel_char that transM[of _ R]
+    by auto
+  with assms
+  show ?thesis
+    using bounded_lam_replacement[of "\<lambda>r . restrict(r,B)" "\<lambda>X. Pow\<^bsup>M\<^esup>(\<Union>X)"]
+    by simp
+qed
+
+lemma lam_replacement_Union' :
+  assumes  "\<forall>A[M]. separation(M, \<lambda>y. \<exists>x[M]. x \<in> A \<and> y = \<langle>x, \<Union>x\<rangle>)"
+  shows "lam_replacement(M,Union)"
+proof -
+  have "\<Union>x \<in> Pow(\<Union>\<Union>A)" if "x\<in>A" for x A
+    using that by auto
+  then
+  have "\<Union>x \<in> Pow\<^bsup>M\<^esup>(\<Union>\<Union>A)" if "M(A)" "x\<in>A" for x A
+    using that transM[of x A] Pow_rel_char
+    by auto
+  with assms
+  show ?thesis
+    using bounded_lam_replacement[where U="\<lambda>A . Pow\<^bsup>M\<^esup>(\<Union>\<Union>A)"]
+    by auto
+qed
+
+lemma Image_in_Pow_rel_Union3:
+  assumes "x\<in>X" "y\<in>X" "M(X)"
+  shows "Image(x,y) \<in> Pow\<^bsup>M\<^esup>(\<Union>\<Union>\<Union>X)"
+proof -
+  from assms
+  have "\<langle>a, b\<rangle> \<in> x \<Longrightarrow> b \<in> \<Union>\<Union>x" for a b
+    unfolding Pair_def by (auto dest:transM)
+  moreover from this and assms
+  have "\<langle>a, b\<rangle> \<in> x \<Longrightarrow> M(b)" for a b
+    using transM[of _  X] transM[of _  x]
+    by auto
+  ultimately
+  show ?thesis
+    using assms transM[of _  X] transM[of _  x] mem_Pow_rel_abs
+    by auto fast
+qed
+
+lemma lam_replacement_Image':
+  assumes
+    "\<forall>A[M]. separation(M,\<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, Image(fst(x),snd(x))\<rangle>)"
+  shows
+    "lam_replacement(M, \<lambda>r . Image(fst(r),snd(r)))"
+  using assms Image_in_Pow_rel_Union3
+  by (rule_tac bounded_lam_replacement_binary[of _ "\<lambda>X. Pow\<^bsup>M\<^esup>(\<Union>\<Union>\<Union>X)"]) auto
+
+lemma minimum_in_Union:
+  assumes "x\<in>X" "y\<in>X"
+  shows "minimum(x,y) \<in> {0} \<union> \<Union>X"
+  using assms minimum_in'
+  by auto
+
+lemma lam_replacement_minimum':
+  assumes
+    "\<forall>A[M]. separation(M,\<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, minimum(fst(x),snd(x))\<rangle>)"
+  shows
+    "lam_replacement(M, \<lambda>r . minimum(fst(r),snd(r)))"
+  using assms minimum_in_Union
+  by (rule_tac bounded_lam_replacement_binary[of _ "\<lambda>X. {0} \<union> \<Union>X"]) auto
+
+lemma lam_replacement_Pow_rel:
+  assumes "\<forall>A[M]. separation(M, \<lambda>y. \<exists>x[M]. x \<in> A \<and> y = \<langle>x, Pow_rel(M,x)\<rangle>)"
+  shows "lam_replacement(M,Pow_rel(M))"
+proof -
+  have "Pow_rel(M,x) \<in> Pow(Pow(\<Union>A))" if "x\<in>A" "M(A)" for x A
+    using that transM[of x A] def_Pow_rel[of _ x] by (auto dest:transM)
+  then
+  have "Pow_rel(M,x) \<in> Pow(Pow\<^bsup>M\<^esup>(\<Union>A))" if "M(A)" "x\<in>A" for x A
+    using that transM[of x A] Pow_rel_char
+    by auto
+  then
+  have "Pow_rel(M,x) \<in> Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(\<Union>A))" if "M(A)" "x\<in>A" for x A
+    using that transM[of x A] Pow_rel_char[of "Pow\<^bsup>M\<^esup>(\<Union>A)"]
+    by auto
+  with assms
+  show ?thesis
+    using bounded_lam_replacement[where U="\<lambda>A. Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(\<Union>A))"]
+    by auto
+qed
+
+
+definition
+  middle_del :: "i\<Rightarrow>i\<Rightarrow>i" where
+  "middle_del(x,y) \<equiv> \<langle>fst(x),snd(y)\<rangle>"
+
+relativize functional "middle_del" "middle_del_rel"
+relationalize "middle_del_rel" "is_middle_del"
+synthesize "is_middle_del" from_definition
+arity_theorem for "is_middle_del_fm"
+
+context M_basic
+begin
+
+lemma middle_del_in_cartprod:
+  assumes "x\<in>X" "y\<in>X" "M(X)"
+  shows "middle_del(x,y) \<in> ({0} \<union> \<Union>\<Union>X) \<times> ({0} \<union> \<Union>\<Union>X)"
+  using assms Pow_rel_char transM[of _ X] fst_in_double_Union snd_in_double_Union
+  unfolding middle_del_def by auto
+
+lemma lam_replacement_middle_del':
+  assumes
+    "\<forall>A[M]. separation(M,\<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, middle_del(fst(x),snd(x))\<rangle>)"
+  shows
+    "lam_replacement(M, \<lambda>r . middle_del(fst(r),snd(r)))"
+  using assms middle_del_in_cartprod
+  by (rule_tac bounded_lam_replacement_binary[of _ "\<lambda>X. ({0} \<union> \<Union>\<Union>X) \<times> ({0} \<union> \<Union>\<Union>X)"]) auto
+
+
+definition
+  prodRepl :: "i\<Rightarrow>i\<Rightarrow>i" where
+  "prodRepl(x,y) \<equiv> \<langle>snd(x),\<langle>fst(x),snd(y)\<rangle>\<rangle>"
+
+relativize functional "prodRepl" "prodRepl_rel"
+relationalize "prodRepl_rel" "is_prodRepl"
+synthesize "is_prodRepl" from_definition
+arity_theorem for "is_prodRepl_fm"
+
+context M_basic
+begin
+
+lemma prodRepl_in_cartprod:
+  assumes "x\<in>X" "y\<in>X" "M(X)"
+  shows "prodRepl(x,y) \<in> ({0} \<union> \<Union>\<Union>X) \<times> ({0} \<union> \<Union>\<Union>X) \<times> ({0} \<union> \<Union>\<Union>X)"
+  using assms Pow_rel_char transM[of _ X] fst_in_double_Union snd_in_double_Union
+  unfolding prodRepl_def by auto
+
+lemma lam_replacement_prodRepl':
+  assumes
+    "\<forall>A[M]. separation(M,\<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, prodRepl(fst(x),snd(x))\<rangle>)"
+  shows
+    "lam_replacement(M, \<lambda>r . prodRepl(fst(r),snd(r)))"
+  using assms prodRepl_in_cartprod
+  by (rule_tac bounded_lam_replacement_binary[of _
+        "\<lambda>X. ({0} \<union> \<Union>\<Union>X) \<times> ({0} \<union> \<Union>\<Union>X) \<times> ({0} \<union> \<Union>\<Union>X)"]) auto
+
+
+context M_Perm
+begin
+
+lemma inj_rel_in_Pow_rel_Pow_rel:
+  assumes "x\<in>X" "y\<in>X" "M(X)"
+  shows "inj\<^bsup>M\<^esup>(x,y) \<in> Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(\<Union>X \<times> \<Union>X))"
+  using assms transM[of _  X] mem_Pow_rel_abs inj_def Pi_def
+  by clarsimp (use inj_rel_char in auto)
+
+lemma lam_replacement_inj_rel':
+  assumes
+    "\<forall>A[M]. separation(M,\<lambda>y. \<exists>x[M]. x\<in>A \<and> y = \<langle>x, inj\<^bsup>M\<^esup>(fst(x),snd(x))\<rangle>)"
+  shows
+    "lam_replacement(M, \<lambda>r . inj\<^bsup>M\<^esup>(fst(r),snd(r)))"
+  using assms inj_rel_in_Pow_rel_Pow_rel
+  by (rule_tac bounded_lam_replacement_binary[of _ "\<lambda>X. Pow\<^bsup>M\<^esup>(Pow\<^bsup>M\<^esup>(\<Union>X \<times> \<Union>X))"]) auto
+
+
+locale M_replacement = M_basic +
+  assumes
+    lam_replacement_fst: "lam_replacement(M,fst)"
+    and
+    lam_replacement_snd: "lam_replacement(M,snd)"
+    and
+    lam_replacement_Union: "lam_replacement(M,Union)"
+    and
+    lam_replacement_middle_del: "lam_replacement(M, \<lambda>r. middle_del(fst(r),snd(r)))"
+    and
+    lam_replacement_prodRepl: "lam_replacement(M, \<lambda>r. prodRepl(fst(r),snd(r)))"
+    and
+    lam_replacement_Image:"lam_replacement(M, \<lambda>p. fst(p) `` snd(p))"
+    and
+    middle_separation: "separation(M, \<lambda>x. snd(fst(x))=fst(snd(x)))"
+    and
+    separation_fst_in_snd: "separation(M, \<lambda>y. fst(snd(y)) \<in> snd(snd(y)))"
+begin
+

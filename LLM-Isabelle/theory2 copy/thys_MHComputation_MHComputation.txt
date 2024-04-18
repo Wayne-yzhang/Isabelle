@@ -1,0 +1,142 @@
+
+theory MHComputation
+  imports Main
+begin
+
+
+
+
+locale Computation = 
+  fixes halts :: "'machineConfig \<Rightarrow> bool"
+and     getNextConfig :: "'machineConfig \<Rightarrow> 'machineConfig"
+and     configAtTick :: "'machineConfig \<Rightarrow> nat \<Rightarrow> 'machineConfig"
+assumes 
+        halting: "halts spec \<equiv> \<exists> n . (configAtTick spec n = configAtTick spec (n+1))"
+and     configs: "configAtTick spec n = 
+                   (if n = 0 then spec else getNextConfig (configAtTick spec (n-1)))"
+begin
+
+abbreviation haltingTick :: "'machineConfig \<Rightarrow> nat option"
+  where "haltingTick spec \<equiv> 
+          (if (halts spec) 
+           then Some (Min { n . configAtTick spec n = configAtTick spec (n+1) })
+           else None)"
+
+end
+
+
+
+
+locale ReachabilitySpace = 
+  fixes   reachable :: "'location \<Rightarrow> 'location \<Rightarrow> bool" ("_ \<leadsto> _")
+begin
+end
+
+
+
+
+locale Time = linordered_field +
+  fixes isFinite  :: "'a \<Rightarrow> bool"
+begin
+
+fun embedTick :: "nat \<Rightarrow> 'a" 
+  where "embedTick 0 = zero"
+  |     "embedTick (Suc n) = plus one (embedTick n)"
+
+end
+
+
+
+
+
+
+
+
+locale MHSpacetime = ReachabilitySpace + Time +
+  fixes mhpoint   :: "'location"
+and     mhline    :: "'b \<Rightarrow> 'location"
+and     basePath  :: "'b \<Rightarrow> 'location"
+and     baseTime  :: "'b"
+assumes 
+        mhprop:   "(mhline t) \<leadsto> mhpoint"
+and     baseprop: "(basePath zero = mhline zero) \<and> (basePath baseTime = mhpoint)
+                    \<and> (isFinite baseTime)"
+begin
+end
+
+
+
+
+
+
+locale MHComputation = Computation + MHSpacetime +
+  fixes machinePath      :: "'c \<Rightarrow> 'b"
+and     userPath         :: "'c \<Rightarrow> 'b"
+and     signalSentFrom   :: "'a \<Rightarrow> 'b \<Rightarrow> bool"
+and     signalPresentAt  :: "'a \<Rightarrow> 'b \<Rightarrow> bool"
+and     runtime          :: "'c"
+assumes
+    pathOfMachine:   "machinePath = mhline"
+and pathOfUser:      "userPath = basePath"
+and decisionTime:    "runtime  = baseTime"
+and signalling:      "(signalSentFrom spec pt) \<longleftrightarrow> 
+                           (\<exists> n . (haltingTick spec = Some n)
+                               \<and> (pt = machinePath (embedTick n)) )"
+and signalReception: "(signalPresentAt spec pt \<longleftrightarrow>  
+                           (\<exists> pt' . signalSentFrom spec pt' \<and> (pt' \<leadsto> pt)))"
+
+begin
+
+
+
+
+abbreviation decisionAtTime :: "'a \<Rightarrow> 'c \<Rightarrow> bool"
+  where "decisionAtTime spec t \<equiv> signalPresentAt spec (userPath t)"
+
+
+lemma hpMHDecidable: "(isFinite runtime) \<and>
+                      (\<forall> spec . (decisionAtTime spec runtime = True) \<longleftrightarrow> halts spec)"
+proof -
+  have part1: "isFinite runtime" using baseprop decisionTime by auto
+
+  moreover have part2: "\<forall> spec . (decisionAtTime spec runtime = True) \<longleftrightarrow> halts spec"
+  proof -
+    { fix spec
+  
+      { assume case1: "decisionAtTime spec runtime = True"
+        hence "signalPresentAt spec (userPath runtime)" by simp
+        then obtain pt'  where pt': "(signalSentFrom spec pt') \<and> (pt' \<leadsto> (userPath runtime))"
+          using signalReception by auto
+        then obtain n where n: "haltingTick spec = Some n" using signalling by auto
+        hence "halts spec" by (meson option.distinct(1))
+      }
+      hence "decisionAtTime spec runtime = True \<longrightarrow> halts spec" by auto
+    
+      moreover have "halts spec \<longrightarrow> decisionAtTime spec runtime = True"
+      proof -
+        { assume case2: "halts spec"
+          obtain m where m: "m = Min { n . configAtTick spec n = configAtTick spec (n+1) }"
+            by auto
+          define pt where pt: "pt = machinePath (embedTick m)"
+          hence "(haltingTick spec = Some m) \<and> (pt = machinePath (embedTick m))" using m case2 by simp
+          hence "signalSentFrom spec pt" using signalling by auto
+          moreover have "pt \<leadsto> mhpoint" by (metis mhprop pathOfMachine pt)
+          ultimately have "signalPresentAt spec (userPath runtime)" 
+            using baseprop decisionTime pathOfUser signalReception by auto
+          hence "decisionAtTime spec runtime = True" by simp
+        }
+        thus ?thesis by auto
+      qed
+  
+      ultimately have "(decisionAtTime spec runtime = True) \<longleftrightarrow> halts spec"
+        by blast
+    }
+    thus ?thesis by blast
+  qed
+
+  ultimately show ?thesis by blast
+qed
+
+end
+end
+                             

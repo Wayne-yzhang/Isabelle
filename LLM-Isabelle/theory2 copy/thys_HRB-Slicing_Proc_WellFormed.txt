@@ -1,0 +1,258 @@
+theory WellFormed imports Interpretation Labels "../StaticInter/CFGExit_wf" begin
+
+
+fun fst_cmd :: "cmd \<Rightarrow> cmd"
+where "fst_cmd (c\<^sub>1;;c\<^sub>2) = fst_cmd c\<^sub>1"
+  | "fst_cmd c = c"
+
+lemma Proc_CFG_Call_target_fst_cmd_Skip:
+  "\<lbrakk>labels prog l' c; prog \<turnstile> n -CEdge (p,es,rets)\<rightarrow>\<^sub>p Label l'\<rbrakk> 
+  \<Longrightarrow> fst_cmd c = Skip"
+proof(induct arbitrary:n rule:labels.induct) 
+  case (Labels_Seq1 c\<^sub>1 l c c\<^sub>2)
+  have "c\<^sub>1 \<turnstile> n -CEdge (p, es, rets)\<rightarrow>\<^sub>p Label l"
+    apply - apply(erule Proc_CFG.cases,auto dest:Proc_CFG_Call_Labels)
+    by(case_tac n')(auto dest:label_less_num_inner_nodes)
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_Seq2 c\<^sub>2 l c c\<^sub>1)
+  obtain nx where "c\<^sub>2 \<turnstile> nx -CEdge (p, es, rets)\<rightarrow>\<^sub>p Label l"
+    apply - apply(erule Proc_CFG.cases)
+    apply(auto dest:Proc_CFG_targetlabel_less_num_nodes Proc_CFG_Call_Labels)
+    by(case_tac n') auto
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_CondTrue c\<^sub>1 l c b c\<^sub>2)
+  obtain nx where "c\<^sub>1 \<turnstile> nx -CEdge (p, es, rets)\<rightarrow>\<^sub>p Label l"
+    apply - apply(erule Proc_CFG.cases,auto)
+     apply(case_tac n') apply auto
+    by(case_tac n')(auto dest:label_less_num_inner_nodes)
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_CondFalse c\<^sub>2 l c b c\<^sub>1)
+  obtain nx where "c\<^sub>2 \<turnstile> nx -CEdge (p, es, rets)\<rightarrow>\<^sub>p Label l"
+    apply - apply(erule Proc_CFG.cases,auto)
+     apply(case_tac n') apply(auto dest:Proc_CFG_targetlabel_less_num_nodes)
+    by(case_tac n') auto
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_WhileBody c' l c b)
+  obtain nx where "c' \<turnstile> nx -CEdge (p, es, rets)\<rightarrow>\<^sub>p Label l"
+    apply - apply(erule Proc_CFG.cases,auto)
+    by(case_tac n') auto
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_Call px esx retsx)
+  show ?case by(fastforce elim:Proc_CFG.cases)
+qed(auto dest:Proc_CFG_Call_Labels)
+
+
+lemma Proc_CFG_Call_source_fst_cmd_Call:
+  "\<lbrakk>labels prog l c; prog \<turnstile> Label l -CEdge (p,es,rets)\<rightarrow>\<^sub>p n'\<rbrakk> 
+  \<Longrightarrow> \<exists>p es rets. fst_cmd c = Call p es rets"
+proof(induct arbitrary:n' rule:labels.induct)
+  case (Labels_Base c n')
+    by(induct c "Label 0" "CEdge (p, es, rets)" n' rule:Proc_CFG.induct) auto
+next
+  case (Labels_LAss V e n')
+    by(fastforce elim:Proc_CFG.cases)
+next
+  case (Labels_Seq1 c\<^sub>1 l c c\<^sub>2)
+  have "c\<^sub>1 \<turnstile> Label l -CEdge (p, es, rets)\<rightarrow>\<^sub>p n'"
+    apply - apply(erule Proc_CFG.cases,auto dest:Proc_CFG_Call_Labels)
+    by(case_tac n)(auto dest:label_less_num_inner_nodes)
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_Seq2 c\<^sub>2 l c c\<^sub>1)
+  obtain nx where "c\<^sub>2 \<turnstile> Label l -CEdge (p, es, rets)\<rightarrow>\<^sub>p nx"
+    apply - apply(erule Proc_CFG.cases)
+    apply(auto dest:Proc_CFG_sourcelabel_less_num_nodes Proc_CFG_Call_Labels)
+    by(case_tac n) auto
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_CondTrue c\<^sub>1 l c b c\<^sub>2)
+  obtain nx where "c\<^sub>1 \<turnstile> Label l -CEdge (p, es, rets)\<rightarrow>\<^sub>p nx"
+    apply - apply(erule Proc_CFG.cases,auto)
+     apply(case_tac n) apply auto
+    by(case_tac n)(auto dest:label_less_num_inner_nodes)
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_CondFalse c\<^sub>2 l c b c\<^sub>1)
+  obtain nx where "c\<^sub>2 \<turnstile> Label l -CEdge (p, es, rets)\<rightarrow>\<^sub>p nx"
+    apply - apply(erule Proc_CFG.cases,auto)
+     apply(case_tac n) apply(auto dest:Proc_CFG_sourcelabel_less_num_nodes)
+    by(case_tac n) auto
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_WhileBody c' l c b)
+  obtain nx where "c' \<turnstile> Label l -CEdge (p, es, rets)\<rightarrow>\<^sub>p nx"
+    apply - apply(erule Proc_CFG.cases,auto dest:Proc_CFG_Call_Labels)
+    by(case_tac n) auto
+  from IH[OF this] show ?case by simp
+next
+  case (Labels_WhileExit b c' n')
+  have "while (b) c' \<turnstile> Label 1 -IEdge \<Up>id\<rightarrow>\<^sub>p Exit" by(rule Proc_CFG_WhileFalseSkip)
+  have False by(rule Proc_CFG_Call_Intra_edge_not_same_source)
+  thus ?case by simp
+next
+  case (Labels_Call px esx retsx)
+  show ?case by(fastforce elim:Proc_CFG.cases)
+qed
+
+
+
+
+lemma PCFG_CallEdge_THE_rets:
+  "prog \<turnstile> n -CEdge (p,es,rets)\<rightarrow>\<^sub>p n'
+\<Longrightarrow> (THE rets'. \<exists>p' es' n. prog \<turnstile> n -CEdge(p',es',rets')\<rightarrow>\<^sub>p n') = rets"
+by(fastforce intro:the_equality dest:Proc_CFG_Call_nodes_eq')
+
+
+definition ParamDefs_proc :: "cmd \<Rightarrow> label \<Rightarrow> vname list"
+  where "ParamDefs_proc c n \<equiv> 
+  if (\<exists>n' p' es' rets'. c \<turnstile> n' -CEdge(p',es',rets')\<rightarrow>\<^sub>p n) then 
+     (THE rets'. \<exists>p' es' n'. c \<turnstile> n' -CEdge(p',es',rets')\<rightarrow>\<^sub>p n)
+  else []"
+
+
+lemma in_procs_THE_in_procs_cmd:
+  "\<lbrakk>well_formed procs; (p,ins,outs,c) \<in> set procs\<rbrakk>
+  \<Longrightarrow> (THE c'. \<exists>ins' outs'. (p,ins',outs',c') \<in> set procs) = c"
+  by(fastforce intro:the_equality)
+
+
+definition ParamDefs :: "wf_prog \<Rightarrow> node \<Rightarrow> vname list"
+  where "ParamDefs wfp n \<equiv> let (prog,procs) = Rep_wf_prog wfp; (p,l) = n in
+  (if (p = Main) then ParamDefs_proc prog l
+   else (if (\<exists>ins outs c. (p,ins,outs,c) \<in> set procs)
+         then ParamDefs_proc (THE c'. \<exists>ins' outs'. (p,ins',outs',c') \<in> set procs) l
+         else []))"
+
+
+lemma ParamDefs_Main_Return_target:
+  "\<lbrakk>Rep_wf_prog wfp = (prog,procs); prog \<turnstile> n -CEdge(p',es,rets)\<rightarrow>\<^sub>p n'\<rbrakk>
+  \<Longrightarrow> ParamDefs wfp (Main,n') = rets"
+  by(fastforce dest:PCFG_CallEdge_THE_rets simp:ParamDefs_def ParamDefs_proc_def)
+
+lemma ParamDefs_Proc_Return_target:
+  assumes "Rep_wf_prog wfp = (prog,procs)"
+  and "(p,ins,outs,c) \<in> set procs" and "c \<turnstile> n -CEdge(p',es,rets)\<rightarrow>\<^sub>p n'"
+  shows "ParamDefs wfp (p,n') = rets"
+proof -
+    by(fastforce intro:wf_wf_prog)
+  moreover
+  have "(THE c'. \<exists>ins' outs'. (p,ins',outs',c') \<in> set procs) = c"
+    by(rule in_procs_THE_in_procs_cmd)
+  ultimately show ?thesis using assms
+    by(fastforce dest:PCFG_CallEdge_THE_rets simp:ParamDefs_def ParamDefs_proc_def)
+qed
+
+lemma ParamDefs_Main_IEdge_Nil:
+  "\<lbrakk>Rep_wf_prog wfp = (prog,procs); prog \<turnstile> n -IEdge et\<rightarrow>\<^sub>p n'\<rbrakk>
+  \<Longrightarrow> ParamDefs wfp (Main,n') = []"
+by(fastforce dest:Proc_CFG_Call_Intra_edge_not_same_target 
+            simp:ParamDefs_def ParamDefs_proc_def)
+
+lemma ParamDefs_Proc_IEdge_Nil:
+  assumes "Rep_wf_prog wfp = (prog,procs)"
+  and "(p,ins,outs,c) \<in> set procs" and "c \<turnstile> n -IEdge et\<rightarrow>\<^sub>p n'"
+  shows "ParamDefs wfp (p,n') = []"
+proof -
+    by(fastforce intro:wf_wf_prog)
+  moreover
+  have "(THE c'. \<exists>ins' outs'. (p,ins',outs',c') \<in> set procs) = c"
+    by(rule in_procs_THE_in_procs_cmd)
+  ultimately show ?thesis using assms
+    by(fastforce dest:Proc_CFG_Call_Intra_edge_not_same_target 
+                simp:ParamDefs_def ParamDefs_proc_def)
+qed
+
+lemma ParamDefs_Main_CEdge_Nil:
+  "\<lbrakk>Rep_wf_prog wfp = (prog,procs); prog \<turnstile> n' -CEdge(p',es,rets)\<rightarrow>\<^sub>p n''\<rbrakk>
+  \<Longrightarrow> ParamDefs wfp (Main,n') = []"
+by(fastforce dest:Proc_CFG_Call_targetnode_no_Call_sourcenode
+            simp:ParamDefs_def ParamDefs_proc_def)
+
+lemma ParamDefs_Proc_CEdge_Nil:
+  assumes "Rep_wf_prog wfp = (prog,procs)"
+  and "(p,ins,outs,c) \<in> set procs" and "c \<turnstile> n' -CEdge(p',es,rets)\<rightarrow>\<^sub>p n''"
+  shows "ParamDefs wfp (p,n') = []"
+proof -
+    by(fastforce intro:wf_wf_prog)
+  moreover
+  have "(THE c'. \<exists>ins' outs'. (p,ins',outs',c') \<in> set procs) = c"
+    by(rule in_procs_THE_in_procs_cmd)
+  ultimately show ?thesis using assms
+    by(fastforce dest:Proc_CFG_Call_targetnode_no_Call_sourcenode
+                simp:ParamDefs_def ParamDefs_proc_def)
+qed
+
+
+lemma assumes "valid_edge wfp a" and "kind a = Q'\<hookleftarrow>\<^bsub>p\<^esub>f'"
+  and "(p, ins, outs) \<in> set (lift_procs wfp)"
+  shows ParamDefs_length:"length (ParamDefs wfp (targetnode a)) = length outs"
+  (is ?length)
+  and Return_update:"f' cf cf' = cf'(ParamDefs wfp (targetnode a) [:=] map cf outs)"
+  (is ?update)
+proof -
+  from Rep_wf_prog[of wfp]
+  obtain prog procs where [simp]:"Rep_wf_prog wfp = (prog,procs)" 
+    by(fastforce simp:wf_prog_def)
+  hence "wf prog procs" by(rule wf_wf_prog)
+  hence wf:"well_formed procs" by fastforce
+  from assms have "prog,procs \<turnstile> sourcenode a -kind a\<rightarrow> targetnode a"
+    by(simp add:valid_edge_def)
+  proof(induct "sourcenode a" "kind a" "targetnode a" rule:PCFG.induct)
+    case (MainReturn l p' es rets l' insx outsx cx)
+    have "\<forall>V\<in>rhs (label c' l'). state_val s V = state_val s' V"
+      by(fastforce dest:labels_label)
+    have "\<forall>V\<in>lhs (label c' l'). state_val (CFG.transfer (lift_procs wfp) et s) V =
+      state_val (CFG.transfer (lift_procs wfp) et s') V" by (rule IH)
+    show ?case by(fastforce dest:labels_label)
+  next
+    case (Proc_CFG_WhileBodyExit c' n et' b)
+      by(cases n) auto
+    have "l' < #:c'" by(fastforce intro:Proc_CFG_sourcelabel_less_num_nodes)
+    then obtain cx where "labels c' l' cx" by(erule less_num_inner_nodes_label)
+      by(fastforce intro:Labels_WhileBody)
+      state_val s V = state_val s' V\<close>
+    with \<open>n = Label l'\<close> \<open>IEdge et = et'\<close>
+    with \<open>labels c' l' cx\<close> \<open>labels (while (b) c') l (cx;;while (b) c')\<close>
+  from \<open>prog \<turnstile> Label l -IEdge et\<rightarrow>\<^sub>p n'\<close> 
+  from \<open>CFG.pred et s\<close> obtain cf cfs where [simp]:"s = cf#cfs" by(cases s) auto
+  from \<open>length s = length s'\<close> obtain cf' cfs' where [simp]:"s' = cf'#cfs'" 
+  from \<open>prog \<turnstile> Label l -x\<rightarrow>\<^sub>p n'\<close> \<open>IEdge et = x\<close> 
+    \<open>\<forall>V\<in>rhs (label prog l). state_val s V = state_val s' V\<close>
+    note IH = \<open>\<lbrakk>IEdge et = et'; \<forall>V\<in>rhs (label c\<^sub>1 l). 
+      state_val s V = state_val s' V\<rbrakk> \<Longrightarrow> CFG.pred et s'\<close>
+    from \<open>c\<^sub>1 \<turnstile> Label l -et'\<rightarrow>\<^sub>p n'\<close>
+    with \<open>labels c\<^sub>1 l c'\<close> \<open>\<forall>V\<in>rhs (label (c\<^sub>1;; c\<^sub>2) l). state_val s V = state_val s' V\<close>
+    with \<open>IEdge et = et'\<close> show ?case by (rule IH)
+    note IH = \<open>\<lbrakk>IEdge et = et'; 
+      \<forall>V\<in>rhs (label c\<^sub>1 l). state_val s V = state_val s' V\<rbrakk>
+      \<Longrightarrow> CFG.pred et s'\<close>
+    from \<open>c\<^sub>1 \<turnstile> Label l -et'\<rightarrow>\<^sub>p Exit\<close>
+    with \<open>labels c\<^sub>1 l c'\<close> \<open>\<forall>V\<in>rhs (label (c\<^sub>1;; c\<^sub>2) l). state_val s V = state_val s' V\<close>
+    with \<open>IEdge et = et'\<close> show ?case by (rule IH)
+    note IH = \<open>\<And>l. \<lbrakk>n = Label l; IEdge et = et';
+      \<forall>V\<in>rhs (label c\<^sub>2 l). state_val s V = state_val s' V\<rbrakk> 
+      \<Longrightarrow> CFG.pred et s'\<close>
+    from \<open>n \<oplus> #:c\<^sub>1 = Label l\<close> obtain l' where "n = Label l'" and "l = l' + #:c\<^sub>1"
+    from \<open>c\<^sub>2 \<turnstile> n -et'\<rightarrow>\<^sub>p n'\<close> \<open>n = Label l'\<close>
+    with \<open>l = l' + #:c\<^sub>1\<close> have "labels (c\<^sub>1;;c\<^sub>2) l c'" by(fastforce intro:Labels_Seq2)
+    with \<open>labels c\<^sub>2 l' c'\<close> \<open>\<forall>V\<in>rhs (label (c\<^sub>1;;c\<^sub>2) l). state_val s V = state_val s' V\<close>
+    with \<open>n = Label l'\<close> \<open>IEdge et = et'\<close> show ?case by (rule IH)
+    from \<open>CFG.pred et s\<close> \<open>IEdge et = IEdge (\<lambda>cf. state_check cf b (Some true))\<^sub>\<surd>\<close>
+    with \<open>\<forall>V\<in>rhs (label (if (b) c\<^sub>1 else c\<^sub>2) 0). state_val s V = state_val s' V\<close>
+    with \<open>IEdge et = IEdge (\<lambda>cf. state_check cf b (Some true))\<^sub>\<surd>\<close>
+    from \<open>CFG.pred et s\<close> 
+      \<open>IEdge et = IEdge (\<lambda>cf. state_check cf b (Some false))\<^sub>\<surd>\<close>
+    with \<open>\<forall>V\<in>rhs (label (if (b) c\<^sub>1 else c\<^sub>2) 0). state_val s V = state_val s' V\<close>
+    with \<open>IEdge et = IEdge (\<lambda>cf. state_check cf b (Some false))\<^sub>\<surd>\<close> 
+    note IH = \<open>\<And>l. \<lbrakk>n = Label l; IEdge et = et';
+      \<forall>V\<in>rhs (label c\<^sub>1 l). state_val s V = state_val s' V\<rbrakk> 
+      \<Longrightarrow> CFG.pred et s'\<close>
+    from \<open>n \<oplus> 1 = Label l\<close> obtain l' where "n = Label l'" and "l = l' + 1"
+    from \<open>c\<^sub>1 \<turnstile> n -et'\<rightarrow>\<^sub>p n'\<close> \<open>n = Label l'\<close>
+    with \<open>l = l' + 1\<close> have "labels (if (b) c\<^sub>1 else c\<^sub>2) l c'" 
+    with \<open>labels c\<^sub>1 l' c'\<close> \<open>\<forall>V\<in>rhs (label (if (b) c\<^sub>1 else c\<^sub>2) l). 

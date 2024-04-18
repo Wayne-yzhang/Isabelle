@@ -1,0 +1,269 @@
+theory SumArr
+imports
+  "../OG_Syntax"
+  Word_Lib.Word_32
+begin
+
+unbundle bit_operations_syntax
+
+type_synonym routine = nat
+type_synonym word32 = "32 word"
+type_synonym funcs = "string \<times> nat"
+datatype faults = Overflow | InvalidMem
+type_synonym 'a array = "'a list"
+ 
+record sumarr_state =
+  tarr :: "routine \<Rightarrow> word32 array"
+  tid :: "routine \<Rightarrow> word32"
+  ti :: "routine \<Rightarrow> word32"
+  tsum :: "routine \<Rightarrow> word32"
+  glock :: nat
+  gsum :: word32
+  gdone :: word32
+  garr :: "(word32 array) array"
+  ghost_lock :: "routine \<Rightarrow> bool"
+
+definition
+ NSUM :: word32
+where
+ "NSUM = 10"
+
+definition
+ MAXSUM :: word32
+where
+ "MAXSUM = 1500"
+
+definition
+ array_length :: "'a array \<Rightarrow> word32"
+where
+ "array_length arr \<equiv> of_nat (length arr)"
+
+definition
+ array_nth :: "'a array \<Rightarrow> word32 \<Rightarrow>'a"
+where
+ "array_nth arr n \<equiv> arr ! unat n"
+
+definition
+ array_in_bound :: "'a array \<Rightarrow> word32 \<Rightarrow> bool"
+where
+ "array_in_bound arr idx \<equiv> unat idx < (length arr)"
+
+definition
+  array_nat_sum :: "('a :: len) word array \<Rightarrow> nat"
+where
+  "array_nat_sum arr \<equiv> sum_list (map unat arr)"
+
+definition
+  "local_sum arr \<equiv> of_nat (min (unat MAXSUM) (array_nat_sum arr))"
+
+definition
+  "global_sum arr \<equiv> sum_list (map local_sum arr)"
+
+definition
+  "tarr_inv s i \<equiv>
+    length (tarr s i) = unat NSUM \<and> tarr s i = garr s ! i"
+
+abbreviation
+  "sumarr_inv_till_lock s i \<equiv> \<not> bit (gdone s) i \<and> ((\<not> (ghost_lock s) (1 - i)) \<longrightarrow> ((gdone s = 0 \<and> gsum s = 0) \<or>
+    (bit (gdone s) (1 - i) \<and> gsum s = local_sum (garr s !(1 - i)))))"
+
+abbreviation
+  "lock_inv s \<equiv>
+    (glock s = fromEnum (ghost_lock s 0) + fromEnum (ghost_lock s 1)) \<and>
+    (\<not>(ghost_lock s) 0 \<or> \<not>(ghost_lock s) 1)"
+
+abbreviation
+  "garr_inv s i \<equiv> (\<exists>a b. garr s = [a, b]) \<and>
+    length (garr s ! (1-i)) = unat NSUM"
+
+abbreviation
+  "sumarr_inv s i \<equiv> lock_inv s \<and> tarr_inv s i \<and> garr_inv s i \<and>
+    tid s i = (of_nat i + 1)"
+
+definition
+  lock :: "routine \<Rightarrow> (sumarr_state, funcs, faults) ann_com"
+where
+  "lock i \<equiv>
+    \<lbrace> \<acute>sumarr_inv i \<and> \<acute>tsum i = local_sum (\<acute>tarr i) \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+    AWAIT \<acute>glock = 0
+    THEN \<acute>glock:=1,, \<acute>ghost_lock:=\<acute>ghost_lock (i:= True)
+    END"
+
+definition
+ "sumarr_in_lock1 s i \<equiv> \<not>bit (gdone s) i \<and> ((gdone s = 0 \<and> gsum s = local_sum (tarr s i)) \<or>
+   (bit (gdone s) (1 - i) \<and> \<not> bit (gdone s) i \<and> gsum s = global_sum (garr s)))"
+
+definition
+ "sumarr_in_lock2 s i \<equiv> (bit (gdone s) i \<and> \<not> bit (gdone s) (1 - i) \<and> gsum s = local_sum (tarr s i)) \<or>
+   (bit (gdone s) i \<and> bit (gdone s) (1 - i) \<and> gsum s = global_sum (garr s))"
+
+definition
+  unlock :: "routine \<Rightarrow> (sumarr_state, funcs, faults) ann_com"
+where
+  "unlock i \<equiv>
+    \<lbrace>  \<acute>sumarr_inv i \<and> \<acute>tsum i = local_sum (\<acute>tarr i) \<and> \<acute>glock = 1 \<and>
+    \<acute>ghost_lock i \<and> bit \<acute>gdone (unat (\<acute>tid i - 1)) \<and> \<acute>sumarr_in_lock2 i \<rbrace>
+    \<langle>\<acute>glock := 0,, \<acute>ghost_lock:=\<acute>ghost_lock (i:= False)\<rangle>"
+
+definition
+ "local_postcond s i \<equiv> (\<not> (ghost_lock s) (1 - i) \<longrightarrow> gsum s = (if bit (gdone s) 0 \<and> bit (gdone s) 1
+              then global_sum (garr s)
+              else local_sum (garr s ! i))) \<and> bit (gdone s) i \<and> \<not>ghost_lock s i"
+
+definition
+  sumarr :: "routine \<Rightarrow> (sumarr_state, funcs, faults) ann_com"
+where
+  "sumarr i \<equiv> 
+  \<lbrace>\<acute>sumarr_inv i \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+  \<acute>tsum:=\<acute>tsum(i:=0) ;;
+  \<lbrace> \<acute>tsum i = 0 \<and> \<acute>sumarr_inv i \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+  \<acute>ti:=\<acute>ti(i:=0) ;;
+  TRY
+    \<lbrace> \<acute>tsum i = 0 \<and> \<acute>sumarr_inv i \<and> \<acute>ti i = 0 \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+    WHILE \<acute>ti i < NSUM
+    INV \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i \<le> NSUM \<and> \<acute>tsum i \<le> MAXSUM \<and>
+          \<acute>tsum i = local_sum (take (unat (\<acute>ti i)) (\<acute>tarr i)) \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+    DO
+     \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i < NSUM \<and> \<acute>tsum i \<le> MAXSUM \<and>
+       \<acute>tsum i = local_sum (take (unat (\<acute>ti i)) (\<acute>tarr i)) \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+     (InvalidMem, \<lbrace> array_in_bound (\<acute>tarr i)  (\<acute>ti i) \<rbrace>) \<longmapsto>
+       \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i < NSUM \<and> \<acute>tsum i \<le> MAXSUM \<and>
+         \<acute>tsum i = local_sum (take (unat (\<acute>ti i)) (\<acute>tarr i)) \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+       \<acute>tsum:=\<acute>tsum(i:=\<acute>tsum i + array_nth (\<acute>tarr i) (\<acute>ti i));;
+     \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i < NSUM \<and>
+         local_sum (take (unat (\<acute>ti i)) (\<acute>tarr i)) \<le> MAXSUM \<and>
+         (\<acute>tsum i < MAXSUM \<and> array_nth (\<acute>tarr i) (\<acute>ti i) < MAXSUM \<longrightarrow>
+       \<acute>tsum i = local_sum (take (Suc (unat (\<acute>ti i))) (\<acute>tarr i))) \<and>
+         (array_nth (\<acute>tarr i) (\<acute>ti i) \<ge> MAXSUM \<or> \<acute>tsum i \<ge> MAXSUM\<longrightarrow>
+           local_sum (\<acute>tarr i) = MAXSUM)  \<and>
+       \<acute>sumarr_inv_till_lock i \<rbrace>
+     (InvalidMem, \<lbrace> array_in_bound (\<acute>tarr i)  (\<acute>ti i) \<rbrace>) \<longmapsto>
+       \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i < NSUM \<and>
+         (\<acute>tsum i < MAXSUM \<and> array_nth (\<acute>tarr i) (\<acute>ti i) < MAXSUM \<longrightarrow>
+           \<acute>tsum i = local_sum (take (Suc (unat (\<acute>ti i))) (\<acute>tarr i))) \<and>
+         (array_nth (\<acute>tarr i) (\<acute>ti i) \<ge> MAXSUM \<or> \<acute>tsum i \<ge> MAXSUM \<longrightarrow>
+           local_sum (\<acute>tarr i) = MAXSUM) \<and>
+         \<acute>sumarr_inv_till_lock i\<rbrace>
+       IF array_nth (\<acute>tarr i) (\<acute>ti i) \<ge> MAXSUM \<or> \<acute>tsum i \<ge> MAXSUM 
+       THEN
+         \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i < NSUM \<and> local_sum (\<acute>tarr i) = MAXSUM \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+         \<acute>tsum:=\<acute>tsum(i:=MAXSUM);;
+         \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i < NSUM \<and> \<acute>tsum i \<le> MAXSUM \<and>
+           \<acute>tsum i = local_sum (\<acute>tarr i) \<and> \<acute>sumarr_inv_till_lock i \<rbrace>
+         THROW
+       ELSE
+         \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i < NSUM \<and> \<acute>tsum i \<le> MAXSUM \<and>
+           \<acute>tsum i = local_sum (take (Suc (unat (\<acute>ti i))) (\<acute>tarr i)) \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+         SKIP
+       FI;;
+     \<lbrace> \<acute>sumarr_inv i \<and> \<acute>ti i < NSUM \<and> \<acute>tsum i \<le> MAXSUM \<and>
+       \<acute>tsum i = local_sum (take (Suc (unat (\<acute>ti i))) (\<acute>tarr i)) \<and> \<acute>sumarr_inv_till_lock i \<rbrace>
+     \<acute>ti:=\<acute>ti(i:=\<acute>ti i + 1)
+    OD
+  CATCH
+    \<lbrace> \<acute>sumarr_inv i \<and> \<acute>tsum i = local_sum (\<acute>tarr i) \<and> \<acute>sumarr_inv_till_lock i\<rbrace> SKIP
+  END;;
+  \<lbrace> \<acute>sumarr_inv i \<and> \<acute>tsum i = local_sum (\<acute>tarr i) \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+  SCALL (''lock'', i) 0;;
+  \<lbrace> \<acute>sumarr_inv i \<and> \<acute>tsum i = local_sum (\<acute>tarr i) \<and> \<acute>glock = 1 \<and>
+    \<acute>ghost_lock i \<and> \<acute>sumarr_inv_till_lock i \<rbrace>
+  \<acute>gsum:=\<acute>gsum + \<acute>tsum i ;;
+  \<lbrace> \<acute>sumarr_inv i \<and> \<acute>tsum i = local_sum (\<acute>tarr i) \<and> \<acute>glock = 1 \<and>
+    \<acute>ghost_lock i \<and> \<acute>sumarr_in_lock1 i \<rbrace>
+  \<acute>gdone:=(\<acute>gdone OR \<acute>tid i) ;;
+  \<lbrace> \<acute>sumarr_inv i \<and> \<acute>tsum i = local_sum (\<acute>tarr i) \<and> \<acute>glock = 1 \<and>
+    \<acute>ghost_lock i \<and> bit \<acute>gdone (unat (\<acute>tid i - 1)) \<and> \<acute>sumarr_in_lock2 i \<rbrace>
+  SCALL (''unlock'', i) 0"
+
+definition
+ precond
+where
+ "precond s \<equiv> (glock s) = 0 \<and> (gsum s) = 0\<and> (gdone s) = 0 \<and>
+               (\<exists>a b. garr s = [a, b]) \<and>
+               (\<forall>xs\<in>set (garr s). length xs = unat NSUM) \<and>
+               (ghost_lock s) 0 = False \<and> (ghost_lock s) 1 = False"
+
+definition
+ postcond
+where
+ "postcond s \<equiv> (gsum s) = global_sum (garr s) \<and>
+               (\<forall>i < 2. bit (gdone s) i)"
+
+definition
+  "call_sumarr i \<equiv>
+    \<lbrace>length (\<acute>garr ! i) = unat NSUM \<and> \<acute>lock_inv \<and> \<acute>garr_inv i \<and>
+     \<acute>sumarr_inv_till_lock i\<rbrace>
+    CALLX (\<lambda>s. s\<lparr>tarr:=(tarr s)(i:=garr s ! i),
+                 tid:=(tid s)(i:=of_nat i+1),
+                 ti:=(ti s)(i:=undefined),
+                 tsum:=(tsum s)(i:=undefined)\<rparr>)
+          \<lbrace>\<acute>sumarr_inv i \<and> \<acute>sumarr_inv_till_lock i\<rbrace>
+          (''sumarr'', i) 0
+          (\<lambda>s t. t\<lparr>tarr:= (tarr t)(i:=(tarr s) i),
+                   tid:=(tid t)(i:=(tid s i)),
+                   ti:=(ti t)(i:=(ti s i)),
+                   tsum:=(tsum t)(i:=(tsum s i))\<rparr>)
+          (\<lambda>_ _. Skip)
+          \<lbrace>\<acute>local_postcond i\<rbrace> \<lbrace>\<acute>local_postcond i\<rbrace>
+          \<lbrace>False\<rbrace> \<lbrace>False\<rbrace>"
+
+definition
+  "\<Gamma> \<equiv> map_of (map (\<lambda>i. ((''sumarr'', i), com (sumarr i))) [0..<2]) ++
+  map_of (map (\<lambda>i. ((''lock'', i), com (lock i))) [0..<2]) ++
+  map_of (map (\<lambda>i. ((''unlock'', i), com (unlock i))) [0..<2])"
+
+definition
+  "\<Theta> \<equiv> map_of (map (\<lambda>i. ((''sumarr'', i), [ann (sumarr i)])) [0..<2]) ++
+  map_of (map (\<lambda>i. ((''lock'', i), [ann (lock i)])) [0..<2]) ++
+  map_of (map (\<lambda>i. ((''unlock'', i), [ann (unlock i)])) [0..<2])"
+
+declare [[goals_limit = 10]]
+
+lemma [simp]:
+  "local_sum [] = 0"
+  by (simp add: local_sum_def array_nat_sum_def)
+
+lemma MAXSUM_le_plus:
+  "x < MAXSUM \<Longrightarrow> MAXSUM \<le> MAXSUM + x"
+  unfolding MAXSUM_def
+  apply (rule word_le_plus[rotated], assumption)
+  apply clarsimp
+ done
+
+lemma local_sum_Suc:
+  "\<lbrakk>n < length arr; local_sum (take n arr) + arr ! n < MAXSUM;
+    arr ! n < MAXSUM\<rbrakk> \<Longrightarrow>
+    local_sum (take n arr) + arr ! n =
+      local_sum (take (Suc n) arr)"
+  apply (subst take_Suc_conv_app_nth)
+   apply clarsimp
+  apply (clarsimp simp: local_sum_def array_nat_sum_def )
+   apply (subst (asm) min_def, clarsimp split: if_splits)
+   apply (clarsimp simp: MAXSUM_le_plus word_not_le[symmetric])
+  apply (subst min_absorb2)
+   apply (subst of_nat_mono_maybe_le[where 'a=32])
+     apply (clarsimp simp: MAXSUM_def)
+    apply (clarsimp simp: MAXSUM_def)
+    apply unat_arith
+   apply (clarsimp simp: MAXSUM_def)
+   apply unat_arith
+  apply clarsimp
+ done
+
+lemma local_sum_MAXSUM:
+  "k < length arr \<Longrightarrow> MAXSUM \<le> arr ! k \<Longrightarrow> local_sum arr = MAXSUM"
+  apply (clarsimp simp: local_sum_def array_nat_sum_def)
+  apply (rule word_unat.Rep_inverse')
+  apply (rule min_absorb1[symmetric])
+  apply (subst (asm) word_le_nat_alt)
+  apply (rule le_trans[rotated])
+   apply (rule elem_le_sum_list)
+   apply simp
+  apply clarsimp
+ done
+
+lemma local_sum_MAXSUM':
+proof -
+    by (simp_all add: id_take_nth_drop)
+  from that show ?thesis
+    apply (simp add: **)

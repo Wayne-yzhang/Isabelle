@@ -1,0 +1,1842 @@
+theory Cone_Decomposition
+  imports Groebner_Bases.Groebner_PM Monomial_Module Hilbert_Function
+begin
+
+
+context pm_powerprod
+begin
+
+lemmas reduced_GB_subset_monic_Polys =
+  punit.reduced_GB_subset_monic_dgrad_p_set[simplified, OF dickson_grading_varnum, where m=0, simplified dgrad_p_set_varnum]
+lemmas reduced_GB_is_monomial_set_Polys =
+  punit.reduced_GB_is_monomial_set_dgrad_p_set[simplified, OF dickson_grading_varnum, where m=0, simplified dgrad_p_set_varnum]
+lemmas is_red_reduced_GB_monomial_lt_GB_Polys =
+  punit.is_red_reduced_GB_monomial_lt_GB_dgrad_p_set[simplified, OF dickson_grading_varnum, where m=0, simplified dgrad_p_set_varnum]
+lemmas reduced_GB_monomial_lt_reduced_GB_Polys =
+  punit.reduced_GB_monomial_lt_reduced_GB_dgrad_p_set[simplified, OF dickson_grading_varnum, where m=0, simplified dgrad_p_set_varnum]
+
+end
+
+
+definition quot_set :: "'a set \<Rightarrow> 'a \<Rightarrow> 'a::semigroup_mult set" (infixl "\<div>" 55)
+
+lemma quot_set_iff: "a \<in> A \<div> x \<longleftrightarrow> x * a \<in> A"
+  by (simp add: quot_set_def)
+
+lemma quot_setI: "x * a \<in> A \<Longrightarrow> a \<in> A \<div> x"
+  by (simp only: quot_set_iff)
+
+lemma quot_setD: "a \<in> A \<div> x \<Longrightarrow> x * a \<in> A"
+  by (simp only: quot_set_iff)
+
+lemma quot_set_quot_set [simp]: "A \<div> x \<div> y = A \<div> x * y"
+  by (rule set_eqI) (simp add: quot_set_iff mult.assoc)
+
+lemma quot_set_one [simp]: "A \<div> (1::_::monoid_mult) = A"
+  by (rule set_eqI) (simp add: quot_set_iff)
+
+lemma ideal_quot_set_ideal [simp]: "ideal (ideal B \<div> x) = (ideal B) \<div> (x::_::comm_ring)"
+proof
+  show "ideal (ideal B \<div> x) \<subseteq> ideal B \<div> x"
+  proof
+    fix b
+    assume "b \<in> ideal (ideal B \<div> x)"
+    thus "b \<in> ideal B \<div> x"
+    proof (induct b rule: ideal.span_induct')
+      case base
+      show ?case by (simp add: quot_set_iff ideal.span_zero)
+    next
+      case (step b q p)
+      hence "x * b \<in> ideal B" and "x * p \<in> ideal B" by (simp_all add: quot_set_iff)
+      hence "x * b + q * (x * p) \<in> ideal B"
+        by (intro ideal.span_add ideal.span_scale[where c=q])
+      thus ?case by (simp only: quot_set_iff algebra_simps)
+    qed
+  qed
+qed (fact ideal.span_superset)
+
+  by (simp add: quot_set_def inj_vimage_image_eq)
+
+
+context pm_powerprod
+begin
+
+definition normal_form :: "(('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a) set \<Rightarrow> (('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::field) \<Rightarrow> (('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::field)"
+  where "normal_form F p = (SOME q. (punit.red (punit.reduced_GB F))\<^sup>*\<^sup>* p q \<and> \<not> punit.is_red (punit.reduced_GB F) q)"
+
+
+context
+  fixes X :: "'x set"
+  assumes fin_X: "finite X"
+begin
+
+context
+  fixes F :: "(('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::field) set"
+  assumes F_sub: "F \<subseteq> P[X]"
+begin
+
+lemma normal_form:
+  shows "(punit.red (punit.reduced_GB F))\<^sup>*\<^sup>* p (normal_form F p)" (is ?thesis1)
+    and "\<not> punit.is_red (punit.reduced_GB F) (normal_form F p)" (is ?thesis2)
+proof -
+  from fin_X F_sub have "finite (punit.reduced_GB F)" by (rule finite_reduced_GB_Polys)
+  hence "wfP (punit.red (punit.reduced_GB F))\<inverse>\<inverse>" by (rule punit.red_wf_finite)
+  then obtain q where "(punit.red (punit.reduced_GB F))\<^sup>*\<^sup>* p q"
+    and "\<not> punit.is_red (punit.reduced_GB F) q" unfolding punit.is_red_def not_not
+    by (rule relation.wf_imp_nf_ex)
+  hence "(punit.red (punit.reduced_GB F))\<^sup>*\<^sup>* p q \<and> \<not> punit.is_red (punit.reduced_GB F) q" ..
+  hence "?thesis1 \<and> ?thesis2" unfolding normal_form_def by (rule someI)
+  thus ?thesis1 and ?thesis2 by simp_all
+qed
+
+lemma normal_form_unique:
+  assumes "(punit.red (punit.reduced_GB F))\<^sup>*\<^sup>* p q" and "\<not> punit.is_red (punit.reduced_GB F) q"
+  shows "normal_form F p = q"
+proof (rule relation.ChurchRosser_unique_final)
+  from fin_X F_sub have "punit.is_Groebner_basis (punit.reduced_GB F)" by (rule reduced_GB_is_GB_Polys)
+  thus "relation.is_ChurchRosser (punit.red (punit.reduced_GB F))"
+    by (simp only: punit.is_Groebner_basis_def)
+next
+  show "(punit.red (punit.reduced_GB F))\<^sup>*\<^sup>* p (normal_form F p)" by (rule normal_form)
+next
+  have "\<not> punit.is_red (punit.reduced_GB F) (normal_form F p)" by (rule normal_form)
+  thus "relation.is_final (punit.red (punit.reduced_GB F)) (normal_form F p)"
+    by (simp add: punit.is_red_def)
+next
+  from assms(2) show "relation.is_final (punit.red (punit.reduced_GB F)) q"
+    by (simp add: punit.is_red_def)
+qed fact
+
+lemma normal_form_id_iff: "normal_form F p = p \<longleftrightarrow> (\<not> punit.is_red (punit.reduced_GB F) p)"
+proof
+  assume "normal_form F p = p"
+  with normal_form(2)[of p] show "\<not> punit.is_red (punit.reduced_GB F) p" by simp
+next
+  assume "\<not> punit.is_red (punit.reduced_GB F) p"
+  with rtranclp.rtrancl_refl show "normal_form F p = p" by (rule normal_form_unique)
+qed
+
+lemma normal_form_normal_form: "normal_form F (normal_form F p) = normal_form F p"
+  by (simp add: normal_form_id_iff normal_form)
+
+lemma normal_form_zero: "normal_form F 0 = 0"
+  by (simp add: normal_form_id_iff punit.irred_0)
+
+lemma normal_form_map_scale: "normal_form F (c \<cdot> p) = c \<cdot> (normal_form F p)"
+  by (intro normal_form_unique punit.is_irred_map_scale normal_form)
+    (simp add: punit.map_scale_eq_monom_mult punit.red_rtrancl_mult normal_form)
+
+lemma normal_form_uminus: "normal_form F (- p) = - normal_form F p"
+  by (intro normal_form_unique punit.red_rtrancl_uminus normal_form)
+      (simp add: punit.is_red_uminus normal_form)
+
+lemma normal_form_plus_normal_form:
+  "normal_form F (normal_form F p + normal_form F q) = normal_form F p + normal_form F q"
+  by (intro normal_form_unique rtranclp.rtrancl_refl punit.is_irred_plus normal_form)
+
+lemma normal_form_minus_normal_form:
+  "normal_form F (normal_form F p - normal_form F q) = normal_form F p - normal_form F q"
+  by (intro normal_form_unique rtranclp.rtrancl_refl punit.is_irred_minus normal_form)
+
+lemma normal_form_ideal_Polys: "normal_form (ideal F \<inter> P[X]) = normal_form F"
+proof -
+  let ?F = "ideal F \<inter> P[X]"
+  from fin_X have eq: "punit.reduced_GB ?F = punit.reduced_GB F"
+  proof (rule reduced_GB_unique_Polys)
+    from fin_X F_sub show "punit.is_reduced_GB (punit.reduced_GB F)"
+      by (rule reduced_GB_is_reduced_GB_Polys)
+  next
+    from fin_X F_sub have "ideal (punit.reduced_GB F) = ideal F" by (rule reduced_GB_ideal_Polys)
+    also have "\<dots> = ideal (ideal F \<inter> P[X])"
+    proof (intro subset_antisym ideal.span_subset_spanI)
+      from ideal.span_superset[of F] F_sub have "F \<subseteq> ideal F \<inter> P[X]" by simp
+      thus "F \<subseteq> ideal (ideal F \<inter> P[X])" using ideal.span_superset by (rule subset_trans)
+    qed blast
+    finally show "ideal (punit.reduced_GB F) = ideal (ideal F \<inter> P[X])" .
+  qed blast
+  show ?thesis by (rule ext) (simp only: normal_form_def eq)
+qed
+
+lemma normal_form_diff_in_ideal: "p - normal_form F p \<in> ideal F"
+proof -
+  from normal_form(1) have "p - normal_form F p \<in> ideal (punit.reduced_GB F)"
+    by (rule punit.red_rtranclp_diff_in_pmdl[simplified])
+  also from fin_X F_sub have "\<dots> = ideal F" by (rule reduced_GB_ideal_Polys)
+  finally show ?thesis .
+qed
+
+lemma normal_form_zero_iff: "normal_form F p = 0 \<longleftrightarrow> p \<in> ideal F"
+proof
+  assume "normal_form F p = 0"
+  with normal_form_diff_in_ideal[of p] show "p \<in> ideal F" by simp
+next
+  assume "p \<in> ideal F"
+  hence "p - (p - normal_form F p) \<in> ideal F" using normal_form_diff_in_ideal
+    by (rule ideal.span_diff)
+  also from fin_X F_sub have "\<dots> = ideal (punit.reduced_GB F)" by (rule reduced_GB_ideal_Polys[symmetric])
+  finally have *: "normal_form F p \<in> ideal (punit.reduced_GB F)" by simp
+  show "normal_form F p = 0"
+  proof (rule ccontr)
+    from fin_X F_sub have "punit.is_Groebner_basis (punit.reduced_GB F)" by (rule reduced_GB_is_GB_Polys)
+    moreover note *
+    moreover assume "normal_form F p \<noteq> 0"
+    ultimately obtain g where "g \<in> punit.reduced_GB F" and "g \<noteq> 0"
+      and a: "lpp g adds lpp (normal_form F p)" by (rule punit.GB_adds_lt[simplified])
+    note this(1, 2)
+      by (rule punit.lt_in_keys)
+    ultimately have "punit.is_red (punit.reduced_GB F) (normal_form F p)"
+      using a by (rule punit.is_red_addsI[simplified])
+    with normal_form(2) show False ..
+  qed
+qed
+
+lemma normal_form_eq_iff: "normal_form F p = normal_form F q \<longleftrightarrow> p - q \<in> ideal F"
+proof -
+  have "p - q - (normal_form F p - normal_form F q) = (p - normal_form F p) - (q - normal_form F q)"
+    by simp
+  also from normal_form_diff_in_ideal normal_form_diff_in_ideal have "\<dots> \<in> ideal F"
+    by (rule ideal.span_diff)
+  finally have *: "p - q - (normal_form F p - normal_form F q) \<in> ideal F" .
+  show ?thesis
+  proof
+    assume "normal_form F p = normal_form F q"
+    with * show "p - q \<in> ideal F" by simp
+  next
+    assume "p - q \<in> ideal F"
+    hence "p - q - (p - q - (normal_form F p - normal_form F q)) \<in> ideal F" using *
+      by (rule ideal.span_diff)
+    hence "normal_form F (normal_form F p - normal_form F q) = 0" by (simp add: normal_form_zero_iff)
+    thus "normal_form F p = normal_form F q" by (simp add: normal_form_minus_normal_form)
+  qed
+qed
+
+lemma Polys_closed_normal_form:
+  assumes "p \<in> P[X]"
+  shows "normal_form F p \<in> P[X]"
+proof -
+  from fin_X F_sub have "punit.reduced_GB F \<subseteq> P[X]" by (rule reduced_GB_Polys)
+  with fin_X show ?thesis using assms normal_form(1)
+    by (rule punit.dgrad_p_set_closed_red_rtrancl[OF dickson_grading_varnum, where m=0, simplified dgrad_p_set_varnum])
+qed
+
+lemma image_normal_form_iff:
+  "p \<in> normal_form F ` P[X] \<longleftrightarrow> (p \<in> P[X] \<and> \<not> punit.is_red (punit.reduced_GB F) p)"
+proof
+  assume "p \<in> normal_form F ` P[X]"
+  then obtain q where "q \<in> P[X]" and p: "p = normal_form F q" ..
+  from this(1) show "p \<in> P[X] \<and> \<not> punit.is_red (punit.reduced_GB F) p" unfolding p
+    by (intro conjI Polys_closed_normal_form normal_form)
+next
+  assume "p \<in> P[X] \<and> \<not> punit.is_red (punit.reduced_GB F) p"
+  hence "p \<in> P[X]" and "\<not> punit.is_red (punit.reduced_GB F) p" by simp_all
+  from this(2) have "normal_form F p = p" by (simp add: normal_form_id_iff)
+qed
+
+end
+
+lemma direct_decomp_ideal_insert:
+  fixes F and f
+  defines "I \<equiv> ideal (insert f F)"
+  defines "L \<equiv> (ideal F \<div> f) \<inter> P[X]"
+  assumes "F \<subseteq> P[X]" and "f \<in> P[X]"
+    (is "direct_decomp _ ?ss")
+proof (rule direct_decompI_alt)
+  fix qs
+  assume "qs \<in> listset ?ss"
+    and qs: "qs = [x, y]" by (rule listset_doubletonE)
+  have "sum_list qs = x + y" by (simp add: qs)
+  also have "\<dots> \<in> I \<inter> P[X]" unfolding I_def
+  proof (intro IntI ideal.span_add Polys_closed_plus)
+    have "ideal F \<subseteq> ideal (insert f F)" by (rule ideal.span_mono) blast
+    with x show "x \<in> ideal (insert f F)" and "x \<in> P[X]" by blast+
+  next
+    from y obtain p where "p \<in> P[X]" and y: "y = f * normal_form L p" by blast
+    have "f \<in> ideal (insert f F)" by (rule ideal.span_base) simp
+    hence "normal_form L p * f \<in> ideal (insert f F)" by (rule ideal.span_scale)
+    thus "y \<in> ideal (insert f F)" by (simp only: mult.commute y)
+
+    have "L \<subseteq> P[X]" by (simp add: L_def)
+    with assms(4) show "y \<in> P[X]" unfolding y by (rule Polys_closed_times)
+  qed
+  finally show "sum_list qs \<in> I \<inter> P[X]" .
+next
+  fix a
+  assume "a \<in> I \<inter> P[X]"
+  hence "a \<in> I" and "a \<in> P[X]" by simp_all
+  from assms(3, 4) have "insert f F \<subseteq> P[X]" by simp
+  then obtain F0 q0 where "F0 \<subseteq> insert f F" and "finite F0" and q0: "\<And>f0. q0 f0 \<in> P[X]"
+    and a: "a = (\<Sum>f0\<in>F0. q0 f0 * f0)"
+  obtain q a' where a': "a' \<in> ideal F" and "a' \<in> P[X]" and "q \<in> P[X]" and a: "a = q * f + a'"
+  proof (cases "f \<in> F0")
+    case True
+    show ?thesis
+    proof
+      have "(\<Sum>f0\<in>F0 - {f}. q0 f0 * f0) \<in> ideal (F0 - {f})" by (rule ideal.sum_in_spanI)
+      finally show "(\<Sum>f0\<in>F0 - {f}. q0 f0 * f0) \<in> ideal F" .
+    next
+      show "(\<Sum>f0\<in>F0 - {f}. q0 f0 * f0) \<in> P[X]"
+      proof (intro Polys_closed_sum Polys_closed_times q0)
+        fix f0
+        assume "f0 \<in> F0 - {f}"
+        also have "\<dots> \<subseteq> F0" by blast
+        also have "\<dots> \<subseteq> insert f F" by fact
+        also have "\<dots> \<subseteq> P[X]" by fact
+        finally show "f0 \<in> P[X]" .
+      qed
+    next
+        by (simp only: a sum.remove)
+    qed fact
+  next
+    case False
+    show ?thesis
+    proof
+      have "a \<in> ideal F0" unfolding a by (rule ideal.sum_in_spanI)
+      finally show "a \<in> ideal F" .
+    next
+      show "a = 0 * f + a" by simp
+  qed
+  let ?a = "f * (normal_form L q)"
+  have "L \<subseteq> P[X]" by (simp add: L_def)
+  with assms(4) have "?a \<in> P[X]" by (rule Polys_closed_times)
+  also have "\<dots> \<subseteq> ideal (ideal F \<div> f)" unfolding L_def by (rule ideal.span_mono) blast
+  finally have "f * (q - normal_form L q) \<in> ideal F" by (simp add: quot_set_iff)
+  hence "a - ?a \<in> ideal F" by (simp add: a algebra_simps)
+
+  define qs where "qs = [a - ?a, ?a]"
+  show "\<exists>!qs\<in>listset ?ss. a = sum_list qs"
+  proof (intro ex1I conjI allI impI)
+    have "a - ?a \<in> ideal F \<inter> P[X]"
+    proof
+        by (intro Polys_closed_minus Polys_closed_times)
+    qed fact
+    ultimately show "qs \<in> listset ?ss" using qs_def by (rule listset_doubletonI)
+  next
+    fix qs0
+    assume "qs0 \<in> listset ?ss \<and> a = sum_list qs0"
+    hence "qs0 \<in> listset ?ss" and "a = sum_list qs0" by simp_all
+      and qs0: "qs0 = [x, y]" by (rule listset_doubletonE)
+    from this(2) obtain a0 where "a0 \<in> P[X]" and y: "y = f * normal_form L a0" by blast
+    have "f * (normal_form L q - normal_form L a0) = x - (a - ?a)" by (simp add: x y a algebra_simps)
+    finally have "normal_form L q - normal_form L a0 \<in> ideal F \<div> f" by (rule quot_setI)
+      by (intro Polys_closed_minus Polys_closed_normal_form)
+    ultimately have "normal_form L q - normal_form L a0 \<in> L" by (simp add: L_def)
+    also have "\<dots> \<subseteq> ideal L" by (fact ideal.span_superset)
+      by (simp only: normal_form_minus_normal_form flip: normal_form_zero_iff)
+    thus "qs0 = qs" by (simp add: qs0 qs_def x y)
+  qed (simp_all add: qs_def)
+qed
+
+corollary direct_decomp_ideal_normal_form:
+  assumes "F \<subseteq> P[X]"
+  shows "direct_decomp P[X] [ideal F \<inter> P[X], normal_form F ` P[X]]"
+proof -
+  from assms one_in_Polys have "direct_decomp (ideal (insert 1 F) \<inter> P[X]) [ideal F \<inter> P[X],
+    by (rule direct_decomp_ideal_insert)
+  moreover have "ideal (insert 1 F) = UNIV"
+    by (simp add: ideal_eq_UNIV_iff_contains_one ideal.span_base)
+    by (rule image_cong) simp
+  ultimately show ?thesis using assms by (simp add: image_comp normal_form_ideal_Polys)
+qed
+
+end
+
+
+definition cone :: "((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a) \<times> 'x set) \<Rightarrow> (('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::comm_semiring_0) set"
+
+lemma coneI: "p = a * h \<Longrightarrow> a \<in> P[U] \<Longrightarrow> p \<in> cone (h, U)"
+  by (auto simp: cone_def mult.commute[of a])
+
+lemma coneE:
+  assumes "p \<in> cone (h, U)"
+  obtains a where "a \<in> P[U]" and "p = a * h"
+  using assms by (auto simp: cone_def mult.commute)
+
+lemma cone_empty: "cone (h, {}) = range (\<lambda>c. c \<cdot> h)"
+  by (auto simp: Polys_empty map_scale_eq_times intro: coneI elim!: coneE)
+
+lemma cone_zero [simp]: "cone (0, U) = {0}"
+  by (auto simp: cone_def intro: zero_in_Polys)
+
+lemma cone_one [simp]: "cone (1::_ \<Rightarrow>\<^sub>0 'a::comm_semiring_1, U) = P[U]"
+  by (auto simp: cone_def)
+
+lemma zero_in_cone: "0 \<in> cone hU"
+  by (auto simp: cone_def intro!: image_eqI zero_in_Polys)
+
+corollary empty_not_in_map_cone: "{} \<notin> set (map cone ps)"
+  using zero_in_cone by fastforce
+
+lemma tip_in_cone: "h \<in> cone (h::_ \<Rightarrow>\<^sub>0 _::comm_semiring_1, U)"
+  using _ one_in_Polys by (rule coneI) simp
+
+lemma cone_closed_plus:
+  assumes "a \<in> cone hU" and "b \<in> cone hU"
+  shows "a + b \<in> cone hU"
+proof -
+  obtain h U where hU: "hU = (h, U)" using prod.exhaust by blast
+  with assms have "a \<in> cone (h, U)" and "b \<in> cone (h, U)" by simp_all
+  from this(1) obtain a' where "a' \<in> P[U]" and a: "a = a' * h" by (rule coneE)
+  have "a + b = (a' + b') * h" by (simp only: a b algebra_simps)
+  ultimately show ?thesis unfolding hU by (rule coneI)
+qed
+
+lemma cone_closed_uminus:
+  assumes "(a::_ \<Rightarrow>\<^sub>0 _::comm_ring) \<in> cone hU"
+  shows "- a \<in> cone hU"
+proof -
+  obtain h U where hU: "hU = (h, U)" using prod.exhaust by blast
+  with assms have "a \<in> cone (h, U)" by simp
+  from this(1) obtain a' where "a' \<in> P[U]" and a: "a = a' * h" by (rule coneE)
+  have "- a = (- a') * h" by (simp add: a)
+  ultimately show ?thesis unfolding hU by (rule coneI)
+qed
+
+lemma cone_closed_minus:
+  assumes "(a::_ \<Rightarrow>\<^sub>0 _::comm_ring) \<in> cone hU" and "b \<in> cone hU"
+  shows "a - b \<in> cone hU"
+proof -
+  from assms(2) have "- b \<in> cone hU" by (rule cone_closed_uminus)
+  with assms(1) have "a + (- b) \<in> cone hU" by (rule cone_closed_plus)
+  thus ?thesis by simp
+qed
+
+lemma cone_closed_times:
+  assumes "a \<in> cone (h, U)" and "q \<in> P[U]"
+  shows "q * a \<in> cone (h, U)"
+proof -
+  from assms(1) obtain a' where "a' \<in> P[U]" and a: "a = a' * h" by (rule coneE)
+  have "q * a = (q * a') * h" by (simp only: a ac_simps)
+  ultimately show ?thesis by (rule coneI)
+qed
+
+corollary cone_closed_monom_mult:
+  assumes "a \<in> cone (h, U)" and "t \<in> .[U]"
+  shows "punit.monom_mult c t a \<in> cone (h, U)"
+proof -
+  from assms(2) have "monomial c t \<in> P[U]" by (rule Polys_closed_monomial)
+  with assms(1) have "monomial c t * a \<in> cone (h, U)" by (rule cone_closed_times)
+  thus ?thesis by (simp only: times_monomial_left)
+qed
+
+lemma coneD:
+  assumes "p \<in> cone (h, U)" and "p \<noteq> 0"
+  shows "lpp h adds lpp (p::_ \<Rightarrow>\<^sub>0 _::{comm_semiring_0,semiring_no_zero_divisors})"
+proof -
+  from assms(1) obtain a where p: "p = a * h" by (rule coneE)
+  with assms(2) have "a \<noteq> 0" and "h \<noteq> 0" by auto
+  hence "lpp p = lpp a + lpp h" unfolding p by (rule lp_times)
+  also have "\<dots> = lpp h + lpp a" by (rule add.commute)
+  finally show ?thesis by (rule addsI)
+qed
+
+lemma cone_mono_1:
+  assumes "h' \<in> P[U]"
+  shows "cone (h' * h, U) \<subseteq> cone (h, U)"
+proof
+  fix p
+  assume "p \<in> cone (h' * h, U)"
+  then obtain a' where "a' \<in> P[U]" and "p = a' * (h' * h)" by (rule coneE)
+  from this(2) have "p = a' * h' * h" by (simp only: mult.assoc)
+  ultimately show "p \<in> cone (h, U)" by (rule coneI)
+qed
+
+lemma cone_mono_2:
+  assumes "U1 \<subseteq> U2"
+  shows "cone (h, U1) \<subseteq> cone (h, U2)"
+proof
+  from assms have "P[U1] \<subseteq> P[U2]" by (rule Polys_mono)
+  fix p
+  assume "p \<in> cone (h, U1)"
+  then obtain a where "a \<in> P[U1]" and "p = a * h" by (rule coneE)
+  note this(2)
+  ultimately show "p \<in> cone (h, U2)" by (rule coneI)
+qed
+
+lemma cone_subsetD:
+  assumes "cone (h1, U1) \<subseteq> cone (h2::_ \<Rightarrow>\<^sub>0 'a::{comm_ring_1,ring_no_zero_divisors}, U2)"
+  shows "h2 dvd h1" and "h1 \<noteq> 0 \<Longrightarrow> U1 \<subseteq> U2"
+proof -
+  from tip_in_cone assms have "h1 \<in> cone (h2, U2)" ..
+  then obtain a1' where "a1' \<in> P[U2]" and h1: "h1 = a1' * h2" by (rule coneE)
+  from this(2) have "h1 = h2 * a1'" by (simp only: mult.commute)
+  thus "h2 dvd h1" ..
+
+  assume "h1 \<noteq> 0"
+  with h1 have "a1' \<noteq> 0" and "h2 \<noteq> 0" by auto
+  show "U1 \<subseteq> U2"
+  proof
+    fix x
+    assume "x \<in> U1"
+    hence "monomial (1::'a) (Poly_Mapping.single x 1) \<in> P[U1]" (is "?p \<in> _")
+      by (intro Polys_closed_monomial PPs_closed_single)
+    with refl have "?p * h1 \<in> cone (h1, U1)" by (rule coneI)
+    hence "?p * h1 \<in> cone (h2, U2)" using assms ..
+    then obtain a where "a \<in> P[U2]" and "?p * h1 = a * h2" by (rule coneE)
+    from this(2) have "(?p * a1') * h2 = a * h2" by (simp only: h1 ac_simps)
+    thus "x \<in> U2" by (simp add: Polys_def PPs_def)
+  qed
+qed
+
+lemma cone_subset_PolysD:
+  assumes "cone (h::_ \<Rightarrow>\<^sub>0 'a::{comm_semiring_1,semiring_no_zero_divisors}, U) \<subseteq> P[X]"
+  shows "h \<in> P[X]" and "h \<noteq> 0 \<Longrightarrow> U \<subseteq> X"
+proof -
+  from tip_in_cone assms show "h \<in> P[X]" ..
+
+  assume "h \<noteq> 0"
+  show "U \<subseteq> X"
+  proof
+    fix x
+    assume "x \<in> U"
+    hence "monomial (1::'a) (Poly_Mapping.single x 1) \<in> P[U]" (is "?p \<in> _")
+      by (intro Polys_closed_monomial PPs_closed_single)
+    with refl have "?p * h \<in> cone (h, U)" by (rule coneI)
+    hence "?p * h \<in> P[X]" using assms ..
+    hence "h * ?p \<in> P[X]" by (simp only: mult.commute)
+    thus "x \<in> X" by (simp add: Polys_def PPs_def)
+  qed
+qed
+
+lemma cone_subset_PolysI:
+  assumes "h \<in> P[X]" and "h \<noteq> 0 \<Longrightarrow> U \<subseteq> X"
+  shows "cone (h, U) \<subseteq> P[X]"
+proof (cases "h = 0")
+  case True
+  thus ?thesis by (simp add: zero_in_Polys)
+next
+  case False
+  hence "U \<subseteq> X" by (rule assms(2))
+  hence "P[U] \<subseteq> P[X]" by (rule Polys_mono)
+  show ?thesis
+  proof
+    fix a
+    assume "a \<in> cone (h, U)"
+    then obtain q where "q \<in> P[U]" and a: "a = q * h" by (rule coneE)
+    from this assms(1) show "a \<in> P[X]" unfolding a by (rule Polys_closed_times)
+  qed
+qed
+
+  by (auto simp: ac_simps image_image intro!: image_eqI coneI elim!: coneE)
+
+proof -
+  obtain h U where "hU = (h, U)" using prod.exhaust by blast
+  thus ?thesis by (simp add: cone_image_times)
+qed
+
+lemma homogeneous_set_coneI:
+  assumes "homogeneous h"
+  shows "homogeneous_set (cone (h, U))"
+proof (rule homogeneous_setI)
+  fix a n
+  assume "a \<in> cone (h, U)"
+  then obtain q where "q \<in> P[U]" and a: "a = q * h" by (rule coneE)
+  from this(1) show "hom_component a n \<in> cone (h, U)" unfolding a
+  proof (induct q rule: poly_mapping_plus_induct)
+    case 1
+    show ?case by (simp add: zero_in_cone)
+  next
+    case (2 p c t)
+    have "p \<in> P[U]"
+    proof (intro PolysI subsetI)
+      fix s
+      assume "s \<in> keys p"
+      moreover from 2(2) this have "s \<notin> keys (monomial c t)" by auto
+      ultimately have "s \<in> keys (monomial c t + p)" by (rule in_keys_plusI2)
+      also from 2(4) have "\<dots> \<subseteq> .[U]" by (rule PolysD)
+      finally show "s \<in> .[U]" .
+    qed
+    hence *: "hom_component (p * h) n \<in> cone (h, U)" by (rule 2(3))
+    from 2(1) have "t \<in> keys (monomial c t)" by simp
+    hence "t \<in> keys (monomial c t + p)" using 2(2) by (rule in_keys_plusI1)
+    also from 2(4) have "\<dots> \<subseteq> .[U]" by (rule PolysD)
+    finally have "monomial c t \<in> P[U]" by (rule Polys_closed_monomial)
+    with refl have "monomial c t * h \<in> cone (h, U)" (is "?h \<in> _") by (rule coneI)
+    from assms have "homogeneous ?h" by (simp add: homogeneous_times)
+    hence "hom_component ?h n = (?h when n = poly_deg ?h)" by (rule hom_component_of_homogeneous)
+      by (simp add: when_def zero_in_cone)
+    have "hom_component ((monomial c t + p) * h) n = hom_component ?h n + hom_component (p * h) n"
+      by (simp only: distrib_right hom_component_plus)
+    also from ** * have "\<dots> \<in> cone (h, U)" by (rule cone_closed_plus)
+    finally show ?case .
+  qed
+qed
+
+lemma subspace_cone: "phull.subspace (cone hU)"
+  using zero_in_cone cone_closed_plus
+proof (rule phull.subspaceI)
+  fix c a
+  assume "a \<in> cone hU"
+  moreover obtain h U where hU: "hU = (h, U)" using prod.exhaust by blast
+  ultimately have "a \<in> cone (h, U)" by simp
+  thus "c \<cdot> a \<in> cone hU" unfolding hU punit.map_scale_eq_monom_mult using zero_in_PPs
+    by (rule cone_closed_monom_mult)
+qed
+
+lemma direct_decomp_cone_insert:
+  fixes h :: "_ \<Rightarrow>\<^sub>0 'a::{comm_ring_1,ring_no_zero_divisors}"
+  assumes "x \<notin> U"
+  shows "direct_decomp (cone (h, insert x U))
+                  [cone (h, U), cone (monomial 1 (Poly_Mapping.single x (Suc 0)) * h, insert x U)]"
+proof -
+  let ?x = "Poly_Mapping.single x (Suc 0)"
+  define xx where "xx = monomial (1::'a) ?x"
+  show "direct_decomp (cone (h, insert x U)) [cone (h, U), cone (xx * h, insert x U)]"
+    (is "direct_decomp _ ?ss")
+  proof (rule direct_decompI_alt)
+    fix qs
+    assume "qs \<in> listset ?ss"
+    then obtain a b where "a \<in> cone (h, U)" and b: "b \<in> cone (xx * h, insert x U)"
+      and qs: "qs = [a, b]" by (rule listset_doubletonE)
+    note this(1)
+    also have "cone (h, U) \<subseteq> cone (h, insert x U)" by (rule cone_mono_2) blast
+    finally have a: "a \<in> cone (h, insert x U)" .
+    have "cone (xx * h, insert x U) \<subseteq> cone (h, insert x U)"
+      by (rule cone_mono_1) (simp add: xx_def Polys_def PPs_closed_single)
+    with b have "b \<in> cone (h, insert x U)" ..
+    with a have "a + b \<in> cone (h, insert x U)" by (rule cone_closed_plus)
+    thus "sum_list qs \<in> cone (h, insert x U)" by (simp add: qs)
+  next
+    fix a
+    assume "a \<in> cone (h, insert x U)"
+    then obtain q where "q \<in> P[insert x U]" and a: "a = q * h" by (rule coneE)
+    define qU where "qU = except q (- .[U])"
+    define qx where "qx = except q .[U]"
+    have q: "q = qU + qx" by (simp only: qU_def qx_def add.commute flip: except_decomp)
+    have "qU \<in> P[U]" by (rule PolysI) (simp add: qU_def keys_except)
+    have x_adds: "?x adds t" if "t \<in> keys qx" for t unfolding adds_poly_mapping le_fun_def
+    proof
+      fix y
+      show "lookup ?x y \<le> lookup t y"
+      proof (cases "y = x")
+        case True
+        from that have "t \<in> keys q" and "t \<notin> .[U]" by (simp_all add: qx_def keys_except)
+        hence "keys t \<subseteq> insert x U" by (rule PPsD)
+        ultimately have "x \<in> keys t" by blast
+        thus ?thesis by (simp add: lookup_single True in_keys_iff)
+      next
+        case False
+        thus ?thesis by (simp add: lookup_single)
+      qed
+    qed
+    define qx' where "qx' = Poly_Mapping.map_key ((+) ?x) qx"
+    have lookup_qx': "lookup qx' = (\<lambda>t. lookup qx (?x + t))"
+      by (rule ext) (simp add: qx'_def map_key.rep_eq)
+    have "qx' * xx = punit.monom_mult 1 ?x qx'"
+      by (simp only: xx_def mult.commute flip: times_monomial_left)
+    also have "\<dots> = qx"
+      by (auto simp: punit.lookup_monom_mult lookup_qx' add.commute[of ?x] adds_minus
+              simp flip: not_in_keys_iff_lookup_eq_zero dest: x_adds intro!: poly_mapping_eqI)
+    finally have qx: "qx = qx' * xx" by (rule sym)
+    have "qx' \<in> P[insert x U]"
+    proof (intro PolysI subsetI)
+      fix t
+      assume "t \<in> keys qx'"
+      hence "t + ?x \<in> keys qx" by (simp only: lookup_qx' in_keys_iff not_False_eq_True add.commute)
+      also have "\<dots> \<subseteq> keys q" by (auto simp: qx_def keys_except)
+      finally have "(t + ?x) - ?x \<in> .[insert x U]" by (rule PPs_closed_minus)
+      thus "t \<in> .[insert x U]" by simp
+    qed
+    define qs where "qs = [qU * h, qx' * (xx * h)]"
+    show "\<exists>!qs\<in>listset ?ss. a = sum_list qs"
+    proof (intro ex1I conjI allI impI)
+        by (rule coneI)
+      ultimately show "qs \<in> listset ?ss" using qs_def by (rule listset_doubletonI)
+    next
+      fix qs0
+      assume "qs0 \<in> listset ?ss \<and> a = sum_list qs0"
+      hence "qs0 \<in> listset ?ss" and a0: "a = sum_list qs0" by simp_all
+      from this(1) obtain p1 p2 where "p1 \<in> cone (h, U)" and p2: "p2 \<in> cone (xx * h, insert x U)"
+        and qs0: "qs0 = [p1, p2]" by (rule listset_doubletonE)
+      from this(1) obtain qU0 where "qU0 \<in> P[U]" and p1: "p1 = qU0 * h" by (rule coneE)
+      from p2 obtain qx0 where p2: "p2 = qx0 * (xx * h)" by (rule coneE)
+      show "qs0 = qs"
+      proof (cases "h = 0")
+        case True
+        thus ?thesis by (simp add: qs_def qs0 p1 p2)
+      next
+        case False
+        from a0 have "(qU - qU0) * h = (qx0 - qx') * xx * h"
+          by (simp add: a qs0 p1 p2 q qx algebra_simps)
+        hence eq: "qU - qU0 = (qx0 - qx') * xx" using False by (rule times_canc_right)
+        have "qx0 = qx'"
+        proof (rule ccontr)
+          assume "qx0 \<noteq> qx'"
+          hence "qx0 - qx' \<noteq> 0" by simp
+          moreover have "xx \<noteq> 0" by (simp add: xx_def monomial_0_iff)
+          ultimately have "lpp ((qx0 - qx') * xx) = lpp (qx0 - qx') + lpp xx"
+            by (rule lp_times)
+          also have "lpp xx = ?x" by (simp add: xx_def punit.lt_monomial)
+          finally have "?x adds lpp (qU - qU0)" by (simp add: eq)
+          hence "lookup ?x x \<le> lookup (lpp (qU - qU0)) x" by (simp only: adds_poly_mapping le_fun_def)
+          hence "x \<in> keys (lpp (qU - qU0))" by (simp add: in_keys_iff lookup_single)
+          moreover have "lpp (qU - qU0) \<in> keys (qU - qU0)"
+          proof (rule punit.lt_in_keys)
+          qed
+          ultimately have "x \<in> indets (qU - qU0)" by (rule in_indetsI)
+          hence "indets (qU - qU0) \<subseteq> U" by (rule PolysD)
+          with assms show False ..
+        qed
+        moreover from this eq have "qU0 = qU" by simp
+        ultimately show ?thesis by (simp only: qs_def qs0 p1 p2)
+      qed
+    qed (simp_all add: qs_def a q qx, simp only: algebra_simps)
+  qed
+qed
+
+definition valid_decomp :: "'x set \<Rightarrow> ((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::zero) \<times> 'x set) list \<Rightarrow> bool"
+  where "valid_decomp X ps \<longleftrightarrow> ((\<forall>(h, U)\<in>set ps. h \<in> P[X] \<and> h \<noteq> 0 \<and> U \<subseteq> X))"
+
+definition monomial_decomp :: "((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::{one,zero}) \<times> 'x set) list \<Rightarrow> bool"
+  where "monomial_decomp ps \<longleftrightarrow> (\<forall>hU\<in>set ps. is_monomial (fst hU) \<and> punit.lc (fst hU) = 1)"
+
+definition hom_decomp :: "((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::{one,zero}) \<times> 'x set) list \<Rightarrow> bool"
+  where "hom_decomp ps \<longleftrightarrow> (\<forall>hU\<in>set ps. homogeneous (fst hU))"
+
+definition cone_decomp :: "(('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a) set \<Rightarrow>
+                            ((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::comm_semiring_0) \<times> 'x set) list \<Rightarrow> bool"
+  where "cone_decomp T ps \<longleftrightarrow> direct_decomp T (map cone ps)"
+
+lemma valid_decompI:
+  "(\<And>h U. (h, U) \<in> set ps \<Longrightarrow> h \<in> P[X]) \<Longrightarrow> (\<And>h U. (h, U) \<in> set ps \<Longrightarrow> h \<noteq> 0) \<Longrightarrow>
+    (\<And>h U. (h, U) \<in> set ps \<Longrightarrow> U \<subseteq> X) \<Longrightarrow> valid_decomp X ps"
+  unfolding valid_decomp_def by blast
+
+lemma valid_decompD:
+  assumes "valid_decomp X ps" and "(h, U) \<in> set ps"
+  shows "h \<in> P[X]" and "h \<noteq> 0" and "U \<subseteq> X"
+  using assms unfolding valid_decomp_def by blast+
+
+lemma valid_decompD_finite:
+  assumes "finite X" and "valid_decomp X ps" and "(h, U) \<in> set ps"
+  shows "finite U"
+proof -
+  from assms(2, 3) have "U \<subseteq> X" by (rule valid_decompD)
+  thus ?thesis using assms(1) by (rule finite_subset)
+qed
+
+lemma valid_decomp_Nil: "valid_decomp X []"
+  by (simp add: valid_decomp_def)
+
+lemma valid_decomp_concat:
+  assumes "\<And>ps. ps \<in> set pss \<Longrightarrow> valid_decomp X ps"
+  shows "valid_decomp X (concat pss)"
+proof (rule valid_decompI)
+  fix h U
+  assume "(h, U) \<in> set (concat pss)"
+  then obtain ps where "ps \<in> set pss" and "(h, U) \<in> set ps" unfolding set_concat ..
+  from this(1) have "valid_decomp X ps" by (rule assms)
+qed
+
+corollary valid_decomp_append:
+  assumes "valid_decomp X ps" and "valid_decomp X qs"
+  shows "valid_decomp X (ps @ qs)"
+proof -
+  have "valid_decomp X (concat [ps, qs])" by (rule valid_decomp_concat) (auto simp: assms)
+  thus ?thesis by simp
+qed
+
+lemma valid_decomp_map_times:
+  assumes "valid_decomp X ps" and "s \<in> P[X]" and "s \<noteq> (0::_ \<Rightarrow>\<^sub>0 _::semiring_no_zero_divisors)"
+proof (rule valid_decompI)
+  fix h U
+  moreover obtain a b where "x = (a, b)" using prod.exhaust by blast
+  ultimately have h: "h = s * a" and "(a, U) \<in> set ps" by simp_all
+  from assms(1) this(2) have "a \<in> P[X]" and "a \<noteq> 0" and "U \<subseteq> X" by (rule valid_decompD)+
+  from assms(2) this(1) show "h \<in> P[X]" unfolding h by (rule Polys_closed_times)
+qed
+
+lemma monomial_decompI:
+  "(\<And>h U. (h, U) \<in> set ps \<Longrightarrow> is_monomial h) \<Longrightarrow> (\<And>h U. (h, U) \<in> set ps \<Longrightarrow> punit.lc h = 1) \<Longrightarrow>
+    monomial_decomp ps"
+  by (auto simp: monomial_decomp_def)
+
+lemma monomial_decompD:
+  assumes "monomial_decomp ps" and "(h, U) \<in> set ps"
+  shows "is_monomial h" and "punit.lc h = 1"
+  using assms by (auto simp: monomial_decomp_def)
+
+lemma monomial_decomp_append_iff:
+  "monomial_decomp (ps @ qs) \<longleftrightarrow> monomial_decomp ps \<and> monomial_decomp qs"
+  by (auto simp: monomial_decomp_def)
+
+lemma monomial_decomp_concat:
+  "(\<And>ps. ps \<in> set pss \<Longrightarrow> monomial_decomp ps) \<Longrightarrow> monomial_decomp (concat pss)"
+  by (induct pss) (auto simp: monomial_decomp_def)
+
+lemma monomial_decomp_map_times:
+  assumes "monomial_decomp ps" and "is_monomial f" and "punit.lc f = (1::'a::semiring_1)"
+proof (rule monomial_decompI)
+  fix h U
+  moreover obtain a b where "x = (a, b)" using prod.exhaust by blast
+  ultimately have h: "h = f * a" and "(a, U) \<in> set ps" by simp_all
+  from assms(1) this(2) have "is_monomial a" and "punit.lc a = 1" by (rule monomial_decompD)+
+  from this(1) have "monomial (punit.lc a) (lpp a) = a" by (rule punit.monomial_eq_itself)
+  moreover define t where "t = lpp a"
+  from assms(2) have "monomial (punit.lc f) (lpp f) = f" by (rule punit.monomial_eq_itself)
+  moreover define s where "s = lpp f"
+  ultimately have f: "f = monomial 1 s" by (simp only: assms(3))
+  show "is_monomial h" by (simp add: h a f times_monomial_monomial monomial_is_monomial)
+  show "punit.lc h = 1" by (simp add: h a f times_monomial_monomial)
+qed
+
+lemma monomial_decomp_monomial_in_cone:
+  assumes "monomial_decomp ps" and "hU \<in> set ps" and "a \<in> cone hU"
+  shows "monomial (lookup a t) t \<in> cone hU"
+proof (cases "t \<in> keys a")
+  case True
+  obtain h U where hU: "hU = (h, U)" using prod.exhaust by blast
+  with assms(2) have "(h, U) \<in> set ps" by simp
+  with assms(1) have "is_monomial h" by (rule monomial_decompD)
+  then obtain c s where h: "h = monomial c s" by (rule is_monomial_monomial)
+  from assms(3) obtain q where "q \<in> P[U]" and "a = q * h" unfolding hU by (rule coneE)
+  from this(2) have "a = h * q" by (simp only: mult.commute)
+  also have "\<dots> = punit.monom_mult c s q" by (simp only: h times_monomial_left)
+  finally have a: "a = punit.monom_mult c s q" .
+  with True have "t \<in> keys (punit.monom_mult c s q)" by simp
+  hence "t \<in> (+) s ` keys q" using punit.keys_monom_mult_subset[simplified] ..
+  then obtain u where "u \<in> keys q" and t: "t = s + u" ..
+  note this(1)
+  finally have "u \<in> .[U]" .
+  have "monomial (lookup a t) t = monomial (lookup q u) u * h"
+    by (simp add: a t punit.lookup_monom_mult h times_monomial_monomial mult.commute)
+  ultimately show ?thesis unfolding hU by (rule coneI)
+next
+  case False
+  thus ?thesis by (simp add: zero_in_cone in_keys_iff)
+qed
+
+lemma monomial_decomp_sum_list_monomial_in_cone:
+  assumes "monomial_decomp ps" and "a \<in> sum_list ` listset (map cone ps)" and "t \<in> keys a"
+  obtains c h U where "(h, U) \<in> set ps" and "c \<noteq> 0" and "monomial c t \<in> cone (h, U)"
+proof -
+  from assms(2) obtain qs where qs_in: "qs \<in> listset (map cone ps)" and a: "a = sum_list qs" ..
+  from assms(3) keys_sum_list_subset have "t \<in> Keys (set qs)" unfolding a ..
+  then obtain q where "q \<in> set qs" and "t \<in> keys q" by (rule in_KeysE)
+  from this(1) obtain i where "i < length qs" and q: "q = qs ! i" by (metis in_set_conv_nth)
+  moreover from qs_in have "length qs = length (map cone ps)" by (rule listsetD)
+  ultimately have "i < length (map cone ps)" by simp
+  moreover from qs_in this have "qs ! i \<in> (map cone ps) ! i" by (rule listsetD)
+  ultimately have "ps ! i \<in> set ps" and "q \<in> cone (ps ! i)" by (simp_all add: q)
+  with assms(1) have *: "monomial (lookup q t) t \<in> cone (ps ! i)"
+    by (rule monomial_decomp_monomial_in_cone)
+  obtain h U where psi: "ps ! i = (h, U)" using prod.exhaust by blast
+  show ?thesis
+  proof
+  next
+  next
+    from * show "monomial (lookup q t) t \<in> cone (h, U)" by (simp only: psi)
+  qed
+qed
+
+lemma hom_decompI: "(\<And>h U. (h, U) \<in> set ps \<Longrightarrow> homogeneous h) \<Longrightarrow> hom_decomp ps"
+  by (auto simp: hom_decomp_def)
+
+lemma hom_decompD: "hom_decomp ps \<Longrightarrow> (h, U) \<in> set ps \<Longrightarrow> homogeneous h"
+  by (auto simp: hom_decomp_def)
+
+lemma hom_decomp_append_iff: "hom_decomp (ps @ qs) \<longleftrightarrow> hom_decomp ps \<and> hom_decomp qs"
+  by (auto simp: hom_decomp_def)
+
+lemma hom_decomp_concat: "(\<And>ps. ps \<in> set pss \<Longrightarrow> hom_decomp ps) \<Longrightarrow> hom_decomp (concat pss)"
+  by (induct pss) (auto simp: hom_decomp_def)
+
+lemma hom_decomp_map_times:
+  assumes "hom_decomp ps" and "homogeneous f"
+proof (rule hom_decompI)
+  fix h U
+  moreover obtain a b where "x = (a, b)" using prod.exhaust by blast
+  ultimately have h: "h = f * a" and "(a, U) \<in> set ps" by simp_all
+  from assms(1) this(2) have "homogeneous a" by (rule hom_decompD)
+  with assms(2) show "homogeneous h" unfolding h by (rule homogeneous_times)
+qed
+
+lemma monomial_decomp_imp_hom_decomp:
+  assumes "monomial_decomp ps"
+  shows "hom_decomp ps"
+proof (rule hom_decompI)
+  fix h U
+  assume "(h, U) \<in> set ps"
+  with assms have "is_monomial h" by (rule monomial_decompD)
+  then obtain c t where h: "h = monomial c t" by (rule is_monomial_monomial)
+  show "homogeneous h" unfolding h by (fact homogeneous_monomial)
+qed
+
+lemma cone_decompI: "direct_decomp T (map cone ps) \<Longrightarrow> cone_decomp T ps"
+  unfolding cone_decomp_def by blast
+
+lemma cone_decompD: "cone_decomp T ps \<Longrightarrow> direct_decomp T (map cone ps)"
+  unfolding cone_decomp_def by blast
+
+lemma cone_decomp_cone_subset:
+  assumes "cone_decomp T ps" and "hU \<in> set ps"
+  shows "cone hU \<subseteq> T"
+proof
+  fix p
+  assume "p \<in> cone hU"
+  from assms(2) obtain i where "i < length ps" and hU: "hU = ps ! i" by (metis in_set_conv_nth)
+  define qs where "qs = (map 0 ps)[i := p]"
+  have "sum_list qs \<in> T"
+  proof (intro direct_decompD listsetI)
+    from assms(1) show "direct_decomp T (map cone ps)" by (rule cone_decompD)
+  next
+    fix j
+    assume "j < length (map cone ps)"
+      by (auto simp: qs_def nth_list_update zero_in_cone hU)
+  qed (simp add: qs_def)
+  finally show "p \<in> T" .
+qed
+
+lemma cone_decomp_indets:
+  assumes "cone_decomp T ps" and "T \<subseteq> P[X]" and "(h, U) \<in> set ps"
+  shows "h \<in> P[X]" and "h \<noteq> (0::_ \<Rightarrow>\<^sub>0 _::{comm_semiring_1,semiring_no_zero_divisors}) \<Longrightarrow> U \<subseteq> X"
+proof -
+  from assms(1, 3) have "cone (h, U) \<subseteq> T" by (rule cone_decomp_cone_subset)
+  hence "cone (h, U) \<subseteq> P[X]" using assms(2) by (rule subset_trans)
+  thus "h \<in> P[X]" and "h \<noteq> 0 \<Longrightarrow> U \<subseteq> X" by (rule cone_subset_PolysD)+
+qed
+
+lemma cone_decomp_closed_plus:
+  assumes "cone_decomp T ps" and "a \<in> T" and "b \<in> T"
+  shows "a + b \<in> T"
+proof -
+  from assms(1) have dd: "direct_decomp T (map cone ps)" by (rule cone_decompD)
+  then obtain qsa where qsa: "qsa \<in> listset (map cone ps)" and a: "a = sum_list qsa" using assms(2)
+    by (rule direct_decompE)
+  from dd assms(3) obtain qsb where qsb: "qsb \<in> listset (map cone ps)" and b: "b = sum_list qsb"
+    by (rule direct_decompE)
+  from qsa have "length qsa = length (map cone ps)" by (rule listsetD)
+  moreover from qsb have "length qsb = length (map cone ps)" by (rule listsetD)
+  ultimately have "a + b = sum_list (map2 (+) qsa qsb)" by (simp only: sum_list_map2_plus a b)
+  also from dd have "sum_list (map2 (+) qsa qsb) \<in> T"
+  proof (rule direct_decompD)
+    from qsa qsb show "map2 (+) qsa qsb \<in> listset (map cone ps)"
+    proof (rule listset_closed_map2)
+      fix c p1 p2
+      assume "c \<in> set (map cone ps)"
+      then obtain hU where c: "c = cone hU" by auto
+      assume "p1 \<in> c" and "p2 \<in> c"
+      thus "p1 + p2 \<in> c" unfolding c by (rule cone_closed_plus)
+    qed
+  qed
+  finally show ?thesis .
+qed
+
+lemma cone_decomp_closed_uminus:
+  assumes "cone_decomp T ps" and "(a::_ \<Rightarrow>\<^sub>0 _::comm_ring) \<in> T"
+  shows "- a \<in> T"
+proof -
+  from assms(1) have dd: "direct_decomp T (map cone ps)" by (rule cone_decompD)
+  then obtain qsa where qsa: "qsa \<in> listset (map cone ps)" and a: "a = sum_list qsa" using assms(2)
+    by (rule direct_decompE)
+  from qsa have "length qsa = length (map cone ps)" by (rule listsetD)
+  have "- a = sum_list (map uminus qsa)" unfolding a by (induct qsa, simp_all)
+  also from dd have "\<dots> \<in> T"
+  proof (rule direct_decompD)
+    from qsa show "map uminus qsa \<in> listset (map cone ps)"
+    proof (rule listset_closed_map)
+      fix c p
+      assume "c \<in> set (map cone ps)"
+      then obtain hU where c: "c = cone hU" by auto
+      assume "p \<in> c"
+      thus "- p \<in> c" unfolding c by (rule cone_closed_uminus)
+    qed
+  qed
+  finally show ?thesis .
+qed
+
+corollary cone_decomp_closed_minus:
+  assumes "cone_decomp T ps" and "(a::_ \<Rightarrow>\<^sub>0 _::comm_ring) \<in> T" and "b \<in> T"
+  shows "a - b \<in> T"
+proof -
+  from assms(1, 3) have "- b \<in> T" by (rule cone_decomp_closed_uminus)
+  with assms(1, 2) have "a + (- b) \<in> T" by (rule cone_decomp_closed_plus)
+  thus ?thesis by simp
+qed
+
+lemma cone_decomp_Nil: "cone_decomp {0} []"
+  by (auto simp: cone_decomp_def intro: direct_decompI_alt)
+
+lemma cone_decomp_singleton: "cone_decomp (cone (t, U)) [(t, U)]"
+  by (simp add: cone_decomp_def direct_decomp_singleton)
+
+lemma cone_decomp_append:
+  assumes "direct_decomp T [S1, S2]" and "cone_decomp S1 ps" and "cone_decomp S2 qs"
+  shows "cone_decomp T (ps @ qs)"
+proof (rule cone_decompI)
+  from assms(2) have "direct_decomp S1 (map cone ps)" by (rule cone_decompD)
+  with assms(1) have "direct_decomp T ([S2] @ map cone ps)" by (rule direct_decomp_direct_decomp)
+  hence "direct_decomp T (S2 # map cone ps)" by simp
+  moreover from assms(3) have "direct_decomp S2 (map cone qs)" by (rule cone_decompD)
+  ultimately have "direct_decomp T (map cone ps @ map cone qs)" by (intro direct_decomp_direct_decomp)
+  thus "direct_decomp T (map cone (ps @ qs))" by simp
+qed
+
+lemma cone_decomp_concat:
+  assumes "direct_decomp T ss" and "length pss = length ss"
+    and "\<And>i. i < length ss \<Longrightarrow> cone_decomp (ss ! i) (pss ! i)"
+  shows "cone_decomp T (concat pss)"
+  using assms(2, 1, 3)
+proof (induct pss ss arbitrary: T rule: list_induct2)
+  case Nil
+  from Nil(1) show ?case by (simp add: cone_decomp_def)
+next
+  case (Cons ps pss s ss)
+  have "0 < length (s # ss)" by simp
+  hence "cone_decomp ((s # ss) ! 0) ((ps # pss) ! 0)" by (rule Cons.prems)
+  hence "cone_decomp s ps" by simp
+  hence *: "direct_decomp s (map cone ps)" by (rule cone_decompD)
+  with Cons.prems(1) have "direct_decomp T (ss @ map cone ps)" by (rule direct_decomp_direct_decomp)
+  hence 1: "direct_decomp T [sum_list ` listset ss, sum_list ` listset (map cone ps)]"
+    and 2: "direct_decomp (sum_list ` listset ss) ss"
+    by (auto dest: direct_decomp_appendD intro!: empty_not_in_map_cone)
+  note 1
+  moreover from 2 have "cone_decomp (sum_list ` listset ss) (concat pss)"
+  proof (rule Cons.hyps)
+    fix i
+    assume "i < length ss"
+    hence "Suc i < length (s # ss)" by simp
+    hence "cone_decomp ((s # ss) ! Suc i) ((ps # pss) ! Suc i)" by (rule Cons.prems)
+    thus "cone_decomp (ss ! i) (pss ! i)" by simp
+  qed
+  moreover have "cone_decomp (sum_list ` listset (map cone ps)) ps"
+  proof (intro cone_decompI direct_decompI refl)
+    from * show "inj_on sum_list (listset (map cone ps))"
+      by (simp only: direct_decomp_def bij_betw_def)
+  qed
+  ultimately have "cone_decomp T (concat pss @ ps)" by (rule cone_decomp_append)
+  hence "direct_decomp T (map cone (concat pss) @ map cone ps)" by (simp add: cone_decomp_def)
+  hence "direct_decomp T (map cone ps @ map cone (concat pss))"
+    by (auto intro: direct_decomp_perm)
+  thus ?case by (simp add: cone_decomp_def)
+qed
+
+lemma cone_decomp_map_times:
+  assumes "cone_decomp T ps"
+proof (rule cone_decompI)
+  from assms have "direct_decomp T (map cone ps)" by (rule cone_decompD)
+    by (rule direct_decomp_image_times) (rule times_canc_left)
+    by (simp add: cone_image_times')
+qed
+
+lemma cone_decomp_perm:
+  assumes "cone_decomp T ps" and "mset ps = mset qs"
+  shows "cone_decomp T qs"
+  using assms(1) unfolding cone_decomp_def
+proof (rule direct_decomp_perm)
+    by simp
+qed
+
+lemma valid_cone_decomp_subset_Polys:
+  assumes "valid_decomp X ps" and "cone_decomp T ps"
+  shows "T \<subseteq> P[X]"
+proof
+  fix p
+  assume "p \<in> T"
+  from assms(2) have "direct_decomp T (map cone ps)" by (rule cone_decompD)
+    by (rule direct_decompE)
+  from assms(1) this(1) show "p \<in> P[X]" unfolding p
+  proof (induct ps arbitrary: qs)
+    case Nil
+    from Nil(2) show ?case by (simp add: zero_in_Polys)
+  next
+    case (Cons a ps)
+    obtain h U where a: "a = (h, U)" using prod.exhaust by blast
+    hence "(h, U) \<in> set (a # ps)" by simp
+    with Cons.prems(1) have "h \<in> P[X]" and "U \<subseteq> X" by (rule valid_decompD)+
+    hence "cone a \<subseteq> P[X]" unfolding a by (rule cone_subset_PolysI)
+    from Cons.prems(1) have "valid_decomp X ps" by (simp add: valid_decomp_def)
+    from Cons.prems(2) have "qs \<in> listset (cone a # map cone ps)" by simp
+    then obtain q qs' where "q \<in> cone a" and qs': "qs' \<in> listset (map cone ps)" and qs: "qs = q # qs'"
+      by (rule listset_ConsE)
+    ultimately have "q + sum_list qs' \<in> P[X]" by (rule Polys_closed_plus)
+    thus ?case by (simp add: qs)
+  qed
+qed
+
+lemma homogeneous_set_cone_decomp:
+  assumes "cone_decomp T ps" and "hom_decomp ps"
+  shows "homogeneous_set T"
+proof (rule homogeneous_set_direct_decomp)
+  from assms(1) show "direct_decomp T (map cone ps)" by (rule cone_decompD)
+next
+  fix cn
+  assume "cn \<in> set (map cone ps)"
+  then obtain hU where "hU \<in> set ps" and cn: "cn = cone hU" unfolding set_map ..
+  moreover obtain h U where hU: "hU = (h, U)" using prod.exhaust by blast
+  ultimately have "(h, U) \<in> set ps" by simp
+  with assms(2) have "homogeneous h" by (rule hom_decompD)
+  thus "homogeneous_set cn" unfolding cn hU by (rule homogeneous_set_coneI)
+qed
+
+lemma subspace_cone_decomp:
+  assumes "cone_decomp T ps"
+  shows "phull.subspace (T::(_ \<Rightarrow>\<^sub>0 _::field) set)"
+proof (rule phull.subspace_direct_decomp)
+  from assms show "direct_decomp T (map cone ps)" by (rule cone_decompD)
+next
+  fix cn
+  assume "cn \<in> set (map cone ps)"
+  then obtain hU where "hU \<in> set ps" and cn: "cn = cone hU" unfolding set_map ..
+  show "phull.subspace cn" unfolding cn by (rule subspace_cone)
+qed
+
+definition pos_decomp :: "((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a) \<times> 'x set) list \<Rightarrow> ((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a) \<times> 'x set) list"
+    ("(_\<^sub>+)" [1000] 999)
+    where "pos_decomp ps = filter (\<lambda>p. snd p \<noteq> {}) ps"
+
+definition standard_decomp :: "nat \<Rightarrow> ((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::zero) \<times> 'x set) list \<Rightarrow> bool"
+  where "standard_decomp k ps \<longleftrightarrow> (\<forall>(h, U)\<in>set (ps\<^sub>+). k \<le> poly_deg h \<and>
+                                      (\<forall>d. k \<le> d \<longrightarrow> d \<le> poly_deg h \<longrightarrow>
+                                        (\<exists>(h', U')\<in>set ps. poly_deg h' = d \<and> card U \<le> card U')))"
+
+lemma pos_decomp_Nil [simp]: "[]\<^sub>+ = []"
+  by (simp add: pos_decomp_def)
+
+lemma pos_decomp_subset: "set (ps\<^sub>+) \<subseteq> set ps"
+  by (simp add: pos_decomp_def)
+
+lemma pos_decomp_append: "(ps @ qs)\<^sub>+ = ps\<^sub>+ @ qs\<^sub>+"
+  by (simp add: pos_decomp_def)
+
+lemma pos_decomp_concat: "(concat pss)\<^sub>+ = concat (map pos_decomp pss)"
+  by (metis (mono_tags, lifting) filter_concat map_eq_conv pos_decomp_def)
+
+lemma pos_decomp_map: "(map (apfst f) ps)\<^sub>+ = map (apfst f) (ps\<^sub>+)"
+  by (metis (mono_tags, lifting) pos_decomp_def filter_cong filter_map o_apply snd_apfst)
+
+lemma card_Diff_pos_decomp: "card {(h, U) \<in> set qs - set (qs\<^sub>+). P h} = card {h. (h, {}) \<in> set qs \<and> P h}"
+proof -
+  have "{h. (h, {}) \<in> set qs \<and> P h} = fst ` {(h, U) \<in> set qs - set (qs\<^sub>+). P h}"
+    by (auto simp: pos_decomp_def image_Collect)
+  also have "card \<dots> = card {(h, U) \<in> set qs - set (qs\<^sub>+). P h}"
+    by (rule card_image, auto simp: pos_decomp_def intro: inj_onI)
+  finally show ?thesis by (rule sym)
+qed
+
+lemma standard_decompI:
+  assumes "\<And>h U. (h, U) \<in> set (ps\<^sub>+) \<Longrightarrow> k \<le> poly_deg h"
+    and "\<And>h U d. (h, U) \<in> set (ps\<^sub>+) \<Longrightarrow> k \<le> d \<Longrightarrow> d \<le> poly_deg h \<Longrightarrow>
+          (\<exists>h' U'. (h', U') \<in> set ps \<and> poly_deg h' = d \<and> card U \<le> card U')"
+  shows "standard_decomp k ps"
+  unfolding standard_decomp_def using assms by blast
+
+lemma standard_decompD: "standard_decomp k ps \<Longrightarrow> (h, U) \<in> set (ps\<^sub>+) \<Longrightarrow> k \<le> poly_deg h"
+  unfolding standard_decomp_def by blast
+
+lemma standard_decompE:
+  assumes "standard_decomp k ps" and "(h, U) \<in> set (ps\<^sub>+)" and "k \<le> d" and "d \<le> poly_deg h"
+  obtains h' U' where "(h', U') \<in> set ps" and "poly_deg h' = d" and "card U \<le> card U'"
+  using assms unfolding standard_decomp_def by blast
+
+lemma standard_decomp_Nil: "ps\<^sub>+ = [] \<Longrightarrow> standard_decomp k ps"
+  by (simp add: standard_decomp_def)
+
+lemma standard_decomp_singleton: "standard_decomp (poly_deg h) [(h, U)]"
+  by (simp add: standard_decomp_def pos_decomp_def)
+
+lemma standard_decomp_concat:
+  assumes "\<And>ps. ps \<in> set pss \<Longrightarrow> standard_decomp k ps"
+  shows "standard_decomp k (concat pss)"
+proof (rule standard_decompI)
+  fix h U
+  assume "(h, U) \<in> set ((concat pss)\<^sub>+)"
+  then obtain ps where "ps \<in> set pss" and *: "(h, U) \<in> set (ps\<^sub>+)" by (auto simp: pos_decomp_concat)
+  from this(1) have "standard_decomp k ps" by (rule assms)
+  thus "k \<le> poly_deg h" using * by (rule standard_decompD)
+
+  fix d
+  assume "k \<le> d" and "d \<le> poly_deg h"
+    and "card U \<le> card U'" by (rule standard_decompE)
+  note this(2, 3)
+  ultimately show "\<exists>h' U'. (h', U') \<in> set (concat pss) \<and> poly_deg h' = d \<and> card U \<le> card U'"
+    by blast
+qed
+
+corollary standard_decomp_append:
+  assumes "standard_decomp k ps" and "standard_decomp k qs"
+  shows "standard_decomp k (ps @ qs)"
+proof -
+  have "standard_decomp k (concat [ps, qs])" by (rule standard_decomp_concat) (auto simp: assms)
+  thus ?thesis by simp
+qed
+
+lemma standard_decomp_map_times:
+  assumes "standard_decomp k ps" and "valid_decomp X ps" and "s \<noteq> (0::_ \<Rightarrow>\<^sub>0 'a::semiring_no_zero_divisors)"
+proof (rule standard_decompI)
+  fix h U
+  then obtain h0 where 1: "(h0, U) \<in> set (ps\<^sub>+)" and h: "h = s * h0" by (fastforce simp: pos_decomp_map)
+  from this(1) pos_decomp_subset have "(h0, U) \<in> set ps" ..
+  with assms(2) have "h0 \<noteq> 0" by (rule valid_decompD)
+  with assms(3) have deg_h: "poly_deg h = poly_deg s + poly_deg h0" unfolding h by (rule poly_deg_times)
+  moreover from assms(1) 1 have "k \<le> poly_deg h0" by (rule standard_decompD)
+  ultimately show "k + poly_deg s \<le> poly_deg h" by simp
+
+  fix d
+  assume "k + poly_deg s \<le> d" and "d \<le> poly_deg h"
+  hence "k \<le> d - poly_deg s" and "d - poly_deg s \<le> poly_deg h0" by (simp_all add: deg_h)
+  with assms(1) 1 obtain h' U' where 2: "(h', U') \<in> set ps" and "poly_deg h' = d - poly_deg s"
+    and "card U \<le> card U'" by (rule standard_decompE)
+  from assms(2) this(1) have "h' \<noteq> 0" by (rule valid_decompD)
+  with assms(3) have deg_h': "poly_deg (s * h') = poly_deg s + poly_deg h'" by (rule poly_deg_times)
+    by (simp add: deg_h')
+qed
+
+lemma standard_decomp_nonempty_unique:
+  assumes "finite X" and "valid_decomp X ps" and "standard_decomp k ps" and "ps\<^sub>+ \<noteq> []"
+  shows "k = Min (poly_deg ` fst ` set (ps\<^sub>+))"
+proof -
+  let ?A = "poly_deg ` fst ` set (ps\<^sub>+)"
+  define m where "m = Min ?A"
+  have "finite ?A" by simp
+  moreover from assms(4) have "?A \<noteq> {}" by simp
+  ultimately have "m \<in> ?A" unfolding m_def by (rule Min_in)
+  then obtain h U where "(h, U) \<in> set (ps\<^sub>+)" and m: "m = poly_deg h" by fastforce
+  have m_min: "m \<le> poly_deg h'" if "(h', U') \<in> set (ps\<^sub>+)" for h' U'
+  proof -
+    from that have "poly_deg (fst (h', U')) \<in> ?A" by (intro imageI)
+    thus ?thesis by simp
+  qed
+  show ?thesis
+  proof (rule linorder_cases)
+    assume "k < m"
+    hence "k \<le> poly_deg h" by (simp add: m)
+      where "(h', U') \<in> set ps" and "poly_deg h' = k" and "card U \<le> card U'" by (rule standard_decompE)
+    with m_min have "(h', U') \<notin> set (ps\<^sub>+)" by blast
+    thus ?thesis
+    proof
+      assume "U = {}"
+    next
+      assume "infinite U"
+      moreover from assms(1, 2) have "finite U"
+      proof (rule valid_decompD_finite)
+      qed
+      ultimately show ?thesis ..
+    qed
+  next
+    assume "m < k"
+    hence "\<not> k \<le> m" by simp
+    ultimately show ?thesis ..
+  qed (simp only: m_def)
+qed
+
+lemma standard_decomp_SucE:
+  assumes "finite X" and "U \<subseteq> X" and "h \<in> P[X]" and "h \<noteq> (0::_ \<Rightarrow>\<^sub>0 'a::{comm_ring_1,ring_no_zero_divisors})"
+  obtains ps where "valid_decomp X ps" and "cone_decomp (cone (h, U)) ps"
+    and "standard_decomp (Suc (poly_deg h)) ps"
+    and "is_monomial h \<Longrightarrow> punit.lc h = 1 \<Longrightarrow> monomial_decomp ps" and "homogeneous h \<Longrightarrow> hom_decomp ps"
+proof -
+  from assms(2, 1) have "finite U" by (rule finite_subset)
+  thus ?thesis using assms(2) that
+  proof (induct U arbitrary: thesis rule: finite_induct)
+    case empty
+    from assms(3, 4) have "valid_decomp X [(h, {})]" by (simp add: valid_decomp_def)
+    moreover note cone_decomp_singleton
+    moreover have "standard_decomp (Suc (poly_deg h)) [(h, {})]"
+      by (rule standard_decomp_Nil) (simp add: pos_decomp_def)
+    ultimately show ?case by (rule empty) (simp_all add: monomial_decomp_def hom_decomp_def)
+  next
+    case (insert x U)
+    from insert.prems(1) have "x \<in> X" and "U \<subseteq> X" by simp_all
+    from this(2) obtain ps where 0: "valid_decomp X ps" and 1: "cone_decomp (cone (h, U)) ps"
+      and 2: "standard_decomp (Suc (poly_deg h)) ps"
+      and 3: "is_monomial h \<Longrightarrow> punit.lc h = 1 \<Longrightarrow> monomial_decomp ps"
+      and 4: "homogeneous h \<Longrightarrow> hom_decomp ps" by (rule insert.hyps) blast
+    let ?x = "monomial (1::'a) (Poly_Mapping.single x (Suc 0))"
+    have "?x \<noteq> 0" by (simp add: monomial_0_iff)
+    with assms(4) have deg: "poly_deg (?x * h) = Suc (poly_deg h)"
+      by (simp add: poly_deg_times poly_deg_monomial deg_pm_single)
+    define qs where "qs = [(?x * h, insert x U)]"
+    show ?case
+    proof (rule insert.prems)
+      hence "?x * h \<in> P[X]" using assms(3) by (rule Polys_closed_times)
+        by (simp add: qs_def valid_decomp_def)
+      with 0 show "valid_decomp X (ps @ qs)" by (rule valid_decomp_append)
+    next
+      show "cone_decomp (cone (h, insert x U)) (ps @ qs)"
+      proof (rule cone_decomp_append)
+        show "direct_decomp (cone (h, insert x U)) [cone (h, U), cone (?x * h, insert x U)]"
+          using insert.hyps(2) by (rule direct_decomp_cone_insert)
+      next
+        show "cone_decomp (cone (?x * h, insert x U)) qs"
+          by (simp add: qs_def cone_decomp_singleton)
+      qed (fact 1)
+    next
+      from standard_decomp_singleton[of "?x * h" "insert x U"]
+      have "standard_decomp (Suc (poly_deg h)) qs" by (simp add: deg qs_def)
+      with 2 show "standard_decomp (Suc (poly_deg h)) (ps @ qs)" by (rule standard_decomp_append)
+    next
+      assume "is_monomial h" and "punit.lc h = 1"
+      hence "monomial_decomp ps" by (rule 3)
+      moreover have "monomial_decomp qs"
+      proof -
+        have "is_monomial (?x * h)"
+              mult.right_neutral mult_single)
+      qed
+      ultimately show "monomial_decomp (ps @ qs)" by (simp only: monomial_decomp_append_iff)
+    next
+      assume "homogeneous h"
+      hence "hom_decomp ps" by (rule 4)
+        by (simp add: hom_decomp_def qs_def homogeneous_times)
+      ultimately show "hom_decomp (ps @ qs)" by (simp only: hom_decomp_append_iff)
+    qed
+  qed
+qed
+
+lemma standard_decomp_geE:
+  assumes "finite X" and "valid_decomp X ps"
+    and "cone_decomp (T::(('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::{comm_ring_1,ring_no_zero_divisors}) set) ps"
+    and "standard_decomp k ps" and "k \<le> d"
+  obtains qs where "valid_decomp X qs" and "cone_decomp T qs" and "standard_decomp d qs"
+    and "monomial_decomp ps \<Longrightarrow> monomial_decomp qs" and "hom_decomp ps \<Longrightarrow> hom_decomp qs"
+proof -
+  have "\<exists>qs. valid_decomp X qs \<and> cone_decomp T qs \<and> standard_decomp (k + i) qs \<and>
+              (monomial_decomp ps \<longrightarrow> monomial_decomp qs) \<and> (hom_decomp ps \<longrightarrow> hom_decomp qs)" for i
+  proof (induct i)
+    case 0
+    from assms(2, 3, 4) show ?case unfolding add_0_right by blast
+  next
+    case (Suc i)
+    then obtain qs where 0: "valid_decomp X qs" and 1: "cone_decomp T qs"
+      and 2: "standard_decomp (k + i) qs" and 3: "monomial_decomp ps \<Longrightarrow> monomial_decomp qs"
+      and 4: "hom_decomp ps \<Longrightarrow> hom_decomp qs" by blast
+    let ?P = "\<lambda>hU. poly_deg (fst hU) \<noteq> k + i"
+    define rs where "rs = filter (- ?P) qs"
+    define ss where "ss = filter ?P qs"
+
+    have "set rs \<subseteq> set qs" by (auto simp: rs_def)
+    have "set ss \<subseteq> set qs" by (auto simp: ss_def)
+
+    define f where "f = (\<lambda>hU. SOME ps'. valid_decomp X ps' \<and> cone_decomp (cone hU) ps' \<and>
+                                        standard_decomp (Suc (poly_deg ((fst hU)::('x \<Rightarrow>\<^sub>0 _) \<Rightarrow>\<^sub>0 'a))) ps' \<and>
+                                        (monomial_decomp ps \<longrightarrow> monomial_decomp ps') \<and>
+                                        (hom_decomp ps \<longrightarrow> hom_decomp ps'))"
+    have "valid_decomp X (f hU) \<and> cone_decomp (cone hU) (f hU) \<and> standard_decomp (Suc (k + i)) (f hU) \<and>
+          (monomial_decomp ps \<longrightarrow> monomial_decomp (f hU)) \<and> (hom_decomp ps \<longrightarrow> hom_decomp (f hU))"
+      if "hU \<in> set rs" for hU
+    proof -
+      obtain h U where hU: "hU = (h, U)" using prod.exhaust by blast
+      with that have eq: "poly_deg (fst hU) = k + i" by (simp add: rs_def)
+      with 0 have "U \<subseteq> X" and "h \<in> P[X]" and "h \<noteq> 0" by (rule valid_decompD)+
+      with assms(1) obtain ps' where "valid_decomp X ps'" and "cone_decomp (cone (h, U)) ps'"
+        and "standard_decomp (Suc (poly_deg h)) ps'"
+        and md: "is_monomial h \<Longrightarrow> punit.lc h = 1 \<Longrightarrow> monomial_decomp ps'"
+        and hd: "homogeneous h \<Longrightarrow> hom_decomp ps'" by (rule standard_decomp_SucE) blast
+      note this(1-3)
+      moreover have "monomial_decomp ps'" if "monomial_decomp ps"
+      proof -
+        from that have "monomial_decomp qs" by (rule 3)
+        thus ?thesis by (rule md)
+      qed
+      moreover have "hom_decomp ps'" if "hom_decomp ps"
+      proof -
+        from that have "hom_decomp qs" by (rule 4)
+        thus ?thesis by (rule hd)
+      qed
+      ultimately have "valid_decomp X ps' \<and> cone_decomp (cone hU) ps' \<and>
+          standard_decomp (Suc (poly_deg (fst hU))) ps' \<and> (monomial_decomp ps \<longrightarrow> monomial_decomp ps') \<and>
+          (hom_decomp ps \<longrightarrow> hom_decomp ps')" by (simp add: hU)
+      thus ?thesis unfolding f_def eq by (rule someI)
+    qed
+    hence f1: "\<And>ps. ps \<in> set (map f rs) \<Longrightarrow> valid_decomp X ps"
+      and f2: "\<And>hU. hU \<in> set rs \<Longrightarrow> cone_decomp (cone hU) (f hU)"
+      and f3: "\<And>ps. ps \<in> set (map f rs) \<Longrightarrow> standard_decomp (Suc (k + i)) ps"
+      and f4: "\<And>ps'. monomial_decomp ps \<Longrightarrow> ps' \<in> set (map f rs) \<Longrightarrow> monomial_decomp ps'"
+      and f5: "\<And>ps'. hom_decomp ps \<Longrightarrow> ps' \<in> set (map f rs) \<Longrightarrow> hom_decomp ps'" by auto
+
+    define rs' where "rs' = concat (map f rs)"
+    show ?case unfolding add_Suc_right
+    proof (intro exI conjI impI)
+      have "valid_decomp X ss"
+      proof (rule valid_decompI)
+        fix h U
+        assume "(h, U) \<in> set ss"
+        with 0 show "h \<in> P[X]" and "h \<noteq> 0" and "U \<subseteq> X" by (rule valid_decompD)+
+      qed
+      moreover have "valid_decomp X rs'"
+        unfolding rs'_def using f1 by (rule valid_decomp_concat)
+      ultimately show "valid_decomp X (ss @ rs')" by (rule valid_decomp_append)
+    next
+      from 1 have "direct_decomp T (map cone qs)" by (rule cone_decompD)
+      hence "direct_decomp T ((map cone ss) @ (map cone rs))" unfolding ss_def rs_def
+        by (rule direct_decomp_split_map)
+      hence ss: "cone_decomp (sum_list ` listset (map cone ss)) ss"
+        and "cone_decomp (sum_list ` listset (map cone rs)) rs"
+        and T: "direct_decomp T [sum_list ` listset (map cone ss), sum_list ` listset (map cone rs)]"
+        by (auto simp: cone_decomp_def dest: direct_decomp_appendD intro!: empty_not_in_map_cone)
+      from this(2) have "direct_decomp (sum_list ` listset (map cone rs)) (map cone rs)"
+        by (rule cone_decompD)
+      hence "cone_decomp (sum_list ` listset (map cone rs)) rs'" unfolding rs'_def
+      proof (rule cone_decomp_concat)
+        fix i
+        assume *: "i < length (map cone rs)"
+        hence "rs ! i \<in> set rs" by simp
+        hence "cone_decomp (cone (rs ! i)) (f (rs ! i))" by (rule f2)
+        with * show "cone_decomp (map cone rs ! i) (map f rs ! i)" by simp
+      qed simp
+      with T ss show "cone_decomp T (ss @ rs')" by (rule cone_decomp_append)
+    next
+      have "standard_decomp (Suc (k + i)) ss"
+      proof (rule standard_decompI)
+        fix h U
+        assume "(h, U) \<in> set (ss\<^sub>+)"
+        hence "(h, U) \<in> set (qs\<^sub>+)" and "poly_deg h \<noteq> k + i" by (simp_all add: pos_decomp_def ss_def)
+        from 2 this(1) have "k + i \<le> poly_deg h" by (rule standard_decompD)
+  
+        fix d'
+        assume "Suc (k + i) \<le> d'" and "d' \<le> poly_deg h"
+        from this(1) have "k + i \<le> d'" and "d' \<noteq> k + i" by simp_all
+          where "(h', U') \<in> set qs" and "poly_deg h' = d'" and "card U \<le> card U'"
+        ultimately show "\<exists>h' U'. (h', U') \<in> set ss \<and> poly_deg h' = d' \<and> card U \<le> card U'" by blast
+      qed
+      moreover have "standard_decomp (Suc (k + i)) rs'"
+        unfolding rs'_def using f3 by (rule standard_decomp_concat)
+      ultimately show "standard_decomp (Suc (k + i)) (ss @ rs')" by (rule standard_decomp_append)
+    next
+      assume *: "monomial_decomp ps"
+      hence "monomial_decomp qs" by (rule 3)
+      hence "monomial_decomp ss" by (simp add: monomial_decomp_def ss_def)
+      moreover have "monomial_decomp rs'"
+        unfolding rs'_def using f4[OF *] by (rule monomial_decomp_concat)
+      ultimately show "monomial_decomp (ss @ rs')" by (simp only: monomial_decomp_append_iff)
+    next
+      assume *: "hom_decomp ps"
+      hence "hom_decomp qs" by (rule 4)
+      hence "hom_decomp ss" by (simp add: hom_decomp_def ss_def)
+      moreover have "hom_decomp rs'" unfolding rs'_def using f5[OF *] by (rule hom_decomp_concat)
+      ultimately show "hom_decomp (ss @ rs')" by (simp only: hom_decomp_append_iff)
+    qed
+  qed
+  then obtain qs where 1: "valid_decomp X qs" and 2: "cone_decomp T qs"
+    and "standard_decomp (k + (d - k)) qs" and 4: "monomial_decomp ps \<Longrightarrow> monomial_decomp qs"
+    and 5: "hom_decomp ps \<Longrightarrow> hom_decomp qs" by blast
+  from this(3) assms(5) have "standard_decomp d qs" by simp
+  with 1 2 show ?thesis using 4 5 ..
+qed
+
+
+context
+  fixes X :: "'x set"
+begin
+
+definition splits_wrt :: "(((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a) \<times> 'x set) list \<times> ((('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a) \<times> 'x set) list) \<Rightarrow>
+                          (('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a::comm_ring_1) set \<Rightarrow> (('x \<Rightarrow>\<^sub>0 nat) \<Rightarrow>\<^sub>0 'a) set \<Rightarrow> bool"
+  where "splits_wrt pqs T F \<longleftrightarrow> cone_decomp T (fst pqs @ snd pqs) \<and>
+                                (\<forall>hU\<in>set (fst pqs). cone hU \<subseteq> ideal F \<inter> P[X]) \<and>
+                                (\<forall>(h, U)\<in>set (snd pqs). cone (h, U) \<subseteq> P[X] \<and> cone (h, U) \<inter> ideal F = {0})"
+
+lemma splits_wrtI:
+  assumes "cone_decomp T (ps @ qs)"
+    and "\<And>h U. (h, U) \<in> set ps \<Longrightarrow> cone (h, U) \<subseteq> P[X]" and "\<And>h U. (h, U) \<in> set ps \<Longrightarrow> h \<in> ideal F"
+    and "\<And>h U. (h, U) \<in> set qs \<Longrightarrow> cone (h, U) \<subseteq> P[X]"
+    and "\<And>h U a. (h, U) \<in> set qs \<Longrightarrow> a \<in> cone (h, U) \<Longrightarrow> a \<in> ideal F \<Longrightarrow> a = 0"
+  shows "splits_wrt (ps, qs) T F"
+  unfolding splits_wrt_def fst_conv snd_conv
+proof (intro conjI ballI)
+  fix hU
+  assume "hU \<in> set ps"
+  moreover obtain h U where hU: "hU = (h, U)" using prod.exhaust by blast
+  ultimately have "(h, U) \<in> set ps" by simp
+  hence "cone (h, U) \<subseteq> P[X]" and "h \<in> ideal F" by (rule assms)+
+  from _ this(1) show "cone hU \<subseteq> ideal F \<inter> P[X]" unfolding hU
+  proof (rule Int_greatest)
+    show "cone (h, U) \<subseteq> ideal F"
+    proof
+      fix a
+      assume "a \<in> cone (h, U)"
+      then obtain a' where "a' \<in> P[U]" and a: "a = a' * h" by (rule coneE)
+    qed
+  qed
+next
+  fix hU
+  assume "hU \<in> set qs"
+  moreover obtain h U where hU: "hU = (h, U)" using prod.exhaust by blast
+  ultimately have "(h, U) \<in> set qs" by simp
+  hence "cone (h, U) \<subseteq> P[X]" and "\<And>a. a \<in> cone (h, U) \<Longrightarrow> a \<in> ideal F \<Longrightarrow> a = 0" by (rule assms)+
+  moreover have "0 \<in> cone (h, U) \<inter> ideal F"
+    by (simp add: zero_in_cone ideal.span_zero)
+  ultimately show "case hU of (h, U) \<Rightarrow> cone (h, U) \<subseteq> P[X] \<and> cone (h, U) \<inter> ideal F = {0}"
+    by (fastforce simp: hU)
+qed (fact assms)+
+
+lemma splits_wrtI_valid_decomp:
+  assumes "valid_decomp X ps" and "valid_decomp X qs" and "cone_decomp T (ps @ qs)"
+    and "\<And>h U. (h, U) \<in> set ps \<Longrightarrow> h \<in> ideal F"
+    and "\<And>h U a. (h, U) \<in> set qs \<Longrightarrow> a \<in> cone (h, U) \<Longrightarrow> a \<in> ideal F \<Longrightarrow> a = 0"
+  shows "splits_wrt (ps, qs) T F"
+  using assms(3) _ _ _ assms(5)
+proof (rule splits_wrtI)
+  fix h U
+  assume "(h, U) \<in> set ps"
+  thus "h \<in> ideal F" by (rule assms(4))
+  thus "cone (h, U) \<subseteq> P[X]" by (rule cone_subset_PolysI)
+next
+  fix h U
+  assume "(h, U) \<in> set qs"
+  with assms(2) have "h \<in> P[X]" by (rule valid_decompD)
+  ultimately show "cone (h, U) \<subseteq> P[X]" by (rule cone_subset_PolysI)
+qed
+
+lemma splits_wrtD:
+  assumes "splits_wrt (ps, qs) T F"
+  shows "cone_decomp T (ps @ qs)" and "hU \<in> set ps \<Longrightarrow> cone hU \<subseteq> ideal F \<inter> P[X]"
+    and "hU \<in> set qs \<Longrightarrow> cone hU \<subseteq> P[X]" and "hU \<in> set qs \<Longrightarrow> cone hU \<inter> ideal F = {0}"
+  using assms by (fastforce simp: splits_wrt_def)+
+
+lemma splits_wrt_image_sum_list_fst_subset:
+  assumes "splits_wrt (ps, qs) T F"
+  shows "sum_list ` listset (map cone ps) \<subseteq> ideal F \<inter> P[X]"
+proof
+  fix x
+  assume x_in: "x \<in> sum_list ` listset (map cone ps)"
+  have "listset (map cone ps) \<subseteq> listset (map (\<lambda>_. ideal F \<inter> P[X]) ps)"
+  proof (rule listset_mono)
+    fix i
+    assume i: "i < length (map (\<lambda>_. ideal F \<inter> P[X]) ps)"
+    hence "ps ! i \<in> set ps" by simp
+    with assms(1) have "cone (ps ! i) \<subseteq> ideal F \<inter> P[X]" by (rule splits_wrtD)
+    with i show "map cone ps ! i \<subseteq> map (\<lambda>_. ideal F \<inter> P[X]) ps ! i" by simp
+  qed simp
+  hence "sum_list ` listset (map cone ps) \<subseteq> sum_list ` listset (map (\<lambda>_. ideal F \<inter> P[X]) ps)"
+    by (rule image_mono)
+  with x_in have "x \<in> sum_list ` listset (map (\<lambda>_. ideal F \<inter> P[X]) ps)" ..
+  then obtain xs where xs: "xs \<in> listset (map (\<lambda>_. ideal F \<inter> P[X]) ps)" and x: "x = sum_list xs" ..
+  have 1: "y \<in> ideal F \<inter> P[X]" if "y \<in> set xs" for y
+  proof -
+    from that obtain i where "i < length xs" and y: "y = xs ! i" by (metis in_set_conv_nth)
+    moreover from xs have "length xs = length (map (\<lambda>_. ideal F \<inter> P[X]) ps)"
+      by (rule listsetD)
+    ultimately have "i < length (map (\<lambda>_. ideal F \<inter> P[X]) ps)" by simp
+    moreover from xs this have "xs ! i \<in> (map (\<lambda>_. ideal F \<inter> P[X]) ps) ! i" by (rule listsetD)
+    ultimately show "y \<in> ideal F \<inter> P[X]" by (simp add: y)
+  qed
+  show "x \<in> ideal F \<inter> P[X]" unfolding x
+  proof
+    show "sum_list xs \<in> ideal F"
+    proof (rule ideal.span_closed_sum_list[simplified])
+      fix y
+      assume "y \<in> set xs"
+      hence "y \<in> ideal F \<inter> P[X]" by (rule 1)
+      thus "y \<in> ideal F" by simp
+    qed
+  next
+    show "sum_list xs \<in> P[X]"
+    proof (rule Polys_closed_sum_list)
+      fix y
+      assume "y \<in> set xs"
+      hence "y \<in> ideal F \<inter> P[X]" by (rule 1)
+      thus "y \<in> P[X]" by simp
+    qed
+  qed
+qed
+
+lemma splits_wrt_image_sum_list_snd_subset:
+  assumes "splits_wrt (ps, qs) T F"
+  shows "sum_list ` listset (map cone qs) \<subseteq> P[X]"
+proof
+  fix x
+  assume x_in: "x \<in> sum_list ` listset (map cone qs)"
+  have "listset (map cone qs) \<subseteq> listset (map (\<lambda>_. P[X]) qs)"
+  proof (rule listset_mono)
+    fix i
+    assume i: "i < length (map (\<lambda>_. P[X]) qs)"
+    hence "qs ! i \<in> set qs" by simp
+    with assms(1) have "cone (qs ! i) \<subseteq> P[X]" by (rule splits_wrtD)
+    with i show "map cone qs ! i \<subseteq> map (\<lambda>_. P[X]) qs ! i" by simp
+  qed simp
+  hence "sum_list ` listset (map cone qs) \<subseteq> sum_list ` listset (map (\<lambda>_. P[X]) qs)"
+    by (rule image_mono)
+  with x_in have "x \<in> sum_list ` listset (map (\<lambda>_. P[X]) qs)" ..
+  then obtain xs where xs: "xs \<in> listset (map (\<lambda>_. P[X]) qs)" and x: "x = sum_list xs" ..
+  show "x \<in> P[X]" unfolding x
+  proof (rule Polys_closed_sum_list)
+    fix y
+    assume "y \<in> set xs"
+    then obtain i where "i < length xs" and y: "y = xs ! i" by (metis in_set_conv_nth)
+    moreover from xs have "length xs = length (map (\<lambda>_. P[X]::(_ \<Rightarrow>\<^sub>0 'a) set) qs)"
+      by (rule listsetD)
+    ultimately have "i < length (map (\<lambda>_. P[X]) qs)" by simp
+    moreover from xs this have "xs ! i \<in> (map (\<lambda>_. P[X]) qs) ! i" by (rule listsetD)
+    ultimately show "y \<in> P[X]" by (simp add: y)
+  qed
+qed
+
+lemma splits_wrt_cone_decomp_1:
+  assumes "splits_wrt (ps, qs) T F" and "monomial_decomp qs" and "is_monomial_set (F::(_ \<Rightarrow>\<^sub>0 'a::field) set)"
+  shows "cone_decomp (T \<inter> ideal F) ps"
+proof -
+  from assms(1) have *: "cone_decomp T (ps @ qs)" by (rule splits_wrtD)
+  hence "direct_decomp T (map cone ps @ map cone qs)" by (simp add: cone_decomp_def)
+  hence 1: "direct_decomp (sum_list ` listset (map cone ps)) (map cone ps)"
+    and 2: "direct_decomp T [sum_list ` listset (map cone ps), sum_list ` listset (map cone qs)]"
+    by (auto dest: direct_decomp_appendD intro!: empty_not_in_map_cone)
+  let ?ss = "[sum_list ` listset (map cone ps), sum_list ` listset (map cone qs)]"
+  show ?thesis
+  proof (intro cone_decompI direct_decompI)
+    from 1 show "inj_on sum_list (listset (map cone ps))" by (simp only: direct_decomp_def bij_betw_def)
+  next
+    from assms(1) have "sum_list ` listset (map cone ps) \<subseteq> ideal F \<inter> P[X]"
+      by (rule splits_wrt_image_sum_list_fst_subset)
+    hence sub: "sum_list ` listset (map cone ps) \<subseteq> ideal F" by simp
+    show "sum_list ` listset (map cone ps) = T \<inter> ideal F"
+    proof (rule set_eqI)
+      fix x
+      show "x \<in> sum_list ` listset (map cone ps) \<longleftrightarrow> x \<in> T \<inter> ideal F"
+      proof
+        assume x_in: "x \<in> sum_list ` listset (map cone ps)"
+        show "x \<in> T \<inter> ideal F"
+        proof (intro IntI)
+          have "map (\<lambda>_. 0) qs \<in> listset (map cone qs)" (is "?ys \<in> _")
+            by (induct qs) (auto intro: listset_ConsI zero_in_cone simp del: listset.simps(2))
+          hence "sum_list ?ys \<in> sum_list ` listset (map cone qs)" by (rule imageI)
+          hence "0 \<in> sum_list ` listset (map cone qs)" by simp
+          with x_in have "[x, 0] \<in> listset ?ss" using refl by (rule listset_doubletonI)
+          with 2 have "sum_list [x, 0] \<in> T" by (rule direct_decompD)
+          thus "x \<in> T" by simp
+        next
+          from x_in sub show "x \<in> ideal F" ..
+        qed
+      next
+        assume "x \<in> T \<inter> ideal F"
+        hence "x \<in> T" and "x \<in> ideal F" by simp_all
+        from 2 this(1) obtain xs where "xs \<in> listset ?ss" and x: "x = sum_list xs"
+          by (rule direct_decompE)
+        from this(1) obtain p q where p: "p \<in> sum_list ` listset (map cone ps)"
+          and q: "q \<in> sum_list ` listset (map cone qs)" and xs: "xs = [p, q]"
+          by (rule listset_doubletonE)
+        moreover from p sub have "p \<in> ideal F" ..
+        ultimately have "p + q - p \<in> ideal F" by (rule ideal.span_diff)
+        hence "q \<in> ideal F" by simp
+        have "q = 0"
+        proof (rule ccontr)
+          assume "q \<noteq> 0"
+          hence "keys q \<noteq> {}" by simp
+          then obtain t where "t \<in> keys q" by blast
+          with assms(2) q obtain c h U where "(h, U) \<in> set qs" and "c \<noteq> 0"
+            and "monomial c t \<in> cone (h, U)" by (rule monomial_decomp_sum_list_monomial_in_cone)
+            by (rule punit.monomial_pmdl_field[simplified])
+          ultimately have "monomial c t \<in> cone (h, U) \<inter> ideal F" by simp
+          finally have "c = 0" by (simp add: monomial_0_iff)
+        qed
+        with p show "x \<in> sum_list ` listset (map cone ps)" by (simp add: x xs)
+      qed
+    qed
+  qed
+qed
+
+  imply that @{term ps} is also a cone decomposition of @{term "T \<inter> ideal F \<inter> P[X]"}.\<close>
+              from \<open>c \<noteq> 0\<close> show "is_monomial (monomial c t)" by (rule monomial_is_monomial)
+              from \<open>c \<noteq> 0\<close> have "t \<in> keys (monomial c t)" by simp
+              with \<open>g \<in> ?G\<close> \<open>g \<noteq> 0\<close> show "punit.is_red ?G (monomial c t)" using adds
+            also from assms(2) \<open>(h, U) \<in> set qs\<close> have "\<dots> = {0}" by (rule splits_wrtD)
+            with \<open>c \<noteq> 0\<close> show False ..
+        from 2 \<open>x \<in> T\<close> obtain xs where "xs \<in> listset ?ss" and x: "x = sum_list xs"
+          from assms(4) \<open>p \<in> ideal F\<close> \<open>t \<in> keys p\<close> have 3: "monomial c t \<in> ideal F" for c
+            also from assms(2) \<open>(h, U) \<in> set qs\<close> have "\<dots> = {0}" by (rule splits_wrtD)
+            with \<open>c \<noteq> 0\<close> show False ..
+          with \<open>t \<in> keys p\<close> have "t \<in> keys x" unfolding \<open>x = p + q\<close> by (rule in_keys_plusI1)
+            with \<open>g \<in> ?G\<close> \<open>g \<noteq> 0\<close> \<open>t \<in> keys x\<close> show ?thesis by (rule punit.is_red_addsI[simplified])
+        with \<open>s \<in> keys a\<close> 2(2) show False by simp
+      from \<open>s \<in> S\<close> have "monomial 1 (s - ?x) \<in> ?S" by (intro imageI)
+        from \<open>f \<in> monomial 1 ` S\<close> have "f \<in> ideal (monomial 1 ` S)" by (rule ideal.span_base)
+        with \<open>s adds ?x + t\<close> have "monomial c (?x + t) \<in> ideal (monomial 1 ` S)"
+      from \<open>s \<in> S\<close> have "monomial 1 s \<in> monomial 1 ` S" by (rule imageI)
+        from \<open>f \<in> ?S\<close> have "f \<in> ideal ?S" by (rule ideal.span_base)
+        with \<open>s - ?x adds t\<close> have "monomial c t \<in> ideal ?S"
+  with \<open>s \<in> S\<close> show "0 \<in> S" by (simp only: adds_zero)
+      from \<open>a \<in> ideal F\<close> have *: "q \<in> ideal F \<div> ?t" by (simp only: quot_set_iff a mult.commute)
+      moreover from \<open>q \<noteq> 0\<close> have "lpp q \<in> keys q" by (rule punit.lt_in_keys)
+      from \<open>q \<noteq> 0\<close> have "lpp q \<in> keys q" by (rule punit.lt_in_keys)
+      also from \<open>q \<in> P[U]\<close> have "\<dots> \<subseteq> .[U]" by (rule PolysD)
+      with eq \<open>s \<in> S\<close> show False by blast
+subsection \<open>Function \<open>split\<close>\<close>
+text \<open>Function @{const split} is not executable, because this is not necessary.
+  With some effort, it could be made executable, though.\<close>
+      with \<open>finite U\<close> empty_subsetI have "S \<subseteq> U" and "F \<inter> .[S] = {}"
+        from \<open>f \<in> F\<close> \<open>f \<in> .[U]\<close> \<open>F \<inter> .[S] = {}\<close> have "S \<noteq> U" by blast
+        with \<open>S \<subseteq> U\<close> show "\<exists>y. y \<in> U \<and> y \<notin> S" by blast
+        moreover from _ \<open>finite F\<close> have "split_dom TYPE('a) (t, U - {x}, F)"
+          from \<open>U \<subseteq> X\<close> show "U - {x} \<subseteq> X" by blast
+          from \<open>finite U\<close> \<open>x \<in> U\<close> have "card (U - {x}) < card U" by (rule card_Diff1_less)
+        moreover from \<open>U \<subseteq> X\<close> have "split_dom TYPE('a) ?args"
+          from \<open>finite F\<close> show "finite ((\<lambda>f. f - Poly_Mapping.single x (Suc 0)) ` F)"
+            using \<open>finite F\<close> by (rule sum_image_le) simp
+          also from \<open>finite F\<close> have "\<dots> < sum deg_pm F"
+              note \<open>finite U\<close>
+              moreover from \<open>x \<in> U\<close> \<open>S \<subseteq> U\<close> have "insert x S \<subseteq> U" by (rule insert_subsetI)
+                  with \<open>s \<in> F\<close> \<open>F \<inter> .[S] = {}\<close> have False by blast
+              moreover from \<open>S \<subseteq> U\<close> \<open>finite U\<close> have "finite S" by (rule finite_subset)
+              ultimately show False using \<open>x \<notin> S\<close> by simp
+      with \<open>finite U\<close> empty_subsetI have "S \<subseteq> U" and "F \<inter> .[S] = {}"
+        using \<open>finite U\<close> that unfolding S_def by (rule max_subset)
+        from \<open>F \<inter> .[U] \<noteq> {}\<close> \<open>F \<inter> .[S] = {}\<close> have "S \<noteq> U" by blast
+        with \<open>S \<subseteq> U\<close> show "\<exists>y. y \<in> U \<and> y \<notin> S" by blast
+      from step(4, 5) \<open>0 \<notin> F\<close> \<open>F \<inter> .[U] \<noteq> {}\<close> \<open>S \<subseteq> U\<close> \<open>F \<inter> .[S] = {}\<close> S_max \<open>x \<in> U\<close> \<open>x \<notin> S\<close> S_def _ PQ0 PQ1
+          unfolding PQ0 using \<open>0 \<notin> F\<close> \<open>F \<inter> .[U] \<noteq> {}\<close> _ _ step(5)
+          from \<open>U \<subseteq> X\<close> show "U - {x} \<subseteq> X" by fastforce
+          unfolding PQ1 using \<open>0 \<notin> F\<close> \<open>F \<inter> .[U] \<noteq> {}\<close> _ refl PQ0 \<open>U \<subseteq> X\<close>
+          from \<open>finite F\<close> show "finite ((\<lambda>f. f - Poly_Mapping.single x 1) ` F)" by (rule finite_imageI)
+        show "split t U F = (ps0 @ ps1, qs0 @ qs1)" using \<open>0 \<notin> F\<close> \<open>F \<inter> .[U] \<noteq> {}\<close>
+    moreover from base1(1) have "U0 \<subseteq> X" by (simp only: \<open>U0 = U\<close>)
+  qed (simp_all add: cone_decomp_singleton \<open>U \<subseteq> X\<close>)
+    moreover from base2(1) have "U0 \<subseteq> X" by (simp only: \<open>U0 = U\<close>)
+  qed (simp_all add: cone_decomp_singleton \<open>U \<subseteq> X\<close>)
+    from \<open>(h0, U0) \<in> set qs0 \<union> set qs1\<close> have "cone (h0, U0) \<inter> ideal F = {0}"
+      also from refl \<open>?s \<in> P[V]\<close> have "\<dots> \<in> cone (?t', V)" by (rule coneI)
+      from \<open>s \<in> S\<close> have "?s \<in> monomial 1 ` S" by (rule imageI)
+  moreover from assms(1) \<open>?S \<subseteq> P[X]\<close> have "punit.is_monic_set ?G"
+  moreover from \<open>is_monomial g\<close> have "monomial (punit.lc g) (lpp g) = g"
+  also from assms(1) \<open>?S \<subseteq> P[X]\<close> have ideal_G: "\<dots> = ideal ?S" by (rule reduced_GB_ideal_Polys)
+  moreover from assms(3) have "g \<in> P[X]" by rule (intro reduced_GB_Polys assms(1) \<open>?S \<subseteq> P[X]\<close>)
+    using \<open>t \<in> keys g\<close> by (rule monomial_decomp_sum_list_monomial_in_cone)
+  with \<open>d \<noteq> 0\<close> have "g \<in> cone (h, U)" by (simp add: g punit.monom_mult_monomial)
+  from \<open>g \<noteq> 0\<close> have "q \<noteq> 0" and "h \<noteq> 0" by (auto simp: g')
+  have "punit.lc q = punit.lc g" by (simp add: g' lc_times \<open>punit.lc h = 1\<close>)
+  hence "punit.lc q = 1" by (simp only: \<open>punit.lc g = 1\<close>)
+  from assms(1) \<open>?S \<subseteq> P[X]\<close> have "punit.is_Groebner_basis ?G" by (rule reduced_GB_is_GB_Polys)
+    using \<open>h \<in> ideal ?G\<close> \<open>h \<noteq> 0\<close> by (rule punit.GB_adds_lt[simplified])
+  with _ \<open>g' \<noteq> 0\<close> \<open>t \<in> keys g\<close> have "punit.is_red {g'} g"
+    with \<open>g' \<in> ?G\<close> have "{g'} \<subseteq> ?G - {g}" by simp
+    with \<open>punit.is_red {g'} g\<close> have red: "punit.is_red (?G - {g}) g" by (rule punit.is_red_subset)
+    from assms(1) \<open>?S \<subseteq> P[X]\<close> have "punit.is_auto_reduced ?G" by (rule reduced_GB_is_auto_reduced_Polys)
+  hence "g = h" by (simp add: \<open>punit.lc q = 1\<close> g')
+    from \<open>V \<subseteq> U - {x}\<close> have "V \<subseteq> U" by blast
+      with \<open>(monomial 1 s, V) \<in> set ps1\<close> have s: "s = Poly_Mapping.single x 1 + t" and "V = U"
+        show "V \<subseteq> U" by (simp add: \<open>V = U\<close>)
+          using \<open>(monomial 1 s, V) \<in> set ps1\<close> by (simp add: step.hyps(14) \<open>V = U\<close>)
+          by (simp add: step.hyps(14) \<open>V = U\<close>)
+      moreover from \<open>(monomial 1 s, V) \<in> set ps1\<close> have "(monomial 1 s, V) \<in> set (fst (ps1, qs1))"
+        with \<open>t' \<in> .[X]\<close> show "t' + Poly_Mapping.single x 1 \<in> .[X]" by (rule PPs_closed_plus)
+  ultimately have g: "g = monomial 1 s" using \<open>punit.lc g = 1\<close> by (metis punit.monomial_eq_itself)
+    using md2 \<open>is_monomial_set ?G\<close> by (rule splits_wrt_cone_decomp_1)
+  with assms(1) \<open>U \<subseteq> X\<close> obtain V where "V \<subseteq> U"
+    using \<open>0 \<notin> ?S\<close> by (rule snd_splitI)
+  from \<open>V \<subseteq> U\<close> \<open>U \<subseteq> X\<close> have "V \<subseteq> X" by (rule subset_trans)
+      moreover from \<open>(h, U0) \<in> set qs1\<close> have "(h, U0) \<in> set (qs0 @ qs1)" by simp
+          using md _ \<open>F \<subseteq> P[X]\<close>
+          using \<open>(h, U0) \<in> set (qs0 @ qs1)\<close> unfolding h by (rule cone_decomp_cone_subset)
+        with assms(1) step.hyps(1, 2) step.prems(2) \<open>F \<subseteq> P[X]\<close> eq
+          show "poly_deg (monomial (1::'a) t) = d" by (simp add: poly_deg_monomial \<open>deg_pm t = d\<close>)
+        with qs1 \<open>(h, U0) \<in> set (qs1\<^sub>+)\<close> obtain h' U' where "(h', U') \<in> set qs1" and "poly_deg h' = d"
+  moreover from \<open>finite G\<close> have "finite S" unfolding S_def by (rule finite_imageI)
+  moreover from \<open>G \<subseteq> P[X]\<close> have "S \<subseteq> .[X]" unfolding S_def by (rule PPs_closed_image_lpp)
+  from \<open>S \<subseteq> .[X]\<close> have "?S \<subseteq> P[X]" by (auto intro: Polys_closed_monomial)
+    using assms(4) subset_refl \<open>finite S\<close> zero_in_PPs unfolding ss_def S_def
+  with assms(4) have "cone_decomp (P[X] \<inter> normal_form ?S ` P[X]) (snd ss)" using _ _ \<open>?S \<subseteq> P[X]\<close>
+    from assms(4) subset_refl \<open>finite S\<close> show "monomial_decomp (snd ss)"
+        (simp add: image_normal_form_iff[OF assms(4)] assms(5) \<open>?S \<subseteq> P[X]\<close>,
+         simp add: S_def is_red_reduced_GB_monomial_lt_GB_Polys[OF assms(4)] \<open>G \<subseteq> P[X]\<close> \<open>0 \<notin> G\<close> flip: G_def)
+  moreover note \<open>punit.is_reduced_GB G\<close> \<open>ideal G = ideal F\<close>
+    from \<open>g \<in> G\<close> \<open>0 \<notin> G\<close> show "g \<noteq> 0" by blast
+  from \<open>g \<in> G\<close> have "monomial 1 (lpp g) \<in> ?S" unfolding S_def by (intro imageI)
+  with assms(4) \<open>finite S\<close> \<open>S \<subseteq> .[X]\<close> have "poly_deg (monomial (1::'a) (lpp g)) \<le> d"
+subsection \<open>Splitting Ideals\<close>
+      moreover from \<open>h \<in> J\<close> have "f * normal_form L q \<in> J" by (simp add: h)
+    unfolding L'_def using fin_X \<open>L \<subseteq> P[X]\<close> by (rule standard_cone_decomp_snd_split)+
+  from fin_X \<open>L \<subseteq> P[X]\<close> have "finite (punit.reduced_GB L)" by (rule finite_reduced_GB_Polys)
+      using fin_X subset_refl \<open>finite L'\<close> by (rule monomial_decomp_split)
+    using fin_X subset_refl \<open>finite L'\<close> zero_in_PPs by (rule valid_decomp_split)
+    moreover from \<open>F \<subseteq> P[X]\<close> assms(3) have f0F_sub: "insert f0 F \<subseteq> P[X]" by simp
+        moreover from cn_ps \<open>x1 \<in> T\<close> \<open>y1 \<in> T\<close> have "x1 - y1 \<in> T" by (rule cone_decomp_closed_minus)
+        moreover from cn_D \<open>y2 \<in> fst ?D\<close> \<open>x2 \<in> fst ?D\<close> have "y2 - x2 \<in> fst ?D"
+        with \<open>x1 - y1 = y2 - x2\<close> show "xs = ys" by (simp add: xs ys)
+      moreover from \<open>homogeneous f\<close> have "hom_decomp qs" by (intro hom_qs hom_D)
+subsection \<open>Exact Cone Decompositions\<close>
+  with \<open>(h, U) \<in> set (ps\<^sub>+)\<close> \<open>(h', U') \<in> set (ps\<^sub>+)\<close> show "(h, U) = (h', U')" by (rule assms(3))
+  with \<open>U \<noteq> {}\<close> have "0 < card U" by (simp add: card_gt_0_iff)
+  with \<open>U' \<noteq> {}\<close> have "0 < card U'" by (simp add: card_gt_0_iff)
+    with \<open>finite A\<close> have "\<a> ps \<le> Max A" by (rule Max_ge)
+      with \<open>finite A\<close> have "poly_deg h \<le> Max A" by (rule Max_ge)
+  with \<open>(h, U) \<in> set ps\<close> show "poly_deg h < \<b> ps i" by (rule \<b>)
+    from \<open>finite ?A\<close> \<open>?A \<noteq> {}\<close> have "\<a> ps \<in> ?A" unfolding aP by (rule Min_in)
+    with \<open>finite ?A\<close> have "\<a> ps \<le> Max ?A" by (rule Max_ge)
+      with \<open>(h, U) \<in> set ps\<close> have "(h, U) \<in> set (ps\<^sub>+)" by (simp add: pos_decomp_def)
+      with \<open>finite ?A\<close> have "poly_deg h \<le> Max ?A" by (rule Max_ge)
+    have "Max ?A < d" unfolding Max_less_iff[OF \<open>finite ?A\<close> \<open>?A \<noteq> {}\<close>]
+      with \<open>U \<noteq> {}\<close> have "0 < card U" by (simp add: card_gt_0_iff)
+      with \<open>(h, U) \<in> set ps\<close> show "d0 < d" unfolding d0 by (rule rl)
+    hence False using \<open>U \<subseteq> X\<close> ..
+    note \<open>\<a> ps \<le> \<b> ps (Suc i)\<close>
+        with * \<open>(h, U) \<in> set ps\<close> \<open>i \<le> card U\<close> show False by auto
+    thus False using \<open>\<a> ps < \<b> ps i\<close> by linarith
+  with \<open>(h, U) \<in> set ps\<close> have "(h, U) \<in> set (ps\<^sub>+)" by (simp add: pos_decomp_def)
+  moreover have "\<b> ps (Suc (card X)) \<le> d" unfolding eq1 using \<open>\<a> ps \<le> \<b> ps (Suc i)\<close> assms(5)
+    from assms(6) \<open>\<b> ps i \<le> Suc (poly_deg h)\<close> have "d < Suc (poly_deg h)" by (rule less_le_trans)
+  from \<open>i \<le> card U\<close> this(3) have "i \<le> card U'" by (rule le_trans)
+  with \<open>(h', U') \<in> set ps\<close> have "(h', U') \<in> set (ps\<^sub>+)" by (simp add: pos_decomp_def)
+  moreover note \<open>poly_deg h' = d\<close>
+    with \<open>i \<le> card U'\<close> have "Suc i \<le> card U'" by simp
+    with \<open>(h', U') \<in> set ps\<close> have "poly_deg h' < \<b> ps (Suc i)" by (rule \<b>)
+    note assms(2) \<open>(h, U) \<in> set (ps\<^sub>+)\<close> this(1)
+    moreover have "poly_deg h = poly_deg h'" by (simp only: \<open>poly_deg h = d\<close> \<open>poly_deg h' = d\<close>)
+  thus ?thesis using \<open>card U = i\<close> ..
+    have "(h, U) \<in> ?A" by (simp add: \<open>?A = {(h, U)}\<close>)
+    also from \<open>(h, U) \<in> ?A\<close> \<open>card U = i\<close> have "\<dots> \<subseteq> ?B" by simp
+    finally show False using \<open>poly_deg h < \<b> ps (Suc i)\<close> by simp
+    from \<open>Suc i < j\<close> show "i \<le> j - 1" by simp
+  hence "card U = j - 1" by (simp only: \<open>card U0 = j - 1\<close>)
+  with \<open>Suc i < j\<close> show False by simp
+    from \<open>x \<in> U\<close> \<open>U \<subseteq> X\<close> show "x \<in> X" ..
+  moreover from \<open>U \<subseteq> X\<close> have "U - {x} \<subseteq> X" by blast
+    using assms(1) \<open>h \<noteq> 0\<close> by (simp add: valid_decomp_def punit.monom_mult_eq_zero_iff shift_list.simps)
+    from \<open>d \<le> poly_deg h\<close> have "d \<le> poly_deg h2 \<or> poly_deg h = d"
+      with assms(1) \<open>(h2, U2) \<in> set (ps\<^sub>+)\<close> \<open>k \<le> d\<close> obtain h' U'
+      moreover note \<open>poly_deg h' = d\<close>
+      moreover from \<open>card U2 \<le> card U'\<close> have "card U \<le> card U'" by (simp only: \<open>U = U2\<close>)
+      have "(h, U) \<in> set (?p1 # ps)" by (simp add: \<open>(h, U) = ?p1\<close>)
+    from \<open>d \<le> poly_deg h\<close> this(1) have "d \<le> poly_deg h2" by simp
+    with assms(1) \<open>(h2, U2) \<in> set (ps\<^sub>+)\<close> \<open>k \<le> d\<close> obtain h' U'
+    moreover note \<open>poly_deg h' = d\<close>
+    moreover from _ \<open>card U2 \<le> card U'\<close> have "card U \<le> card U'" unfolding U
+    from assms(1) this \<open>k \<le> d\<close> \<open>d \<le> poly_deg h\<close> obtain h' U'
+    thus ?thesis using \<open>poly_deg h' = d\<close> \<open>card U \<le> card U'\<close> ..
+    moreover from \<open>poly_deg h' = d\<close> have "poly_deg h1 = d" by (simp only: \<open>h' = h2\<close> assms(4))
+    moreover from \<open>card U \<le> card U'\<close> assms(5) have "card U \<le> card U1" by (simp add: \<open>U' = U2\<close>)
+    thus ?thesis using \<open>poly_deg h' = d\<close> \<open>card U \<le> card U'\<close> by blast
+    with \<open>h \<noteq> 0\<close> show False ..
+subsection \<open>Functions \<open>shift\<close> and \<open>exact\<close>\<close>
+  thm card_le_Suc0_iff_eq[OF \<open>finite Y\<close>]
+  moreover have "card Y \<le> 1" unfolding One_nat_def card_le_Suc0_iff_eq[OF \<open>finite Y\<close>]
+    from this(2) have "poly_deg h1 = poly_deg h2" by (simp only: \<open>poly_deg h1 = d\<close>)
+    from \<open>a \<in> A\<close> show "a \<in> B \<and> card (snd a) = Suc m" by (simp add: A_def)
+  hence "h \<noteq> 0" using \<open>(h, U) \<in> set qs\<close> by (rule valid_decompD)
+          with \<open>h \<noteq> 0\<close> have "poly_deg (fst b) = Suc d"
+    from valid_qs \<open>(h, U) \<in> set qs\<close> \<open>x \<in> U\<close> show "valid_decomp X (shift_list (h, U) x qs)"
+    note std this(1) \<open>(h, U) \<in> set qs\<close>
+    moreover from \<open>poly_deg h' = d\<close> have "poly_deg h' = poly_deg h" by (simp only: deg_h)
+    moreover from \<open>Suc m \<le> card U'\<close> have "card U \<le> card U'" by (simp only: card_U)
+        from exct \<open>(h, U) \<in> set qs\<close> have "U \<subseteq> X" by (rule exact_decompD)
+        with \<open>x \<in> U\<close> have "x \<in> X" ..
+        moreover from exct \<open>(h, U) \<in> set qs\<close> have "h \<in> P[X]" by (rule exact_decompD)
+        also from exct \<open>(h, U) \<in> set qs\<close> have "\<dots> \<in> P[X]" by (rule exact_decompD)
+        also from exct \<open>(h, U) \<in> set qs\<close> have "\<dots> \<subseteq> X" by (rule exact_decompD)
+        also from exct \<open>(h, U) \<in> set qs\<close> have "\<dots> \<subseteq> X" by (rule exact_decompD)
+        with \<open>h \<noteq> 0\<close> have "d \<le> poly_deg (fst q)" by (simp add: poly_deg_monom_mult deg_h)
+        with \<open>d0 < d\<close> show ?thesis by (simp only: 1)
+        with \<open>d0 < d\<close> show ?thesis by (simp only: 1)
+    also from inv2 \<open>d0 < d\<close> have "\<dots> \<le> 1" by (rule shift2_invD)
+        moreover from inv \<open>1 < card B\<close> hU have "(h, U) \<in> B" by (rule shift1_inv_some_snd)
+        from inv \<open>1 < card B\<close> hU x_def show "shift1_inv (shift_list (h, U) x qs, (B - {(h, U)}))"
+      with step.prems \<open>1 < card B\<close> hU x_def \<open>finite U\<close> show "P (qs, B) (shift1 ?args)"
+        from \<open>finite U\<close> \<open>x \<in> U\<close> show "card (U - {x}) = m" by (simp add: card_U)
+        from \<open>1 < card B\<close> refl hU x_def show "P ?args (shift1 ?args)"
+          from step.prems \<open>1 < card B\<close> hU x_def show "shift1_inv ?args" by (rule shift1_inv_preserved)
+      unfolding fst_conv \<open>d0 = d\<close> by (rule shift1_invD)
+  hence "h \<noteq> 0" using \<open>(h, U) \<in> set qs\<close> by (rule valid_decompD)
+  from \<open>(h, U) \<in> set qs\<close> have hU_in: "(h, U) \<in> insert ?p1 ?A" by (simp add: card_U)
+    with \<open>h \<noteq> 0\<close> show False by (simp add: punit.lt_monom_mult monomial_0_iff)
+    using step(7) card_U \<open>?p1 \<noteq> (h, U)\<close> by (fastforce simp: shift_list.simps)
+    from \<open>set qs \<noteq> {}\<close> show "poly_deg ` fst ` set qs \<noteq> {}" by simp
+      with \<open>q \<in> set qs\<close> have "q \<in> set ?qs" by (simp add: shift_list.simps)
+      hence "d0 < d" using \<open>c \<le> d\<close> by (rule less_le_trans)
+    also from \<open>\<not> c \<le> d\<close> have "\<dots> \<le> Max (poly_deg ` fst ` set (shift2 c (Suc d) (fst (shift1 ?args))))"
+      hence "poly_deg h < k" and "m < card U" using \<open>d0 < k\<close> by (simp_all add: q)
+      with \<open>q \<in> set qs\<close> have "(h, U) \<in> set (qs\<^sub>+)" by (simp add: q pos_decomp_def)
+      with \<open>poly_deg h < k\<close> have False by simp
+        from _ \<open>finite A\<close> show "finite {q \<in> A. poly_deg (fst q) = d0}" by (rule finite_subset) blast
+        with std \<open>(h2, U2) \<in> set ((shift qs)\<^sub>+)\<close> obtain h' U' where "(h', U') \<in> set (shift qs)"
+        with \<open>(h', U') \<in> set (shift qs)\<close> have "(h', U') \<in> {q \<in> A. poly_deg (fst q) = d0}"
+          by (simp add: A_def \<open>poly_deg h' = d0\<close>)
+        moreover from _ \<open>finite A\<close> have "finite {q \<in> A. poly_deg (fst q) = d0}"
+    also from \<open>finite A\<close> _ have "\<dots> \<le> card A" by (rule card_mono) (auto simp: B_def)
+    moreover note \<open>card ?C \<le> 1\<close>
+  from fin_X subset_refl \<open>finite ?S\<close> have md: "monomial_decomp qs"

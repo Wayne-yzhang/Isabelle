@@ -1,0 +1,202 @@
+theory ParityGame
+imports
+  Main
+  MoreCoinductiveList
+begin
+
+
+type_synonym 'a Edge = "'a \<times> 'a"
+
+type_synonym 'a Path = "'a llist"
+
+
+
+record 'a Graph =
+  verts :: "'a set" ("V\<index>")
+  arcs :: "'a Edge set" ("E\<index>")
+abbreviation is_arc :: "('a, 'b) Graph_scheme \<Rightarrow> 'a \<Rightarrow> 'a \<Rightarrow> bool" (infixl "\<rightarrow>\<index>" 60) where
+  "v \<rightarrow>\<^bsub>G\<^esub> w \<equiv> (v,w) \<in> E\<^bsub>G\<^esub>"
+
+locale Digraph =
+  fixes G (structure)
+  assumes valid_edge_set: "E \<subseteq> V \<times> V"
+begin
+lemma edges_are_in_V [intro]: "v\<rightarrow>w \<Longrightarrow> v \<in> V" "v\<rightarrow>w \<Longrightarrow> w \<in> V" using valid_edge_set by blast+
+
+abbreviation deadend :: "'a \<Rightarrow> bool" where "deadend v \<equiv> \<not>(\<exists>w \<in> V. v \<rightarrow> w)"
+
+
+coinductive valid_path :: "'a Path \<Rightarrow> bool" where
+  valid_path_base: "valid_path LNil"
+| valid_path_base': "v \<in> V \<Longrightarrow> valid_path (LCons v LNil)"
+| valid_path_cons: "\<lbrakk> v \<in> V; w \<in> V; v\<rightarrow>w; valid_path Ps; \<not>lnull Ps; lhd Ps = w \<rbrakk>
+    \<Longrightarrow> valid_path (LCons v Ps)"
+
+inductive_simps valid_path_cons_simp: "valid_path (LCons x xs)"
+
+lemma valid_path_ltl': "valid_path (LCons v Ps) \<Longrightarrow> valid_path Ps"
+  using valid_path.simps by blast
+lemma valid_path_ltl: "valid_path P \<Longrightarrow> valid_path (ltl P)"
+  by (metis llist.exhaust_sel ltl_simps(1) valid_path_ltl')
+lemma valid_path_drop: "valid_path P \<Longrightarrow> valid_path (ldropn n P)"
+  by (simp add: valid_path_ltl ltl_ldrop)
+
+lemma valid_path_in_V: assumes "valid_path P" shows "lset P \<subseteq> V" proof
+  fix x assume "x \<in> lset P" thus "x \<in> V"
+    using assms by (induct rule: llist.set_induct) (auto intro: valid_path.cases)
+qed
+lemma valid_path_finite_in_V: "\<lbrakk> valid_path P; enat n < llength P \<rbrakk> \<Longrightarrow> P $ n \<in> V"
+  using valid_path_in_V lset_lnth_member by blast
+
+lemma valid_path_edges': "valid_path (LCons v (LCons w Ps)) \<Longrightarrow> v\<rightarrow>w"
+  using valid_path.cases by fastforce
+lemma valid_path_edges:
+  assumes "valid_path P" "enat (Suc n) < llength P"
+  shows "P $ n \<rightarrow> P $ Suc n"
+proof-
+  define P' where "P' = ldropn n P"
+  have "enat n < llength P" using assms(2) enat_ord_simps(2) less_trans by blast
+  hence "P' $ 0 = P $ n" by (simp add: P'_def)
+  moreover have "P' $ Suc 0 = P $ Suc n"
+    by (metis One_nat_def P'_def Suc_eq_plus1 add.commute assms(2) lnth_ldropn)
+  ultimately have "\<exists>Ps. P' = LCons (P $ n) (LCons (P $ Suc n) Ps)"
+  moreover have "valid_path P'" by (simp add: P'_def assms(1) valid_path_drop)
+  ultimately show ?thesis using valid_path_edges' by blast
+qed
+
+lemma valid_path_coinduct [consumes 1, case_names base step, coinduct pred: valid_path]:
+  assumes major: "Q P"
+    and base: "\<And>v P. Q (LCons v LNil) \<Longrightarrow> v \<in> V"
+    and step: "\<And>v w P. Q (LCons v (LCons w P)) \<Longrightarrow> v\<rightarrow>w \<and> (Q (LCons w P) \<or> valid_path (LCons w P))"
+  shows "valid_path P"
+using major proof (coinduction arbitrary: P)
+  case valid_path
+  { assume "P \<noteq> LNil" "\<not>(\<exists>v. P = LCons v LNil \<and> v \<in> V)"
+    then obtain v w P' where "P = LCons v (LCons w P')"
+      using neq_LNil_conv base valid_path by metis
+    hence ?case using step valid_path by auto
+  }
+  thus ?case by blast
+qed
+
+lemma valid_path_no_deadends:
+  "\<lbrakk> valid_path P; enat (Suc i) < llength P \<rbrakk> \<Longrightarrow> \<not>deadend (P $ i)"
+  using valid_path_edges by blast
+
+lemma valid_path_ends_on_deadend:
+  "\<lbrakk> valid_path P; enat i < llength P; deadend (P $ i) \<rbrakk> \<Longrightarrow> enat (Suc i) = llength P"
+  using valid_path_no_deadends by (metis enat_iless enat_ord_simps(2) neq_iff not_less_eq)
+
+lemma valid_path_prefix: "\<lbrakk> valid_path P; lprefix P' P \<rbrakk> \<Longrightarrow> valid_path P'"
+proof (coinduction arbitrary: P' P)
+  case (step v w P'' P' P)
+  then obtain Ps where Ps: "LCons v (LCons w Ps) = P" by (metis LCons_lprefix_conv)
+  hence "valid_path (LCons w Ps)" using valid_path_ltl' step(2) by blast
+  moreover have "lprefix (LCons w P'') (LCons w Ps)" using Ps step(1,3) by auto
+  ultimately show ?case using Ps step(2) valid_path_edges' by blast
+qed (metis LCons_lprefix_conv valid_path_cons_simp)
+
+lemma valid_path_lappend:
+  assumes "valid_path P" "valid_path P'" "\<lbrakk> \<not>lnull P; \<not>lnull P' \<rbrakk> \<Longrightarrow> llast P\<rightarrow>lhd P'"
+  shows "valid_path (lappend P P')"
+proof (cases, cases)
+  assume "\<not>lnull P" "\<not>lnull P'"
+  thus ?thesis using assms proof (coinduction arbitrary: P' P)
+    case (step v w P'' P' P)
+    show ?case proof (cases)
+      assume "lnull (ltl P)"
+      thus ?case using step(1,2,3,5,6)
+        by (metis lhd_LCons lhd_LCons_ltl lhd_lappend llast_singleton
+                  llist.collapse(1) ltl_lappend ltl_simps(2))
+    next
+      assume "\<not>lnull (ltl P)"
+      moreover have "ltl (lappend P P') = lappend (ltl P) P'" using step(2) by simp
+      ultimately show ?case using step
+        by (metis (no_types, lifting)
+            lhd_LCons lhd_LCons_ltl lhd_lappend llast_LCons ltl_simps(2)
+            valid_path_edges' valid_path_ltl)
+    qed
+  qed (metis llist.disc(1) lnull_lappend ltl_lappend ltl_simps(2))
+qed (simp_all add: assms(1,2) lappend_lnull1 lappend_lnull2)
+
+lemma valid_path_supergame:
+  assumes "valid_path P" and G': "Digraph G'" "V \<subseteq> V\<^bsub>G'\<^esub>" "E \<subseteq> E\<^bsub>G'\<^esub>"
+  shows "Digraph.valid_path G' P"
+  rule: Digraph.valid_path_coinduct[OF G'(1), case_names base step])
+  case base thus ?case using G'(2) valid_path_cons_simp by auto
+qed (meson G'(3) subset_eq valid_path_edges' valid_path_ltl')
+
+
+coinductive maximal_path where
+  maximal_path_base: "maximal_path LNil"
+| maximal_path_base': "deadend v \<Longrightarrow> maximal_path (LCons v LNil)"
+| maximal_path_cons: "\<not>lnull Ps \<Longrightarrow> maximal_path Ps \<Longrightarrow> maximal_path (LCons v Ps)"
+
+lemma maximal_no_deadend: "maximal_path (LCons v Ps) \<Longrightarrow> \<not>deadend v \<Longrightarrow> \<not>lnull Ps"
+  by (metis lhd_LCons llist.distinct(1) ltl_simps(2) maximal_path.simps)
+lemma maximal_ltl: "maximal_path P \<Longrightarrow> maximal_path (ltl P)"
+  by (metis ltl_simps(1) ltl_simps(2) maximal_path.simps)
+lemma maximal_drop: "maximal_path P \<Longrightarrow> maximal_path (ldropn n P)"
+  by (simp add: maximal_ltl ltl_ldrop)
+
+lemma maximal_path_lappend:
+  assumes "\<not>lnull P'" "maximal_path P'"
+  shows "maximal_path (lappend P P')"
+proof (cases)
+  assume "\<not>lnull P"
+  thus ?thesis using assms proof (coinduction arbitrary: P' P rule: maximal_path.coinduct)
+    case (maximal_path P' P)
+    let ?P = "lappend P P'"
+    show ?case proof (cases "?P = LNil \<or> (\<exists>v. ?P = LCons v LNil \<and> deadend v)")
+      case False
+      then obtain Ps v where P: "?P = LCons v Ps" by (meson neq_LNil_conv)
+      hence "Ps = lappend (ltl P) P'" by (simp add: lappend_ltl maximal_path(1))
+      hence "\<exists>Ps1 P'. Ps = lappend Ps1 P' \<and> \<not>lnull P' \<and> maximal_path P'"
+        using maximal_path(2) maximal_path(3) by auto
+      thus ?thesis using P lappend_lnull1 by fastforce
+    qed blast
+  qed
+qed (simp add: assms(2) lappend_lnull1[of P P'])
+
+lemma maximal_ends_on_deadend:
+  assumes "maximal_path P" "lfinite P" "\<not>lnull P"
+  shows "deadend (llast P)"
+proof-
+    by (metis enat_ord_simps(2) gr0_implies_Suc lfinite_llength_enat lnull_0_llength)
+  define P' where "P' = ldropn n P"
+  hence "maximal_path P'" using assms(1) maximal_drop by blast
+  thus ?thesis proof (cases rule: maximal_path.cases)
+    case (maximal_path_base' v)
+    hence "deadend (llast P')" unfolding P'_def by simp
+    thus ?thesis unfolding P'_def using llast_ldropn[of n P] n
+      by (metis P'_def ldropn_eq_LConsD local.maximal_path_base'(1))
+  next
+    case (maximal_path_cons P'' v)
+    hence "ldropn (Suc n) P = P''" unfolding P'_def by (metis ldrop_eSuc_ltl ltl_ldropn ltl_simps(2))
+    thus ?thesis using n maximal_path_cons(2) by auto
+  qed (simp add: P'_def n ldropn_eq_LNil)
+qed
+
+lemma maximal_ends_on_deadend': "\<lbrakk> lfinite P; deadend (llast P) \<rbrakk> \<Longrightarrow> maximal_path P"
+proof (coinduction arbitrary: P rule: maximal_path.coinduct)
+  case (maximal_path P)
+  show ?case proof (cases)
+    assume "P \<noteq> LNil"
+    then obtain v P' where P': "P = LCons v P'" by (meson neq_LNil_conv)
+    show ?thesis proof (cases)
+      assume "P' = LNil" thus ?thesis using P' maximal_path(2) by auto
+    qed (metis P' lfinite_LCons llast_LCons llist.collapse(1) maximal_path(1,2))
+  qed simp
+qed
+
+lemma infinite_path_is_maximal: "\<lbrakk> valid_path P; \<not>lfinite P \<rbrakk> \<Longrightarrow> maximal_path P"
+  by (coinduction arbitrary: P rule: maximal_path.coinduct)
+     (cases rule: valid_path.cases, auto)
+
+
+
+
+datatype Player = Even | Odd
+
+abbreviation "other_player p \<equiv> (if p = Even then Odd else Even)"
+notation other_player ("(_**)" [1000] 1000)

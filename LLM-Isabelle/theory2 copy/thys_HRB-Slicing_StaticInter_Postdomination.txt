@@ -1,0 +1,414 @@
+theory Postdomination imports CFGExit begin
+
+
+locale Postdomination = CFGExit sourcenode targetnode kind valid_edge Entry 
+    get_proc get_return_edges procs Main Exit
+  for sourcenode :: "'edge \<Rightarrow> 'node" and targetnode :: "'edge \<Rightarrow> 'node"
+  and kind :: "'edge \<Rightarrow> ('var,'val,'ret,'pname) edge_kind" 
+  and valid_edge :: "'edge \<Rightarrow> bool"
+  and Entry :: "'node" ("'('_Entry'_')")  and get_proc :: "'node \<Rightarrow> 'pname"
+  and get_return_edges :: "'edge \<Rightarrow> 'edge set"
+  and procs :: "('pname \<times> 'var list \<times> 'var list) list" and Main :: "'pname"
+  and Exit::"'node"  ("'('_Exit'_')") +
+  assumes Entry_path:"valid_node n \<Longrightarrow> \<exists>as. (_Entry_) -as\<rightarrow>\<^sub>\<surd>* n"
+  and Exit_path:"valid_node n \<Longrightarrow> \<exists>as. n -as\<rightarrow>\<^sub>\<surd>* (_Exit_)"
+  and method_exit_unique:
+    "\<lbrakk>method_exit n; method_exit n'; get_proc n = get_proc n'\<rbrakk> \<Longrightarrow> n = n'"
+
+begin
+
+lemma get_return_edges_unique:
+  assumes "valid_edge a" and "a' \<in> get_return_edges a" and "a'' \<in> get_return_edges a"
+  shows "a' = a''"
+proof -
+  obtain Q r p fs where "kind a = Q:r\<hookrightarrow>\<^bsub>p\<^esub>fs"
+    by(fastforce dest!:only_call_get_return_edges)
+    by(fastforce dest!:call_return_edges)
+    by(rule get_return_edges_valid)
+    by(rule get_proc_return)
+    by(fastforce simp:method_exit_def)
+  obtain Q'' f'' where "kind a'' = Q''\<hookleftarrow>\<^bsub>p\<^esub>f''" by(fastforce dest!:call_return_edges)
+    by(rule get_return_edges_valid)
+    by(rule get_proc_return)
+    by(fastforce simp:method_exit_def)
+    by(fastforce elim!:method_exit_unique)
+  obtain ax' where "valid_edge ax'" and "sourcenode ax' = sourcenode a"
+    and "targetnode ax' = targetnode a'" and "intra_kind(kind ax')"
+    by -(drule call_return_node_edge,auto simp:intra_kind_def)
+  obtain ax'' where "valid_edge ax''" and "sourcenode ax'' = sourcenode a"
+    and "targetnode ax'' = targetnode a''" and "intra_kind(kind ax'')"
+    by -(drule call_return_node_edge,auto simp:intra_kind_def)
+  have "ax' = ax''" by -(drule call_only_one_intra_edge,auto)
+  have "targetnode a' = targetnode a''" by simp
+  show ?thesis by(rule edge_det)
+qed
+
+
+definition postdominate :: "'node \<Rightarrow> 'node \<Rightarrow> bool" ("_ postdominates _" [51,0])
+where postdominate_def:"n' postdominates n \<equiv> 
+  (valid_node n \<and> valid_node n' \<and>
+  (\<forall>as pex. (n -as\<rightarrow>\<^sub>\<iota>* pex \<and> method_exit pex) \<longrightarrow> n' \<in> set (sourcenodes as)))"
+
+
+lemma postdominate_implies_inner_path: 
+  assumes "n' postdominates n" 
+  obtains as where "n -as\<rightarrow>\<^sub>\<iota>* n'" and "n' \<notin> set (sourcenodes as)"
+proof(atomize_elim)
+    and all:"\<forall>as pex. (n -as\<rightarrow>\<^sub>\<iota>* pex \<and> method_exit pex) \<longrightarrow> n' \<in> set (sourcenodes as)"
+    by(auto simp:postdominate_def)
+  then obtain as where "n -as\<rightarrow>\<^sub>\<surd>* (_Exit_)"
+    and "\<forall>a \<in> set as. intra_kind(kind a) \<or> (\<exists>Q f p. kind a = Q\<hookleftarrow>\<^bsub>p\<^esub>f)"
+    by -(erule valid_Exit_path_descending_path)
+  show "\<exists>as. n -as\<rightarrow>\<^sub>\<iota>* n' \<and> n' \<notin> set (sourcenodes as)"
+  proof(cases "\<exists>a \<in> set as. \<exists>Q f p. kind a = Q\<hookleftarrow>\<^bsub>p\<^esub>f")
+    case True
+    then obtain asx ax asx' where [simp]:"as = asx@ax#asx'" 
+      and "\<exists>Q f p. kind ax = Q\<hookleftarrow>\<^bsub>p\<^esub>f" and "\<forall>a \<in> set asx. \<forall>Q f p. kind a \<noteq> Q\<hookleftarrow>\<^bsub>p\<^esub>f"
+      by -(erule split_list_first_propE,simp)
+    have "\<forall>a \<in> set asx. intra_kind(kind a)" by auto
+      and "valid_edge ax" by(auto dest:vp_split)
+    have "n -asx\<rightarrow>\<^sub>\<iota>* sourcenode ax" by(simp add:vp_def intra_path_def)
+    have "method_exit (sourcenode ax)" by(fastforce simp:method_exit_def)
+    then obtain xs ys where "sourcenodes asx = xs@n'#ys" and "n' \<notin> set xs"
+      by(fastforce dest:split_list_first)
+    then obtain as' a as'' where "xs = sourcenodes as'"
+      and [simp]:"asx = as'@a#as''" and "sourcenode a = n'"
+      by(fastforce elim:map_append_append_maps simp:sourcenodes_def)
+      by(fastforce dest:path_split simp:intra_path_def)
+    show ?thesis by fastforce
+  next
+    case False
+    have "\<forall>a \<in> set as. intra_kind(kind a)" by fastforce
+      by(auto simp:vp_def intra_path_def simp:method_exit_def)
+    then obtain xs ys where "sourcenodes as = xs@n'#ys" and "n' \<notin> set xs"
+      by(fastforce dest:split_list_first)
+    then obtain as' a as'' where "xs = sourcenodes as'"
+      and [simp]:"as = as'@a#as''" and "sourcenode a = n'"
+      by(fastforce elim:map_append_append_maps simp:sourcenodes_def)
+    have "n -as'\<rightarrow>\<^sub>\<iota>* sourcenode a"
+      by(fastforce dest:path_split simp:vp_def intra_path_def)
+    show ?thesis by fastforce
+  qed
+qed
+
+
+lemma postdominate_variant:
+  assumes "n' postdominates n" 
+  shows "\<forall>as. n -as\<rightarrow>\<^sub>\<surd>* (_Exit_) \<longrightarrow> n' \<in> set (sourcenodes as)"
+proof -
+  have all:"\<forall>as pex. (n -as\<rightarrow>\<^sub>\<iota>* pex \<and> method_exit pex) \<longrightarrow> n' \<in> set (sourcenodes as)"
+    by(simp add:postdominate_def)
+  { fix as assume "n -as\<rightarrow>\<^sub>\<surd>* (_Exit_)"
+    then obtain as' pex where "n -as'\<rightarrow>\<^sub>\<iota>* pex" and "method_exit pex"
+      and "set(sourcenodes as') \<subseteq> set(sourcenodes as)"
+      by(erule valid_Exit_path_intra_path)
+    have "n' \<in> set (sourcenodes as')" by(fastforce simp:postdominate_def)
+    have "n' \<in> set (sourcenodes as)" by fastforce }
+  thus ?thesis by simp
+qed
+
+
+lemma postdominate_refl:
+  assumes "valid_node n" and "\<not> method_exit n" shows "n postdominates n"
+proof(induct rule:valid_node_cases)
+  case Entry
+  { fix as pex assume "(_Entry_) -as\<rightarrow>\<^sub>\<iota>* pex" and "method_exit pex"
+    proof(rule method_exit_cases)
+      assume "pex = (_Exit_)"
+        apply(clarsimp simp:intra_path_def) apply(erule path.cases)
+        by (drule sym,simp,drule Exit_noteq_Entry,auto)
+        by(fastforce intro:path_sourcenode simp:intra_path_def)
+    next
+      fix a Q p f assume "pex = sourcenode a" and "valid_edge a" and "kind a = Q\<hookleftarrow>\<^bsub>p\<^esub>f"
+        by(rule intra_path_get_procs)
+      hence "get_proc pex = Main" by(simp add:get_proc_Entry)
+        by(rule get_proc_return)
+        by simp (rule Main_no_return_source)
+      thus ?thesis by simp
+    qed }
+  with Entry show ?thesis 
+    by(fastforce intro:empty_path simp:postdominate_def intra_path_def)
+next
+  case Exit
+  thus ?thesis by simp
+next
+  case inner
+  show ?thesis
+  proof(cases "\<exists>as. n -as\<rightarrow>\<^sub>\<surd>* (_Exit_)")
+    case True
+    { fix as pex assume "n -as\<rightarrow>\<^sub>\<iota>* pex" and "method_exit pex"
+        by(fastforce elim:path.cases simp:intra_path_def)
+        by(fastforce intro:path_sourcenode simp:intra_path_def)
+      have "n \<in> set (sourcenodes as)" by simp }
+    hence "\<forall>as pex. (n -as\<rightarrow>\<^sub>\<iota>* pex \<and> method_exit pex) \<longrightarrow> n \<in> set (sourcenodes as)"
+      by fastforce
+    with True inner show ?thesis 
+      by(fastforce intro:empty_path 
+                   simp:postdominate_def inner_is_valid intra_path_def)
+  next
+    case False
+    with inner show ?thesis by(fastforce dest:inner_is_valid Exit_path)
+  qed
+qed
+
+
+
+lemma postdominate_trans:
+  assumes "n'' postdominates n" and "n' postdominates n''"
+  shows "n' postdominates n"
+proof -
+  have "valid_node n" and "valid_node n'" by(simp_all add:postdominate_def)
+  { fix as pex assume "n -as\<rightarrow>\<^sub>\<iota>* pex" and "method_exit pex"
+      by(fastforce simp:postdominate_def)
+    then obtain ns' ns'' where "sourcenodes as = ns'@n''#ns''"
+      by(auto dest:split_list)
+    then obtain as' as'' a where "sourcenodes as'' = ns''" and [simp]:"as=as'@a#as''"
+      and [simp]:"sourcenode a = n''"
+      by(fastforce elim:map_append_append_maps simp:sourcenodes_def)
+    hence "n'' -a#as''\<rightarrow>\<^sub>\<iota>* pex"
+      by(fastforce dest:path_split_second simp:intra_path_def)
+    have "n' \<in> set(sourcenodes (a#as''))" by(fastforce simp:postdominate_def)
+    hence "n' \<in> set (sourcenodes as)" by(fastforce simp:sourcenodes_def) }
+  show ?thesis by(fastforce simp:postdominate_def)
+qed
+
+
+lemma postdominate_antisym:
+  assumes "n' postdominates n" and "n postdominates n'"
+  shows "n = n'"
+proof -
+    by(auto simp:postdominate_def)
+  then obtain as' pex where "n -as'\<rightarrow>\<^sub>\<iota>* pex" and "method_exit pex"
+    by -(erule valid_Exit_path_intra_path)
+    by(fastforce simp:postdominate_def)
+  then obtain ns ns' where "sourcenodes as' = ns@n'#ns'"
+    and "\<forall>nx \<in> set ns'. nx \<noteq> n'"
+    by(fastforce elim!:split_list_last_propE)
+    where [simp]:"ns' = sourcenodes asx'" "as' = asx@a#asx'" "sourcenode a = n'"
+    by(fastforce elim:map_append_append_maps simp:sourcenodes_def)
+    by(fastforce dest:path_split_second simp:intra_path_def)
+    by(fastforce simp:postdominate_def)
+  hence "n = n' \<or> n \<in> set(sourcenodes asx')" by(simp add:sourcenodes_def)
+  thus ?thesis
+  proof
+    assume "n = n'" thus ?thesis .
+  next
+    assume "n \<in> set(sourcenodes asx')"
+    then obtain nsx' nsx'' where "sourcenodes asx' = nsx'@n#nsx''"
+      by(auto dest:split_list)
+    then obtain asi asi' a' where [simp]:"asx' = asi@a'#asi'" "sourcenode a' = n"
+      by(fastforce elim:map_append_append_maps simp:sourcenodes_def)
+    hence "n -(asx@a#asi)@a'#asi'\<rightarrow>* pex"
+      and "\<forall>a \<in> set ((asx@a#asi)@a'#asi'). intra_kind (kind a)"
+      by(simp_all add:intra_path_def)
+    have "n -a'#asi'\<rightarrow>* pex" by(fastforce dest:path_split_second)
+    have "n -a'#asi'\<rightarrow>\<^sub>\<iota>* pex" by(simp add:intra_path_def)
+    have "n' \<in> set(sourcenodes (a'#asi'))" by(fastforce simp:postdominate_def)
+    hence "n' = n \<or> n' \<in> set(sourcenodes asi')"
+      by(simp add:sourcenodes_def)
+    thus ?thesis
+    proof
+      assume "n' = n" thus ?thesis by(rule sym)
+    next
+      assume "n' \<in> set(sourcenodes asi')"
+      thus ?thesis by simp
+    qed
+  qed
+qed
+
+
+lemma postdominate_path_branch:
+  assumes "n -as\<rightarrow>* n''" and "n' postdominates n''" and "\<not> n' postdominates n"
+  obtains a as' as'' where "as = as'@a#as''" and "valid_edge a"
+  and "\<not> n' postdominates (sourcenode a)" and "n' postdominates (targetnode a)"
+proof(atomize_elim)
+  from assms
+  show "\<exists>as' a as''. as = as'@a#as'' \<and> valid_edge a \<and> 
+    \<not> n' postdominates (sourcenode a) \<and> n' postdominates (targetnode a)"
+  proof(induct rule:path.induct)
+    case (Cons_path n'' as nx a n)
+    show ?case
+    proof(cases "n' postdominates n''")
+      case True
+    next
+      case False
+        by clarsimp(rule_tac x="a#as'" in exI,clarsimp)
+    qed
+  qed simp
+qed
+
+
+lemma Exit_no_postdominator:
+  assumes "(_Exit_) postdominates n" shows False
+proof -
+  then obtain as' pex where "n -as'\<rightarrow>\<^sub>\<iota>* pex" and "method_exit pex"
+    by -(erule valid_Exit_path_intra_path)
+    by(fastforce simp:postdominate_def)
+qed
+
+
+lemma postdominate_inner_path_targetnode:
+  assumes "n' postdominates n" and "n -as\<rightarrow>\<^sub>\<iota>* n''" and "n' \<notin> set(sourcenodes as)"
+  shows "n' postdominates n''"
+proof -
+    where "valid_node n" and "valid_node n'"
+    and all:"\<forall>as pex. (n -as\<rightarrow>\<^sub>\<iota>* pex \<and> method_exit pex) \<longrightarrow> n' \<in> set (sourcenodes as)"
+    by(auto simp:postdominate_def)
+    by(fastforce dest:path_valid_node simp:intra_path_def)
+  have "\<forall>as' pex'. (n'' -as'\<rightarrow>\<^sub>\<iota>* pex' \<and> method_exit pex') \<longrightarrow> 
+                   n' \<in> set (sourcenodes as')"
+  proof(rule ccontr)
+    assume "\<not> (\<forall>as' pex'. (n'' -as'\<rightarrow>\<^sub>\<iota>* pex' \<and> method_exit pex') \<longrightarrow> 
+                          n' \<in> set (sourcenodes as'))"
+    then obtain as' pex' where "n'' -as'\<rightarrow>\<^sub>\<iota>* pex'" and "method_exit pex'"
+      and "n' \<notin> set (sourcenodes as')" by blast
+      by(fastforce intro:path_Append simp:intra_path_def)
+    have "n' \<notin> set (sourcenodes (as@as'))"
+      by(simp add:sourcenodes_def)
+    show False by(fastforce simp:postdominate_def)
+  qed
+  show ?thesis by(auto simp:postdominate_def)
+qed
+
+
+lemma not_postdominate_source_not_postdominate_target:
+  assumes "\<not> n postdominates (sourcenode a)" 
+  and "valid_node n" and "valid_edge a" and "intra_kind (kind a)"
+  obtains ax where "sourcenode a = sourcenode ax" and "valid_edge ax"
+  and "\<not> n postdominates targetnode ax"
+proof(atomize_elim)
+  show "\<exists>ax. sourcenode a = sourcenode ax \<and> valid_edge ax \<and> 
+    \<not> n postdominates targetnode ax"
+  proof -
+    from assms obtain asx pex 
+      where "sourcenode a -asx\<rightarrow>\<^sub>\<iota>* pex" and "method_exit pex"
+      and "n \<notin> set(sourcenodes asx)" by(fastforce simp:postdominate_def)
+    show ?thesis
+    proof(cases asx)
+      case Nil
+        by(fastforce simp:intra_path_def)
+      thus ?thesis
+      proof(rule method_exit_cases)
+        assume "sourcenode a = (_Exit_)"
+        thus ?thesis by simp
+      next
+        fix a' Q f p assume "sourcenode a = sourcenode a'"
+          and "valid_edge a'" and "kind a' = Q\<hookleftarrow>\<^bsub>p\<^esub>f"
+          by(fastforce dest:return_edges_only simp:intra_kind_def)
+        thus ?thesis by simp
+      qed
+    next
+      case (Cons ax asx')
+      have "sourcenode a -[]@ax#asx'\<rightarrow>* pex" 
+        and "\<forall>a \<in> set (ax#asx'). intra_kind (kind a)" by(simp_all add:intra_path_def)
+      have "sourcenode a = sourcenode ax" and "valid_edge ax"
+        and "targetnode ax -asx'\<rightarrow>* pex"  by(fastforce dest:path_split)+
+      have "targetnode ax -asx'\<rightarrow>\<^sub>\<iota>* pex" by(simp add:intra_path_def)
+      have "\<not> n postdominates targetnode ax"
+        by(fastforce simp:postdominate_def sourcenodes_def) 
+    qed
+  qed
+qed
+
+
+lemma inner_node_Exit_edge:
+  assumes "inner_node n" 
+  obtains a where "valid_edge a" and "intra_kind (kind a)" 
+  and "inner_node (sourcenode a)" and "targetnode a = (_Exit_)"
+proof(atomize_elim)
+  then obtain as where "n -as\<rightarrow>\<^sub>\<surd>* (_Exit_)" by(fastforce dest:Exit_path)
+  show "\<exists>a. valid_edge a \<and> intra_kind (kind a) \<and> inner_node (sourcenode a) \<and> 
+    targetnode a = (_Exit_)"
+  proof(cases "as = []")
+    case True
+    thus ?thesis by simp
+  next
+    case False
+      and "n -as'\<rightarrow>\<^sub>\<surd>* sourcenode a'" and "valid_edge a'" 
+      and "(_Exit_) = targetnode a'" by -(erule vp_split_snoc)
+    thus ?thesis
+    proof(cases "sourcenode a'" rule:valid_node_cases)
+      case Entry
+      have False by -(drule path_Entry_target,auto simp:inner_node_def)
+      thus ?thesis by simp
+    next
+      case Exit
+      thus ?thesis by simp
+    next
+      case inner
+      have "intra_kind (kind a')"
+      proof(cases "kind a'" rule:edge_kind_cases)
+        case Intra thus ?thesis by simp
+      next
+        case (Call Q r p fs)
+        thus ?thesis by simp
+      next
+        case (Return Q p f)
+        have False by(rule Exit_no_return_target)
+        thus ?thesis by simp
+      qed
+      show ?thesis by simp blast
+    qed
+  qed
+qed
+
+
+lemma inner_node_Entry_edge:
+  assumes "inner_node n" 
+  obtains a where "valid_edge a" and "intra_kind (kind a)" 
+  and "inner_node (targetnode a)" and "sourcenode a = (_Entry_)"
+proof(atomize_elim)
+  then obtain as where "(_Entry_) -as\<rightarrow>\<^sub>\<surd>* n" by(fastforce dest:Entry_path)
+  show "\<exists>a. valid_edge a \<and> intra_kind (kind a) \<and> inner_node (targetnode a) \<and> 
+    sourcenode a = (_Entry_)"
+  proof(cases "as = []")
+    case True
+      by(fastforce simp:inner_node_def vp_def)
+    thus ?thesis by simp
+  next
+    case False
+      and "targetnode a' -as'\<rightarrow>\<^sub>\<surd>* n" and "valid_edge a'" 
+      and "(_Entry_) = sourcenode a'" by -(erule vp_split_Cons)
+    thus ?thesis
+    proof(cases "targetnode a'" rule:valid_node_cases)
+      case Entry
+      thus ?thesis by simp
+    next
+      case Exit
+      have False by -(drule path_Exit_source,auto simp:inner_node_def)
+      thus ?thesis by simp
+    next
+      case inner
+      have "intra_kind (kind a')"
+      proof(cases "kind a'" rule:edge_kind_cases)
+        case Intra thus ?thesis by simp
+      next
+        case (Call Q r p fs)
+        have False by(rule Entry_no_call_source)
+        thus ?thesis by simp
+      next
+        case (Return Q p f)
+          by(rule get_proc_return)
+        thus ?thesis by simp
+      qed
+      show ?thesis by simp blast
+    qed
+  qed
+qed
+
+
+lemma intra_path_to_matching_method_exit:
+  assumes "method_exit n'" and "get_proc n = get_proc n'" and "valid_node n"
+  obtains as where "n -as\<rightarrow>\<^sub>\<iota>* n'"
+proof(atomize_elim)
+    by(fastforce dest:Exit_path)
+  then obtain as mex where "n -as\<rightarrow>\<^sub>\<iota>* mex" and "method_exit mex"
+    by(fastforce elim:valid_Exit_path_intra_path)
+    by(rule intra_path_get_procs)
+  have "mex = n'" by(fastforce intro:method_exit_unique)
+qed
+
+
+end
+
+end

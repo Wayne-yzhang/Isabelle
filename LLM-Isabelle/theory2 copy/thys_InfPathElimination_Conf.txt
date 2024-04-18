@@ -1,0 +1,148 @@
+theory Conf
+imports Store
+begin
+
+
+
+
+
+
+
+
+record ('v,'d) conf = 
+  store :: "'v store"
+  pred  :: "('v symvar,'d) bexp set"
+
+
+
+
+
+definition symvars :: 
+  "('v,'d) conf \<Rightarrow> 'v symvar set" 
+where
+  "symvars c = Store.symvars (store c) \<union> Bexp.vars (conjunct (pred c))"
+
+
+
+
+
+definition fresh_symvar :: 
+  "'v symvar \<Rightarrow> ('v,'d) conf \<Rightarrow> bool" 
+where
+  "fresh_symvar sv c = (sv \<notin> symvars c)"
+
+
+
+
+
+abbreviation sat :: 
+  "('v,'d) conf \<Rightarrow> bool" 
+where
+  "sat c \<equiv> Bexp.sat (conjunct (pred c))"
+
+
+
+
+
+definition states :: 
+  "('v,'d) conf \<Rightarrow> ('v,'d) state set" 
+where
+ "states c = {\<sigma>. \<exists> \<sigma>\<^sub>s\<^sub>y\<^sub>m. consistent \<sigma> \<sigma>\<^sub>s\<^sub>y\<^sub>m (store c) \<and> conjunct (pred c) \<sigma>\<^sub>s\<^sub>y\<^sub>m}"
+
+
+
+
+lemma sat_eq :  
+  "sat c = (states c \<noteq> {})"
+using consistentI2 by (simp add : sat_def states_def) fast
+
+
+
+
+
+
+definition subsums :: 
+  "('v,'d) conf \<Rightarrow> ('v,'d) conf \<Rightarrow> bool" (infixl "\<sqsubseteq>" 55) 
+where     
+  "c\<^sub>2 \<sqsubseteq> c\<^sub>1 \<equiv> (states c\<^sub>2 \<subseteq> states c\<^sub>1)"
+
+
+
+
+lemma subsums_refl :
+  "c \<sqsubseteq> c"
+by (simp only : subsums_def)
+
+
+lemma subsums_trans :
+  "c1 \<sqsubseteq> c2 \<Longrightarrow> c2 \<sqsubseteq> c3 \<Longrightarrow> c1 \<sqsubseteq> c3"
+unfolding subsums_def by simp
+
+
+
+
+lemma
+  assumes "c1 \<sqsubseteq> c2"
+  assumes "c2 \<sqsubseteq> c1"
+  shows   "states c1 = states c2"
+using assms by (simp add : subsums_def)
+
+
+
+
+lemma sat_sub_by_sat :
+  assumes "sat c\<^sub>2"
+  and     "c\<^sub>2 \<sqsubseteq> c\<^sub>1"
+  shows   "sat c\<^sub>1"
+using assms sat_eq[of c\<^sub>1] sat_eq[of c\<^sub>2] 
+by (simp add : subsums_def) fast
+
+
+
+
+lemma unsat_subs_unsat :
+  assumes "\<not> sat c1"
+  assumes "c2 \<sqsubseteq> c1"
+  shows   "\<not> sat c2"
+using assms sat_eq[of c1] sat_eq[of c2] 
+by (simp add : subsums_def)
+
+
+
+
+
+definition sem :: 
+  "('v,'d) conf \<Rightarrow> ('v,'d) bexp" 
+where
+ "sem c = (\<lambda> \<sigma>. \<sigma> \<in> states c)"
+
+
+theorem
+  "c\<^sub>2 \<sqsubseteq> c\<^sub>1 \<longleftrightarrow> sem c\<^sub>2 \<Turnstile>\<^sub>B sem c\<^sub>1"
+unfolding subsums_def sem_def subset_iff entails_def by (rule refl)
+
+
+
+
+
+definition abstract ::
+  "('v,'d) conf \<Rightarrow> ('v,'d) conf \<Rightarrow> bool"
+where
+  "abstract c c\<^sub>a \<equiv> c \<sqsubseteq> c\<^sub>a"
+
+
+
+
+
+abbreviation entails :: 
+  "('v,'d) conf \<Rightarrow> ('v,'d) bexp \<Rightarrow> bool" (infixl "\<Turnstile>\<^sub>c" 55) 
+where
+  "c \<Turnstile>\<^sub>c \<phi> \<equiv> sem c \<Turnstile>\<^sub>B \<phi>"
+
+lemma 
+  "sem c \<Turnstile>\<^sub>B e \<longleftrightarrow> (\<forall> \<sigma> \<in> states c. e \<sigma>)"
+by (auto simp add : states_def sem_def entails_def)
+
+
+
+end

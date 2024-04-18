@@ -1,0 +1,320 @@
+theory NTT
+  imports Preliminary_Lemmas
+begin
+
+
+locale ntt = preliminary "TYPE ('a ::prime_card)" +
+fixes \<omega> :: "('a::prime_card mod_ring)"
+fixes \<mu> :: "('a mod_ring)"
+assumes omega_properties: "\<omega>^n = 1" "\<omega> \<noteq> 1" "(\<forall> m. \<omega>^m = 1 \<and> m\<noteq>0 \<longrightarrow> m \<ge> n)"
+assumes mu_properties: "\<mu> * \<omega> = 1"
+begin
+
+lemma mu_properties': "\<mu> \<noteq> 1"
+  using omega_properties mu_properties by auto
+
+
+
+
+definition ntt::"(('a ::prime_card) mod_ring) list \<Rightarrow> nat \<Rightarrow> 'a mod_ring" where
+"ntt numbers i = (\<Sum>j=0..<n. (numbers ! j) * \<omega>^(i*j)) "
+
+definition "NTT numbers = map (ntt numbers) [0..<n]"
+
+
+
+definition "intt xs i = (\<Sum>j=0..<n. (xs ! j) * \<mu>^(i*j)) "
+
+definition "INTT xs = map (intt xs) [0..<n]"
+
+
+lemma length_NTT:
+  assumes n_def: "length numbers = n"
+  shows "length (NTT numbers) = n"
+  unfolding NTT_def ntt_def using n_def length_map[of _ "[0..<n]"]
+  by simp
+
+lemma length_INTT:
+  assumes n_def: "length numbers = n"
+  shows "length (INTT numbers) = n"
+  unfolding INTT_def intt_def using n_def length_map[of _ "[0..<n]"]
+  by simp
+
+
+theorem ntt_correct: 
+  assumes n_def: "length numbers = n"
+  shows "INTT (NTT numbers) = map (\<lambda> x. (of_int_mod_ring n) * x ) numbers"
+proof-
+  have 0:"\<And> i. i < n \<Longrightarrow> (INTT (NTT numbers)) ! i = intt (NTT numbers) i " using n_def length_NTT
+    unfolding INTT_def NTT_def intt_def by simp
+
+
+  have 1:"\<And> i. i < n \<Longrightarrow>intt (NTT numbers) i = (of_int_mod_ring n)*numbers ! i"
+  proof-
+    fix i
+    assume i_assms:"i < n"
+
+
+    hence 1:"intt (NTT numbers) i  =
+            (\<Sum>l = 0..<n. 
+              (\<Sum>j = 0..<n. numbers ! j * \<omega> ^ (l * j)) * \<mu> ^ (i * l))" 
+      unfolding NTT_def intt_def ntt_def using n_def length_map nth_map by simp
+    also have 2:"\<dots> =
+            (\<Sum>l = 0..<n. 
+              (\<Sum>j = 0..<n. (numbers ! j * \<omega> ^ (l * j)) * \<mu> ^ (i * l)))"
+      using sum_in by (simp add: sum_distrib_right) 
+    also have 3:"\<dots> =
+            (\<Sum>j = 0..<n. 
+              (\<Sum>l = 0..<n. (numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l))))" using sum_swap by fast
+
+
+    have iisj:"\<And> j. j = i \<Longrightarrow> (\<Sum>l = 0..<n. (numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l))) = (numbers ! j)* (of_int_mod_ring n)"
+    proof-
+      fix j
+      assume "j=i"
+      hence "\<And> l. l < n \<Longrightarrow> (numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l))= (numbers ! j)"
+        by (simp add: left_right_inverse_power mult.commute mu_properties(1))
+      moreover have "\<And> l. l < n  \<Longrightarrow> numbers ! j *  \<omega> ^ (l * j) * \<mu> ^ (i * l) = numbers ! j" 
+        using calculation by blast
+
+
+      ultimately show "(\<Sum>l = 0..<n. (numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l))) = 
+        (numbers ! j)* (of_int_mod_ring n)" 
+        using n_def sum_const[of "numbers ! j" n] exp_rule[of \<omega> \<mu>] mu_properties(1) 
+        by (metis (no_types, lifting) atLeastLessThan_iff mult.commute sum.cong) 
+
+    qed
+
+
+    have jlsi:"\<And> j. j < i \<Longrightarrow> (\<Sum>l = 0..<n. (numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l))) = 0"
+    proof-
+      fix j
+      assume j_assms:"j < i"
+      hence 00:"\<And>  (c::('a::prime_card) mod_ring) a b. c * a^j*b^i  = (a*b)^j*(c * b^(i-j))" 
+         using  algebra_simps 
+         by (smt (z3) le_less ordered_cancel_comm_monoid_diff_class.add_diff_inverse power_add)
+
+
+      have 01:" (\<Sum>l = 0..<n. (numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l))) = 
+                (\<Sum>l = 0..<n. (numbers ! j *  (\<mu>^l)^(i-j)))" 
+           apply(rule sum_eq)
+           using mu_properties(1) 00 algebra_simps(23)
+           by (smt (z3) mult.commute mult.left_neutral power_mult power_one)
+      have 02:"\<dots> = numbers ! j *(\<Sum>l = 0..<n. ((\<mu>^l)^(i-j))) " 
+           using sum_in[of "\<lambda> l. numbers ! j * (\<mu> ^ l) ^ (i - j)" " numbers ! j" n] 
+           by (simp add: mult_hom.hom_sum)
+      moreover have 03:"(\<Sum>l = 0..<n. ((\<mu>^l)^(i-j))) = 
+                     (\<Sum>l = 0..<n. ((\<mu>^(i-j))^l)) "
+        by(rule sum_eq) (metis mult.commute power_mult)
+      have "\<mu>^(i-j) \<noteq> 1" 
+      proof
+        assume "\<mu> ^ (i - j) = 1"
+        hence "ord p (to_int_mod_ring \<mu>) \<le> i-j" 
+          by (simp add: j_assms not_le ord_max)
+        moreover hence "ord p (to_int_mod_ring \<omega>) \<le> i-j" 
+        moreover hence "i-j < n" 
+          using j_assms i_assms p_fact k_bound n_lst2 by linarith
+        moreover have "ord p (to_int_mod_ring \<omega>) = n" using omega_properties n_lst2 unfolding ord_def          
+        ultimately show False by simp
+      qed
+
+
+      ultimately have "(1-\<mu>^(i-j))*(\<Sum>l = 0..<n. ((\<mu>^(i-j))^l)) = (1-(\<mu>^(i-j))^n)" 
+        using geo_sum[of "\<mu> ^ (i - j)" n] by simp
+      moreover have "(\<mu>^(i-j))^n = 1"
+        by (metis (no_types) left_right_inverse_power mult.commute mult.right_neutral mu_properties(1) omega_properties(1) power_mult power_one)
+
+      
+      ultimately have "(\<Sum>l = 0..<n. ((\<mu>^(i-j))^l)) = 0"
+      thus "(\<Sum>l = 0..<n. numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l)) = 0" using  01 02 03 by simp
+    qed
+
+
+    have ilsj:"\<And> j. i < j \<and> j < n \<Longrightarrow> (\<Sum>l = 0..<n. (numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l))) = 0"
+    proof-
+      fix j
+      assume ij_Assm: "i < j \<and> j < n"
+      hence 00:"\<And>  (c::('a::prime_card) mod_ring) a b. (a*b)^i*(c * b^(j-i)) = c * a^i*b^j  " 
+        by (auto simp: field_simps simp flip: power_add)
+      have 01:" (\<Sum>l = 0..<n. (numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l))) = 
+                (\<Sum>l = 0..<n. (numbers ! j *  (\<omega>^l)^(j-i))) " 
+           apply(rule sum_eq) subgoal for l
+           using mu_properties(1) 00[of "\<omega>^l" "\<mu>^l" "numbers ! j "] algebra_simps(23) 
+           by (smt (z3) "00" left_right_inverse_power mult.assoc mult.commute mult.right_neutral power_mult)
+         done
+      moreover have 02:"(\<Sum>l = 0..<n. (numbers ! j *   (\<omega>^l)^(j-i)))  = 
+                         numbers ! j *(\<Sum>l = 0..<n. ( (\<omega>^l)^(j-i))) " 
+        by (simp add: mult_hom.hom_sum)
+      moreover have 03:"(\<Sum>l = 0..<n. ( (\<omega>^l)^(j-i))) = 
+                     (\<Sum>l = 0..<n. (( (\<omega>^(j-i))^l))) "
+        by(rule sum_eq) (metis mult.commute power_mult)
+      have "\<omega>^(j-i) \<noteq> 1"
+      proof
+        assume " \<omega> ^ (j - i) = 1"
+        hence "ord p (to_int_mod_ring  \<omega>) \<le> j-i" using ord_max[of "j-i" \<omega>] ij_Assm by simp
+        moreover have "ord p (to_int_mod_ring \<omega>) =p-1" 
+        ultimately show False 
+      qed
+
+
+      ultimately have "(1-\<omega>^(j-i))* (\<Sum>l = 0..<n. ((\<omega>^(j-i))^l)) = (1-(\<omega>^(j-i))^n)" 
+        using geo_sum[of "\<omega> ^ (j-i)" n] by simp
+      moreover have "(\<omega>^(j-i))^n = 1"
+        by (metis (no_types) mult.commute  omega_properties(1) power_mult power_one)
+      ultimately have "(\<Sum>l = 0..<n. ((\<omega>^(j-i))^l)) = 0"
+      thus "(\<Sum>l = 0..<n. numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l)) = 0" using  01 02 03 by simp
+    qed
+
+
+    have " (\<Sum>j = 0..<i. \<Sum>l = 0..<n. numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l)) = 0" using jlsi by simp
+    moreover have " (\<Sum>j = i..<i+1. \<Sum>l = 0..<n. numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l)) =  numbers ! i * (of_int_mod_ring n)" using iisj by simp
+    moreover have " (\<Sum>j = (i+1)..<n. \<Sum>l = 0..<n. numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l)) = 0" using ilsj by simp
+    ultimately have " (\<Sum>j = 0..<n. \<Sum>l = 0..<n. numbers ! j * \<omega> ^ (l * j) * \<mu> ^ (i * l)) =
+                        numbers ! i * (of_int_mod_ring n)" using i_assms sum_split 
+      by (smt (z3) add.commute add.left_neutral int_ops(2) less_imp_of_nat_less of_nat_add of_nat_eq_iff of_nat_less_imp_less)
+    
+    
+    thus "intt (NTT numbers) i = of_int_mod_ring (int n) * numbers ! i" using 1 2 3
+      by (metis mult.commute)
+  qed
+    by (simp add: n_def)
+
+
+   show ?thesis
+     apply(rule nth_equalityI)
+     subgoal my_subgoal
+       unfolding INTT_def NTT_def 
+       apply (simp add: n_def)
+       done
+     subgoal for i
+     using 0 1 2 n_def algebra_simps my_subgoal length_map 
+     apply  auto
+     done
+   done
+qed
+
+
+theorem inv_ntt_correct: 
+  assumes n_def: "length numbers = n"
+  shows "NTT (INTT numbers) = map (\<lambda> x. (of_int_mod_ring n) * x ) numbers"
+proof-
+  have 0:"\<And> i. i < n \<Longrightarrow> (NTT (INTT numbers)) ! i = ntt (INTT numbers) i " using n_def length_NTT
+    unfolding INTT_def NTT_def intt_def by simp
+  have 1:"\<And> i. i < n \<Longrightarrow>ntt (INTT numbers) i = (of_int_mod_ring n)*numbers ! i"
+  proof-
+    fix i
+    assume i_assms:"i < n"
+    hence 1:"ntt (INTT numbers) i  =
+            (\<Sum>l = 0..<n. 
+               (\<Sum>j = 0..<n. numbers ! j * \<mu> ^ (l * j)) * \<omega> ^ (i * l))" 
+      unfolding INTT_def ntt_def intt_def using n_def length_map nth_map by simp
+    hence 2:"\<dots> = (\<Sum>l = 0..<n. 
+                     (\<Sum>j = 0..<n. (numbers ! j * \<mu> ^ (l * j)) * \<omega> ^ (i * l)))" using sum_in by simp
+    have 3:" \<dots> =(\<Sum>j = 0..<n. 
+                  (\<Sum>l = 0..<n. (numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l))))" using sum_swap by fast
+    have iisj:"\<And> j. j = i \<Longrightarrow> (\<Sum>l = 0..<n. (numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l))) = (numbers ! j)* (of_int_mod_ring n)"
+    proof-
+      fix j
+      assume "j=i"
+      hence "\<And> l. l < n \<Longrightarrow> (numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l))= (numbers ! j)"
+        by (simp add: left_right_inverse_power mult.commute mu_properties(1))
+      moreover have "\<And> l. l < n  \<Longrightarrow> numbers ! j *  \<mu> ^ (l * j) * \<omega> ^ (i * l) = numbers ! j" 
+        using calculation by blast
+      ultimately show "(\<Sum>l = 0..<n. (numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l))) = (numbers ! j)* (of_int_mod_ring n)" 
+        using n_def sum_const[of "numbers ! j" n] exp_rule[of \<omega> \<mu>] mu_properties(1) 
+        by (metis (no_types, lifting) atLeastLessThan_iff mult.commute sum.cong) 
+    qed
+    have jlsi:"\<And> j. j < i \<Longrightarrow> (\<Sum>l = 0..<n. (numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l))) = 0"
+    proof-
+      fix j
+      assume j_assms:"j < i"
+      hence 00:"\<And>  (c::('a::prime_card) mod_ring) a b. c * a^j*b^i  = (a*b)^j*(c * b^(i-j))" 
+         using  algebra_simps 
+         by (smt (z3) le_less ordered_cancel_comm_monoid_diff_class.add_diff_inverse power_add)
+      have 01:" (\<Sum>l = 0..<n. (numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l))) = 
+                (\<Sum>l = 0..<n. (numbers ! j *  (\<omega>^l)^(i-j))) " 
+           apply(rule sum_eq)
+           using mu_properties(1) 00 algebra_simps(23)
+           by (smt (z3) mult.commute mult.left_neutral power_mult power_one)
+      moreover have 02: "\<dots>=  numbers ! j *(\<Sum>l = 0..<n. ((\<omega>^l)^(i-j))) "
+           using sum_in[of "\<lambda> l. numbers ! j * (\<mu> ^ l) ^ (i - j)" " numbers ! j" n] 
+        by (simp add: mult_hom.hom_sum)
+      moreover have 03:"(\<Sum>l = 0..<n. ((\<omega>^l)^(i-j))) = 
+                     (\<Sum>l = 0..<n. ((\<omega>^(i-j))^l)) "
+        by(rule sum_eq) (metis mult.commute power_mult)
+      have "\<omega>^(i-j) \<noteq> 1" 
+      proof
+        assume "\<omega> ^ (i - j) = 1"
+        hence "ord p (to_int_mod_ring \<omega>) \<le> i-j" 
+          by (simp add: j_assms not_le ord_max)
+         moreover have "ord p (to_int_mod_ring \<omega>) = n" using omega_properties n_lst2 unfolding ord_def
+         ultimately show False 
+           by (metis i_assms leD less_imp_diff_less)
+      qed
+      ultimately have "(1-\<omega>^(i-j))*(\<Sum>l = 0..<n. ((\<omega>^(i-j))^l)) = (1-(\<omega>^(i-j))^n)" 
+        using geo_sum[of "\<omega> ^ (i - j)" n] by simp
+      moreover have "(\<omega>^(i-j))^n = 1"
+        by (metis (no_types)  mult.commute omega_properties(1) power_mult power_one)
+      ultimately have "(\<Sum>l = 0..<n. ((\<omega>^(i-j))^l)) = 0" 
+      thus "(\<Sum>l = 0..<n. numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l)) = 0" using  01 02 03 by simp
+    qed
+    have ilsj:"\<And> j. i < j \<and> j < n \<Longrightarrow> (\<Sum>l = 0..<n. (numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l))) = 0"
+    proof-
+      fix j
+      assume ij_Assm: "i < j \<and> j < n"
+      hence 00:"\<And>  (c::('a::prime_card) mod_ring) a b. (a*b)^i*(c * b^(j-i)) = c * a^i*b^j  " 
+        by (simp add: field_simps flip: power_add)
+      have 01:" (\<Sum>l = 0..<n. (numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l))) = 
+                (\<Sum>l = 0..<n. (numbers ! j *  (\<mu>^l)^(j-i))) " 
+           apply(rule sum_eq) subgoal for l
+           using mu_properties(1) 00[of "\<omega>^l" "\<mu>^l" "numbers ! j "] algebra_simps(23) 
+           by (smt (z3) "00" left_right_inverse_power mult.assoc mult.commute mult.right_neutral power_mult)
+         done
+      moreover have 02:"(\<Sum>l = 0..<n. (numbers ! j *   (\<mu>^l)^(j-i)))  = 
+            numbers ! j *(\<Sum>l = 0..<n. ( (\<mu>^l)^(j-i))) " 
+        by (simp add: mult_hom.hom_sum)
+      moreover have 03:"(\<Sum>l = 0..<n. ( (\<mu>^l)^(j-i))) = 
+                     (\<Sum>l = 0..<n. (( (\<mu>^(j-i))^l))) "
+        by(rule sum_eq) (metis mult.commute power_mult)
+      have "\<mu>^(j-i) \<noteq> 1"
+       proof
+        assume "\<mu> ^ (j - i) = 1"
+        hence "ord p (to_int_mod_ring \<mu>) \<le> j -i " 
+          by (simp add: ij_Assm not_le ord_max)
+        moreover hence "ord p (to_int_mod_ring \<omega>) \<le> j-i" 
+        moreover hence "j-i < n" using ij_Assm i_assms p_fact k_bound n_lst2 by linarith
+        moreover have "ord p (to_int_mod_ring \<omega>) = n" using omega_properties n_lst2 unfolding ord_def
+        ultimately show False by simp
+      qed
+      ultimately have "(1-\<mu>^(j-i))* (\<Sum>l = 0..<n. ((\<mu>^(j-i))^l)) = (1-(\<mu>^(j-i))^n)" 
+        using geo_sum[of "\<mu> ^ (j-i)" n] by simp
+      moreover have "(\<mu>^(j-i))^n = 1"
+        by (metis (no_types) left_right_inverse_power mult.commute mult.right_neutral mu_properties(1) omega_properties(1) power_mult power_one)
+      ultimately have "(\<Sum>l = 0..<n. ((\<mu>^(j-i))^l)) = 0"
+      thus "(\<Sum>l = 0..<n. numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l)) = 0" using  01 02 03 by simp
+    qed
+    have " (\<Sum>j = 0..<i. \<Sum>l = 0..<n. numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l)) = 0" using jlsi by simp
+    moreover have " (\<Sum>j = i..<i+1. \<Sum>l = 0..<n. numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l)) =  numbers ! i * (of_int_mod_ring n)" using iisj by simp
+    moreover have " (\<Sum>j = (i+1)..<n. \<Sum>l = 0..<n. numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l)) = 0" using ilsj by simp
+    ultimately have " (\<Sum>j = 0..<n. \<Sum>l = 0..<n. numbers ! j * \<mu> ^ (l * j) * \<omega> ^ (i * l)) =
+                        numbers ! i * (of_int_mod_ring n)" using i_assms sum_split 
+      by (smt (z3) add.commute add.left_neutral int_ops(2) less_imp_of_nat_less of_nat_add of_nat_eq_iff of_nat_less_imp_less)
+    thus "ntt (INTT numbers) i = of_int_mod_ring (int n) * numbers ! i" using 1 2 3 
+      by (metis mult.commute)
+  qed
+     by (simp add: n_def)
+   show ?thesis
+     apply(rule nth_equalityI)
+     subgoal my_little_subgoal
+       unfolding INTT_def NTT_def 
+       apply (simp add: n_def)
+       done
+     subgoal for i
+       using 0 1 2 n_def algebra_simps  my_little_subgoal length_map 
+       apply  auto
+     done
+   done
+qed
+
+end
+end

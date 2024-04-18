@@ -1,0 +1,102 @@
+theory TopoS_Impl
+imports TopoS_Library TopoS_Composition_Theory_impl
+    "Security_Invariants/METASINVAR_SystemBoundary"
+    "Lib/ML_GraphViz"
+    TopoS_Stateful_Policy_impl
+begin
+
+
+
+definition print_offending_flows_debug ::
+  "'v  SecurityInvariant list \<Rightarrow> 'v list_graph \<Rightarrow> (string \<times> ('v \<times> 'v) list list) list" where
+  "print_offending_flows_debug M G = map
+    (\<lambda>m.
+         (implc_description m @ '' ('' @ implc_type m @ '')''
+         , implc_offending_flows m G)
+    ) M"
+
+
+
+  fun rembiflowdups :: "('a \<times> 'a) list \<Rightarrow> ('a \<times> 'a) list" where
+    "rembiflowdups [] = []" |
+    "rembiflowdups ((s,r)#as) = (if (s,r) \<in> set as \<or> (r,s) \<in> set as then rembiflowdups as else (s,r)#rembiflowdups as)"
+
+
+  lemma rembiflowdups_complete: "\<lbrakk> \<forall>(s,r) \<in> set x. (r,s) \<in> set x \<rbrakk> \<Longrightarrow> set (rembiflowdups x) \<union> set (backlinks (rembiflowdups x)) = set x"
+    proof
+      assume a: "\<forall>(s,r) \<in> set x. (r,s) \<in> set x"
+      have subset1: "set (rembiflowdups x) \<subseteq> set x"
+        apply(induction x)
+         apply(simp)
+        apply(clarsimp)
+        apply(simp split: if_split_asm)
+         by(blast)+
+      have set_backlinks_simp: "\<And> x. \<forall>(s,r) \<in> set x. (r,s) \<in> set x \<Longrightarrow> set (backlinks x) = set x"
+        apply(simp add: backlinks_set)
+        apply(rule)
+         by fast+
+      have subset2: "set (backlinks (rembiflowdups x)) \<subseteq> set x"
+        apply(subst set_backlinks_simp[OF a, symmetric])
+        by(simp add: backlinks_subset subset1)
+
+      from subset1 subset2 
+      show "set (rembiflowdups x) \<union> set (backlinks (rembiflowdups x)) \<subseteq> set x" by blast
+    next
+      show "set x \<subseteq> set (rembiflowdups x) \<union> set (backlinks (rembiflowdups x))"
+        apply(rule)
+        apply(induction x)
+         apply(simp)
+        apply(rename_tac a as e)
+        apply(simp)
+        apply(erule disjE)
+         apply(simp)
+         defer
+         apply fastforce
+        apply(case_tac a)
+        apply(rename_tac s r)
+        apply(case_tac "(s,r) \<notin> set as \<and> (r,s) \<notin> set as")
+         apply(simp)
+        apply(simp add: backlinks_set)
+        by blast
+      qed
+
+
+  definition filter_for_biflows:: "('a \<times> 'a) list \<Rightarrow> ('a \<times> 'a) list" where
+    "filter_for_biflows E \<equiv> [e \<leftarrow> E. (snd e, fst e) \<in> set E]"
+
+  definition filter_for_uniflows:: "('a \<times> 'a) list \<Rightarrow> ('a \<times> 'a) list" where
+    "filter_for_uniflows E \<equiv> [e \<leftarrow> E. (snd e, fst e) \<notin> set E]"
+
+  lemma filter_for_biflows_correct: "\<forall>(s,r) \<in> set (filter_for_biflows E). (r,s) \<in> set (filter_for_biflows E)"
+    unfolding filter_for_biflows_def
+    by(induction E, auto)
+
+  lemma filter_for_biflows_un_filter_for_uniflows: "set (filter_for_biflows E) \<union> set (filter_for_uniflows E) = set E"
+    apply(simp add: filter_for_biflows_def filter_for_uniflows_def) by blast
+
+
+  definition partition_by_biflows :: "('a \<times> 'a) list \<Rightarrow> (('a \<times> 'a) list \<times> ('a \<times> 'a) list)" where
+    "partition_by_biflows E \<equiv> (rembiflowdups (filter_for_biflows E), remdups (filter_for_uniflows E))"
+
+  lemma partition_by_biflows_correct: "case partition_by_biflows E of (biflows, uniflows) \<Rightarrow> set biflows \<union> set (backlinks (biflows)) \<union> set uniflows = set E"
+    apply(simp add: partition_by_biflows_def)
+    by(simp add: filter_for_biflows_un_filter_for_uniflows filter_for_biflows_correct rembiflowdups_complete)
+
+
+  lemma "partition_by_biflows [(1::int, 1::int), (1,2), (2, 1), (1,3)] = ([(1, 1), (2, 1)], [(1, 3)])" by eval
+
+
+
+
+
+
+
+definition internal_get_invariant_types_list:: "'a SecurityInvariant list \<Rightarrow> string list" where
+  "internal_get_invariant_types_list M \<equiv> map implc_type M"
+
+
+definition internal_node_configs :: "'a list_graph \<Rightarrow> ('a \<Rightarrow> 'b) \<Rightarrow> ('a \<times>'b) list" where
+  "internal_node_configs G config \<equiv> zip (nodesL G) (map config (nodesL G))"
+
+
+end

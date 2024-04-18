@@ -1,0 +1,287 @@
+theory Zeta_Function
+imports
+  "Euler_MacLaurin.Euler_MacLaurin"
+  "Bernoulli.Bernoulli_Zeta"
+  "Dirichlet_Series.Dirichlet_Series_Analysis"
+  "Winding_Number_Eval.Winding_Number_Eval"
+  "HOL-Real_Asymp.Real_Asymp"
+  Zeta_Library
+  "Pure-ex.Guess"
+begin
+
+
+
+lemma powr_add_minus_powr_asymptotics:
+  fixes a z :: complex 
+  shows "((\<lambda>z. ((1 + z) powr a - 1) / z) \<longlongrightarrow> a) (at 0)"
+proof (rule Lim_transform_eventually)
+  have "eventually (\<lambda>z::complex. z \<in> ball 0 1 - {0}) (at 0)"
+    using eventually_at_ball'[of 1 "0::complex" UNIV] by (simp add: dist_norm)
+  thus "eventually (\<lambda>z. (\<Sum>n. (a gchoose (Suc n)) * z ^ n) = ((1 + z) powr a - 1) / z) (at 0)"
+  proof eventually_elim
+    case (elim z)
+    hence "(\<lambda>n. (a gchoose n) * z ^ n) sums (1 + z) powr a"
+      by (intro gen_binomial_complex) auto
+    hence "(\<lambda>n. (a gchoose (Suc n)) * z ^ (Suc n)) sums ((1 + z) powr a - 1)"
+      by (subst sums_Suc_iff) simp_all
+    also have "(\<lambda>n. (a gchoose (Suc n)) * z ^ (Suc n)) = (\<lambda>n. z * ((a gchoose (Suc n)) * z ^ n))"
+      by (simp add: algebra_simps)
+    finally have "(\<lambda>n. (a gchoose (Suc n)) * z ^ n) sums (((1 + z) powr a - 1) / z)"
+      by (rule sums_mult_D) (use elim in auto)
+    thus ?case by (simp add: sums_iff)
+  qed
+next
+  have "conv_radius (\<lambda>n. a gchoose (n + 1)) = conv_radius (\<lambda>n. a gchoose n)"
+    using conv_radius_shift[of "\<lambda>n. a gchoose n" 1] by simp
+  hence "continuous_on (cball 0 (1/2)) (\<lambda>z. \<Sum>n. (a gchoose (Suc n)) * (z - 0) ^ n)"
+    using conv_radius_gchoose[of a] by (intro powser_continuous_suminf) (simp_all)
+  hence "isCont (\<lambda>z. \<Sum>n. (a gchoose (Suc n)) * z ^ n) 0"
+    by (auto intro: continuous_on_interior)
+  thus "(\<lambda>z. \<Sum>n. (a gchoose Suc n) * z ^ n) \<midarrow>0\<rightarrow> a"
+    by (auto simp: isCont_def)
+qed
+
+lemma complex_powr_add_minus_powr_asymptotics:
+  fixes s :: complex
+  assumes a: "a > 0" and s: "Re s < 1"
+  shows "filterlim (\<lambda>x. of_real (x + a) powr s - of_real x powr s) (nhds 0) at_top"
+proof (rule Lim_transform_eventually)
+  show "eventually (\<lambda>x. ((1 + of_real (a / x)) powr s - 1) / of_real (a / x) * 
+                            of_real x powr (s - 1) * a = 
+                          of_real (x + a) powr s - of_real x powr s) at_top"
+    (is "eventually (\<lambda>x. ?f x / ?g x * ?h x * _ = _) _") using eventually_gt_at_top[of a]
+  proof eventually_elim
+    case (elim x)
+    have "?f x / ?g x * ?h x * a = ?f x * (a * ?h x / ?g x)" by simp
+    also have "a * ?h x / ?g x = of_real x powr s"
+      using elim a by (simp add: powr_diff)
+    also have "?f x * \<dots> = of_real (x + a) powr s - of_real x powr s"
+      using a elim by (simp add: algebra_simps powr_times_real [symmetric])
+    finally show ?case .
+  qed
+
+  have "filterlim (\<lambda>x. complex_of_real (a / x)) (nhds (complex_of_real 0)) at_top"
+    by (intro tendsto_of_real real_tendsto_divide_at_top[OF tendsto_const] filterlim_ident)
+  hence "filterlim (\<lambda>x. complex_of_real (a / x)) (at 0) at_top"
+    using a by (intro filterlim_atI) auto
+  hence "((\<lambda>x. ?f x / ?g x * ?h x * a) \<longlongrightarrow> s * 0 * a) at_top" using s
+    by (intro tendsto_mult filterlim_compose[OF powr_add_minus_powr_asymptotics]
+              tendsto_const tendsto_neg_powr_complex_of_real filterlim_ident) auto
+  thus "((\<lambda>x. ?f x / ?g x * ?h x * a) \<longlongrightarrow> 0) at_top" by simp
+qed
+
+lemma summable_zeta:
+  assumes "Re s > 1"
+  shows   "summable (\<lambda>n. of_nat (Suc n) powr -s)"
+proof -
+  have "summable (\<lambda>n. exp (complex_of_real (ln (real (Suc n))) * - s))" (is "summable ?f")
+    by (subst summable_Suc_iff, rule summable_complex_powr_iff) (use assms in auto)
+  also have "?f = (\<lambda>n. of_nat (Suc n) powr -s)"
+    by (simp add: powr_def algebra_simps del: of_nat_Suc)
+  finally show ?thesis .
+qed
+
+lemma summable_zeta_real:
+  assumes "x > 1"
+  shows   "summable (\<lambda>n. real (Suc n) powr -x)"
+proof -
+  have "summable (\<lambda>n. of_nat (Suc n) powr -complex_of_real x)"
+    using assms by (intro summable_zeta) simp_all
+  also have "(\<lambda>n. of_nat (Suc n) powr -complex_of_real x) = (\<lambda>n. of_real (real (Suc n) powr -x))"
+    by (subst powr_Reals_eq) simp_all
+  finally show ?thesis
+    by (subst (asm) summable_complex_of_real)
+qed
+
+lemma summable_hurwitz_zeta:
+  assumes "Re s > 1" "a > 0"
+  shows   "summable (\<lambda>n. (of_nat n + of_real a) powr -s)"
+proof -
+  have "summable (\<lambda>n. (of_nat (Suc n) + of_real a) powr -s)"
+  proof (rule summable_comparison_test' [OF summable_zeta_real [OF assms(1)]] )
+    fix n :: nat
+    have "norm ((of_nat (Suc n) + of_real a) powr -s) = (real (Suc n) + a) powr - Re s"
+      (is "?N = _") using assms by (simp add: norm_powr_real_powr)
+    also have "\<dots> \<le> real (Suc n) powr -Re s"
+      using assms by (intro powr_mono2') auto
+    finally show "?N \<le> \<dots>" .
+  qed
+  thus ?thesis by (subst (asm) summable_Suc_iff)
+qed
+
+lemma summable_hurwitz_zeta_real:
+  assumes "x > 1" "a > 0"
+  shows   "summable (\<lambda>n. (real n + a) powr -x)"
+proof -
+  have "summable (\<lambda>n. (of_nat n + of_real a) powr -complex_of_real x)"
+    using assms by (intro summable_hurwitz_zeta) simp_all
+  also have "(\<lambda>n. (of_nat n + of_real a) powr -complex_of_real x) = 
+               (\<lambda>n. of_real ((real n + a) powr -x))"
+    using assms by (subst powr_Reals_eq) simp_all
+  finally show ?thesis
+    by (subst (asm) summable_complex_of_real)
+qed
+
+
+
+
+definition pre_zeta_aux :: "nat \<Rightarrow> real \<Rightarrow> complex \<Rightarrow> complex" where
+  "pre_zeta_aux N a s = a powr - s / 2 +
+    (\<Sum>i=1..N. (bernoulli (2 * i) / fact (2 * i)) *\<^sub>R (pochhammer s (2*i - 1) * 
+                 of_real a powr (- s - of_nat (2*i - 1)))) +
+    EM_remainder (Suc (2*N)) 
+      (\<lambda>x. -(pochhammer s (Suc (2*N)) * of_real (x + a) powr (- 1 - 2*N - s))) 0"
+
+definition pre_zeta :: "real \<Rightarrow> complex \<Rightarrow> complex" where
+  "pre_zeta a s = pre_zeta_aux (nat (1 - \<lceil>Re s / 2\<rceil>)) a s"
+
+definition hurwitz_zeta :: "real \<Rightarrow> complex \<Rightarrow> complex" where
+  "hurwitz_zeta a s = (if s = 1 then 0 else pre_zeta a s + of_real a powr (1 - s) / (s - 1))"
+
+definition zeta :: "complex \<Rightarrow> complex" where
+  "zeta = hurwitz_zeta 1"
+
+
+lemma hurwitz_zeta_1: "hurwitz_zeta c 1 = 0"
+  by (simp add: hurwitz_zeta_def)
+
+lemma zeta_1: "zeta 1 = 0"
+  by (simp add: zeta_def hurwitz_zeta_1)
+
+lemma zeta_minus_pole_eq: "s \<noteq> 1 \<Longrightarrow> zeta s - 1 / (s - 1) = pre_zeta 1 s"
+  by (simp add: zeta_def hurwitz_zeta_def)
+
+
+context
+begin
+
+private lemma holomorphic_pre_zeta_aux':
+  assumes "a > 0" "bounded U" "open U" "U \<subseteq> {s. Re s > \<sigma>}" and \<sigma>: "\<sigma> > - 2 * real n"
+  shows   "pre_zeta_aux n a holomorphic_on U" unfolding pre_zeta_aux_def
+proof (intro holomorphic_intros)
+  define C :: real where "C = max 0 (Sup ((\<lambda>s. norm (pochhammer s (Suc (2 * n)))) ` closure U))"
+  have "compact (closure U)" 
+    using assms by (auto simp: compact_eq_bounded_closed)
+  hence "compact ((\<lambda>s. norm (pochhammer s (Suc (2 * n)))) ` closure U)"
+    by (rule compact_continuous_image [rotated]) (auto intro!: continuous_intros)
+  hence "bounded ((\<lambda>s. norm (pochhammer s (Suc (2 * n)))) ` closure U)"
+    by (simp add: compact_eq_bounded_closed)
+  hence C: "cmod (pochhammer s (Suc (2 * n))) \<le> C" if "s \<in> U" for s
+    using that closure_subset[of U] unfolding C_def 
+    by (intro max.coboundedI2 cSup_upper bounded_imp_bdd_above) (auto simp: image_iff)
+  have C' [simp]: "C \<ge> 0" by (simp add: C_def)
+
+  let ?g = "\<lambda>(x::real). C * (x + a) powr (- 1 - 2 * of_nat n - \<sigma>)"
+  let ?G = "\<lambda>(x::real). C / (- 2 * of_nat n - \<sigma>) * (x + a) powr (- 2 * of_nat n - \<sigma>)"  
+  define poch' where "poch' = deriv (\<lambda>z::complex. pochhammer z (Suc (2 * n)))"
+  have [derivative_intros]:
+    "((\<lambda>z. pochhammer z (Suc (2 * n))) has_field_derivative poch' z) (at z within A)" 
+    for z :: complex and A unfolding poch'_def
+    by (rule holomorphic_derivI [OF holomorphic_pochhammer [of _ UNIV]]) auto
+  have A: "continuous_on A poch'" for A unfolding poch'_def 
+    by (rule continuous_on_subset[OF _ subset_UNIV], 
+        intro holomorphic_on_imp_continuous_on holomorphic_deriv)
+        (auto intro: holomorphic_pochhammer) 
+  note [continuous_intros] = continuous_on_compose2[OF this _ subset_UNIV]
+
+  define f' where "f' = (\<lambda>z t. - (poch' z * complex_of_real (t + a) powr (- 1 - 2 * of_nat n - z) -
+                          Ln (complex_of_real (t + a)) * complex_of_real (t + a) powr 
+                            (- 1 - 2 * of_nat n - z) * pochhammer z (Suc (2 * n))))"
+
+  show "(\<lambda>z. EM_remainder (Suc (2 * n)) (\<lambda>x. - (pochhammer z (Suc (2 * n)) *
+                  complex_of_real (x + a) powr (- 1 - 2 * of_nat n - z))) 0) holomorphic_on
+    U" unfolding pre_zeta_aux_def
+  proof (rule holomorphic_EM_remainder[of _ ?G ?g _ _ f'], goal_cases)
+    case (1 x)
+    show ?case
+         (auto simp: field_simps powr_diff powr_add powr_minus)
+  next
+    case (2 z t x)
+    note [derivative_intros] = has_field_derivative_powr_right [THEN DERIV_chain2]
+    show ?case
+         (simp add: f'_def)
+  next
+    case 3
+    hence *: "complex_of_real x + complex_of_real a \<notin> \<real>\<^sub>\<le>\<^sub>0" if "x \<ge> 0" for x
+      by (auto simp: case_prod_unfold add_eq_0_iff intro!: continuous_intros)
+  next
+    case (4 b c z e)
+    have "- 2 * real n < \<sigma>" by (fact \<sigma>)
+    also from 4 assms have "\<sigma> < Re z" by auto
+    finally show ?case using assms 4
+      by (intro integrable_continuous_real continuous_intros) (auto simp: add_eq_0_iff)
+  next
+    case (5 t x s)
+      by (intro integrable_EM_remainder') (auto intro!: continuous_intros simp: add_eq_0_iff)
+  next
+    case 6
+    from \<sigma> have "(\<lambda>y. C / (-2 * real n - \<sigma>) * (a + y) powr (-2 * real n - \<sigma>)) \<longlonglongrightarrow> 0"
+      by (intro tendsto_mult_right_zero tendsto_neg_powr
+            filterlim_real_sequentially filterlim_tendsto_add_at_top [OF tendsto_const]) auto
+    thus ?case unfolding convergent_def by (auto simp: add_ac)
+  next
+    case 7
+    show ?case 
+    proof (intro eventually_mono [OF eventually_ge_at_top[of 1]] ballI)
+      fix x :: real and s :: complex assume x: "x \<ge> 1" and s: "s \<in> U"
+      have "norm (- (pochhammer s (Suc (2 * n)) * of_real (x + a) powr (- 1 - 2 * of_nat n - s))) =
+              norm (pochhammer s (Suc (2 * n))) * (x + a) powr (-1 - 2 * of_nat n - Re s)"
+      also have "\<dots> \<le> ?g x"
+      finally show "?N \<le> ?g x" .
+    qed
+  qed (insert assms, auto)
+qed (insert assms, auto)
+
+lemma analytic_pre_zeta_aux:
+  assumes "a > 0"
+  shows   "pre_zeta_aux n a analytic_on {s. Re s > - 2 * real n}"
+  unfolding analytic_on_def
+proof
+  fix s assume s: "s \<in> {s. Re s > - 2 * real n}"
+  define \<sigma> where "\<sigma> = (Re s - 2 * real n) / 2"
+  with s have \<sigma>: "\<sigma> > - 2 * real n" 
+    by (simp add: \<sigma>_def field_simps)
+  from s have s': "s \<in> {s. Re s > \<sigma>}"
+    by (auto simp: \<sigma>_def field_simps)
+
+  have "open {s. Re s > \<sigma>}"
+    by (rule open_halfspace_Re_gt)
+  with s' obtain \<epsilon> where "\<epsilon> > 0" "ball s \<epsilon> \<subseteq> {s. Re s > \<sigma>}"
+    unfolding open_contains_ball by blast
+  with \<sigma> have "pre_zeta_aux n a holomorphic_on ball s \<epsilon>"
+    by (intro holomorphic_pre_zeta_aux' [OF assms, of _ \<sigma>]) auto
+    by blast
+qed
+end
+
+context
+  fixes s :: complex and N :: nat and \<zeta> :: "complex \<Rightarrow> complex" and a :: real
+  assumes s: "Re s > 1" and a: "a > 0"
+  defines "\<zeta> \<equiv> (\<lambda>s. \<Sum>n. (of_nat n + of_real a) powr -s)"
+begin
+
+interpretation \<zeta>: euler_maclaurin_nat'
+  "\<lambda>x. of_real (x + a) powr (1 - s) / (1 - s)" "\<lambda>x. of_real (x + a) powr -s" 
+  "\<lambda>n x. (-1) ^ n * pochhammer s n * of_real (x + a) powr -(s + n)" 
+  0 N "\<zeta> s" "{}"
+proof (standard, goal_cases)
+  case 2
+  show ?case by (simp add: powr_minus field_simps)
+next
+  case (3 k)
+  have "complex_of_real x + complex_of_real a = 0 \<longleftrightarrow> x = -a" for x
+    by (simp only: of_real_add [symmetric] of_real_eq_0_iff add_eq_0_iff2)
+  with a s show ?case
+    by (intro continuous_intros) (auto simp: add_nonneg_nonneg)
+next
+  case (4 k x)
+  with a have "0 < x + a" by simp
+  hence *: "complex_of_real x + complex_of_real a \<notin> \<real>\<^sub>\<le>\<^sub>0"
+    using nonpos_Reals_of_real_iff[of "x+a", unfolded of_real_add] by auto
+  have **: "pochhammer z (Suc n) = - pochhammer z n * (-z - of_nat n :: complex)" for z n
+    by (simp add: pochhammer_rec' field_simps)
+  show "((\<lambda>x. (- 1) ^ k * pochhammer s k * of_real (x + a) powr - (s + of_nat k)) 
+          has_vector_derivative (- 1) ^ Suc k * pochhammer s (Suc k) *
+            of_real (x + a) powr - (s + of_nat (Suc k))) (at x)"
+    by (insert 4 *, (rule has_vector_derivative_real_field derivative_eq_intros refl | simp)+)
+       (auto simp: divide_simps powr_add powr_diff powr_minus **)

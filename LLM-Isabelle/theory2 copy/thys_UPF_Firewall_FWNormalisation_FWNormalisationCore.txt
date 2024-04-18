@@ -1,0 +1,486 @@
+theory
+  FWNormalisationCore
+imports
+  "../PacketFilter/PacketFilter"
+begin
+
+
+
+
+
+datatype ('\<alpha>,'\<beta>) Combinators = 
+  DenyAll
+  | DenyAllFromTo '\<alpha> '\<alpha> 
+  | AllowPortFromTo '\<alpha> '\<alpha> '\<beta> 
+  | Conc "(('\<alpha>,'\<beta>) Combinators)" "(('\<alpha>,'\<beta>) Combinators)" (infixr "\<oplus>" 80)
+
+
+  
+fun srcNet where 
+ "srcNet (DenyAllFromTo x y) = x"
+|"srcNet (AllowPortFromTo x y p) = x"
+|"srcNet DenyAll = undefined"
+|"srcNet (v \<oplus> va) = undefined" 
+
+fun destNet where 
+ "destNet (DenyAllFromTo x y) = y"
+|"destNet (AllowPortFromTo x y p) = y"
+|"destNet DenyAll = undefined"
+|"destNet (v \<oplus> va) = undefined" 
+
+fun srcnets where
+ "srcnets DenyAll = [] " 
+|"srcnets (DenyAllFromTo x y) = [x] " 
+|"srcnets (AllowPortFromTo x y p) = [x] " 
+|"(srcnets (x \<oplus> y)) = (srcnets x)@(srcnets y)"
+
+fun destnets where
+ "destnets DenyAll = [] " 
+|"destnets (DenyAllFromTo x y) = [y] " 
+|"destnets (AllowPortFromTo x y p) = [y] "
+|"(destnets (x \<oplus> y)) = (destnets x)@(destnets y)"
+
+fun (sequential) net_list_aux where
+ "net_list_aux [] = []"
+|"net_list_aux (DenyAll#xs) = net_list_aux xs"
+|"net_list_aux ((DenyAllFromTo x y)#xs) = x#y#(net_list_aux xs)"
+|"net_list_aux ((AllowPortFromTo x y p)#xs) = x#y#(net_list_aux xs)"
+|"net_list_aux ((x\<oplus>y)#xs) = (net_list_aux [x])@(net_list_aux [y])@(net_list_aux xs)"
+
+fun net_list where "net_list p = remdups (net_list_aux p)"
+
+definition bothNets where "bothNets x = (zip (srcnets x) (destnets x))"
+
+fun (sequential) normBothNets where 
+ "normBothNets ((a,b)#xs) = (if ((b,a) \<in> set xs) \<or> (a,b) \<in> set (xs) 
+                            then (normBothNets xs)
+                            else (a,b)#(normBothNets xs))"
+|"normBothNets x = x" 
+
+fun makeSets where 
+ "makeSets ((a,b)#xs) = ({a,b}#(makeSets xs))"
+|"makeSets [] = []"
+
+fun bothNet where
+ "bothNet DenyAll = {}"
+|"bothNet (DenyAllFromTo a b) = {a,b}"
+|"bothNet (AllowPortFromTo a b p) = {a,b}"
+|"bothNet (v \<oplus> va) = undefined "
+
+
+definition Nets_List 
+  where 
+  "Nets_List x = makeSets (normBothNets (bothNets x))"
+
+fun (sequential) first_srcNet where 
+  "first_srcNet (x\<oplus>y) = first_srcNet x"
+| "first_srcNet x = srcNet x"
+
+fun (sequential) first_destNet where 
+  "first_destNet (x\<oplus>y) = first_destNet x"
+| "first_destNet x = destNet x"
+
+fun (sequential) first_bothNet where
+ "first_bothNet (x\<oplus>y) = first_bothNet x"
+|"first_bothNet x = bothNet x"
+
+fun (sequential) in_list where 
+ "in_list DenyAll l = True"
+|"in_list x l = (bothNet x \<in> set l)"
+
+fun all_in_list where 
+ "all_in_list [] l = True"
+|"all_in_list (x#xs) l = (in_list x l \<and> all_in_list xs l)" 
+
+fun (sequential) member where
+ "member a (x\<oplus>xs) = ((member a x) \<or> (member a xs))"
+|"member a x = (a = x)"
+
+fun sdnets where
+  "sdnets DenyAll = {}"
+| "sdnets (DenyAllFromTo a b) = {(a,b)}"
+| "sdnets (AllowPortFromTo a b c) = {(a,b)}"
+| "sdnets (a \<oplus> b) = sdnets a \<union> sdnets b"
+
+definition packet_Nets  where "packet_Nets x a b = ((src x \<sqsubset> a \<and> dest x \<sqsubset> b) \<or>
+                                                    (src x \<sqsubset> b \<and> dest x \<sqsubset> a))"
+
+definition subnetsOfAdr where "subnetsOfAdr a = {x. a \<sqsubset> x}"
+
+definition fst_set where "fst_set s = {a. \<exists> b. (a,b) \<in> s}"
+
+definition snd_set where "snd_set s = {a. \<exists> b. (b,a) \<in> s}"
+
+fun memberP where
+ "memberP r (x#xs) = (member r x \<or> memberP r xs)"
+|"memberP r [] = False"
+
+fun firstList where 
+ "firstList (x#xs) = (first_bothNet x)"
+|"firstList [] = {}"
+
+
+fun wellformed_policy1:: "(('\<alpha>, '\<beta>) Combinators) list \<Rightarrow> bool" where 
+  "wellformed_policy1 [] = True"
+| "wellformed_policy1 (x#xs) = (DenyAll \<notin> (set xs))" 
+
+fun wellformed_policy1_strong:: "(('\<alpha>, '\<beta>) Combinators) list \<Rightarrow> bool"
+where 
+  "wellformed_policy1_strong [] = False"
+| "wellformed_policy1_strong (x#xs) = (x=DenyAll \<and> (DenyAll \<notin> (set xs)))" 
+
+
+definition netsDistinct where "netsDistinct a b = (\<not> (\<exists> x. x \<sqsubset> a \<and> x \<sqsubset> b))"
+
+definition twoNetsDistinct where
+  "twoNetsDistinct a b c d = (netsDistinct a c \<or> netsDistinct b d)"
+
+definition allNetsDistinct where 
+  "allNetsDistinct p = (\<forall> a b. (a \<noteq> b \<and> a \<in> set (net_list p) \<and>
+                        b \<in> set (net_list p)) \<longrightarrow> netsDistinct a b)"
+
+definition disjSD_2 where 
+ "disjSD_2 x y = (\<forall> a b c d. ((a,b)\<in>sdnets x \<and>  (c,d) \<in>sdnets y \<longrightarrow>
+      (twoNetsDistinct a b c d \<and> twoNetsDistinct a b d c)))"
+
+fun singleCombinators where 
+"singleCombinators [] = True"
+|"singleCombinators ((x\<oplus>y)#xs) = False"
+|"singleCombinators (x#xs) = singleCombinators xs"
+
+definition onlyTwoNets where
+ "onlyTwoNets x = ((\<exists> a b. (sdnets x = {(a,b)})) \<or> (\<exists> a b. sdnets x = {(a,b),(b,a)}))" 
+
+fun OnlyTwoNets where 
+ "OnlyTwoNets (DenyAll#xs) = OnlyTwoNets xs"
+|"OnlyTwoNets (x#xs) = (onlyTwoNets x \<and> OnlyTwoNets xs)"
+|"OnlyTwoNets [] = True"
+
+fun noDenyAll where
+ "noDenyAll (x#xs) = ((\<not> member DenyAll x) \<and> noDenyAll xs)"
+|"noDenyAll [] = True"
+
+fun noDenyAll1 where 
+  "noDenyAll1 (DenyAll#xs) = noDenyAll xs"
+| "noDenyAll1 xs = noDenyAll xs"
+
+fun separated where
+  "separated (x#xs) = ((\<forall> s. s \<in> set xs \<longrightarrow> disjSD_2 x s) \<and> separated xs)"
+| "separated [] = True"
+
+fun NetsCollected where 
+  "NetsCollected (x#xs) = (((first_bothNet x \<noteq> firstList xs) \<longrightarrow>
+          (\<forall>a\<in>set xs. first_bothNet x \<noteq> first_bothNet a)) \<and> NetsCollected (xs))"
+| "NetsCollected [] = True"
+
+fun NetsCollected2 where
+ "NetsCollected2 (x#xs) = (xs = [] \<or> (first_bothNet x \<noteq> firstList xs \<and>
+                           NetsCollected2 xs))"
+|"NetsCollected2 [] = True"
+
+
+
+fun policy2list::"('\<alpha>, '\<beta>) Combinators \<Rightarrow>
+                 (('\<alpha>, '\<beta>) Combinators) list" where
+ "policy2list (x \<oplus> y) = (concat [(policy2list x),(policy2list y)])"
+|"policy2list x = [x]"
+
+fun list2FWpolicy::"(('\<alpha>, '\<beta>) Combinators) list \<Rightarrow>
+                  (('\<alpha>, '\<beta>) Combinators)" where
+ "list2FWpolicy [] = undefined "
+|"list2FWpolicy (x#[]) = x"
+|"list2FWpolicy (x#y) = x \<oplus> (list2FWpolicy y)"
+
+
+fun removeShadowRules1 where
+  "removeShadowRules1 (x#xs) = (if (DenyAll \<in> set xs) 
+                                then ((removeShadowRules1 xs))
+                                else x#xs)"
+| "removeShadowRules1 [] = []"
+
+fun  removeShadowRules1_alternative_rev where
+  "removeShadowRules1_alternative_rev [] = []"
+| "removeShadowRules1_alternative_rev (DenyAll#xs) = [DenyAll]"
+| "removeShadowRules1_alternative_rev [x] = [x]"
+| "removeShadowRules1_alternative_rev (x#xs)=
+                 x#(removeShadowRules1_alternative_rev xs)"
+
+definition removeShadowRules1_alternative where
+   "removeShadowRules1_alternative p =
+                         rev (removeShadowRules1_alternative_rev (rev p))"
+
+
+fun removeShadowRules2::  "(('\<alpha>, '\<beta>) Combinators) list \<Rightarrow>
+                          (('\<alpha>, '\<beta>) Combinators) list"
+where
+  "(removeShadowRules2 ((AllowPortFromTo x y p)#z)) = 
+        (if (((DenyAllFromTo x y) \<in> set z)) 
+         then ((removeShadowRules2 z))
+         else (((AllowPortFromTo x y p)#(removeShadowRules2 z))))"
+| "removeShadowRules2 (x#y) = x#(removeShadowRules2 y)"
+| "removeShadowRules2 [] = []"
+
+
+fun smaller :: "('\<alpha>, '\<beta>) Combinators \<Rightarrow> 
+                ('\<alpha>, '\<beta>) Combinators \<Rightarrow> 
+                (('\<alpha>) set) list \<Rightarrow> bool" 
+where
+ "smaller DenyAll x l = True" 
+| "smaller x DenyAll l = False"
+| "smaller x y l = 
+ ((x = y) \<or>         (if (bothNet x) = (bothNet y) then 
+                       (case y of (DenyAllFromTo a b) \<Rightarrow> (x = DenyAllFromTo b a)  
+                            | _ \<Rightarrow>  True)
+                    else
+                        (position (bothNet x) l <= position (bothNet y) l)))"
+
+
+fun qsort where
+  "qsort [] l     = []"
+| "qsort (x#xs) l = (qsort [y\<leftarrow>xs. \<not> (smaller x y l)] l) @ [x] @ (qsort [y\<leftarrow>xs. smaller x y l] l)"
+
+lemma qsort_permutes:
+  "set (qsort xs l) = set xs"
+  apply (induct "xs" "l" rule: qsort.induct)
+  by (auto)
+
+lemma set_qsort [simp]: "set (qsort xs l)  = set xs" 
+  by (simp add: qsort_permutes)
+    
+fun insort where
+	  "insort a [] l = [a]"
+	| "insort a (x#xs) l = (if (smaller a x l) then a#x#xs else x#(insort a xs l))"
+
+fun sort where
+  "sort [] l = []"
+| "sort (x#xs) l = insort x (sort xs l) l"
+
+fun sorted  where
+  "sorted [] l = True"
+| "sorted [x] l = True"
+| "sorted (x#y#zs) l = (smaller x y l \<and> sorted (y#zs) l)"
+
+fun separate where
+ "separate (DenyAll#x) = DenyAll#(separate x)"
+| "separate (x#y#z) = (if (first_bothNet x = first_bothNet y) 
+                   then (separate ((x\<oplus>y)#z))
+                   else (x#(separate(y#z))))"
+|"separate x = x"                
+
+
+fun  insertDenies where
+ "insertDenies (x#xs) = (case x of DenyAll \<Rightarrow> (DenyAll#(insertDenies xs))
+                    | _  \<Rightarrow> (DenyAllFromTo (first_srcNet x) (first_destNet x) \<oplus> 
+                       (DenyAllFromTo (first_destNet x) (first_srcNet x)) \<oplus> x)#
+                                (insertDenies xs))"
+| "insertDenies [] = []"
+
+
+
+fun removeDuplicates where
+  "removeDuplicates (x\<oplus>xs) = (if member x xs then (removeDuplicates xs)
+                              else x\<oplus>(removeDuplicates xs))"
+| "removeDuplicates x = x"
+
+fun removeAllDuplicates where 
+ "removeAllDuplicates (x#xs) = ((removeDuplicates (x))#(removeAllDuplicates xs))"
+|"removeAllDuplicates x = x"
+
+fun insertDeny where 
+ "insertDeny (DenyAll#xs) = DenyAll#xs"
+|"insertDeny xs = DenyAll#xs"
+
+
+definition "sort' p l = sort l p"
+definition "qsort' p l = qsort l p"
+
+declare dom_eq_empty_conv [simp del]
+
+fun list2policyR::"(('\<alpha>, '\<beta>) Combinators) list \<Rightarrow>
+                   (('\<alpha>, '\<beta>) Combinators)" where
+ "list2policyR (x#[]) = x"
+|"list2policyR (x#y) = (list2policyR y) \<oplus> x"
+|"list2policyR [] = undefined "
+
+
+
+
+
+fun C :: "(adr\<^sub>i\<^sub>p net, port) Combinators \<Rightarrow> (adr\<^sub>i\<^sub>p,DummyContent) packet \<mapsto> unit"
+where
+" C DenyAll = deny_all" 
+|"C (DenyAllFromTo x y) = deny_all_from_to x y"
+|"C (AllowPortFromTo x y p) = allow_from_to_port p x y"
+|"C  (x \<oplus> y) =  C x ++ C y"
+
+fun CRotate :: "(adr\<^sub>i\<^sub>p net, port) Combinators \<Rightarrow> (adr\<^sub>i\<^sub>p,DummyContent) packet \<mapsto> unit"
+where
+" CRotate DenyAll = C DenyAll" 
+|"CRotate (DenyAllFromTo x y) = C (DenyAllFromTo x y)"
+|"CRotate (AllowPortFromTo x y p) = C (AllowPortFromTo x y p)"
+|"CRotate (x \<oplus> y) = ((CRotate y) ++ ((CRotate x)))"
+
+fun rotatePolicy where
+  "rotatePolicy DenyAll = DenyAll" 
+| "rotatePolicy (DenyAllFromTo a b) = DenyAllFromTo a b"
+| "rotatePolicy (AllowPortFromTo a b p) = AllowPortFromTo a b p"
+| "rotatePolicy (a\<oplus>b) = (rotatePolicy b) \<oplus> (rotatePolicy a)"
+
+lemma check: "rev (policy2list (rotatePolicy p)) = policy2list p"
+  apply (induct "p")
+  by (simp_all) 
+
+
+fun (sequential) wellformed_policy2 where
+  "wellformed_policy2 [] = True"
+| "wellformed_policy2 (DenyAll#xs) = wellformed_policy2 xs"
+| "wellformed_policy2 (x#xs) = ((\<forall> c a b. c = DenyAllFromTo a b \<and> c \<in> set xs \<longrightarrow>
+                 Map.dom (C x) \<inter> Map.dom (C c) = {}) \<and> wellformed_policy2 xs)"
+
+
+fun (sequential) wellformed_policy3::"((adr\<^sub>i\<^sub>p net,port) Combinators) list \<Rightarrow> bool" where
+  "wellformed_policy3 [] = True"
+| "wellformed_policy3 ((AllowPortFromTo a b p)#xs) = ((\<forall> r. r \<in> set xs \<longrightarrow>
+      dom (C r) \<inter> dom (C (AllowPortFromTo a b p)) = {}) \<and> wellformed_policy3 xs)"
+| "wellformed_policy3 (x#xs) = wellformed_policy3 xs"
+
+
+definition 
+  "normalize' p  = (removeAllDuplicates o insertDenies o separate o
+                   (sort' (Nets_List p))  o removeShadowRules2 o remdups o
+                   (rm_MT_rules C) o insertDeny o removeShadowRules1 o
+                   policy2list) p"
+
+definition 
+  "normalizeQ' p  = (removeAllDuplicates o insertDenies o separate o
+                   (qsort' (Nets_List p))  o removeShadowRules2 o remdups o
+                   (rm_MT_rules C) o insertDeny o removeShadowRules1 o
+                   policy2list) p"
+
+definition normalize :: 
+  "(adr\<^sub>i\<^sub>p net, port) Combinators \<Rightarrow> 
+   (adr\<^sub>i\<^sub>p net, port) Combinators list" 
+where
+   "normalize p = (removeAllDuplicates (insertDenies (separate (sort
+                   (removeShadowRules2 (remdups ((rm_MT_rules C) (insertDeny
+                  (removeShadowRules1 (policy2list p)))))) ((Nets_List p))))))"
+
+definition
+   "normalize_manual_order p l = removeAllDuplicates (insertDenies (separate
+    (sort (removeShadowRules2 (remdups ((rm_MT_rules C) (insertDeny
+    (removeShadowRules1 (policy2list p)))))) ((l)))))"
+
+definition normalizeQ :: 
+  "(adr\<^sub>i\<^sub>p net, port) Combinators \<Rightarrow> 
+   (adr\<^sub>i\<^sub>p net, port) Combinators list" 
+where
+   "normalizeQ p = (removeAllDuplicates (insertDenies (separate (qsort
+                   (removeShadowRules2 (remdups ((rm_MT_rules C) (insertDeny
+                  (removeShadowRules1 (policy2list p)))))) ((Nets_List p))))))"
+
+definition
+   "normalize_manual_orderQ p l = removeAllDuplicates (insertDenies (separate
+    (qsort (removeShadowRules2 (remdups ((rm_MT_rules C) (insertDeny
+    (removeShadowRules1 (policy2list p)))))) ((l)))))"
+
+lemma "normalize = normalize'"
+  by (rule ext, simp add: normalize_def normalize'_def sort'_def)
+
+declare C.simps [simp del]
+
+
+
+fun Cp :: "(adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators \<Rightarrow> 
+          (adr\<^sub>i\<^sub>p\<^sub>p,DummyContent) packet \<mapsto> unit"
+where
+ " Cp DenyAll = deny_all"  
+|"Cp (DenyAllFromTo x y) = deny_all_from_to x y"
+|"Cp (AllowPortFromTo x y p) = allow_from_to_port_prot (fst p) (snd p) x y"
+|"Cp  (x \<oplus> y) =  Cp x ++ Cp y"
+
+
+fun Dp :: "(adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators \<Rightarrow> 
+          (adr\<^sub>i\<^sub>p\<^sub>p,DummyContent) packet \<mapsto> unit"
+where
+" Dp DenyAll = Cp DenyAll" 
+|"Dp (DenyAllFromTo x y) = Cp (DenyAllFromTo x y)"
+|"Dp (AllowPortFromTo x y p) = Cp (AllowPortFromTo x y p)"
+|"Dp  (x \<oplus> y) =  Cp (y \<oplus> x)"
+
+fun (sequential) wellformed_policy2Pr where
+  "wellformed_policy2Pr [] = True"
+| "wellformed_policy2Pr (DenyAll#xs) = wellformed_policy2Pr xs"
+| "wellformed_policy2Pr (x#xs) = ((\<forall> c a b. c = DenyAllFromTo a b \<and> c \<in> set xs \<longrightarrow>
+                 Map.dom (Cp x) \<inter> Map.dom (Cp c) = {}) \<and> wellformed_policy2Pr xs)"
+
+
+fun (sequential) wellformed_policy3Pr::"((adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators) list \<Rightarrow> bool" where
+  "wellformed_policy3Pr [] = True"
+| "wellformed_policy3Pr ((AllowPortFromTo a b p)#xs) = ((\<forall> r. r \<in> set xs \<longrightarrow>
+      dom (Cp r) \<inter> dom (Cp (AllowPortFromTo a b p)) = {}) \<and> wellformed_policy3Pr xs)"
+| "wellformed_policy3Pr (x#xs) = wellformed_policy3Pr xs"
+
+definition 
+ normalizePr' :: "(adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators
+  \<Rightarrow> (adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators list" where 
+ "normalizePr' p = (removeAllDuplicates o insertDenies o separate o
+                   (sort' (Nets_List p))  o removeShadowRules2 o remdups o
+                   (rm_MT_rules Cp) o insertDeny o removeShadowRules1 o
+                   policy2list) p"
+
+definition normalizePr :: 
+"(adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators
+  \<Rightarrow> (adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators list" where
+   "normalizePr p = (removeAllDuplicates (insertDenies (separate (sort
+                   (removeShadowRules2 (remdups ((rm_MT_rules Cp) (insertDeny
+                  (removeShadowRules1 (policy2list p)))))) ((Nets_List p))))))"
+
+definition
+   "normalize_manual_orderPr p l = removeAllDuplicates (insertDenies (separate
+    (sort (removeShadowRules2 (remdups ((rm_MT_rules Cp) (insertDeny
+    (removeShadowRules1 (policy2list p)))))) ((l)))))"
+
+
+definition 
+ normalizePrQ' :: "(adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators
+  \<Rightarrow> (adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators list" where 
+ "normalizePrQ' p = (removeAllDuplicates o insertDenies o separate o
+                   (qsort' (Nets_List p))  o removeShadowRules2 o remdups o
+                   (rm_MT_rules Cp) o insertDeny o removeShadowRules1 o
+                   policy2list) p"
+
+definition normalizePrQ :: 
+"(adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators
+  \<Rightarrow> (adr\<^sub>i\<^sub>p\<^sub>p net, protocol \<times> port) Combinators list" where
+   "normalizePrQ p = (removeAllDuplicates (insertDenies (separate (qsort
+                   (removeShadowRules2 (remdups ((rm_MT_rules Cp) (insertDeny
+                  (removeShadowRules1 (policy2list p)))))) ((Nets_List p))))))"
+
+definition
+   "normalize_manual_orderPrQ p l = removeAllDuplicates (insertDenies (separate
+    (qsort (removeShadowRules2 (remdups ((rm_MT_rules Cp) (insertDeny
+    (removeShadowRules1 (policy2list p)))))) ((l)))))"
+
+lemma "normalizePr = normalizePr'"
+  by (rule ext, simp add: normalizePr_def normalizePr'_def sort'_def)
+
+
+definition makeFUTPr where 
+   "makeFUTPr FUT p x n = 
+     (packet_Nets x (fst (normBothNets (bothNets p)!n))  
+                     (snd(normBothNets (bothNets p)!n)) \<longrightarrow> 
+    FUT x = Cp ((normalizePr p)!Suc n) x)"
+
+declare Cp.simps [simp del]
+
+lemmas PLemmas = C.simps Cp.simps dom_def PolicyCombinators.PolicyCombinators
+                 PortCombinators.PortCombinatorsCore aux
+                 ProtocolPortCombinators.ProtocolCombinatorsCore src_def dest_def in_subnet_def
+                 adr\<^sub>i\<^sub>p\<^sub>pLemmas adr\<^sub>i\<^sub>p\<^sub>pLemmas
+
+lemma aux: "\<lbrakk>x \<noteq> a; y\<noteq>b; (x \<noteq> y \<and> x \<noteq> b) \<or>  (a \<noteq> b \<and> a \<noteq> y)\<rbrakk> \<Longrightarrow> {x,a} \<noteq> {y,b}"
+  by (auto)
+
+lemma aux2: "{a,b} = {b,a}"
+  by auto
+end

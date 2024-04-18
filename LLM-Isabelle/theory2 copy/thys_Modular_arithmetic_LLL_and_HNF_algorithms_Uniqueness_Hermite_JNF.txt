@@ -1,0 +1,265 @@
+
+theory Uniqueness_Hermite_JNF
+  imports 
+  Hermite.Hermite
+  Uniqueness_Hermite
+  Smith_Normal_Form.SNF_Missing_Lemmas
+  Smith_Normal_Form.Mod_Type_Connect
+  Smith_Normal_Form.Finite_Field_Mod_Type_Connection
+begin  
+
+hide_const (open) residues
+
+
+definition is_zero_row_upt_k_JNF :: "nat  => nat =>'a::{zero} mat => bool"
+  where "is_zero_row_upt_k_JNF i k A = (\<forall>j. j < k \<longrightarrow> A $$ (i,j) = 0)"
+
+definition is_zero_row_JNF :: "nat =>'a::{zero} mat  => bool"
+  where "is_zero_row_JNF i A =  (\<forall>j<dim_col A. A $$ (i, j) = 0)"
+
+lemma echelon_form_def': 
+"echelon_form A = (
+    (\<forall>i. is_zero_row i A \<longrightarrow> \<not> (\<exists>j. j>i \<and> \<not> is_zero_row j A)) 
+    \<and>  
+    (\<forall>i j. i<j \<and> \<not> (is_zero_row i A) \<and> \<not> (is_zero_row j A) 
+          \<longrightarrow> ((LEAST n. A $ i $ n \<noteq> 0) < (LEAST n. A $ j $ n \<noteq> 0))))"
+  unfolding echelon_form_def echelon_form_upt_k_def unfolding is_zero_row_def by auto
+
+definition 
+  echelon_form_JNF :: "'a::{bezout_ring} mat \<Rightarrow> bool" 
+  where 
+  "echelon_form_JNF A = (
+    (\<forall>i<dim_row A. is_zero_row_JNF i A \<longrightarrow> \<not> (\<exists>j. j < dim_row A \<and> j>i \<and> \<not> is_zero_row_JNF j A)) 
+    \<and>  
+    (\<forall>i j. i<j \<and> j<dim_row A \<and> \<not> (is_zero_row_JNF i A) \<and> \<not> (is_zero_row_JNF j A) 
+          \<longrightarrow> ((LEAST n. A $$ (i, n) \<noteq> 0) < (LEAST n. A $$ (j, n) \<noteq> 0))))"
+
+
+
+context includes lifting_syntax
+begin
+
+
+lemma HMA_is_zero_row_mod_type[transfer_rule]: 
+  "((Mod_Type_Connect.HMA_I) ===> (Mod_Type_Connect.HMA_M :: _ \<Rightarrow> 'a :: comm_ring_1 ^ 'n :: mod_type ^ 'm :: mod_type \<Rightarrow> _) 
+    ===> (=)) is_zero_row_JNF is_zero_row"
+proof (intro rel_funI, goal_cases)
+  case (1 i i' A A')
+  note ii' = "1"(1)[transfer_rule]
+  note AA' = "1"(2)[transfer_rule]
+  have "(\<forall>j<dim_col A. A $$ (i, j) = 0) = (\<forall>j. A' $h i' $h j = 0)"
+  proof (rule;rule+)
+    fix j'::'n assume Aij_0: "\<forall>j<dim_col A. A $$ (i, j) = 0" 
+    define j where "j = mod_type_class.to_nat j'"
+    have [transfer_rule]: "Mod_Type_Connect.HMA_I j j'" unfolding Mod_Type_Connect.HMA_I_def j_def by auto
+    have A_ij0': "A $$ (i,j) = 0" using Aij_0 unfolding j_def
+      by (metis AA' Mod_Type_Connect.HMA_M_def Mod_Type_Connect.from_hma\<^sub>m_def 
+          dim_col_mat(1) mod_type_class.to_nat_less_card)
+    hence "index_hma A' i' j' = 0" by transfer
+    thus "A' $h i' $h j' = 0" unfolding index_hma_def by simp
+  next
+    fix j assume 1: "\<forall>j'. A' $h i' $h j' = 0" and 2: "j < dim_col A" 
+    define j'::'n where "j' = mod_type_class.from_nat j"
+    have [transfer_rule]: "Mod_Type_Connect.HMA_I j j'" unfolding Mod_Type_Connect.HMA_I_def j'_def 
+      using Mod_Type.to_nat_from_nat_id[of j, where ?'a = 'n] 2
+      using AA' Mod_Type_Connect.dim_col_transfer_rule by force
+    have "A' $h i' $h j' = 0" using 1 by auto
+    hence "index_hma A' i' j' = 0" unfolding index_hma_def by simp  
+    thus "A $$ (i, j) = 0" by transfer
+  qed
+  thus ?case unfolding is_zero_row_def' is_zero_row_JNF_def by auto
+qed
+
+lemma HMA_echelon_form_mod_type[transfer_rule]: 
+  "((Mod_Type_Connect.HMA_M :: _ \<Rightarrow> 'a ::bezout_ring ^ 'n :: mod_type ^ 'm :: mod_type \<Rightarrow> _) ===> (=))
+  echelon_form_JNF echelon_form"
+proof (intro rel_funI, goal_cases)
+  case (1 A A')
+  note AA' = "1"(1)[transfer_rule]
+  have 1: "(\<forall>i<dim_row A. is_zero_row_JNF i A \<longrightarrow> \<not> (\<exists>j < dim_row A. j>i \<and> \<not> is_zero_row_JNF j A))
+    = (\<forall>i. is_zero_row i A' \<longrightarrow> \<not> (\<exists>j>i. \<not> is_zero_row j A'))"
+  proof (auto)
+    fix i' j' assume 1: "\<forall>i<dim_row A. is_zero_row_JNF i A \<longrightarrow> (\<forall>j>i. j < dim_row A \<longrightarrow> is_zero_row_JNF j A)"
+      and 2: "is_zero_row i' A'" and 3: "i' < j'"
+    let ?i = "Mod_Type.to_nat i'"
+    let ?j = "Mod_Type.to_nat j'"
+    have ii'[transfer_rule]: "Mod_Type_Connect.HMA_I ?i i'" and jj'[transfer_rule]: "Mod_Type_Connect.HMA_I ?j j'" 
+      unfolding Mod_Type_Connect.HMA_I_def by auto
+    have "is_zero_row_JNF ?i A" using 2 by transfer' 
+    hence "is_zero_row_JNF ?j A" using 1 3 to_nat_mono
+      by (metis AA' Mod_Type_Connect.HMA_M_def Mod_Type_Connect.from_hma\<^sub>m_def
+          dim_row_mat(1) mod_type_class.to_nat_less_card)
+    thus "is_zero_row j' A'" by transfer'
+  next
+    fix i j assume 1: "\<forall>i'. is_zero_row i' A' \<longrightarrow> (\<forall>j'>i'. is_zero_row j' A')"
+      and 2: "is_zero_row_JNF i A" and 3: "i < j" and 4: "j<dim_row A"
+    let ?i' = "Mod_Type.from_nat i::'m"
+    let ?j' = "Mod_Type.from_nat j::'m"
+    have ii'[transfer_rule]: "Mod_Type_Connect.HMA_I i ?i'"
+      unfolding Mod_Type_Connect.HMA_I_def using Mod_Type.to_nat_from_nat_id[of i]
+      using 3 4 AA' Mod_Type_Connect.dim_row_transfer_rule less_trans by fastforce
+    have jj'[transfer_rule]: "Mod_Type_Connect.HMA_I j ?j'" 
+      unfolding Mod_Type_Connect.HMA_I_def  using Mod_Type.to_nat_from_nat_id[of j]
+      using 3 4 AA' Mod_Type_Connect.dim_row_transfer_rule less_trans by fastforce
+    have "is_zero_row ?i' A'" using 2 by transfer
+    moreover have "?i' < ?j'" using 3 4 AA' Mod_Type_Connect.dim_row_transfer_rule from_nat_mono by fastforce
+    ultimately have "is_zero_row ?j' A'" using 1 3 by auto
+    thus "is_zero_row_JNF j A" by transfer
+  qed
+  have 2: "((\<forall>i j. i<j \<and> \<not> (is_zero_row i A') \<and> \<not> (is_zero_row j A') 
+    \<longrightarrow> ((LEAST n. A' $h i $h n \<noteq> 0) < (LEAST n. A' $h j $h n \<noteq> 0)))) 
+    = (\<forall>i j. i<j \<and> j<dim_row A \<and> \<not> (is_zero_row_JNF i A) \<and> \<not> (is_zero_row_JNF j A) 
+    \<longrightarrow> ((LEAST n. A $$ (i, n) \<noteq> 0) < (LEAST n. A $$ (j, n) \<noteq> 0)))"
+  proof (auto)
+    fix i j assume 1: "\<forall>i' j'. i' < j' \<and> \<not> is_zero_row i' A' \<and> \<not> is_zero_row j' A' 
+      \<longrightarrow> (LEAST n'. A' $h i' $h n' \<noteq> 0) < (LEAST n'. A' $h j' $h n' \<noteq> 0)"
+      and ij: "i < j" and j: "j < dim_row A" and i0: "\<not> is_zero_row_JNF i A"
+      and j0: "\<not> is_zero_row_JNF j A"
+    let ?i' = "Mod_Type.from_nat i::'m"
+    let ?j' = "Mod_Type.from_nat j::'m"
+    have ii'[transfer_rule]: "Mod_Type_Connect.HMA_I i ?i'"
+      unfolding Mod_Type_Connect.HMA_I_def using Mod_Type.to_nat_from_nat_id[of i]
+      using ij j AA' Mod_Type_Connect.dim_row_transfer_rule less_trans by fastforce
+    have jj'[transfer_rule]: "Mod_Type_Connect.HMA_I j ?j'" 
+      unfolding Mod_Type_Connect.HMA_I_def  using Mod_Type.to_nat_from_nat_id[of j]
+      using ij j AA' Mod_Type_Connect.dim_row_transfer_rule less_trans by fastforce
+    have i'0: "\<not> is_zero_row ?i' A'" using i0 by transfer
+    have j'0: "\<not> is_zero_row ?j' A'" using j0 by transfer
+    have i'j': "?i' < ?j'"
+      using AA' Mod_Type_Connect.dim_row_transfer_rule from_nat_mono ij j by fastforce
+    have l1l2: "(LEAST n'. A' $h ?i' $h n' \<noteq> 0) < (LEAST n'. A' $h ?j' $h n' \<noteq> 0)"
+      using 1 i'0 j'0 i'j' by auto
+    define l1 where "l1 = (LEAST n'. A' $h ?i' $h n' \<noteq> 0)"
+    define l2 where "l2 = (LEAST n'. A' $h ?j' $h n' \<noteq> 0)"
+    let ?least_n1 = "Mod_Type.to_nat l1"
+    let ?least_n2 = "Mod_Type.to_nat l2"
+    have l1[transfer_rule]: "Mod_Type_Connect.HMA_I ?least_n1 l1" and [transfer_rule]: "Mod_Type_Connect.HMA_I ?least_n2 l2"
+      unfolding Mod_Type_Connect.HMA_I_def by auto
+    have "(LEAST n. A $$ (i, n) \<noteq> 0) = ?least_n1" 
+    proof (rule Least_equality)
+      obtain n' where n'1: "A $$ (i,n') \<noteq> 0" and n'2: "n'<dim_col A"
+        using i0 unfolding is_zero_row_JNF_def by auto
+      let ?n' = "Mod_Type.from_nat n'::'n"
+      have n'n'[transfer_rule]: "Mod_Type_Connect.HMA_I n' ?n'"
+        unfolding Mod_Type_Connect.HMA_I_def using Mod_Type.to_nat_from_nat_id n'2
+        using AA' Mod_Type_Connect.dim_col_transfer_rule by fastforce
+      have "index_hma A' ?i' ?n' \<noteq> 0" using n'1 by transfer
+      hence A'i'n': "A' $h ?i' $h ?n' \<noteq> 0" unfolding index_hma_def by simp
+      have least_le_n': "(LEAST n. A $$ (i, n) \<noteq> 0)  \<le> n'" by (simp add: Least_le n'1)
+      have l1_le_n': "l1 \<le> ?n'" by (simp add: A'i'n' Least_le l1_def)
+      have "A $$ (i, ?least_n1) = index_hma A' ?i' l1" by (transfer, simp)
+      also have "... = A' $h mod_type_class.from_nat i $h l1" unfolding index_hma_def by simp
+      also have "... \<noteq> 0" unfolding l1_def by (metis (mono_tags, lifting) LeastI i'0 is_zero_row_def')
+      finally show "A $$ (i, mod_type_class.to_nat l1) \<noteq> 0" .
+      fix y assume Aiy: "A $$ (i, y) \<noteq> 0"
+      let ?y' = "Mod_Type.from_nat y::'n"
+      show "Mod_Type.to_nat l1 \<le> y"
+      proof (cases "y\<le>n'")
+        case True
+        hence y: "y < dim_col A" using n'2 by auto
+        have yy'[transfer_rule]: "Mod_Type_Connect.HMA_I y ?y'" unfolding Mod_Type_Connect.HMA_I_def
+          apply (rule Mod_Type.to_nat_from_nat_id[symmetric])
+          using y Mod_Type_Connect.dim_col_transfer_rule[OF AA'] by auto
+        have "Mod_Type.to_nat l1 \<le> Mod_Type.to_nat ?y'"
+        proof (rule to_nat_mono')
+          have "index_hma A' ?i' ?y' \<noteq> 0" using Aiy by transfer
+          hence "A' $h ?i' $h ?y' \<noteq> 0" unfolding index_hma_def by simp
+          thus "l1 \<le> ?y'" unfolding l1_def by (simp add: Least_le)
+        qed
+          then show ?thesis by (metis Mod_Type_Connect.HMA_I_def yy')
+        next
+          case False
+          hence "n' < y" by auto
+          then show ?thesis
+            by (metis False Mod_Type_Connect.HMA_I_def dual_order.trans l1_le_n' linear n'n' to_nat_mono')
+        qed
+      qed
+      moreover have "(LEAST n. A $$ (j, n) \<noteq> 0) = ?least_n2"
+      proof (rule Least_equality)
+        obtain n' where n'1: "A $$ (j,n') \<noteq> 0" and n'2: "n'<dim_col A"
+        using j0 unfolding is_zero_row_JNF_def by auto
+      let ?n' = "Mod_Type.from_nat n'::'n"
+      have n'n'[transfer_rule]: "Mod_Type_Connect.HMA_I n' ?n'" 
+        unfolding Mod_Type_Connect.HMA_I_def using Mod_Type.to_nat_from_nat_id n'2
+        using AA' Mod_Type_Connect.dim_col_transfer_rule by fastforce
+      have "index_hma A' ?j' ?n' \<noteq> 0" using n'1 by transfer
+      hence A'i'n': "A' $h ?j' $h ?n' \<noteq> 0" unfolding index_hma_def by simp
+      have least_le_n': "(LEAST n. A $$ (j, n) \<noteq> 0)  \<le> n'" by (simp add: Least_le n'1)
+      have l1_le_n': "l2 \<le> ?n'" by (simp add: A'i'n' Least_le l2_def)
+      have "A $$ (j, ?least_n2) = index_hma A' ?j' l2" by (transfer, simp)
+      also have "... = A' $h ?j' $h l2" unfolding index_hma_def by simp
+      also have "... \<noteq> 0" unfolding l2_def by (metis (mono_tags, lifting) LeastI j'0 is_zero_row_def')
+      finally show "A $$ (j, mod_type_class.to_nat l2) \<noteq> 0" .
+      fix y assume Aiy: "A $$ (j, y) \<noteq> 0"
+      let ?y' = "Mod_Type.from_nat y::'n"
+      show "Mod_Type.to_nat l2 \<le> y"
+      proof (cases "y\<le>n'")
+        case True
+        hence y: "y < dim_col A" using n'2 by auto
+        have yy'[transfer_rule]: "Mod_Type_Connect.HMA_I y ?y'" unfolding Mod_Type_Connect.HMA_I_def
+          apply (rule Mod_Type.to_nat_from_nat_id[symmetric])
+          using y Mod_Type_Connect.dim_col_transfer_rule[OF AA'] by auto
+        have "Mod_Type.to_nat l2 \<le> Mod_Type.to_nat ?y'"
+        proof (rule to_nat_mono')
+          have "index_hma A' ?j' ?y' \<noteq> 0" using Aiy by transfer
+          hence "A' $h ?j' $h ?y' \<noteq> 0" unfolding index_hma_def by simp
+          thus "l2 \<le> ?y'" unfolding l2_def by (simp add: Least_le)
+        qed
+          then show ?thesis by (metis Mod_Type_Connect.HMA_I_def yy')
+        next
+          case False
+          hence "n' < y" by auto
+          then show ?thesis
+            by (metis False Mod_Type_Connect.HMA_I_def dual_order.trans l1_le_n' linear n'n' to_nat_mono')
+        qed
+      qed
+      ultimately show "(LEAST n. A $$ (i, n) \<noteq> 0) < (LEAST n. A $$ (j, n) \<noteq> 0)"
+        using l1l2 unfolding l1_def l2_def by (simp add: to_nat_mono)
+    next
+      fix i' j' assume 1: "\<forall>i j. i < j \<and> j < dim_row A \<and> \<not> is_zero_row_JNF i A \<and> \<not> is_zero_row_JNF j A 
+      \<longrightarrow> (LEAST n. A $$ (i, n) \<noteq> 0) < (LEAST n. A $$ (j, n) \<noteq> 0)"
+       and i'j': "i' < j'" and i': "\<not> is_zero_row i' A'" and j': "\<not> is_zero_row j' A'"
+      let ?i = "Mod_Type.to_nat i'"
+      let ?j = "Mod_Type.to_nat j'"
+      have [transfer_rule]: "Mod_Type_Connect.HMA_I ?i i'" 
+        and [transfer_rule]: "Mod_Type_Connect.HMA_I ?j j'"
+        unfolding Mod_Type_Connect.HMA_I_def by auto
+      have i: "\<not> is_zero_row_JNF ?i A" using i' by transfer'
+      have j: "\<not> is_zero_row_JNF ?j A" using j' by transfer'
+      have ij: "?i < ?j" using i'j' to_nat_mono by blast
+      have j_dim_row: "?j < dim_row A" 
+        using AA' Mod_Type_Connect.dim_row_transfer_rule mod_type_class.to_nat_less_card by fastforce
+      have least_ij: "(LEAST n. A $$ (?i, n) \<noteq> 0) < (LEAST n. A $$ (?j, n) \<noteq> 0)"
+        using i j ij j_dim_row 1 by auto
+      define l1 where "l1 = (LEAST n'. A $$ (?i, n') \<noteq> 0)"
+      define l2 where "l2 = (LEAST n'. A $$ (?j, n') \<noteq> 0)"
+      let ?least_n1 = "Mod_Type.from_nat l1::'n"
+      let ?least_n2 = "Mod_Type.from_nat l2::'n"
+      have l1_dim_col: "l1 < dim_col A"
+        by (smt is_zero_row_JNF_def j l1_def leI le_less_trans least_ij less_trans not_less_Least)
+      have l2_dim_col: "l2 < dim_col A"
+        by (metis (mono_tags, lifting) Least_le is_zero_row_JNF_def j l2_def le_less_trans)
+      have [transfer_rule]: "Mod_Type_Connect.HMA_I l1 ?least_n1" unfolding Mod_Type_Connect.HMA_I_def
+        using AA' Mod_Type_Connect.dim_col_transfer_rule l1_dim_col Mod_Type.to_nat_from_nat_id
+        by fastforce
+      have [transfer_rule]: "Mod_Type_Connect.HMA_I l2 ?least_n2" unfolding Mod_Type_Connect.HMA_I_def
+        using AA' Mod_Type_Connect.dim_col_transfer_rule l2_dim_col Mod_Type.to_nat_from_nat_id
+        by fastforce
+      have "(LEAST n. A' $h i' $h n \<noteq> 0) = ?least_n1"
+      proof (rule Least_equality)
+        obtain n' where n'1: "A' $h i' $h n' \<noteq> 0" using i' unfolding is_zero_row_def' by auto
+        have "A' $h i' $h ?least_n1 = index_hma A' i' ?least_n1" unfolding index_hma_def by simp
+        also have "... = A$$ (?i, l1)"  by (transfer, simp)
+        also have "... \<noteq> 0" by (metis (mono_tags, lifting) LeastI i is_zero_row_JNF_def l1_def)
+        finally show "A' $h i' $h ?least_n1 \<noteq> 0" .
+      next
+        fix y assume y: "A' $h i' $h y \<noteq> 0"
+        let ?y' = "Mod_Type.to_nat y"
+        have [transfer_rule]: "Mod_Type_Connect.HMA_I ?y' y" unfolding Mod_Type_Connect.HMA_I_def by simp
+        have "?least_n1 \<le> Mod_Type.from_nat ?y'"
+        proof (unfold l1_def, rule from_nat_mono')                      
+          show "Mod_Type.to_nat y < CARD('n)" by (simp add: mod_type_class.to_nat_less_card)
+          have *: "A $$ (mod_type_class.to_nat i', mod_type_class.to_nat y) \<noteq> 0" 
+            using y[unfolded index_hma_def[symmetric]] by transfer'
+          show "(LEAST n'. A $$ (mod_type_class.to_nat i', n') \<noteq> 0) \<le> mod_type_class.to_nat y" 
+            by (rule Least_le, simp add: *)

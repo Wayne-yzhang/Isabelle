@@ -1,0 +1,419 @@
+theory Refine_Reachability_Analysis
+  imports
+    Abstract_Reachability_Analysis
+    Refine_Rigorous_Numerics
+begin
+
+lemma isDERIV_simps[simp]:
+  "isDERIV i 1 xs" "isDERIV i 0 xs"
+  "isDERIV i (a + b) xs \<longleftrightarrow>  isDERIV i a xs \<and> isDERIV i b xs"
+  "isDERIV i (a - b) xs \<longleftrightarrow> isDERIV i a xs \<and> isDERIV i b xs"
+  "isDERIV i (a * b) xs \<longleftrightarrow> isDERIV i a xs \<and> isDERIV i b xs"
+  "isDERIV i (a / b) xs \<longleftrightarrow> isDERIV i a xs \<and> isDERIV i b xs \<and> interpret_floatarith b xs \<noteq> 0"
+  "isDERIV i (-a) xs = isDERIV i a xs"
+  by (auto simp: one_floatarith_def zero_floatarith_def plus_floatarith_def minus_floatarith_def
+      times_floatarith_def divide_floatarith_def uminus_floatarith_def)
+
+lemma list_of_eucl_of_env:
+  assumes [simp]: "length xs = DIM('a)"
+  shows "(list_of_eucl (eucl_of_env xs vs::'a)) = (map (\<lambda>i. vs ! (xs ! i)) [0..<DIM('a::executable_euclidean_space)])"
+  by (auto intro!: nth_equalityI simp: eucl_of_env_def eucl_of_list_inner)
+
+context approximate_sets_ode
+begin
+
+lemma interpret_ode_fa[simp]:
+  assumes [simp]: "length xs = DIM('a::executable_euclidean_space)" "length vs \<ge> DIM('a)" "length ode_e = DIM('a)"
+    and mV:  "max_Var_floatariths ode_e \<le> DIM('a)"
+  shows "(eucl_of_list (interpret_floatariths (ode_fa xs) vs)::'a) = ode (eucl_of_list (interpret_floatariths xs vs))"
+  unfolding ode_fa_def
+  apply (auto intro!: euclidean_eqI[where 'a='a] simp: eucl_of_list_inner ode_def)
+  apply (subst interpret_floatarith_subst_floatarith[where D="length vs"])
+   apply (auto intro!: max_Var_floatarith_le_max_Var_floatariths_nth[le]
+      mV[le])
+  apply (rule interpret_floatarith_max_Var_cong)
+  apply (drule max_Var_floatariths_lessI) apply simp
+  apply (drule less_le_trans[OF _ mV])
+  apply auto
+  apply (subst nth_map)
+   apply simp  using assms(2) order.strict_trans2 apply blast
+  apply (subst nth_upt) apply simp
+   apply (rule less_le_trans, assumption, simp)
+  apply auto
+  done
+
+lemma length_ode_fa[simp]: "length (ode_fa xs) = length ode_e"
+  by (auto simp: ode_fa_def)
+
+lemma max_Var_ode_fa[le]:
+  assumes "max_Var_floatariths ode_e \<le> length xs"
+  shows "max_Var_floatariths (ode_fa xs) \<le> max_Var_floatariths xs"
+  by (auto simp: ode_fa_def intro!: assms max_Var_floatariths_subst_floatarith_le)
+
+lemma max_Var_floatariths_ode_d_expr[le]:
+  "max_Var_floatariths ode_e \<le> d \<Longrightarrow> d > 0 \<Longrightarrow>
+    max_Var_floatariths (ode_d_expr d m) \<le> 3 * d"
+  by (auto simp: ode_d_expr_def
+      intro!: max_Var_floatarith_FDERIV_n_floatariths[le]
+        max_Var_floatarith_FDERIV_floatariths[le])
+
+lemma interpret_ode_d_fa:
+  assumes FDERIV: "(eucl_of_list (interpret_floatariths xs vs)::'a::executable_euclidean_space) \<in> Csafe"
+  assumes [simp]: "length ds = DIM('a)" "length xs = DIM('a)"
+  notes [simp] = safe_length[OF FDERIV]
+  shows "(eucl_of_list (interpret_floatariths (ode_d_fa n xs ds) vs)::'a) =
+      ode_d n (eucl_of_list (interpret_floatariths xs vs)) (eucl_of_list (interpret_floatariths ds vs))
+        (eucl_of_list (interpret_floatariths ds vs))"
+  apply (transfer fixing: xs ds vs n)
+  using FDERIV apply (auto simp del: isnFDERIV.simps simp: interpret_floatariths_append)
+  apply (auto simp add: list_of_eucl_of_env ode_def
+      ode_d_raw_def eucl_of_list_inner
+      intro!: euclidean_eqI[where 'a='a])
+  apply (auto simp: ode_d_fa_def )
+  apply (subst interpret_floatarith_subst_floatarith[OF max_Var_floatarith_le_max_Var_floatariths_nth], simp)
+  apply (rule interpret_floatarith_max_Var_cong)
+  subgoal premises prems for b i
+  proof -
+    from prems have i: "i < max_Var_floatariths (ode_d_expr DIM('a) n)"
+      by (auto dest!: max_Var_floatariths_lessI)
+    also have "\<dots> \<le> 3 * DIM('a)"
+      by (auto intro!: max_Var_floatariths_ode_d_expr safe_max_Var[OF FDERIV])
+    finally have "i < 3 * DIM('a)" .
+    then show ?thesis
+      using prems i
+      by (auto simp: nth_append)
+  qed
+  done
+
+lemma safe_at_within: "x \<in> Csafe \<Longrightarrow> at x = at x within Csafe"
+  by (subst (2) at_within_open)  (auto simp: open_safe)
+
+lemma ivlflowsD:
+  assumes "ivlflows stops stopcont trap rsctn" "ivl \<subseteq> \<Union>(plane_of ` stops) \<times> UNIV "
+  shows "ivl \<subseteq> (snd (stopcont ivl))"
+    "(fst (stopcont ivl)) \<subseteq> sbelow_halfspace rsctn \<times> UNIV"
+    "fst (stopcont ivl) \<subseteq> snd (stopcont ivl)"
+    "(snd (stopcont ivl)) \<subseteq> sbelow_halfspace rsctn \<times> UNIV"
+    "flowsto (ivl) {0..} ((snd (stopcont ivl))) ((fst (stopcont ivl)) \<union> trap)"
+  using assms(1)[unfolded ivlflows_def, rule_format, OF assms(2)]
+  by auto
+
+lemma ivlflows_flowsto:
+  assumes "ivlflows stops stopcont trap rsctn" "ivl \<subseteq> \<Union>(plane_of ` stops) \<times> UNIV"
+  assumes "stopcont ivl = (x, y)"
+  shows "flowsto (ivl) {0..} y (x \<union> trap)"
+  using ivlflowsD[OF assms(1,2)] assms(3)
+  by auto
+
+lemma ivlflows_emptyI: "ivlflows {} (\<lambda>x. (x, x)) J K"
+  by (auto simp: ivlflows_def set_of_ivl_def)
+
+lemma plane_of_neg[simp]: "plane_of (Sctn (- normal sctn) (- pstn sctn)) = plane_of sctn"
+  by (auto simp: plane_of_def)
+
+lemmas safe_max_Var_le[intro] = safe_max_Var[le]
+
+lemmas [simp] = safe_length
+
+lemma continuous_on_ode_d2: "continuous_on (Csafe) ode_d2"
+proof -
+  have isn: "isnFDERIV DIM('a) ode_e [0..<DIM('a)] [DIM('a)..<2 * DIM('a)] (list_of_eucl x @ list_of_eucl i)
+                 (Suc (Suc 0))"
+    if "x \<in> Csafe"
+    for x i::'a
+    by (rule safe_isnFDERIV) fact
+  have "continuous_on (Csafe::'a set) (\<lambda>x. ode_d_raw (Suc 0) x i j)"
+     if "i \<in> Basis" "j \<in> Basis" for i j
+    apply (rule has_derivative_continuous_on)
+    apply (auto simp: ode_d_raw_def at_within_open[OF _ open_safe])
+     apply (rule interpret_floatarith_FDERIV_floatariths_append)
+    apply (auto simp: ode_d_expr_def 
+        intro!: isDERIV_FDERIV_floatariths safe_isFDERIV_append that isFDERIV_map_Var
+        safe_max_Var_le
+        max_Var_floatarith_FDERIV_floatariths[le])
+     apply assumption
+    apply arith
+    done
+  then show ?thesis
+    apply (auto intro!: continuous_on_blinfun_componentwise)
+    subgoal for i j
+    apply (rule continuous_on_eq[where f="(\<lambda>x. ode_d_raw (Suc 0) x i j)"])
+       apply force
+      apply (subst ode_d2.rep_eq)
+      apply simp
+      apply (subst ode_d.rep_eq)
+      apply (split if_splits)
+      apply (rule conjI) apply simp
+      using isn apply force
+      done
+    done
+qed
+
+lemmas continuous_on_ode_d2_comp[continuous_intros] = continuous_on_compose2[OF continuous_on_ode_d2]
+
+
+lemma map_ode_fa_nth[simp]:
+  "d \<le> length ode_e \<Longrightarrow> map (ode_fa_nth CX) [0..<d] = map ((!) (ode_fa CX)) [0..<d]"
+  by (auto simp: ode_fa_nth cong: map_cong)
+
+lemma map_ode_d_fa_nth[simp]:
+  "d \<le> length ode_e \<Longrightarrow> map (ode_d_fa_nth i CX X) [0..<d] = map ((!) (ode_d_fa i CX X)) [0..<d]"
+  by (auto simp: ode_d_fa_nth cong: map_cong)
+
+lemma einterpret_euler_incr_fas:
+  assumes "length ode_e = DIM('a)" "length X0 = DIM('a)" "length CX = DIM('a)"
+    "DIM('a) \<le> length vs" "max_Var_floatariths ode_e \<le> DIM('a)"
+  shows "(einterpret (euler_incr_fas X0 h CX) vs::'a::executable_euclidean_space) =
+    einterpret X0 vs + (interpret_floatarith h vs) *\<^sub>R ode (einterpret CX vs)"
+  by (simp add: euler_incr_fas_def euler_incr_fas_nth_def assms ode_fa_nth cong: map_cong)
+
+lemma einterpret_euler_err_fas:
+  assumes safe: "(einterpret CX vs::'a) \<in> Csafe"
+  assumes [simp]: "length X0 = DIM('a)" "length CX = DIM('a)" "DIM('a) \<le> length vs"
+  shows "(einterpret (euler_err_fas X0 h CX) vs::'a::executable_euclidean_space) =
+    (((interpret_floatarith h vs))\<^sup>2/2) *\<^sub>R ode_d 0 (einterpret CX vs) (ode (einterpret CX vs)) (ode (einterpret CX vs))"
+  using safe_length[OF safe] safe_max_Var[OF safe]
+  apply (simp add: euler_err_fas_def euler_err_fas_nth_def[abs_def] euler_incr_fas_def)
+  apply (subst interpret_ode_d_fa)
+  by (auto simp: safe)
+
+lemma einterpret_euler_fas1:
+  assumes safe[simp]: "(einterpret CX vs::'a) \<in> Csafe"
+  assumes [simp]: "length X0 = DIM('a)" "length CX = DIM('a)" "DIM('a) \<le> length vs"
+  shows "(einterpret (take DIM('a) (euler_fas X0 h CX)) vs::'a::executable_euclidean_space) =
+    einterpret X0 vs + (interpret_floatarith h vs) *\<^sub>R ode (einterpret X0 vs) +
+    (((interpret_floatarith h vs))\<^sup>2/2) *\<^sub>R ode_d 0 (einterpret CX vs) (ode (einterpret CX vs)) (ode (einterpret CX vs))"
+  using safe_length[OF safe] safe_max_Var[OF safe]
+  by (simp add: euler_fas_def euler_incr_fas_def euler_incr_fas_nth_def[abs_def]
+      einterpret_euler_err_fas euler_err_fas_nth_def[abs_def] interpret_ode_d_fa)
+
+lemma einterpret_euler_fas2:
+  assumes [simp]: "(einterpret CX vs::'a) \<in> Csafe"
+  assumes [simp]: "length X0 = DIM('a)" "length CX = DIM('a)" "DIM('a) \<le> length vs"
+  shows "(einterpret (drop DIM('a) (euler_fas  X0 h CX)) vs::'a::executable_euclidean_space) =
+    (((interpret_floatarith h vs))\<^sup>2/2) *\<^sub>R ode_d 0 (einterpret CX vs) (ode (einterpret CX vs)) (ode (einterpret CX vs))"
+  by (simp add: euler_fas_def euler_incr_fas_def einterpret_euler_err_fas)
+
+lemma ode_d_Suc_0_eq_ode_d2: "x \<in> Csafe \<Longrightarrow> ode_d (Suc 0) x = ode_d2 x"
+  unfolding ode_d2.rep_eq by auto
+
+lemma rk2_increment_rk2_fas_err:
+  fixes h s1 s2 rkp x0 cx vs
+  defines "h' \<equiv> interpret_floatarith h vs"
+  defines "s2' \<equiv> interpret_floatarith s2 vs"
+  defines "rkp' \<equiv> interpret_floatarith rkp vs"
+  defines "x0' \<equiv> einterpret x0 vs"
+  defines "cx' \<equiv> einterpret cx vs"
+  assumes cx_flow: "cx' = flow0 x0' (h' * s1')"
+  assumes [simp]: "length x0 = DIM('a)" "length cx = DIM('a)" "DIM('a) \<le> length vs"
+  assumes safes: "x0' \<in> Csafe" "cx' \<in> Csafe" "(x0' + (s2' * h' * rkp') *\<^sub>R ode x0')\<in> Csafe"
+  shows "(einterpret (rk2_fas_err rkp x0 h cx s2) vs::'a::executable_euclidean_space) =
+    heun_remainder1 (flow0 x0') ode_na ode_d_na ode_d2_na 0 h' s1' -
+    heun_remainder2 rkp' (flow0 x0') ode_na     ode_d2_na 0 h' s2'"
+  using safes
+  using safe_length[OF safes(1)] safe_max_Var[OF safes(1)]
+  apply (auto simp: heun_remainder1_def heun_remainder2_def discrete_evolution_def
+      ode_na_def ode_d_na_def ode_d2_na_def rk2_increment x0'_def rkp'_def h'_def s2'_def
+      cx'_def euler_incr_fas_def rk2_fas_err_def rk2_fas_err_nth_def[abs_def]
+        euler_incr_fas_nth_def[abs_def]
+        interpret_ode_d_fa)
+  apply (simp add: ode_d1_eq[symmetric] ode_d_Suc_0_eq_ode_d2 inverse_eq_divide)
+  apply (simp add: algebra_simps field_simps divide_simps)
+  unfolding cx'_def[symmetric] cx_flow x0'_def h'_def
+  apply (simp add: algebra_simps)
+  done
+
+lemma map_rk2_fas_err_nth[simp]:
+  "d = length ode_e \<Longrightarrow> length b = length ode_e \<Longrightarrow> map (rk2_fas_err_nth a b c e f) [0..<d] = map ((!) (rk2_fas_err a b c e f)) [0..<d]"
+  unfolding rk2_fas_err_nth_def rk2_fas_err_def
+  by (rule map_cong) auto
+
+lemma rk2_increment_rk2_fas1:
+  fixes h s1 s2 rkp x0 cx vs
+  defines "h' \<equiv> interpret_floatarith h vs"
+  defines "s2' \<equiv> interpret_floatarith s2 vs"
+  defines "rkp' \<equiv> interpret_floatarith rkp vs"
+  defines "x0' \<equiv> einterpret x0 vs"
+  defines "cx' \<equiv> einterpret cx vs"
+  assumes cx_flow: "cx' = flow0 x0' (h' * s1')"
+  assumes [simp]: "length x0 = DIM('a)" "length cx = DIM('a)" "DIM('a) \<le> length vs"
+  assumes safes: "(x0'::'a)\<in> Csafe" "(cx'::'a)\<in> Csafe" "(x0' + (s2' * h' * rkp') *\<^sub>R ode x0'::'a)\<in> Csafe"
+  shows "(einterpret (take DIM('a) (rk2_fas rkp x0 h cx s2)) vs::'a::executable_euclidean_space) =
+    discrete_evolution (rk2_increment rkp' (\<lambda>_. ode)) h' 0 x0' + (heun_remainder1 (flow0 x0') ode_na ode_d_na ode_d2_na 0 h' s1' -
+    heun_remainder2 rkp' (flow0 x0') ode_na ode_d2_na 0 h' s2')"
+  using safes  using safe_length[OF safes(1)] safe_max_Var[OF safes(1)]
+  apply (auto simp: discrete_evolution_def rk2_fas_def)
+  apply (subst rk2_increment_rk2_fas_err[OF cx_flow[unfolded cx'_def x0'_def h'_def]])
+  subgoal by simp
+  subgoal by simp
+  subgoal by simp
+  subgoal by (simp add: x0'_def)
+  subgoal by (simp add: cx'_def)
+  subgoal by (simp add: x0'_def s2'_def h'_def rkp'_def)
+  subgoal using [[show_consts, show_sorts, show_types]]
+    by (auto simp: x0'_def s2'_def h'_def rkp'_def rk2_increment euler_incr_fas_def
+        euler_incr_fas_nth_def[abs_def] inverse_eq_divide)
+  done
+
+lemma rk2_increment_rk2_fas2:
+  fixes h s1 s2 rkp x0 cx vs
+  defines "h' \<equiv> interpret_floatarith h vs"
+  defines "s2' \<equiv> interpret_floatarith s2 vs"
+  defines "rkp' \<equiv> interpret_floatarith rkp vs"
+  defines "x0' \<equiv> einterpret x0 vs"
+  defines "cx' \<equiv> einterpret cx vs"
+  assumes cx_flow: "cx' = flow0 x0' (h' * s1')"
+  assumes [simp]: "length x0 = DIM('a)" "length cx = DIM('a)" "DIM('a) \<le> length vs"
+  assumes safes: "x0'\<in> Csafe" "cx'\<in> Csafe" "(x0' + (s2' * h' * rkp') *\<^sub>R ode x0')\<in> Csafe"
+  shows "(einterpret (drop DIM('a) (rk2_fas rkp x0 h cx s2)) vs::'a::executable_euclidean_space) =
+    (heun_remainder1 (flow0 x0') ode_na ode_d_na ode_d2_na 0 h' s1' -
+    heun_remainder2 rkp' (flow0 x0') ode_na      ode_d2_na 0 h' s2')"
+  using safes
+  apply (auto simp: discrete_evolution_def rk2_fas_def)
+  apply (subst rk2_increment_rk2_fas_err[OF cx_flow[unfolded cx'_def x0'_def h'_def]])
+  subgoal by simp
+  subgoal by simp
+  subgoal by simp
+  subgoal by (simp add: x0'_def)
+  subgoal by (simp add: cx'_def)
+  subgoal by (simp add: x0'_def s2'_def h'_def rkp'_def)
+  subgoal by (auto simp: x0'_def s2'_def h'_def rkp'_def rk2_increment euler_incr_fas_def inverse_eq_divide)
+  done
+
+
+lemma mk_safe[le, refine_vcg]: "wd TYPE('a::executable_euclidean_space)\<Longrightarrow>
+  mk_safe X \<le> SPEC (\<lambda>R::'a set. R = X \<and> X \<subseteq> Csafe)"
+  unfolding mk_safe_def
+  by refine_vcg
+
+lemma mk_safe_coll[le, refine_vcg]: "wd TYPE('a::executable_euclidean_space) \<Longrightarrow>
+    mk_safe_coll X \<le> SPEC (\<lambda>R::'a set. R = X \<and> X \<subseteq> Csafe)"
+  unfolding mk_safe_coll_def autoref_tag_defs
+  by (refine_vcg FORWEAK_invarI[where I="\<lambda>a b. X = \<Union>b \<union> a \<and> a \<subseteq> Csafe"]) auto
+
+
+lemma ode_set_spec[THEN order.trans, refine_vcg]:
+  assumes [refine_vcg]: "wd TYPE('a::executable_euclidean_space)"
+  shows "ode_set X \<le> SPEC (\<lambda>r. ode ` X \<subseteq> (r::'a set))"
+  using assms wdD[OF assms(1)]
+  unfolding ode_set_def
+  apply (refine_vcg)
+  subgoal by (auto simp: env_len_def ode_slp_def)
+  subgoal premises prems
+    using prems(1,2,4-)
+    by (auto simp: env_len_def eucl_of_list_prod ode_def)
+  done
+
+lemmas fderiv[derivative_intros] = ode_has_derivative_safeI
+
+lemma fderiv2[derivative_intros]:
+  "x \<in> Csafe \<Longrightarrow> (ode_d1 has_derivative ode_d2 x) (at x)"
+  by (frule ode_d1_has_derivative_safeI)
+    (simp add: ode_d_Suc_0_eq_ode_d2)
+
+lemma derivative_within_safe[derivative_intros]:
+  "(g has_derivative h) (at x) \<Longrightarrow> (g has_derivative h) (at x within Csafe)"
+  by (rule has_derivative_at_withinI)
+
+lemma cont_fderiv: "continuous_on (Csafe) ode_d1"
+  by (rule has_derivative_continuous_on) (auto intro!: derivative_intros)
+
+lemmas cont_fderiv'[continuous_intros] = continuous_on_compose2[OF cont_fderiv]
+
+lemma continuous_on_ode1:
+  "continuous_on (Csafe) (ode)"
+  using fderiv
+  by (auto intro!: has_derivative_continuous_on derivative_intros)
+
+lemma continuous_on_ode[continuous_intros]:
+  "continuous_on s g \<Longrightarrow> (\<And>x. x \<in> s \<Longrightarrow> (g x) \<in> Csafe) \<Longrightarrow> continuous_on s (\<lambda>x. ode (g x))"
+  using continuous_on_ode1
+  by (rule continuous_on_compose2) auto
+
+lemma fderiv'[derivative_intros]:
+  assumes "(g has_derivative g' y) (at y within X)"
+  assumes "(g y) \<in> Csafe"
+  shows "((\<lambda>y. ode (g y)) has_derivative
+    (blinfun_apply (ode_d1 (g y)) \<circ>\<circ> g') y) (at y within X)"
+  using diff_chain_within[OF assms(1) has_derivative_subset[OF fderiv]] assms(2)
+  by (simp add: o_def)
+
+lemma fderiv2'[derivative_intros]:
+  assumes "(g has_derivative g' y) (at y within X)"
+  assumes "(g y) \<in> Csafe"
+  shows "((\<lambda>y. ode_d1 (g y)) has_derivative
+    (blinfun_apply (ode_d2 (g y)) \<circ>\<circ> g') y) (at y within X)"
+  using diff_chain_within[OF assms(1) has_derivative_subset[OF fderiv2]] assms(2)
+  by (simp add: o_def)
+
+
+
+lemma ncc_interval: "ncc {a .. b::'a::executable_euclidean_space} \<longleftrightarrow> a \<le> b"
+  by (auto simp: ncc_def)
+lemma nonempty_interval: "nonempty {a .. b::'a::executable_euclidean_space} \<longleftrightarrow> a \<le> b"
+  by (auto simp: nonempty_def)
+
+lemmas [refine_vcg] = Picard_step_def[THEN eq_refl, THEN order.trans]
+
+lemma Basis_list_zero_mem_Basis[simp]:
+  "Basis_list ! 0 \<in> Basis"
+  unfolding Basis_list[symmetric]
+  apply (rule nth_mem)
+  apply (rule length_Basis_list_pos)
+  done
+
+lemma cfuncset_empty_iff:
+  fixes l u::"'d::ordered_euclidean_space"
+  shows "l \<le> u \<Longrightarrow> cfuncset l u X = {} \<longleftrightarrow> X = {}"
+  unfolding cfuncset_def Pi_def
+proof (safe, goal_cases)
+  case hyps: (1 x)
+  have "(\<lambda>_. x) \<in> {f. \<forall>x. x \<in> {l..u} \<longrightarrow> f x \<in> X} \<inter> Collect (continuous_on {l..u})"
+    by (auto intro!: continuous_on_const)
+  then show ?case using hyps by auto
+qed auto
+
+lemma lv_ivl_sings: "lv_ivl [x] [y] = (\<lambda>x. [x]) ` {x .. y}"
+  apply (auto simp: lv_ivl_def)
+  subgoal for x by (cases x) auto
+  done
+
+lemma Picard_step_ivl_refine[le, refine_vcg]:
+  assumes [refine_vcg]: "wd TYPE('a::executable_euclidean_space)"
+  assumes "(X::'a set) \<subseteq> Csafe"
+  assumes "0 \<le> h"
+  shows "Picard_step_ivl X0 t0 h X \<le> Picard_step X0 t0 h X"
+proof -
+  have "h' \<in> {t0..t0 + h} \<Longrightarrow> t0 \<le> h'" for h' by simp
+  then show ?thesis
+    unfolding Picard_step_ivl_def Picard_step_def
+    apply (refine_vcg, clarsimp_all simp del: atLeastAtMost_iff)
+    subgoal by (auto simp: euler_incr_slp_def wdD)
+    subgoal by (auto simp: euler_incr_fas'_def)
+    subgoal for XS l u
+      apply (auto simp: lv_ivl_sings nonempty_interval
+          simp del: atLeastAtMost_iff
+          intro!: add_integral_ivl_bound)
+      subgoal for x0 h' phi x h''
+        apply (drule bspec, assumption)
+        apply (drule bspec[where x="h'' - t0"], force)
+      proof goal_cases
+        case (1)
+        have *: "map ((!) (list_of_eucl b)) [0..<DIM('a) - Suc 0] @ [b \<bullet> Basis_list ! (DIM('a) - Suc 0)]
+          = list_of_eucl b" for b::'a
+          apply (auto intro!: nth_equalityI simp: nth_append not_less)
+          using Intersection.le_less_Suc_eq by blast
+        have "phi x \<in> X" if "x \<in> {t0 .. h''}" for x
+          using 1 that by (auto simp: cfuncset_iff)
+        have "x0 + (h'' - t0) *\<^sub>R ode b \<in> {l .. u}" if "b \<in> X" for b
+        proof -
+          from 1(17)[rule_format, OF that] assms(1)
+          have "einterpret (euler_incr_fas' D) (list_of_eucl x0 @ (h'' - t0) # list_of_eucl b) \<in> eucl_of_list ` XS"
+            by (auto simp: wdD)
+          also have "eucl_of_list ` XS \<subseteq> {l .. u}" by fact
+          finally show ?thesis
+        qed
+        then have *: "(h'' - t0) *\<^sub>R ode b \<in> {l - x0..u - x0}" if "b \<in> X" for b using that
+          by (auto simp: algebra_simps)
+        show ?case
+          apply (rule *)

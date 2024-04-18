@@ -1,0 +1,589 @@
+theory Ground_MCtxt
+  imports
+   Multihole_Context
+   Regular_Tree_Relations.Ground_Terms
+   Regular_Tree_Relations.Ground_Ctxt
+begin
+
+
+datatype (gfuns_mctxt: 'f) gmctxt = GMHole | GMFun 'f "'f gmctxt list"
+
+
+primrec gmctxt_of_gterm :: "'f gterm \<Rightarrow> 'f gmctxt" where
+  "gmctxt_of_gterm (GFun f ts) = GMFun f (map gmctxt_of_gterm ts)"
+
+fun num_gholes :: "'f gmctxt \<Rightarrow> nat" where
+  "num_gholes GMHole = Suc 0"
+| "num_gholes (GMFun _ ctxts) = sum_list (map num_gholes ctxts)"
+
+primrec gterm_of_gmctxt :: "'f gmctxt \<Rightarrow> 'f gterm" where
+  "gterm_of_gmctxt (GMFun f Cs) = GFun f (map gterm_of_gmctxt Cs)"
+
+primrec term_of_gmctxt :: "'f gmctxt \<Rightarrow> ('f, 'v) term" where
+  "term_of_gmctxt (GMFun f Cs) = Fun f (map term_of_gmctxt Cs)"
+
+primrec gmctxt_of_gctxt :: "'f gctxt \<Rightarrow> 'f gmctxt" where
+  "gmctxt_of_gctxt \<box>\<^sub>G = GMHole"
+| "gmctxt_of_gctxt (GMore f ss C ts) =
+    GMFun f (map gmctxt_of_gterm ss @ gmctxt_of_gctxt C # map gmctxt_of_gterm ts)"
+
+fun gctxt_of_gmctxt :: "'f gmctxt \<Rightarrow> 'f gctxt" where
+  "gctxt_of_gmctxt GMHole = \<box>\<^sub>G"
+| "gctxt_of_gmctxt (GMFun f Cs) = (let n = length (takeWhile (\<lambda> C. num_gholes C = 0) Cs) in
+     (if n < length Cs then
+        GMore f (map gterm_of_gmctxt (take n Cs)) (gctxt_of_gmctxt (Cs ! n)) (map gterm_of_gmctxt (drop (Suc n) Cs))
+      else undefined))"
+
+primrec gmctxt_of_mctxt :: "('f, 'v) mctxt \<Rightarrow> 'f gmctxt" where
+   "gmctxt_of_mctxt MHole = GMHole"
+|  "gmctxt_of_mctxt (MFun f Cs) = GMFun f (map gmctxt_of_mctxt Cs)"
+
+primrec mctxt_of_gmctxt :: "'f gmctxt \<Rightarrow> ('f, 'v) mctxt" where
+   "mctxt_of_gmctxt GMHole = MHole"
+|  "mctxt_of_gmctxt (GMFun f Cs) = MFun f (map mctxt_of_gmctxt Cs)"
+
+fun funas_gmctxt where
+  "funas_gmctxt (GMFun f Cs) = {(f, length Cs)} \<union> \<Union>(funas_gmctxt ` set Cs)" |
+  "funas_gmctxt _ = {}"
+
+abbreviation "partition_gholes xs Cs \<equiv> partition_by xs (map num_gholes Cs)"
+
+fun fill_gholes :: "'f gmctxt \<Rightarrow> 'f gterm list \<Rightarrow> 'f gterm" where
+  "fill_gholes GMHole [t] = t"
+| "fill_gholes (GMFun f cs) ts = GFun f (map (\<lambda> i. fill_gholes (cs ! i)
+    (partition_gholes ts cs ! i)) [0 ..< length cs])"
+
+fun fill_gholes_gmctxt :: "'f gmctxt \<Rightarrow> 'f gmctxt list \<Rightarrow> 'f gmctxt" where
+  "fill_gholes_gmctxt GMHole [] = GMHole" |
+  "fill_gholes_gmctxt GMHole [t] = t" |
+  "fill_gholes_gmctxt (GMFun f cs) ts = (GMFun f (map (\<lambda> i. fill_gholes_gmctxt (cs ! i) 
+    (partition_gholes ts cs ! i)) [0 ..< length cs]))"
+
+fun unfill_gholes :: "'f gmctxt \<Rightarrow> 'f gterm \<Rightarrow> 'f gterm list" where
+  "unfill_gholes GMHole t = [t]"
+| "unfill_gholes (GMFun g Cs) (GFun f ts) = (if f = g \<and> length ts = length Cs then
+    concat (map (\<lambda>i. unfill_gholes (Cs ! i) (ts ! i)) [0..<length ts]) else undefined)"
+
+fun sup_gmctxt_args :: "'f gmctxt \<Rightarrow> 'f gmctxt \<Rightarrow> 'f gmctxt list" where
+  "sup_gmctxt_args GMHole D = [D]" |
+  "sup_gmctxt_args C GMHole = replicate (num_gholes C) GMHole" |
+  "sup_gmctxt_args (GMFun f Cs) (GMFun g Ds) =
+    (if f = g \<and> length Cs = length Ds then concat (map (case_prod sup_gmctxt_args) (zip Cs Ds))
+    else undefined)"
+
+fun ghole_poss :: "'f gmctxt \<Rightarrow> pos set" where
+  "ghole_poss GMHole = {[]}" |
+  "ghole_poss (GMFun f cs) = \<Union>(set (map (\<lambda> i. (\<lambda> p. i # p) ` ghole_poss (cs ! i)) [0 ..< length cs]))"
+
+abbreviation "poss_rec f ts \<equiv> map2 (\<lambda> i t. map ((#) i) (f t)) ([0 ..< length ts]) ts"
+fun ghole_poss_list :: "'f gmctxt \<Rightarrow> pos list" where
+  "ghole_poss_list GMHole = [[]]"
+| "ghole_poss_list (GMFun f cs) = concat (poss_rec ghole_poss_list cs)"
+
+
+fun poss_gmctxt :: "'f gmctxt \<Rightarrow> pos set" where
+  "poss_gmctxt GMHole = {}" |
+  "poss_gmctxt (GMFun f cs) = {[]} \<union> \<Union>(set (map (\<lambda> i. (\<lambda> p. i # p) ` poss_gmctxt (cs ! i)) [0 ..< length cs]))"
+
+lemma poss_simps [simp]:
+  "ghole_poss (GMFun f Cs) = {i # p | i p. i < length Cs \<and> p \<in> ghole_poss (Cs ! i)}"
+  "poss_gmctxt (GMFun f Cs) = {[]} \<union> {i # p | i p. i < length Cs \<and> p \<in> poss_gmctxt (Cs ! i)}"
+  by auto
+
+fun ghole_num_bef_pos where
+  "ghole_num_bef_pos [] _ = 0" |
+  "ghole_num_bef_pos (i # q) (GMFun f Cs) = sum_list (map num_gholes (take i Cs)) + ghole_num_bef_pos q (Cs ! i)"
+
+fun ghole_num_at_pos where
+  "ghole_num_at_pos [] C = num_gholes C" |
+  "ghole_num_at_pos (i # q) (GMFun f Cs) = ghole_num_at_pos q (Cs ! i)"
+
+fun subgm_at :: "'f gmctxt \<Rightarrow> pos \<Rightarrow> 'f gmctxt" where
+  "subgm_at C [] = C"
+| "subgm_at (GMFun f Cs) (i # p) = subgm_at (Cs ! i) p"
+
+definition gmctxt_subtgm_at_fill_args where
+  "gmctxt_subtgm_at_fill_args p C ts = take (ghole_num_at_pos p C) (drop (ghole_num_bef_pos p C) ts)"
+
+
+instantiation gmctxt :: (type) inf
+begin
+
+fun inf_gmctxt :: "'a gmctxt \<Rightarrow> 'a gmctxt \<Rightarrow> 'a gmctxt" where
+  "GMHole \<sqinter> D = GMHole" |
+  "C \<sqinter> GMHole = GMHole" |
+  "GMFun f Cs \<sqinter> GMFun g Ds =
+    (if f = g \<and> length Cs = length Ds then GMFun f (map (case_prod (\<sqinter>)) (zip Cs Ds))
+    else GMHole)"
+
+instance ..
+end
+
+instantiation gmctxt :: (type) sup
+begin
+
+fun sup_gmctxt :: "'a gmctxt \<Rightarrow> 'a gmctxt \<Rightarrow> 'a gmctxt" where
+  "GMHole \<squnion> D = D" |
+  "C \<squnion> GMHole = C" |
+  "GMFun f Cs \<squnion> GMFun g Ds =
+    (if f = g \<and> length Cs = length Ds then GMFun f (map (case_prod (\<squnion>)) (zip Cs Ds))
+    else undefined)"
+
+instance ..
+end
+
+
+inductive less_eq_gmctxt :: "'f gmctxt \<Rightarrow> 'f gmctxt \<Rightarrow> bool" where
+ base [simp]: "less_eq_gmctxt GMHole u"
+| ind[intro]: "length cs = length ds \<Longrightarrow> (\<And>i. i < length cs \<Longrightarrow> less_eq_gmctxt (cs ! i) (ds ! i)) \<Longrightarrow>
+     less_eq_gmctxt (GMFun f cs) (GMFun f ds)"
+
+inductive_set comp_gmctxt :: "('f gmctxt \<times> 'f gmctxt) set" where
+  GMHole1 [simp]: "(GMHole, D) \<in> comp_gmctxt" |
+  GMHole2 [simp]: "(C, GMHole) \<in> comp_gmctxt" |
+  GMFun [intro]: "f = g \<Longrightarrow> length Cs = length Ds \<Longrightarrow> \<forall>i < length Ds. (Cs ! i, Ds ! i) \<in> comp_gmctxt \<Longrightarrow>
+    (GMFun f Cs, GMFun g Ds) \<in> comp_gmctxt"
+
+definition gmctxt_closing where
+  "gmctxt_closing C D \<longleftrightarrow> less_eq_gmctxt C D \<and> ghole_poss D \<subseteq> ghole_poss C"
+
+
+inductive eq_gfill ("(_/ =\<^sub>G\<^sub>f _)" [51, 51] 50) where
+  eqfI [intro]: "t = fill_gholes D ss \<Longrightarrow> num_gholes D = length ss \<Longrightarrow> t =\<^sub>G\<^sub>f (D, ss)"
+
+
+lemma num_gholes_o_gmctxt_of_gterm [simp]:
+  "num_gholes \<circ> gmctxt_of_gterm = (\<lambda>x. 0)"
+  by (rule ext, induct_tac x) simp_all
+
+lemma mctxt_of_term_term_of_mctxt_id [simp]:
+  "num_gholes C = 0 \<Longrightarrow> gmctxt_of_gterm (gterm_of_gmctxt C) = C"
+  by (induct C) (simp_all add: map_idI)
+
+lemma num_holes_mctxt_of_term [simp]:
+  "num_gholes (gmctxt_of_gterm t) = 0"
+  by (induct t) simp_all
+
+lemma num_gholes_gmctxt_of_mctxt [simp]:
+  "ground_mctxt C \<Longrightarrow> num_gholes (gmctxt_of_mctxt C) = num_holes C"
+  by (induct C) (auto intro: nth_sum_listI)
+
+lemma num_holes_mctxt_of_gmctxt [simp]:
+  "num_holes (mctxt_of_gmctxt C) = num_gholes C"
+  by (induct C) (auto intro: nth_sum_listI)
+
+lemma num_holes_mctxt_of_gmctxt_fun_comp [simp]:
+  "num_holes \<circ> mctxt_of_gmctxt = num_gholes"
+  by (auto simp: comp_def)
+
+lemma gmctxt_of_gctxt_num_gholes [simp]:
+  "num_gholes (gmctxt_of_gctxt C) = Suc 0"
+  by (induct C) auto
+
+lemma ground_mctxt_list_num_gholes_gmctxt_of_mctxt_conv [simp]:
+  "\<forall>x\<in>set Cs. ground_mctxt x \<Longrightarrow> map (num_gholes \<circ> gmctxt_of_mctxt) Cs = map num_holes Cs"
+  by auto
+
+
+lemma num_gholes_map_gmctxt [simp]:
+  "num_gholes (map_gmctxt f C) = num_gholes C"
+  by (induct C)  (auto simp: comp_def, metis (no_types, lifting) map_eq_conv)
+
+lemma map_num_gholes_map_gmctxt [simp]:
+  "map (num_gholes \<circ> map_gmctxt f) Cs = map num_gholes Cs"
+  by (induct Cs) auto
+
+lemma gterm_of_gmctxt_gmctxt_of_gterm_id [simp]:
+  "gterm_of_gmctxt (gmctxt_of_gterm t) = t"
+  by (induct t) (simp_all add: map_idI)
+
+lemma no_gholes_gmctxt_of_gterm_gterm_of_gmctxt_id [simp]:
+  "num_gholes C = 0 \<Longrightarrow> gmctxt_of_gterm (gterm_of_gmctxt C) = C"
+  by (induct C) (auto simp: comp_def intro: nth_equalityI)
+
+lemma no_gholes_term_of_gterm_gterm_of_gmctxt [simp]:
+  "num_gholes C = 0 \<Longrightarrow> term_of_gterm (gterm_of_gmctxt C) = term_of_gmctxt C"
+  by (induct C) (auto simp: comp_def intro: nth_equalityI)
+
+lemma no_gholes_term_of_mctxt_mctxt_of_gmctxt [simp]:
+  "num_gholes C = 0 \<Longrightarrow> term_of_mctxt (mctxt_of_gmctxt C) = term_of_gmctxt C"
+  by (induct C) (auto simp: comp_def intro: nth_equalityI)
+
+lemma nthWhile_gmctxt_of_gctxt [simp]:
+  "length (takeWhile (\<lambda>C. num_gholes C = 0) (map gmctxt_of_gterm ss @ gmctxt_of_gctxt C # ts)) = length ss"
+  by (induct ss) auto
+
+lemma sum_list_nthWhile_length [simp]:
+  "sum_list (map num_gholes Cs) = Suc 0 \<Longrightarrow> length (takeWhile (\<lambda>C. num_gholes C = 0) Cs) < length Cs"
+  by (induct Cs) auto
+
+lemma gctxt_of_gmctxt_gmctxt_of_gctxt [simp]:
+  "gctxt_of_gmctxt (gmctxt_of_gctxt C) = C"
+  by (induct C) (auto simp: Let_def comp_def nth_append)
+
+lemma gmctxt_of_gctxt_GMHole_Hole:
+  "gmctxt_of_gctxt C = GMHole \<Longrightarrow> C = \<box>\<^sub>G"
+  by (metis gctxt_of_gmctxt.simps(1) gctxt_of_gmctxt_gmctxt_of_gctxt)
+
+lemma gmctxt_of_gctxt_gctxt_of_gmctxt:
+  "num_gholes C = Suc 0 \<Longrightarrow> gmctxt_of_gctxt (gctxt_of_gmctxt C) = C"
+proof (induct C)
+  case (GMFun f Cs)
+  then obtain i where nth: "i < length Cs" "i = length (takeWhile (\<lambda>C. num_gholes C = 0) Cs)"
+    using sum_list_nthWhile_length by auto
+  then have "0 < num_gholes (Cs ! i)" unfolding nth(2) using nth_length_takeWhile
+    by auto
+  from nth(1) this have num: "num_gholes (Cs ! i) = Suc 0" using GMFun(2)
+    by (auto elim!: sum_list_1_E)
+  then have [simp]: "map (gmctxt_of_gterm \<circ> gterm_of_gmctxt) (drop (Suc i) Cs) = drop (Suc i) Cs" using GMFun(2) nth(1)
+    by (auto elim!: sum_list_1_E simp: comp_def intro!: nth_equalityI)
+     (metis add.commute add_Suc_right lessI less_diff_conv no_gholes_gmctxt_of_gterm_gterm_of_gmctxt_id not_add_less1)
+  have [simp]: "map (gmctxt_of_gterm \<circ> gterm_of_gmctxt) (take i Cs) = take i Cs"
+    using nth(1) unfolding nth(2) by (induct Cs) auto
+  show ?case using id_take_nth_drop[OF nth(1)]
+    by (auto simp: Let_def GMFun(1)[OF nth_mem[OF nth(1)] num] simp flip: nth(2))
+qed auto
+
+lemma inj_gmctxt_of_gctxt: "inj gmctxt_of_gctxt"
+  unfolding inj_def by (metis gctxt_of_gmctxt_gmctxt_of_gctxt)
+
+lemma inj_gctxt_of_gmctxt_on_single_hole:
+  "inj_on gctxt_of_gmctxt (Collect (\<lambda> C. num_gholes C = Suc 0))"
+  by (metis (mono_tags, lifting) gmctxt_of_gctxt_gctxt_of_gmctxt inj_onI mem_Collect_eq)
+
+lemma gctxt_of_gmctxt_hole_dest:
+  "num_gholes C = Suc 0 \<Longrightarrow> gctxt_of_gmctxt C = \<box>\<^sub>G \<Longrightarrow> C = GMHole"
+  by (cases C) (auto simp: Let_def split!: if_splits)
+
+lemma mctxt_of_gmctxt_inv [simp]:
+  "gmctxt_of_mctxt (mctxt_of_gmctxt C) = C"
+  by (induct C) (simp_all add: map_idI)
+
+lemma ground_mctxt_of_gmctxt [simp]:
+  "ground_mctxt (mctxt_of_gmctxt C)"
+  by (induct C) auto
+
+lemma ground_mctxt_of_gmctxt' [simp]:
+  "mctxt_of_gmctxt C = MFun f D \<Longrightarrow> ground_mctxt (MFun f D)"
+  by (induct C) auto
+
+lemma gmctxt_of_mctxt_inv [simp]:
+  "ground_mctxt C \<Longrightarrow> mctxt_of_gmctxt (gmctxt_of_mctxt C) = C"
+  by (induct C) (auto 0 0 intro!: nth_equalityI)
+
+lemma ground_mctxt_of_gmctxtD:
+  "ground_mctxt C \<Longrightarrow> \<exists> D. C = mctxt_of_gmctxt D"
+  by (metis gmctxt_of_mctxt_inv)
+
+lemma inj_mctxt_of_gmctxt: "inj_on mctxt_of_gmctxt X"
+  by (metis inj_on_def mctxt_of_gmctxt_inv)
+
+lemma inj_gmctxt_of_mctxt_ground:
+  "inj_on gmctxt_of_mctxt (Collect ground_mctxt)"
+  using gmctxt_of_mctxt_inv inj_on_def by force
+
+lemma map_gmctxt_comp [simp]:
+  "map_gmctxt f (map_gmctxt g C) = map_gmctxt (f \<circ> g) C"
+  by (induct C) auto
+
+lemma map_mctxt_of_gmctxt:
+  "map_mctxt f (mctxt_of_gmctxt C) = mctxt_of_gmctxt (map_gmctxt f C)"
+  by (induct C) auto
+
+lemma map_gmctxt_of_mctxt:
+  "ground_mctxt C \<Longrightarrow> map_gmctxt f (gmctxt_of_mctxt C) = gmctxt_of_mctxt (map_mctxt f C)"
+  by (induct C) auto
+
+lemma map_gmctxt_nempty [simp]:
+  "C \<noteq> GMHole \<Longrightarrow> map_gmctxt f C \<noteq> GMHole"
+  by (cases C) auto
+
+
+lemma vars_mctxt_of_gmctxt [simp]:
+  "vars_mctxt (mctxt_of_gmctxt C) = {}"
+  by (induct C) auto
+
+lemma vars_mctxt_of_gmctxt_subseteq [simp]:
+  "vars_mctxt (mctxt_of_gmctxt C) \<subseteq> Q \<longleftrightarrow> True"
+  by auto
+
+
+lemma eqgfE:
+  assumes "t =\<^sub>G\<^sub>f (D, ss)" shows "t = fill_gholes D ss" "num_gholes D = length ss"
+  using assms[unfolded eq_gfill.simps] by auto
+
+lemma eqgf_GMHoleE:
+  assumes "t =\<^sub>G\<^sub>f (GMHole, ss)" shows "ss = [t]" using eqgfE[OF assms]
+  by (cases ss) auto
+
+lemma eqgf_GMFunE:
+  assumes "s =\<^sub>G\<^sub>f (GMFun f Cs, ss)"  
+  obtains ts sss where "s = GFun f ts" "length ts = length Cs" "length sss = length Cs" 
+  "\<And> i. i < length Cs \<Longrightarrow> ts ! i =\<^sub>G\<^sub>f (Cs ! i, sss ! i)" "ss = concat sss"
+proof -
+  from eqgfE[OF assms] have fh: "s = fill_gholes (GMFun f Cs) ss" 
+    and nh: "sum_list (map num_gholes Cs) = length ss" by auto
+  from fh obtain ts where s: "s = GFun f ts" by (cases s, auto)
+  from fh[unfolded s] 
+  have ts: "ts = map (\<lambda>i. fill_gholes (Cs ! i) (partition_gholes ss Cs ! i)) [0..<length Cs]" 
+    (is "_ = map (?f Cs ss) _")
+    by auto
+  let ?sss = "partition_gholes ss Cs"
+  from nh have *: "length ?sss = length Cs"
+    "\<And>i. i < length Cs \<Longrightarrow> ts ! i =\<^sub>G\<^sub>f (Cs ! i, ?sss ! i)" "ss = concat ?sss"
+    by (auto simp: ts length_partition_by_nth)
+  have len: "length ts = length Cs" unfolding ts by auto
+  assume ass: "\<And>ts sss. s = GFun f ts \<Longrightarrow>
+              length ts = length Cs \<Longrightarrow>
+              length sss = length Cs \<Longrightarrow> (\<And>i. i < length Cs \<Longrightarrow> ts ! i =\<^sub>G\<^sub>f (Cs ! i, sss ! i)) \<Longrightarrow> ss = concat sss \<Longrightarrow> thesis"
+  show thesis by (rule ass[OF s len *])
+qed
+
+lemma partition_holes_subseteq [simp]:
+  assumes "sum_list (map num_holes Cs) = length xs" "i < length Cs"
+    and "x \<in> set (partition_holes xs Cs ! i)"
+  shows "x \<in> set xs"
+  using assms partition_by_nth_nth_elem length_partition_by_nth
+  by (auto simp: in_set_conv_nth) fastforce
+
+lemma partition_gholes_subseteq [simp]:
+  assumes "sum_list (map num_gholes Cs) = length xs" "i < length Cs"
+    and "x \<in> set (partition_gholes xs Cs ! i)"
+  shows "x \<in> set xs"
+  using assms partition_by_nth_nth_elem length_partition_by_nth
+  by (auto simp: in_set_conv_nth) fastforce
+
+lemma list_elem_to_partition_nth [elim]:
+  assumes "sum_list (map num_gholes Cs) = length xs" "x \<in> set xs"
+  obtains i where "i < length Cs" "x \<in> set (partition_gholes xs Cs ! i)" using assms
+  by (metis concat_partition_by in_set_idx length_map length_partition_by nth_concat_split nth_mem)
+
+lemma partition_holes_fill_gholes_conv':
+  "fill_gholes (GMFun f Cs) ts =
+    GFun f (map (case_prod fill_gholes) (zip Cs (partition_gholes ts Cs)))"
+  unfolding zip_nth_conv [of Cs "partition_gholes ts Cs", simplified]
+    and partition_holes_fill_holes_conv by simp
+
+lemma unfill_gholes_conv:
+  assumes "length Cs = length ts"
+  shows "unfill_gholes (GMFun f Cs) (GFun f ts) =
+    concat (map (case_prod unfill_gholes) (zip Cs ts))" using assms
+  by (auto simp: zip_nth_conv [of Cs ts, simplified] comp_def)
+
+lemma partition_holes_fill_gholes_gmctxt_conv:
+  "fill_gholes_gmctxt (GMFun f Cs) ts =
+    GMFun f [fill_gholes_gmctxt (Cs ! i) (partition_gholes ts Cs ! i). i \<leftarrow> [0 ..< length Cs]]"
+  by (simp add: partition_by_nth take_map)
+
+lemma partition_holes_fill_gholes_gmctxt_conv':
+  "fill_gholes_gmctxt (GMFun f Cs) ts =
+    GMFun f (map (case_prod fill_gholes_gmctxt) (zip Cs (partition_gholes ts Cs)))"
+  unfolding zip_nth_conv [of Cs "partition_gholes ts Cs", simplified]
+    and partition_holes_fill_gholes_gmctxt_conv by simp
+
+lemma fill_gholes_no_holes [simp]:
+  "num_gholes C = 0 \<Longrightarrow> fill_gholes C [] = gterm_of_gmctxt C"
+  by (induct C) (auto simp: partition_holes_fill_gholes_conv'
+    simp del: fill_gholes.simps intro: nth_equalityI)
+
+lemma fill_gholes_gmctxt_no_holes [simp]:
+  "num_gholes C = 0 \<Longrightarrow> fill_gholes_gmctxt C [] = C"
+  by (induct C) (auto intro: nth_equalityI)
+
+lemma eqgf_GMFunI:
+  assumes "\<And> i. i < length Cs \<Longrightarrow> ss ! i =\<^sub>G\<^sub>f (Cs ! i, ts ! i)"
+    and "length Cs = length ss" "length ss = length ts"
+  shows "GFun f ss =\<^sub>G\<^sub>f (GMFun f Cs, concat ts)" using assms
+  apply (auto simp del: fill_gholes.simps
+    simp: partition_holes_fill_gholes_conv' intro!: eq_gfill.intros nth_equalityI)
+  apply (metis eqgfE length_map map_nth_eq_conv partition_by_concat_id)
+  by (metis eqgfE(2) length_concat nth_map_conv)
+
+lemma length_partition_gholes_nth:
+  assumes "sum_list (map num_gholes cs) = length ts"
+    and "i < length cs"
+  shows "length (partition_gholes ts cs ! i) = num_gholes (cs ! i)"
+  using assms by (simp add: length_partition_by_nth)
+
+lemma fill_gholes_induct2[consumes 2, case_names GMHole GMFun]:
+  fixes P :: "'f gmctxt \<Rightarrow> 'a list \<Rightarrow> 'b list \<Rightarrow> bool"
+  assumes len1: "num_gholes C = length xs" and len2: "num_gholes C = length ys"
+  and Hole: "\<And>x y. P GMHole [x] [y]"
+  and Fun: "\<And>f Cs xs ys.  sum_list (map num_gholes Cs) = length xs \<Longrightarrow>
+    sum_list (map num_gholes Cs) = length ys \<Longrightarrow>
+    (\<And>i. i < length Cs \<Longrightarrow> P (Cs ! i) (partition_gholes xs Cs ! i) (partition_gholes ys Cs ! i)) \<Longrightarrow>
+    P (GMFun f Cs) (concat (partition_gholes xs Cs)) (concat (partition_gholes ys Cs))"
+  shows "P C xs ys"
+proof (insert len1 len2, induct C arbitrary: xs ys)
+  case GMHole
+  then show ?case using Hole by (cases xs; cases ys) auto
+next
+  case (GMFun f Cs)
+  then show ?case using Fun[of Cs xs ys f] by (auto simp: length_partition_by_nth)
+qed
+
+lemma fill_gholes_induct[consumes 1, case_names GMHole GMFun]:
+  fixes P :: "'f gmctxt \<Rightarrow> 'a list \<Rightarrow> bool"
+  assumes len: "num_gholes C = length xs"
+    and Hole: "\<And>x. P GMHole [x]"
+    and Fun: "\<And>f Cs xs. sum_list (map num_gholes Cs) = length xs \<Longrightarrow>
+      (\<And>i. i < length Cs \<Longrightarrow> P (Cs ! i) (partition_gholes xs Cs ! i)) \<Longrightarrow>
+      P (GMFun f Cs) (concat (partition_gholes xs Cs))"
+  shows "P C xs"
+  using fill_gholes_induct2[of C xs xs "\<lambda> C xs _. P C xs"] assms by simp
+
+lemma eq_gfill_induct [consumes 1, case_names GMHole GMFun]:
+  assumes "t =\<^sub>G\<^sub>f (C, ts)"
+    and "\<And>t. P t GMHole [t]"
+    and "\<And>f ss Cs ts. \<lbrakk>length Cs = length ss; sum_list (map num_gholes Cs) = length ts;
+      \<forall>i < length ss. ss ! i =\<^sub>G\<^sub>f (Cs ! i, partition_gholes ts Cs ! i) \<and>
+        P (ss ! i) (Cs ! i) (partition_gholes ts Cs ! i)\<rbrakk>
+      \<Longrightarrow> P (GFun f ss) (GMFun f Cs) ts"
+  shows "P t C ts" using assms(1)
+proof (induct t arbitrary: C ts)
+  case (GFun f ss)
+  {assume "C = GMHole" and "ts = [GFun f ss]"
+    then have ?case using assms(2) by auto}
+  moreover
+  {fix Cs
+    assume C: "C = GMFun f Cs" and "sum_list (map num_gholes Cs) = length ts"
+      and "length Cs = length ss"
+      and "GFun f ss = fill_gholes (GMFun f Cs) ts"
+    moreover then have "\<forall>i < length ss. ss ! i =\<^sub>G\<^sub>f (Cs ! i, partition_gholes ts Cs ! i)"
+      by (auto simp del: fill_gholes.simps
+         simp: partition_holes_fill_gholes_conv' length_partition_gholes_nth  intro!: eq_gfill.intros)
+    moreover have "\<forall>i < length ss. P (ss ! i) (Cs ! i) (partition_gholes ts Cs ! i)"
+      using GFun calculation(5) nth_mem by blast
+    ultimately have ?case using assms(3)[of Cs ss ts f] by auto}
+  ultimately show ?case using GFun
+    by (elim eq_gfill.cases) (auto simp del: fill_gholes.simps,
+      metis GFun.prems eqgf_GMFunE eqgf_GMHoleE gterm.inject num_gholes.elims)
+qed
+
+lemma nempty_ground_mctxt_gmctxt [simp]:
+  "C \<noteq> MHole \<Longrightarrow> ground_mctxt C \<Longrightarrow> gmctxt_of_mctxt C \<noteq> GMHole"
+  by (induct C) auto
+
+lemma mctxt_of_gmctxt_fill_holes [simp]:
+  assumes "num_gholes C = length ss"
+  shows "gterm_of_term (fill_holes (mctxt_of_gmctxt C) (map term_of_gterm ss)) = fill_gholes C ss" using assms
+  by (induct rule: fill_gholes_induct) auto
+
+lemma mctxt_of_gmctxt_terms_fill_holes:
+  assumes "num_gholes C = length ss"
+  shows "gterm_of_term (fill_holes (mctxt_of_gmctxt C) ss) = fill_gholes C (map gterm_of_term ss)" using assms
+  by (induct rule: fill_gholes_induct) auto
+
+lemma ground_gmctxt_of_mctxt_gterm_fill_holes:
+  assumes "num_holes C = length ss" and "ground_mctxt C"
+  shows "term_of_gterm (fill_gholes (gmctxt_of_mctxt C) ss) = fill_holes C (map term_of_gterm ss)" using assms
+  by (induct rule: fill_holes_induct)
+   (auto simp: comp_def, metis (no_types, lifting) map_eq_conv num_gholes_gmctxt_of_mctxt)
+
+lemma  ground_gmctxt_of_gterm_of_term:
+  assumes "num_holes C = length ss" and "ground_mctxt C"
+  shows "gterm_of_term (fill_holes C (map term_of_gterm ss)) = fill_gholes (gmctxt_of_mctxt C) ss" using assms
+  by (induct rule: fill_holes_induct)
+   (auto simp: comp_def, metis (no_types, lifting) map_eq_conv num_gholes_gmctxt_of_mctxt)
+
+lemma ground_gmctxt_of_mctxt_fill_holes [simp]:
+  assumes "num_holes C = length ss" and "ground_mctxt C" "\<forall> s \<in> set ss. ground s"  
+  shows "term_of_gterm (fill_gholes (gmctxt_of_mctxt C) (map gterm_of_term ss)) = fill_holes C ss" using assms
+  by (induct rule: fill_holes_induct) auto
+
+lemma fill_holes_mctxt_of_gmctxt_to_fill_gholes:
+  assumes "num_gholes C = length ss"
+  shows "fill_holes (mctxt_of_gmctxt C) (map term_of_gterm ss) = term_of_gterm (fill_gholes C ss)"
+  using assms
+  by (metis ground_gmctxt_of_mctxt_gterm_fill_holes ground_mctxt_of_gmctxt mctxt_of_gmctxt_inv num_holes_mctxt_of_gmctxt)
+
+lemma fill_gholes_gmctxt_of_gterm [simp]:
+  "fill_gholes (gmctxt_of_gterm s) [] = s"
+  by (induct s) (auto simp add: map_nth_eq_conv)
+
+lemma fill_gholes_GMHole [simp]:
+  "length ss = Suc 0 \<Longrightarrow> fill_gholes GMHole ss = ss ! 0"
+  by (cases ss) auto
+
+lemma apply_gctxt_fill_gholes:
+  "C\<langle>s\<rangle>\<^sub>G = fill_gholes (gmctxt_of_gctxt C) [s]"
+  by (induct C) (auto simp: partition_holes_fill_gholes_conv'
+    simp del: fill_gholes.simps intro!: nth_equalityI)
+
+lemma fill_gholes_apply_gctxt:
+  "num_gholes C = Suc 0 \<Longrightarrow> fill_gholes C [s] = (gctxt_of_gmctxt C)\<langle>s\<rangle>\<^sub>G"
+  by (simp add: apply_gctxt_fill_gholes gmctxt_of_gctxt_gctxt_of_gmctxt)
+
+
+lemma ctxt_of_gctxt_gctxt_of_gmctxt_apply:
+  "num_gholes C = Suc 0 \<Longrightarrow> fill_holes (mctxt_of_gmctxt C) [s] = (ctxt_of_gctxt (gctxt_of_gmctxt C))\<langle>s\<rangle>"
+proof (induct C)
+  case (GMFun f Cs)
+  obtain i where split: "i < length Cs" "num_gholes (Cs ! i) = Suc 0"
+    "\<forall> j < length Cs. j \<noteq> i \<longrightarrow> num_gholes (Cs ! j) = 0" using GMFun(2)
+    by auto
+  then have [simp]: "sum_list (take i (map num_gholes Cs)) = 0"
+    by (auto simp: sum_list_eq_0_iff dest: set_take_nth)
+  from split have [simp]: "j < length Cs \<Longrightarrow> j \<noteq> i \<Longrightarrow>
+     fill_holes (mctxt_of_gmctxt (Cs ! j)) [] = term_of_mctxt (mctxt_of_gmctxt (Cs ! j))" for j
+    by (intro fill_holes_term_of_mctxt) auto
+  from split have [simp]: "gctxt_of_gmctxt (GMFun f Cs) =
+    GMore f (map gterm_of_gmctxt (take i Cs)) (gctxt_of_gmctxt (Cs ! i)) (map gterm_of_gmctxt (drop (Suc i) Cs))"
+     using nth_length_takeWhile GMFun(2) sum_list_nthWhile_length by (auto simp: Let_def)
+  show ?case using GMFun(1)[OF nth_mem[OF split(1)] split(2)] split
+    by (auto simp: min_def nth_append_Cons partition_by_nth simp del: gctxt_of_gmctxt.simps intro!: nth_equalityI)
+qed auto
+
+
+lemma fill_gholes_replicate [simp]:
+  "n = length ss \<Longrightarrow> fill_gholes (GMFun f (replicate n GMHole)) ss = GFun f ss"
+  unfolding partition_holes_fill_gholes_conv'
+  by (induct ss arbitrary: n) auto
+
+lemma fill_gholes_gmctxt_replicate_MHole [simp]:
+  "fill_gholes_gmctxt C (replicate (num_gholes C) GMHole) = C"
+proof (induct C)
+  case (GMFun f Cs)
+  {fix i assume "i < length Cs"
+    then have "partition_gholes (replicate (sum_list (map num_gholes Cs)) GMHole) Cs ! i =
+        replicate (num_gholes (Cs ! i)) GMHole"
+      using partition_by_nth_nth[of "map num_gholes Cs" "replicate (sum_list (map num_gholes Cs)) MHole"]
+      by (auto simp: length_partition_by_nth partition_by_nth_nth intro!: nth_equalityI)}
+  note * = this
+  show ?case using GMFun[OF nth_mem] by (auto simp: * intro!: nth_equalityI)
+qed auto
+
+lemma fill_gholes_gmctxt_GMFun_replicate_length [simp]:
+  "fill_gholes_gmctxt (GMFun f (replicate (length Cs) GMHole)) Cs = GMFun f Cs"
+  unfolding partition_holes_fill_gholes_gmctxt_conv'
+  by (induct Cs) simp_all
+
+lemma fill_gholes_gmctxt_MFun:
+  assumes lCs: "length Cs = length ts"
+    and lss: "length ss = length ts"
+    and rec: "\<And> i. i < length ts \<Longrightarrow> num_gholes (Cs ! i) = length (ss ! i) \<and>
+      fill_gholes_gmctxt (Cs ! i) (ss ! i) = ts ! i"
+  shows "fill_gholes_gmctxt (GMFun f Cs) (concat ss) = GMFun f ts" 
+  using assms unfolding fill_gholes_gmctxt.simps gmctxt.simps
+  by (auto intro!: nth_equalityI)
+    (metis length_map map_nth_eq_conv partition_by_concat_id)
+
+lemma fill_gholes_gmctxt_nHole [simp]:
+  "C \<noteq> GMHole \<Longrightarrow> num_gholes C = length Ds \<Longrightarrow> fill_gholes_gmctxt C Ds \<noteq> GMHole"
+  using fill_gholes_gmctxt.elims by blast
+
+lemma num_gholes_fill_gholes_gmctxt [simp]:
+  assumes "num_gholes C = length Ds"
+  shows "num_gholes (fill_gholes_gmctxt C Ds) = sum_list (map num_gholes Ds)" using assms
+proof (induct C arbitrary: Ds)
+  case GMHole then show ?case
+    by (cases Ds) simp_all
+next
+  case (GMFun f Cs)
+  then have *: "map (num_gholes \<circ> (\<lambda>i. fill_gholes_gmctxt (Cs ! i) (partition_gholes Ds Cs ! i))) [0..<length Cs] =
+    map (\<lambda>i. sum_list (map num_gholes (partition_gholes Ds Cs ! i))) [0 ..< length Cs]"
+    and "sum_list (map num_gholes Cs) = length Ds"
+    by (auto simp add: length_partition_by_nth)
+  then show ?case
+    using map_upt_len_conv [of "\<lambda>x. sum_list (map num_gholes x)" "partition_gholes Ds Cs"]
+    unfolding partition_holes_fill_holes_mctxt_conv by (simp add: *)

@@ -1,0 +1,589 @@
+theory Check_Non_Planarity_Verification imports
+  Check_Non_Planarity_Impl
+  "../Planarity/Kuratowski_Combinatorial"
+  "HOL-Library.Rewrite"
+  "HOL-Eisbach.Eisbach"
+begin
+
+
+context pre_digraph begin
+
+lemma cas_nonempty_ends:
+  assumes "p \<noteq> []" "cas u p v" "cas u' p v'"
+  shows "u = u'" "v = v'"
+  using assms apply (metis cas_simp)
+  using assms by (metis append_Nil2 cas.simps(1) cas_append_iff cas_simp)
+
+lemma awalk_nonempty_ends:
+  assumes "p \<noteq> []" "awalk u p v" "awalk u' p v'"
+  shows "u = u'" "v = v'"
+  using assms by (auto simp: awalk_def intro: cas_nonempty_ends)
+
+end
+
+lemma (in pair_graph) verts2_awalk_distinct:
+  assumes V: "verts3 G \<subseteq> V" "V \<subseteq> pverts G" "u \<in> V"
+  assumes p: "awalk u p v" "set (inner_verts p) \<inter> V = {}" "progressing p"
+  shows "distinct (inner_verts p)"
+  using p
+proof (induct p arbitrary: v rule: rev_induct)
+  case Nil then show ?case by auto
+next
+  case (snoc e es)
+  have "distinct (inner_verts es)"
+    apply (rule snoc.hyps)
+      using snoc.prems apply (auto dest: progressing_appendD1)
+    apply (metis (opaque_lifting, no_types) disjoint_iff_not_equal in_set_inner_verts_appendI_l)
+    done
+  show ?case
+  proof (rule ccontr)
+    assume A: "\<not>?thesis"
+    then obtain es' e' where "es = es' @ [e']" "es \<noteq> []"
+      by (cases es rule: rev_cases) auto
+
+    have "fst e \<in> set (inner_verts es)"
+      by (auto simp: inner_verts_def)
+    moreover
+    have "fst e' \<noteq> fst e" "snd e' = fst e"
+      by (auto simp: awalk_Cons_iff dest: no_loops)
+    ultimately
+    obtain es'' e'' where "es' = es'' @ [e'']"
+    then have "fst e'' \<noteq> fst e"
+
+    have "fst e' \<in> set (inner_verts es)"
+      by (cases es'') (auto simp: inner_verts_def)
+
+    have "fst e \<in> set (inner_verts es')"
+      by (cases es')  (auto simp: inner_verts_def)
+    then obtain q e'2 e'3 r where Z: "es' = q @ [e'2, e'3] @ r" "snd e'2 = fst e" "fst e'3 = fst e"
+    proof -
+      obtain e'3' where "e'3' \<in> set (tl es')" "fst e'3' = fst e"
+        by (cases es') (auto simp: inner_verts_def)
+      then obtain q r where "tl es' = q @ e'3' # r"
+        by (metis split_list)
+      then have F2: "snd (last (hd es' # q)) = fst e"
+        apply (cases es')
+         apply (case_tac [2] q rule: rev_cases)
+          apply auto
+        done
+      then have "es' = (butlast (hd es' # q)) @ [last (hd es' # q), e'3'] @ r"
+    qed
+    then have "fst e'2 \<noteq> snd e'3"
+      by (simp add: progressing_append_iff progressing_Cons)
+    moreover
+    from Z have B: "fst e'2 = u \<or> fst e'2 \<in> set (inner_verts es')"
+      by (cases q) (auto simp: inner_verts_def)
+    then have "fst e'2 \<noteq> fst e'"
+    proof
+      assume "fst e'2 = u"
+      then have "fst e'2 \<notin> set (inner_verts es)"
+        by (cases es') (auto simp: inner_verts_def)
+      moreover
+      have "fst e' \<in> set (inner_verts es)"
+        by (cases es'') (auto simp: inner_verts_def)
+      ultimately show ?thesis by auto
+    next
+      assume "fst e'2 \<in> set (inner_verts es')"
+      moreover
+      have "fst e' \<in> set (inner_verts es)"
+        by (cases es'') (auto simp: inner_verts_def)
+      ultimately
+      show ?thesis
+        by (cases es') (fastforce simp: inner_verts_def)+
+    qed
+    moreover
+    have "snd e'3 \<noteq> fst e'"
+    proof (rule notI, cases)
+      assume "r = []" "snd e'3 = fst e'"
+        by (simp add: progressing_append_iff progressing_Cons)
+    next
+      assume A: "r \<noteq> []" "snd e'3 = fst e'"
+      then obtain r0 rs where "r = r0 # rs" by (cases r) auto
+      then have "snd e'3 = fst r0"
+        by (auto simp: awalk_Cons_iff)
+      with A have "fst r0 = fst e'" by auto
+      have "\<not>distinct (inner_verts es)"
+    qed
+    ultimately
+    have card_to_fst_e: "card {e'2, (snd e'3, fst e'3), e'} = 3"
+      by (auto simp: card_insert_if)
+    moreover
+    have "e'3 \<in> parcs G"
+      by (auto intro: arcs_symmetric)
+    then have "(snd e'3, fst e'3) \<in> parcs G"
+      by (auto intro: arcs_symmetric)
+    then have "{e'2, (snd e'3, fst e'3), e'} \<subseteq> {ed \<in> parcs G. snd ed = fst e}"
+    moreover
+    have "fst e \<in> pverts G" using snoc.prems(1) by auto
+    then have card_to_fst_e_abs: "card {ed \<in> parcs G. snd ed = fst e} \<le> 2"
+      unfolding verts3_def in_degree_def
+      by (cases es) (auto simp: inner_verts_def in_arcs_def)
+    ultimately
+    have "{e'2, (snd e'3, fst e'3), e'} = {ed \<in> parcs G. snd ed = fst e}"
+      by (intro card_seteq) auto
+    then show False
+      using card_to_fst_e card_to_fst_e_abs by auto
+  qed
+qed
+
+
+lemma (in wf_digraph) inner_verts_conv':
+  assumes "awalk u p v" "2 \<le> length p" shows "inner_verts p = awalk_verts (head G (hd p)) (butlast (tl p))"
+  using assms
+  apply (cases p)
+   apply (auto simp: awalk_Cons_iff; fail)
+   apply (auto simp: inner_verts_def awalk_verts_conv)
+  done
+
+lemma verts3_in_verts:
+  assumes "x \<in> verts3 G" shows "x \<in> verts G"
+  using assms unfolding verts3_def by auto
+
+lemma (in pair_graph) deg2_awalk_is_iapath:
+  assumes V: "verts3 G \<subseteq> V" "V \<subseteq> pverts G"
+  assumes p: "awalk u p v" "set (inner_verts p) \<inter> V = {}" "progressing p"
+  assumes in_V: "u \<in> V" "v \<in> V"
+  assumes "u \<noteq> v"
+  shows "gen_iapath V u p v"
+proof (cases p)
+next
+  case (Cons p0 ps)
+  then have ev_p: "awalk_verts u p = u # butlast (tl (awalk_verts u p)) @ [v]"
+    using p(1) by (cases p) auto
+
+  have "u \<notin> set (inner_verts p)" "v \<notin> set (inner_verts p)"
+    using p(2) in_V by auto
+  with verts2_awalk_distinct[OF V in_V(1) p] have "distinct (awalk_verts u p)"
+qed
+
+lemma (in pair_graph) inner_verts_min_degree:
+  assumes walk_p: "awalk u p v" and progress: "progressing p"
+  and w_p: "w \<in> set (inner_verts p)"
+  shows "2 \<le>in_degree G w"
+proof -
+  from w_p have "2 \<le> length p" using not_le by fastforce
+  moreover
+  then obtain e1 es e2 where p_decomp: "p = e1 # es @ [e2]"
+    by (metis One_nat_def Suc_1 Suc_eq_plus1 le0 list.size(3) list.size(4) neq_Nil_conv not_less_eq_eq rev_cases)
+  ultimately
+  have w_es: "w \<in> set (awalk_verts (snd e1) es)"
+    using walk_p w_p by (auto simp: apath_def inner_verts_conv')
+
+  have walk_es: "awalk (snd e1) es (fst e2)"
+    using walk_p by (auto simp: p_decomp awalk_simps)
+  obtain q r where es_decomp: "es = q @ r" "awalk (snd e1) q w" "awalk w r (fst e2)"
+    using awalk_decomp[OF walk_es w_es] by auto
+
+  define xs x y ys
+    where "xs = butlast (e1 # q)" and "x = last (e1 # q)"
+      and "y = hd (r @ [e2])" and "ys = tl (r @ [e2])"
+  then have "p = xs @ x # y # ys"
+    by (auto simp: p_decomp es_decomp)
+  moreover
+  have "awalk u (e1 # q) w" "awalk w (r @ [e2]) v"
+    using walk_p es_decomp p_decomp by (auto simp: awalk_Cons_iff)
+  then have inc_w: "snd x = w" "fst y = w"
+    unfolding x_def y_def
+     apply -
+     apply (auto simp: awalk_Cons_iff awalk_verts_conv; fail)
+    apply (cases r)
+     apply auto
+    done
+  ultimately have "fst x \<noteq> snd y"
+    using progress by (auto simp: progressing_append_iff progressing_Cons)
+
+  have "x \<in> parcs G" "y \<in> parcs G"
+  then have "{x, (snd y, w)} \<subseteq> {e \<in> parcs G. snd e = w}"
+    using inc_w by auto (metis arcs_symmetric surjective_pairing)
+  then have "card {x, (snd y, w)} \<le> in_degree G w"
+    unfolding in_degree_def by (intro card_mono) auto
+    by (auto simp: card_insert_if split: if_split_asm)
+qed
+
+lemma (in pair_pseudo_graph) gen_iapath_same2E:
+  assumes "verts3 G \<subseteq> V" "V \<subseteq> pverts G"
+  and "gen_iapath V u p v" "gen_iapath V w q x"
+  and "e \<in> set p" "e \<in> set q"
+  obtains "p = q"
+using assms same_gen_iapath_by_common_arc by metis
+
+
+
+definition mk_graph' :: "IGraph \<Rightarrow> ig_vertex pair_pre_digraph" where
+  "mk_graph' IG \<equiv> \<lparr> pverts = set (ig_verts IG), parcs = set (ig_arcs IG)\<rparr>"
+
+definition mk_graph :: "IGraph \<Rightarrow> ig_vertex pair_pre_digraph" where
+  "mk_graph IG \<equiv> mk_symmetric (mk_graph' IG)"
+
+lemma verts_mkg': "pverts (mk_graph' G) = set (ig_verts G)"
+  unfolding mk_graph'_def by simp
+
+lemma arcs_mkg': "parcs (mk_graph' G) = set (ig_arcs G)"
+  unfolding mk_graph'_def by simp
+
+lemmas mkg'_simps = verts_mkg' arcs_mkg'
+
+lemma verts_mkg: "pverts (mk_graph G) = set (ig_verts G)"
+  unfolding mk_graph_def by (simp add: mkg'_simps )
+
+lemma parcs_mk_symmetric_symcl: "parcs (mk_symmetric G) = (arcs_ends G)\<^sup>s"
+  by (auto simp: parcs_mk_symmetric symcl_def arcs_ends_conv)
+
+lemma arcs_mkg: "parcs (mk_graph G) = (set (ig_arcs G))\<^sup>s"
+  unfolding mk_graph_def parcs_mk_symmetric_symcl by (simp add: arcs_mkg')
+
+lemmas mkg_simps = verts_mkg arcs_mkg
+
+
+
+definition iadj :: "IGraph \<Rightarrow> ig_vertex \<Rightarrow> ig_vertex \<Rightarrow> bool" where
+  "iadj G u v \<equiv> (u,v) \<in> set (ig_arcs G) \<or> (v,u) \<in> set (ig_arcs G)"
+
+definition "loop_free G \<equiv> (\<forall>e \<in> parcs G. fst e \<noteq> snd e)"
+
+
+lemma ig_opposite_simps:
+  "ig_opposite G (u,v) u = v" "ig_opposite G (v,u) u = v"
+unfolding ig_opposite_def by auto
+
+lemma distinct_ig_verts:
+  "distinct (ig_verts G)"
+by (cases G) (auto simp: ig_verts_def Abs_IGraph_inverse)
+
+lemma set_ig_arcs_verts:
+  assumes "IGraph_inv G" "(u,v) \<in> set (ig_arcs G)" shows "u \<in> set (ig_verts G)" "v \<in> set (ig_verts G)"
+  using assms unfolding IGraph_inv_def
+  by (auto simp: mkg'_simps dest: all_nth_imp_all_set)
+
+lemma IGraph_inv_conv:
+  "IGraph_inv G \<longleftrightarrow> pair_fin_digraph (mk_graph' G)"
+proof -
+  { assume "\<forall>e\<in>set (ig_arcs G). fst e \<in> set (ig_verts G) \<and> snd e \<in> set (ig_verts G)"
+    then have "pair_fin_digraph (mk_graph' G)"
+      by unfold_locales (auto simp: mkg'_simps) }
+  moreover
+  { assume "pair_fin_digraph (mk_graph' G)"
+    then interpret pair_fin_digraph "mk_graph' G" .
+    have "\<forall>e\<in>set (ig_arcs G). fst e \<in> set (ig_verts G) \<and> snd e \<in> set (ig_verts G)"
+      using tail_in_verts head_in_verts
+      by (fastforce simp: mkg'_simps in_set_conv_nth) }
+  ultimately
+  show ?thesis unfolding IGraph_inv_def by blast
+qed
+
+lemma IGraph_inv_conv':
+  "IGraph_inv G \<longleftrightarrow> pair_pseudo_graph (mk_graph G)"
+  unfolding IGraph_inv_conv
+proof
+  assume "pair_fin_digraph (mk_graph' G)"
+  interpret ppd: pair_fin_digraph "mk_graph' G" by fact
+  interpret pd: pair_fin_digraph "mk_graph G"
+    unfolding mk_graph_def ..
+  show "pair_pseudo_graph (mk_graph G)"
+    by unfold_locales (auto simp: mk_graph_def symmetric_mk_symmetric)
+next
+  assume A: "pair_pseudo_graph (mk_graph G)"
+  interpret ppg: pair_pseudo_graph "mk_graph G" by fact
+  show "pair_fin_digraph (mk_graph' G)"
+    using ppg.wellformed'
+    by unfold_locales (auto simp: mkg_simps mkg'_simps symcl_def, auto)
+qed
+
+lemma iadj_io_edge:
+  assumes "u \<in> set (ig_verts G)" "e \<in> set (ig_in_out_arcs G u)"
+  shows "iadj G u (ig_opposite G e u)"
+proof -
+  from assms obtain v where e: "e = (u,v) \<or>  e = (v,u)" "e \<in> set (ig_arcs G)"
+    unfolding ig_in_out_arcs_def by (cases e) auto
+  then have *: "ig_opposite G e u = v" by safe (auto simp: ig_opposite_def)
+
+  show ?thesis using e unfolding iadj_def * by auto
+qed
+
+lemma All_set_ig_verts: "(\<forall>v \<in> set (ig_verts G). P v) \<longleftrightarrow> (\<forall>i < ig_verts_cnt G. P (ig_verts G ! i))"
+  by (metis in_set_conv_nth ig_verts_cnt_def)
+
+lemma IGraph_imp_ppd_mkg':
+  assumes "IGraph_inv G" shows "pair_fin_digraph (mk_graph' G)"
+  using assms unfolding IGraph_inv_conv by auto
+
+lemma finite_symcl_iff: "finite (R\<^sup>s) \<longleftrightarrow> finite R"
+  unfolding symcl_def by blast
+
+lemma (in pair_fin_digraph) pair_pseudo_graphI_mk_symmetric:
+  "pair_pseudo_graph (mk_symmetric G)"
+  by unfold_locales
+     (auto simp: parcs_mk_symmetric symmetric_mk_symmetric wellformed')
+
+lemma IGraph_imp_ppg_mkg:
+  assumes "IGraph_inv G" shows "pair_pseudo_graph (mk_graph G)"
+  using assms unfolding mk_graph_def
+  by (intro pair_fin_digraph.pair_pseudo_graphI_mk_symmetric IGraph_imp_ppd_mkg')
+
+lemma IGraph_lf_imp_pg_mkg:
+  assumes "IGraph_inv G" "loop_free (mk_graph G)" shows "pair_graph (mk_graph G)"
+proof -
+  interpret ppg: pair_pseudo_graph "mk_graph G"
+    using assms(1) by (rule IGraph_imp_ppg_mkg)
+  show "pair_graph (mk_graph G)"
+    using assms by unfold_locales (auto simp: loop_free_def)
+qed
+
+lemma set_ig_arcs_imp_verts:
+  assumes "(u,v) \<in> set (ig_arcs G)" "IGraph_inv G" shows "u \<in> set (ig_verts G)" "v \<in> set (ig_verts G)"
+proof -
+  interpret pair_pseudo_graph "mk_graph G"
+    using assms by (auto intro: IGraph_imp_ppg_mkg)
+  from assms have "(u,v) \<in> parcs (mk_graph G)" by (simp add: mkg_simps symcl_def)
+  then have "u \<in> pverts (mk_graph G)" "v \<in> pverts (mk_graph G)" by (auto dest: wellformed')
+  then show "u \<in> set (ig_verts G)" "v \<in> set (ig_verts G)" by (auto simp: mkg_simps)
+qed
+
+lemma iadj_imp_verts:
+  assumes "iadj G u v" "IGraph_inv G" shows "u \<in> set (ig_verts G)" "v \<in> set (ig_verts G)"
+  using assms unfolding iadj_def by (auto dest: set_ig_arcs_imp_verts)
+
+lemma card_ig_neighbors_indegree:
+  assumes "IGraph_inv G"
+  shows "card (ig_neighbors G u) = in_degree (mk_graph G) u"
+proof -
+  have inj2: "inj_on (\<lambda>e. ig_opposite G e u) {e \<in> parcs (mk_graph G). snd e = u}"
+    unfolding ig_opposite_def by (rule inj_onI) (fastforce split: if_split_asm)
+
+  have "ig_neighbors G u = (\<lambda>e. ig_opposite G e u) ` {e \<in> parcs (mk_graph G). snd e = u}"
+    using assms unfolding ig_neighbors_def
+    by (auto simp: ig_opposite_simps symcl_def mkg_simps set_ig_arcs_verts intro!: rev_image_eqI)
+  then have "card (ig_neighbors G u) = card ((\<lambda>e. ig_opposite G e u) ` {e \<in> parcs (mk_graph G). snd e = u})"
+    by simp
+  also have "\<dots> = in_degree (mk_graph G) u"
+    unfolding in_degree_def in_arcs_def with_proj_simps
+    using inj2 by (rule card_image)
+  finally show ?thesis .
+qed
+
+lemma iadjD:
+  assumes "iadj G u v"
+  shows "\<exists>e \<in> set (ig_in_out_arcs G u). (e = (u,v) \<or> e = (v,u))"
+proof -
+  from assms obtain e where "e \<in> set (ig_arcs G)" "e = (u,v) \<or> e = (v,u)"
+    unfolding iadj_def by auto
+  then show ?thesis unfolding ig_in_out_arcs_def by auto
+qed
+
+lemma
+  ig_verts_empty[simp]: "ig_verts ig_empty = []" and
+  ig_verts_add_e[simp]: "ig_verts (ig_add_e G u v) = ig_verts G" and
+  ig_verts_add_v[simp]: "ig_verts (ig_add_v G v) = ig_verts G @ (if v \<in> set (ig_verts G) then [] else [v])"
+  unfolding ig_verts_def ig_empty_def ig_add_e_def ig_add_v_def
+  by (auto simp: Abs_IGraph_inverse distinct_ig_verts[simplified ig_verts_def])
+
+lemma
+  ig_arcs_empty[simp]: "ig_arcs ig_empty = []" and
+  ig_arcs_add_e[simp]: "ig_arcs (ig_add_e G u v) = ig_arcs G @ [(u,v)]" and
+  ig_arcs_add_v[simp]: "ig_arcs (ig_add_v G v) = ig_arcs G"
+  unfolding ig_arcs_def ig_empty_def ig_add_e_def ig_add_v_def
+  by (auto simp: Abs_IGraph_inverse distinct_ig_verts)
+
+
+
+
+
+definition is_subgraph_verts_inv :: "IGraph \<Rightarrow> IGraph \<Rightarrow> nat \<Rightarrow> bool" where
+  "is_subgraph_verts_inv G H i \<equiv> set (take i (ig_verts G)) \<subseteq> set (ig_verts H)"
+
+definition is_subgraph_arcs_inv :: "IGraph \<Rightarrow> IGraph \<Rightarrow> nat \<Rightarrow> bool" where
+  "is_subgraph_arcs_inv G H i \<equiv> \<forall>j < i. let (u,v) = ig_arcs G ! j in
+    ((u,v) \<in> set (ig_arcs H) \<or> (v,u) \<in> set (ig_arcs H))
+    \<and> u \<in> set (ig_verts G) \<and> v \<in> set (ig_verts G)"
+
+lemma is_subgraph_verts_0: "is_subgraph_verts_inv G H 0"
+  unfolding is_subgraph_verts_inv_def by auto
+
+lemma is_subgraph_verts_step:
+  assumes "is_subgraph_verts_inv G H i" "ig_verts G ! i \<in> set (ig_verts H)"
+  assumes "i < length (ig_verts G)"
+  shows "is_subgraph_verts_inv G H (Suc i)"
+  using assms by (auto simp: is_subgraph_verts_inv_def take_Suc_conv_app_nth)
+
+lemma is_subgraph_verts_last:
+  "is_subgraph_verts_inv G H (length (ig_verts G)) \<longleftrightarrow> pverts (mk_graph G) \<subseteq> pverts (mk_graph H)"
+  apply (auto simp: is_subgraph_verts_inv_def mkg_simps)
+  done
+
+lemma is_subgraph_arcs_0: "is_subgraph_arcs_inv G H 0"
+  unfolding is_subgraph_arcs_inv_def by auto
+
+lemma is_subgraph_arcs_step:
+  assumes "is_subgraph_arcs_inv G H i"
+    "e \<in> set (ig_arcs H) \<or> (snd e, fst e) \<in> set (ig_arcs H)"
+    "fst e \<in> set (ig_verts G)" "snd e \<in> set (ig_verts G)"
+  assumes "e = ig_arcs G ! i"
+  assumes "i < length (ig_arcs G)"
+  shows "is_subgraph_arcs_inv G H (Suc i)"
+  using assms by (auto simp: is_subgraph_arcs_inv_def less_Suc_eq)
+
+lemma wellformed_pseudo_graph_mkg:
+  shows "pair_wf_digraph (mk_graph G) = pair_pseudo_graph(mk_graph G)" (is "?L = ?R")
+proof
+  assume ?R
+  then interpret ppg: pair_pseudo_graph "mk_graph G" .
+  show ?L by unfold_locales
+next
+  assume ?L
+  moreover have "symmetric (mk_graph G)"
+    unfolding mk_graph_def by (simp add: symmetric_mk_symmetric)
+  ultimately show ?R
+    unfolding pair_wf_digraph_def
+    by unfold_locales (auto simp: mkg_simps finite_symcl_iff)
+qed
+
+lemma is_subgraph_arcs_last:
+  "is_subgraph_arcs_inv G H (length (ig_arcs G)) \<longleftrightarrow> parcs (mk_graph G) \<subseteq> parcs (mk_graph H) \<and> pair_pseudo_graph (mk_graph G)"
+proof -
+  have "is_subgraph_arcs_inv G H (length (ig_arcs G))
+      = (\<forall>(u,v) \<in> set (ig_arcs G). ((u,v) \<in> set (ig_arcs H) \<or> (v,u) \<in> set (ig_arcs H))
+        \<and> u \<in> set (ig_verts G) \<and> v \<in> set (ig_verts G))"
+    unfolding is_subgraph_arcs_inv_def
+    by (metis (lifting, no_types) all_nth_imp_all_set nth_mem)
+  also have "... \<longleftrightarrow> parcs (mk_graph G) \<subseteq> parcs (mk_graph H) \<and> pair_pseudo_graph (mk_graph G)"
+    unfolding wellformed_pseudo_graph_mkg[symmetric]
+    by (auto simp: mkg_simps pair_wf_digraph_def symcl_def)
+  finally show ?thesis .
+qed
+
+lemma is_subgraph_verts_arcs_last:
+  assumes "is_subgraph_verts_inv G H (ig_verts_cnt G)"
+  assumes "is_subgraph_arcs_inv G H (ig_arcs_cnt G)"
+  assumes "IGraph_inv H"
+  shows "subgraph (mk_graph G) (mk_graph H)" (is ?T1)
+        "pair_pseudo_graph (mk_graph G)" (is ?T2)
+proof -
+  interpret ppg: pair_pseudo_graph "mk_graph G"
+    using assms by (simp add: is_subgraph_arcs_last)
+  interpret ppgH: pair_pseudo_graph "mk_graph H" using assms by (intro IGraph_imp_ppg_mkg)
+  have "wf_digraph (with_proj (mk_graph G))" by unfold_locales
+  with assms show ?T1 ?T2
+    by (auto simp: is_subgraph_verts_last is_subgraph_arcs_last subgraph_def ppgH.wf_digraph)
+qed
+
+lemma is_subgraph_false:
+  assumes "subgraph (mk_graph G) (mk_graph H)"
+  obtains "\<forall>i < length (ig_verts G). ig_verts G ! i \<in> set (ig_verts H)"
+    "\<forall>i < length (ig_arcs G). let (u,v) = ig_arcs G ! i in
+      ((u,v)\<in> set (ig_arcs H) \<or> (v,u) \<in> set (ig_arcs H))
+      \<and> u \<in> set (ig_verts G) \<and> v \<in> set (ig_verts G)"
+proof
+  from assms
+  show "\<forall>i < length (ig_verts G). ig_verts G ! i \<in> set (ig_verts H)"
+  unfolding subgraph_def by (auto simp: mkg_simps)
+next
+  from assms have "is_subgraph_arcs_inv G H (length (ig_arcs G))"
+    unfolding is_subgraph_arcs_last subgraph_def wellformed_pseudo_graph_mkg[symmetric]
+    by (auto simp: wf_digraph_wp_iff)
+  then show "\<forall>i < length (ig_arcs G). let (u,v) = ig_arcs G ! i in
+      ((u,v)\<in> set (ig_arcs H) \<or> (v,u) \<in> set (ig_arcs H))
+      \<and> u \<in> set (ig_verts G) \<and> v \<in> set (ig_verts G)"
+    by (auto simp: is_subgraph_arcs_inv_def)
+qed
+
+lemma (in is_subgraph_impl) is_subgraph_spec:
+  "\<forall>\<sigma>. \<Gamma> \<turnstile>\<^sub>t \<lbrace>\<sigma>. IGraph_inv \<acute>H \<rbrace> \<acute>R :== PROC is_subgraph(\<acute>G, \<acute>H) \<lbrace> \<acute>G = \<^bsup>\<sigma>\<^esup>G \<and> \<acute>H = \<^bsup>\<sigma>\<^esup>H \<and> \<acute>R = (subgraph (mk_graph \<acute>G) (mk_graph \<acute>H) \<and> IGraph_inv \<acute>G)\<rbrace>"
+  apply (vcg_step spec=none)
+  apply (rewrite
+    at "whileAnno _ (named_loop ''verts'') _ _"
+    in for (\<sigma>)
+    to "whileAnno _
+      \<lbrace> is_subgraph_verts_inv \<acute>G \<acute>H \<acute>i \<and> \<acute>G = \<^bsup>\<sigma>\<^esup>G \<and> \<acute>H = \<^bsup>\<sigma>\<^esup>H \<and> \<acute>i \<le> ig_verts_cnt \<acute>G
+      \<and> IGraph_inv \<acute>H\<rbrace>
+      (MEASURE ig_verts_cnt \<acute>G - \<acute>i)
+      _"
+    annotate_named_loop_var)
+  apply (rewrite
+    at "whileAnno _ (named_loop ''arcs'') _ _"
+    in for (\<sigma>)
+    to "whileAnno _
+      \<lbrace> is_subgraph_arcs_inv \<acute>G \<acute>H \<acute>i \<and> \<acute>G = \<^bsup>\<sigma>\<^esup>G \<and> \<acute>H = \<^bsup>\<sigma>\<^esup>H \<and> \<acute>i \<le> ig_arcs_cnt \<acute>G
+      \<and> is_subgraph_verts_inv \<acute>G \<acute>H (length (ig_verts \<acute>G)) \<and> IGraph_inv \<acute>H \<rbrace>
+      (MEASURE ig_arcs_cnt \<acute>G - \<acute>i)
+      _"
+    annotate_named_loop_var)
+  apply vcg
+      apply (fastforce simp: is_subgraph_verts_0)
+     apply (fastforce simp: is_subgraph_verts_step elim: is_subgraph_false)
+    apply (fastforce simp: is_subgraph_arcs_0 not_less)
+   apply (auto simp: is_subgraph_arcs_step elim!: is_subgraph_false; fastforce)
+  apply (fastforce simp: IGraph_inv_conv' is_subgraph_verts_arcs_last)
+  done
+
+
+definition "is_loopfree_inv G k \<equiv> \<forall>j<k. fst (ig_arcs G ! j) \<noteq> snd (ig_arcs G ! j)"
+
+lemma is_loopfree_0:
+  "is_loopfree_inv G 0"
+  by (auto simp: is_loopfree_inv_def)
+
+lemma is_loopfree_step1:
+  assumes "is_loopfree_inv G n"
+  assumes "fst (ig_arcs G ! n) \<noteq> snd (ig_arcs G ! n)"
+  assumes "n < ig_arcs_cnt G"
+  shows "is_loopfree_inv G (Suc n)"
+  using assms unfolding is_loopfree_inv_def
+  by (auto intro: less_SucI elim: less_SucE)
+
+lemma is_loopfree_step2:
+  assumes "loop_free (mk_graph G)"
+  assumes "n < ig_arcs_cnt G"
+  shows "fst (ig_arcs G ! n) \<noteq> snd (ig_arcs G ! n)"
+  using assms unfolding is_loopfree_inv_def loop_free_def
+  by (auto simp: mkg_simps symcl_def)
+
+lemma is_loopfree_last:
+  assumes "is_loopfree_inv G (ig_arcs_cnt G)"
+  shows "loop_free (mk_graph G)"
+  using assms apply (auto simp: is_loopfree_inv_def loop_free_def mkg_simps in_set_conv_nth symcl_def)
+  apply (metis fst_eqD snd_eqD)+
+  done
+
+lemma (in is_loopfree_impl) is_loopfree_spec:
+  "\<forall>\<sigma>. \<Gamma> \<turnstile>\<^sub>t \<lbrace>\<sigma>. IGraph_inv \<acute>G \<rbrace> \<acute>R :== PROC is_loopfree(\<acute>G) \<lbrace> \<acute>G = \<^bsup>\<sigma>\<^esup>G \<and> \<acute>R = loop_free (mk_graph \<acute>G) \<rbrace>"
+  apply (vcg_step spec=none)
+  apply (rewrite
+    at "whileAnno _ (named_loop ''loop'') _ _"
+    in for (\<sigma>)
+    to "whileAnno _
+      \<lbrace> is_loopfree_inv \<acute>G \<acute>i \<and> \<acute>G = \<^bsup>\<sigma>\<^esup>G \<and> \<acute>i \<le> ig_arcs_cnt \<acute>G \<rbrace>
+      (MEASURE ig_arcs_cnt \<acute>G - \<acute>i)
+      _"
+    annotate_named_loop_var)
+  apply vcg
+    apply (fastforce simp: is_loopfree_0)
+   apply (fastforce intro: is_loopfree_step1 dest: is_loopfree_step2)
+  apply (fastforce simp: is_loopfree_last)
+  done
+
+
+
+
+definition select_nodes_inv :: "IGraph \<Rightarrow> IGraph \<Rightarrow> nat \<Rightarrow> bool" where
+  "select_nodes_inv G H i \<equiv> set (ig_verts H) = {v \<in> set (take i (ig_verts G)). card (ig_neighbors G v) \<ge> 3} \<and> IGraph_inv H"
+
+lemma select_nodes_inv_step:
+  fixes G H i
+  defines "v \<equiv> ig_verts G ! i"
+  assumes G_inv: "IGraph_inv G"
+  assumes sni_inv: "select_nodes_inv G H i"
+  assumes less: "i < ig_verts_cnt G"
+  assumes H': "H' = (if 3 \<le> card (ig_neighbors G v) then ig_add_v H v else H)"
+  shows "select_nodes_inv G H' (Suc i)"
+proof -
+  have *: "IGraph_inv H'" using sni_inv H'
+    unfolding IGraph_inv_def select_nodes_inv_def by auto
+  have take_Suc_i: "take (Suc i) (ig_verts G) = take i (ig_verts G) @ [v]"
+    using less unfolding v_def by (auto simp: take_Suc_conv_app_nth)
+  have X: "v \<notin> set (take i (ig_verts G))"
+    using G_inv less distinct_ig_verts unfolding v_def IGraph_inv_conv
+    by (auto simp: distinct_conv_nth in_set_conv_nth)
+
+  show ?thesis
+    unfolding select_nodes_inv_def using X sni_inv
+    by (simp only: *) (auto simp: take_Suc_i select_nodes_inv_def H')

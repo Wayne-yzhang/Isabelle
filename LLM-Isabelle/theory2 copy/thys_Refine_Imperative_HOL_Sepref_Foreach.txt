@@ -1,0 +1,265 @@
+theory Sepref_Foreach
+imports Sepref_HOL_Bindings "Lib/Pf_Add" "HOL-Library.Rewrite"
+begin
+
+subsection "Foreach Loops"
+
+subsubsection "Monadic Version of Foreach"
+
+
+definition "FOREACH_inv xs \<Phi> s \<equiv> 
+  case s of (it, \<sigma>) \<Rightarrow> \<exists>xs'. xs = xs' @ it \<and> \<Phi> (set it) \<sigma>"
+
+definition "monadic_FOREACH R \<Phi> S c f \<sigma>0 \<equiv> do {
+  ASSERT (finite S);
+  xs0 \<leftarrow> it_to_sorted_list R S;
+  (_,\<sigma>) \<leftarrow> RECT (\<lambda>W (xs,\<sigma>). do {
+    ASSERT (FOREACH_inv xs0 \<Phi> (xs,\<sigma>));
+    if xs\<noteq>[] then do {
+      b \<leftarrow> c \<sigma>;
+      if b then
+        FOREACH_body f (xs,\<sigma>) \<bind> W
+      else
+        RETURN (xs,\<sigma>)
+    } else RETURN (xs,\<sigma>)
+  }) (xs0,\<sigma>0);
+  RETURN \<sigma>
+}"
+
+lemma FOREACH_oci_to_monadic:
+  "FOREACHoci R \<Phi> S c f \<sigma>0 = monadic_FOREACH R \<Phi> S (\<lambda>\<sigma>. RETURN (c \<sigma>)) f \<sigma>0"
+  unfolding FOREACHoci_def monadic_FOREACH_def WHILEIT_def WHILEI_body_def
+  unfolding it_to_sorted_list_def FOREACH_cond_def FOREACH_inv_def
+  apply simp
+  apply (fo_rule arg_cong[THEN cong] | rule refl ext)+
+  apply (simp split: prod.split)
+  apply (rule refl)+
+  done
+
+
+definition "monadic_nfoldli l c f s \<equiv> RECT (\<lambda>D (l,s). case l of 
+    [] \<Rightarrow> RETURN s
+  | x#ls \<Rightarrow> do {
+      b \<leftarrow> c s;
+      if b then do { s'\<leftarrow>f x s; D (ls,s')} else RETURN s
+    }
+  ) (l,s)"
+
+lemma monadic_nfoldli_eq:
+  "monadic_nfoldli l c f s = (
+    case l of 
+      [] \<Rightarrow> RETURN s 
+    | x#ls \<Rightarrow> do {
+        b\<leftarrow>c s; 
+        if b then f x s \<bind> monadic_nfoldli ls c f else RETURN s
+      }
+  )"
+  apply (subst monadic_nfoldli_def)
+  apply (subst RECT_unfold)
+  apply (tagged_solver)
+  apply (subst monadic_nfoldli_def[symmetric])
+  apply simp
+  done
+  
+lemma monadic_nfoldli_simp[simp]:
+  "monadic_nfoldli [] c f s = RETURN s"
+  "monadic_nfoldli (x#ls) c f s = do {
+    b\<leftarrow>c s;
+    if b then f x s \<bind> monadic_nfoldli ls c f else RETURN s
+  }"
+  apply (subst monadic_nfoldli_eq, simp)
+  apply (subst monadic_nfoldli_eq, simp)
+  done
+
+lemma nfoldli_to_monadic:
+  "nfoldli l c f = monadic_nfoldli l (\<lambda>x. RETURN (c x)) f"
+  apply (induct l)
+  apply auto
+  done
+
+definition "nfoldli_alt l c f s \<equiv> RECT (\<lambda>D (l,s). case l of 
+    [] \<Rightarrow> RETURN s
+  | x#ls \<Rightarrow> do {
+      let b = c s;
+      if b then do { s'\<leftarrow>f x s; D (ls,s')} else RETURN s
+    }
+  ) (l,s)"
+
+lemma nfoldli_alt_eq:
+  "nfoldli_alt l c f s = (
+    case l of 
+      [] \<Rightarrow> RETURN s 
+    | x#ls \<Rightarrow> do {let b=c s; if b then f x s \<bind> nfoldli_alt ls c f else RETURN s}
+  )"
+  apply (subst nfoldli_alt_def)
+  apply (subst RECT_unfold)
+  apply (tagged_solver)
+  apply (subst nfoldli_alt_def[symmetric])
+  apply simp
+  done
+  
+lemma nfoldli_alt_simp[simp]:
+  "nfoldli_alt [] c f s = RETURN s"
+  "nfoldli_alt (x#ls) c f s = do {
+    let b = c s;
+    if b then f x s \<bind> nfoldli_alt ls c f else RETURN s
+  }"
+  apply (subst nfoldli_alt_eq, simp)
+  apply (subst nfoldli_alt_eq, simp)
+  done
+
+
+lemma nfoldli_alt:
+  "(nfoldli::'a list \<Rightarrow> ('b \<Rightarrow> bool) \<Rightarrow> ('a \<Rightarrow> 'b \<Rightarrow> 'b nres) \<Rightarrow> 'b \<Rightarrow> 'b nres)
+  = nfoldli_alt"
+proof (intro ext)
+  fix l::"'a list" and c::"'b \<Rightarrow> bool" and f::"'a \<Rightarrow> 'b \<Rightarrow> 'b nres" and s :: 'b
+  have "nfoldli l c f = nfoldli_alt l c f"
+    by (induct l) auto
+  thus "nfoldli l c f s = nfoldli_alt l c f s" by simp
+qed
+
+lemma monadic_nfoldli_rec:
+  "monadic_nfoldli x' c f \<sigma>
+          \<le>\<Down>Id (REC\<^sub>T
+             (\<lambda>W (xs, \<sigma>).
+                 ASSERT (FOREACH_inv xs0 I (xs, \<sigma>)) \<bind>
+                 (\<lambda>_. if xs = [] then RETURN (xs, \<sigma>)
+                      else c \<sigma> \<bind>
+                           (\<lambda>b. if b then FOREACH_body f (xs, \<sigma>) \<bind> W
+                                else RETURN (xs, \<sigma>))))
+             (x', \<sigma>) \<bind>
+            (\<lambda>(_, y). RETURN y))"
+  apply (induct x' arbitrary: \<sigma>)
+
+  apply (subst RECT_unfold, refine_mono)
+  apply (simp)
+  apply (rule le_ASSERTI)
+  apply simp
+
+  apply (subst RECT_unfold, refine_mono)
+  apply (subst monadic_nfoldli_simp)
+  apply (simp del: conc_Id cong: if_cong)
+  apply refine_rcg
+  apply simp
+  apply (clarsimp simp add: FOREACH_body_def)
+  apply (rule_tac R="br (Pair x') (\<lambda>_. True)" in intro_prgR)
+  apply (simp add: pw_le_iff refine_pw_simps br_def)
+
+  apply (rule order_trans)
+  apply rprems
+  apply (simp add: br_def)
+  done
+
+lemma monadic_nfoldli_arities[sepref_monadify_arity]:
+  "monadic_nfoldli \<equiv> \<lambda>\<^sub>2s c f \<sigma>. SP (monadic_nfoldli)$s$(\<lambda>\<^sub>2x. c$x)$(\<lambda>\<^sub>2x \<sigma>. f$x$\<sigma>)$\<sigma>"
+  by (simp_all)
+
+lemma monadic_nfoldli_comb[sepref_monadify_comb]:
+  "\<And>s c f \<sigma>. (monadic_nfoldli)$s$c$f$\<sigma> \<equiv> 
+    Refine_Basic.bind$(EVAL$s)$(\<lambda>\<^sub>2s. Refine_Basic.bind$(EVAL$\<sigma>)$(\<lambda>\<^sub>2\<sigma>. 
+      SP (monadic_nfoldli)$s$c$f$\<sigma>
+    ))"
+  by (simp_all)
+
+lemma list_rel_congD: 
+  assumes A: "(li,l)\<in>\<langle>S\<rangle>list_rel" 
+  shows "(li,l)\<in>\<langle>S\<inter>(set li\<times>set l)\<rangle>list_rel"
+proof -
+  {
+    fix Si0 S0
+    assume "set li \<subseteq> Si0" "set l \<subseteq> S0"
+    with A have "(li,l)\<in>\<langle>S\<inter>(Si0\<times>S0)\<rangle>list_rel"
+      by (induction rule: list_rel_induct) auto  
+  } from this[OF order_refl order_refl] show ?thesis .
+qed      
+    
+lemma monadic_nfoldli_refine[refine]:
+  assumes L: "(li, l) \<in> \<langle>S\<rangle>list_rel"
+    and  [simp]: "(si, s) \<in> R"
+    and CR[refine]: "\<And>si s. (si,s)\<in>R \<Longrightarrow> ci si \<le>\<Down>bool_rel (c s)"
+    and [refine]: "\<And>xi x si s. \<lbrakk> (xi,x)\<in>S; x\<in>set l; (si,s)\<in>R; inres (c s) True \<rbrakk> \<Longrightarrow> fi xi si \<le> \<Down>R (f x s)"
+  shows "monadic_nfoldli li ci fi si \<le> \<Down> R (monadic_nfoldli l c f s)"
+    
+  supply RELATESI[of "S\<inter>(set li\<times>set l)", refine_dref_RELATES]
+  supply RELATESI[of R, refine_dref_RELATES]
+  unfolding monadic_nfoldli_def  
+  apply (refine_rcg bind_refine')
+  apply refine_dref_type  
+  apply (vc_solve simp: list_rel_congD[OF L]) 
+  done
+    
+    
+lemma monadic_FOREACH_itsl:
+  fixes R I tsl
+  shows 
+    "do { l \<leftarrow> it_to_sorted_list R s; monadic_nfoldli l c f \<sigma> } 
+     \<le> monadic_FOREACH R I s c f \<sigma>"
+    apply (rule refine_IdD)
+    unfolding monadic_FOREACH_def it_to_sorted_list_def
+    apply (refine_rcg)
+    apply simp
+    apply (rule monadic_nfoldli_rec[simplified])
+    done
+
+lemma FOREACHoci_itsl:
+  fixes R I tsl
+  shows 
+    "do { l \<leftarrow> it_to_sorted_list R s; nfoldli l c f \<sigma> } 
+     \<le> FOREACHoci R I s c f \<sigma>"
+    apply (rule refine_IdD)
+    unfolding FOREACHoci_def it_to_sorted_list_def
+    apply refine_rcg
+    apply simp
+    apply (rule nfoldli_while)
+    done
+
+lemma [def_pat_rules]:
+  "FOREACHc \<equiv> PR_CONST (FOREACHoci (\<lambda>_ _. True) (\<lambda>_ _. True))"
+  "FOREACHci$I \<equiv> PR_CONST (FOREACHoci (\<lambda>_ _. True) I)"
+  "FOREACHi$I \<equiv> \<lambda>\<^sub>2s. PR_CONST (FOREACHoci (\<lambda>_ _. True) I)$s$(\<lambda>\<^sub>2x. True)"
+  "FOREACH \<equiv> FOREACHi$(\<lambda>\<^sub>2_ _. True)"
+  by (simp_all add: 
+    FOREACHci_def FOREACHi_def[abs_def] FOREACHc_def FOREACH_def[abs_def])
+  
+term "FOREACHoci R I"
+lemma id_FOREACHoci[id_rules]: "PR_CONST (FOREACHoci R I) ::\<^sub>i 
+  TYPE('c set \<Rightarrow> ('d \<Rightarrow> bool) \<Rightarrow> ('c \<Rightarrow> 'd \<Rightarrow> 'd nres) \<Rightarrow> 'd \<Rightarrow> 'd nres)"
+  by simp
+
+lemma FOREACH_arities[sepref_monadify_arity]:
+  "PR_CONST (FOREACHoci R I) \<equiv> \<lambda>\<^sub>2s c f \<sigma>. SP (PR_CONST (FOREACHoci R I))$s$(\<lambda>\<^sub>2x. c$x)$(\<lambda>\<^sub>2x \<sigma>. f$x$\<sigma>)$\<sigma>"
+  by (simp_all)
+
+lemma FOREACHoci_comb[sepref_monadify_comb]:
+  "\<And>s c f \<sigma>. (PR_CONST (FOREACHoci R I))$s$(\<lambda>\<^sub>2x. c x)$f$\<sigma> \<equiv> 
+    Refine_Basic.bind$(EVAL$s)$(\<lambda>\<^sub>2s. Refine_Basic.bind$(EVAL$\<sigma>)$(\<lambda>\<^sub>2\<sigma>. 
+      SP (PR_CONST (monadic_FOREACH R I))$s$(\<lambda>\<^sub>2x. (EVAL$(c x)))$f$\<sigma>
+    ))"
+  by (simp_all add: FOREACH_oci_to_monadic)
+
+subsubsection "Imperative Version of nfoldli"
+  equivalent to the monadic version in the nres-monad\<close>
+    apply (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+      applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+        applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+          applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+        applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+        applyS (tactic \<open>Sepref_Frame.merge_tac (K (K no_tac)) @{context} 1\<close>)
+    apply (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+    apply (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+    applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+    applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+  apply (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+  apply (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+  apply (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+  applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+  applyS (tactic \<open>Sepref_Frame.merge_tac (K (K no_tac)) @{context} 1\<close>)
+        applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+    applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+    applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+    applyS (tactic \<open>Sepref_Frame.frame_tac (K (K no_tac)) @{context} 1\<close>)
+text \<open>foldli\<close>
+subsubsection \<open>Deforestation\<close>
+subsection \<open>For Loops\<close>
+text \<open>This lemma is used to manually convert a fold to a loop over indices. \<close>

@@ -1,0 +1,218 @@
+theory "Ast" 
+
+imports
+  Main
+  "HOL-Library.Datatype_Records"
+  "LEM.Lem_pervasives"
+  "Lib"
+  "Namespace"
+  "FpSem"
+
+begin 
+
+
+datatype lit =
+    IntLit " int "
+  | Char " char "
+  | StrLit " string "
+  | Word8 " 8 word "
+  | Word64 " 64 word "
+
+datatype opn = Plus | Minus | Times | Divide | Modulo
+datatype opb = Lt | Gt | Leq | Geq
+datatype opw = Andw | Orw | Xor | Add | Sub
+datatype shift = Lsl | Lsr | Asr | Ror
+
+type_synonym modN =" string "
+
+type_synonym varN =" string "
+
+type_synonym conN =" string "
+
+type_synonym typeN =" string "
+
+type_synonym tvarN =" string "
+
+datatype word_size = W8 | W64
+
+datatype op0 =
+    Opn " opn "
+  | Opb " opb "
+  | Opw " word_size " " opw "
+  | Shift " word_size " " shift " " nat "
+  | Equality
+  | FP_cmp " fp_cmp_op "
+  | FP_uop " fp_uop_op "
+  | FP_bop " fp_bop_op "
+  | Opapp
+  | Opassign
+  | Opref
+  | Opderef
+  | Aw8alloc
+  | Aw8sub
+  | Aw8length
+  | Aw8update
+  | WordFromInt " word_size "
+  | WordToInt " word_size "
+  | CopyStrStr
+  | CopyStrAw8
+  | CopyAw8Str
+  | CopyAw8Aw8
+  | Ord
+  | Chr
+  | Chopb " opb "
+  | Implode
+  | Strsub
+  | Strlen
+  | Strcat
+  | VfromList
+  | Vsub
+  | Vlength
+  | Aalloc
+  | AallocEmpty
+  | Asub
+  | Alength
+  | Aupdate
+  | ConfigGC
+  | FFI " string "
+
+datatype lop =
+    And
+  | Or
+
+datatype tctor =
+    TC_name " (modN, typeN) id0 "
+  | TC_int
+  | TC_char
+  | TC_string
+  | TC_ref
+  | TC_word8
+  | TC_word64
+  | TC_word8array
+  | TC_fn
+  | TC_tup
+  | TC_exn
+  | TC_vector
+  | TC_array
+
+datatype t =
+    Tvar " tvarN "
+  | Tvar_db " nat "
+  | Tapp " t list " " tctor "
+
+definition Tint  :: " t "  where 
+     " Tint = ( Tapp [] TC_int )"
+
+definition Tchar  :: " t "  where 
+     " Tchar = ( Tapp [] TC_char )"
+
+definition Tstring  :: " t "  where 
+     " Tstring = ( Tapp [] TC_string )"
+
+definition Tref  :: " t \<Rightarrow> t "  where 
+     " Tref t1 = ( Tapp [t1] TC_ref )"
+
+fun  TC_word  :: " word_size \<Rightarrow> tctor "  where 
+     " TC_word W8 = ( TC_word8 )"
+|"     TC_word W64 = ( TC_word64 )"
+
+definition Tword  :: " word_size \<Rightarrow> t "  where 
+     " Tword wz = ( Tapp [] (TC_word wz))"
+
+definition Tword8  :: " t "  where 
+     " Tword8 = ( Tword W8 )"
+
+definition Tword64  :: " t "  where 
+     " Tword64 = ( Tword W64 )"
+
+definition Tword8array  :: " t "  where 
+     " Tword8array = ( Tapp [] TC_word8array )"
+
+definition Tfn  :: " t \<Rightarrow> t \<Rightarrow> t "  where 
+     " Tfn t1 t2 = ( Tapp [t1,t2] TC_fn )"
+
+definition Texn  :: " t "  where 
+     " Texn = ( Tapp [] TC_exn )"
+
+
+datatype pat =
+    Pany
+  | Pvar " varN "
+  | Plit " lit "
+  | Pcon "  ( (modN, conN)id0)option " " pat list "
+  | Pref " pat "
+  | Ptannot " pat " " t "
+
+datatype exp0 =
+    Raise " exp0 "
+  | Handle " exp0 " " (pat * exp0) list "
+  | Lit " lit "
+  | Con "  ( (modN, conN)id0)option " " exp0 list "
+  | Var " (modN, varN) id0 "
+  | Fun " varN " " exp0 "
+  | App " op0 " " exp0 list "
+  | Log " lop " " exp0 " " exp0 "
+  | If " exp0 " " exp0 " " exp0 "
+  | Mat " exp0 " " (pat * exp0) list "
+  | Let "  varN option " " exp0 " " exp0 "
+  | Letrec " (varN * varN * exp0) list " " exp0 "
+  | Tannot " exp0 " " t "
+  | Lannot " exp0 " " locs "
+
+type_synonym type_def =" ( tvarN list * typeN * (conN * t list) list) list "
+
+datatype dec =
+    Dlet " locs " " pat " " exp0 "
+  | Dletrec " locs " " (varN * varN * exp0) list "
+  | Dtype " locs " " type_def "
+  | Dtabbrev " locs " " tvarN list " " typeN " " t "
+  | Dexn " locs " " conN " " t list "
+
+type_synonym decs =" dec list "
+
+datatype spec =
+    Sval " varN " " t "
+  | Stype " type_def "
+  | Stabbrev " tvarN list " " typeN " " t "
+  | Stype_opq " tvarN list " " typeN "
+  | Sexn " conN " " t list "
+
+type_synonym specs =" spec list "
+
+datatype top0 =
+    Tmod " modN " "  specs option " " decs "
+  | Tdec " dec "
+
+type_synonym prog =" top0 list "
+
+function (sequential,domintros) 
+pats_bindings  :: "(pat)list \<Rightarrow>(string)list \<Rightarrow>(string)list "  
+                   and
+pat_bindings  :: " pat \<Rightarrow>(string)list \<Rightarrow>(string)list "  where 
+     "
+pat_bindings Pany already_bound = (
+  already_bound )"
+|"
+pat_bindings (Pvar n) already_bound = (
+  n # already_bound )"
+|"
+pat_bindings (Plit l) already_bound = (
+  already_bound )"
+|"
+pat_bindings (Pcon _ ps) already_bound = (
+  pats_bindings ps already_bound )"
+|"
+pat_bindings (Pref p) already_bound = (
+  pat_bindings p already_bound )"
+|"
+pat_bindings (Ptannot p _) already_bound = (
+  pat_bindings p already_bound )"
+|"
+pats_bindings [] already_bound = (
+  already_bound )"
+|"
+pats_bindings (p # ps) already_bound = (
+  pats_bindings ps (pat_bindings p already_bound))" 
+by pat_completeness auto
+
+end

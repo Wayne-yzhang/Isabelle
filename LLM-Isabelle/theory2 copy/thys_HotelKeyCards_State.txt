@@ -1,0 +1,169 @@
+theory State
+imports Basis
+begin
+
+declare if_split_asm[split]
+
+
+
+record state =
+ owns :: "room \<Rightarrow> guest option"
+ currk :: "room \<Rightarrow> key"
+ issued :: "key set"
+ cards :: "guest \<Rightarrow> card set"
+ roomk :: "room \<Rightarrow> key"
+ isin :: "room \<Rightarrow> guest set"
+ safe :: "room \<Rightarrow> bool"
+
+
+inductive_set reach :: "state set"
+where
+init:
+"inj initk \<Longrightarrow>
+\<lparr> owns = (\<lambda>r. None), currk = initk, issued = range initk,
+  cards = (\<lambda>g. {}), roomk = initk, isin = (\<lambda>r. {}),
+  safe = (\<lambda>r. True) \<rparr> \<in> reach"
+
+| check_in:
+"\<lbrakk> s \<in> reach; k \<notin> issued s \<rbrakk> \<Longrightarrow>
+s\<lparr> currk := (currk s)(r := k), issued := issued s \<union> {k},
+   cards := (cards s)(g := cards s g \<union> {(currk s r, k)}),
+   owns :=  (owns s)(r := Some g),
+   safe := (safe s)(r := False) \<rparr> \<in> reach"
+
+| enter_room:
+"\<lbrakk> s \<in> reach; (k,k') \<in> cards s g; roomk s r \<in> {k,k'} \<rbrakk> \<Longrightarrow>
+s\<lparr> isin := (isin s)(r := isin s r \<union> {g}),
+   roomk := (roomk s)(r := k'),
+   safe := (safe s)(r := owns s r = \<lfloor>g\<rfloor> \<and> isin s r = {} \<and> k' = currk s r
+                              \<or> safe s r)
+  \<rparr> \<in> reach"
+
+| exit_room:
+"\<lbrakk> s \<in> reach;  g \<in> isin s r \<rbrakk> \<Longrightarrow>
+s\<lparr> isin := (isin s)(r := isin s r - {g}) \<rparr> \<in> reach"
+
+
+lemma currk_issued[simp]: "s : reach \<Longrightarrow> currk s r : issued s"
+by (induct set: reach) auto
+
+lemma key1_issued[simp]: "s : reach \<Longrightarrow> (k,k') : cards s g \<Longrightarrow> k : issued s"
+by (induct set: reach) auto
+
+lemma key2_issued[simp]: "s : reach \<Longrightarrow> (k,k') : cards s g \<Longrightarrow> k' : issued s"
+by (induct set: reach) auto
+
+lemma roomk_issued[simp]: "s : reach \<Longrightarrow> roomk s k : issued s"
+by (induct set: reach) auto
+
+lemma currk_inj[simp]:
+ "s : reach \<Longrightarrow> \<forall>r r'. (currk s r = currk s r') = (r = r')"
+by (induct set: reach) (auto simp:inj_on_def)
+
+lemma key1_not_currk[simp]:
+ "s : reach \<Longrightarrow> (currk s r,k') \<notin> cards s g"
+by (induct set: reach) auto
+
+lemma guest_key2_disj[simp]: 
+ "\<lbrakk> s : reach; (k\<^sub>1,k) \<in> cards s g\<^sub>1; (k\<^sub>2,k) \<in> cards s g\<^sub>2 \<rbrakk> \<Longrightarrow> g\<^sub>1=g\<^sub>2"
+by (induct set: reach) auto
+
+lemma safe_roomk_currk[simp]:
+ "s : reach \<Longrightarrow> safe s r \<Longrightarrow> roomk s r = currk s r"
+by (induct set: reach) auto
+
+
+lemma safe_only_owner_enter_normal_aux[simp]:
+ "\<lbrakk> s : reach; safe s r; (k',roomk s r) \<in> cards s g \<rbrakk> \<Longrightarrow> owns s r = Some g"
+by (induct set: reach) (auto)
+
+lemma safe_only_owner_enter_normal:
+assumes "s : reach"
+shows "\<lbrakk> safe s r; (k',roomk s r) \<in> cards s g \<rbrakk> \<Longrightarrow> owns s r = Some g"
+using assms
+proof induct
+  case (enter_room s k k1 g1 r1)
+  let ?s' = "s\<lparr>isin := (isin s)(r1 := isin s r1 \<union> {g1}),
+               roomk := (roomk s)(r1 := k1),
+               safe := (safe s)
+                 (r1 :=
+                    owns s r1 = Some g1 \<and> isin s r1 = {} \<and> k1 = currk s r1 \<or>
+                    safe s r1)\<rparr>"
+  thus ?case
+  proof
+    assume [symmetric,simp]: "roomk s r1 = k"
+    show ?thesis
+    proof (cases "r1 = r")
+      assume "r1 \<noteq> r" with IH safe card_g show ?thesis by simp
+    next
+      assume [simp]: "r1 = r"
+      hence safe': "owns s r = Some g1 \<or> safe s r"
+        using safe by auto
+      thus ?thesis
+      proof
+        assume "safe s r"
+        with s card_g1 have False by simp
+        thus ?thesis ..
+      next
+        assume [simp]: "owns s r = Some g1"
+        thus "owns ?s' r = Some g"
+          using s card_g card_g1 by simp
+      qed
+    qed
+  next
+    assume "roomk s r1 = k1"
+    with enter_room show ?case by auto
+  qed
+qed auto
+
+theorem "s : reach \<Longrightarrow> safe s r \<Longrightarrow> g : isin s r \<Longrightarrow> owns s r = Some g"
+by (induct set: reach) auto
+
+theorem safe: assumes "s : reach"
+shows "safe s r \<Longrightarrow> g : isin s r \<Longrightarrow> owns s r = Some g"
+using assms
+proof induct
+  case (enter_room s k1 k2 g1 r1)
+  let ?s' = "s\<lparr>isin := (isin s)(r1 := isin s r1 \<union> {g1}),
+               roomk := (roomk s)(r1 := k2),
+               safe := (safe s)
+                 (r1 :=
+                    owns s r1 = Some g1 \<and> isin s r1 = {} \<and> k2 = currk s r1 \<or>
+                    safe s r1)\<rparr>"
+  show ?case
+    proof (cases "r1 = r")
+      assume "r1 \<noteq> r" with IH isin safe show ?thesis by simp
+    next
+      assume [simp]: "r1 = r"
+      have "g \<in> isin s r \<or> g = g1" using isin by auto
+      thus ?thesis
+      proof
+        assume g: "g \<in> isin s r"
+        then have "safe s r" using safe by auto
+        with g show ?thesis using IH by simp
+      next
+        assume [simp]: "g = g1"
+        have "k2 = roomk s r1 \<or> k1 = roomk s r1"
+        thus ?thesis
+        proof
+          assume "k2 = roomk s r1"
+          with card_g1 s safe show ?thesis
+            by auto
+      next
+        assume [simp]: "k1 = roomk s r1"
+        have "owns s r = Some g1 \<or> safe s r" using safe by auto
+        thus ?thesis
+        proof
+          assume "owns s r = Some g1" thus ?thesis by simp
+        next
+          assume "safe s r"
+          hence False using s card_g1 by auto
+          thus ?thesis ..
+        qed
+      qed
+    qed
+  qed
+qed auto
+
+
+end

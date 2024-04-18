@@ -1,0 +1,253 @@
+theory Library_Extras imports
+  "HOL-Analysis.Polytope" 
+
+begin
+
+
+lemma Inter_over_Union:
+  "\<Inter> {\<Union> (\<F> x) |x. x \<in> S} = \<Union> {\<Inter> (G ` S) |G. \<forall>x\<in>S. G x \<in> \<F> x}" 
+proof -
+  have "\<And>x. \<forall>s\<in>S. \<exists>X \<in> \<F> s. x \<in> X \<Longrightarrow> \<exists>G. (\<forall>x\<in>S. G x \<in> \<F> x) \<and> (\<forall>s\<in>S. x \<in> G s)"
+    by metis
+  then show ?thesis
+    by (auto simp flip: all_simps ex_simps)
+qed
+
+lemmas closure_Int_convex = convex_closure_inter_two
+
+lemmas span_not_UNIV_orthogonal = span_not_univ_orthogonal
+
+lemma convex_closure_rel_interior_Int:
+  assumes "\<And>S. S\<in>\<F> \<Longrightarrow> convex (S :: 'n::euclidean_space set)"
+    and "\<Inter>(rel_interior ` \<F>) \<noteq> {}"
+  shows "\<Inter>(closure ` \<F>) \<subseteq> closure (\<Inter>(rel_interior ` \<F>))"
+proof -
+  obtain x where x: "\<forall>S\<in>\<F>. x \<in> rel_interior S"
+    using assms by auto
+  show ?thesis
+  proof
+    fix y
+    assume y: "y \<in> \<Inter> (closure ` \<F>)"
+    show "y \<in> closure (\<Inter>(rel_interior ` \<F>))"
+    proof (cases "y=x")
+      case True
+      with closure_subset x show ?thesis 
+        by fastforce
+    next
+      case False
+      {         fix \<epsilon> :: real
+        assume e: "\<epsilon> > 0"
+        define e1 where "e1 = min 1 (\<epsilon>/norm (y - x))"
+        then have e1: "e1 > 0" "e1 \<le> 1" "e1 * norm (y - x) \<le> \<epsilon>"
+          by simp_all
+        define z where "z = y - e1 *\<^sub>R (y - x)"
+        {
+          fix S
+          assume "S \<in> \<F>"
+          then have "z \<in> rel_interior S"
+            using rel_interior_closure_convex_shrink[of S x y e1] assms x y e1 z_def
+            by auto
+        }
+        then have *: "z \<in> \<Inter>(rel_interior ` \<F>)"
+          by auto
+        have "\<exists>x\<in>\<Inter> (rel_interior ` \<F>). dist x y \<le> \<epsilon>"
+          by force
+      } then
+      show ?thesis
+        by (auto simp: closure_approachable_le)
+    qed
+  qed
+qed
+
+
+lemma closure_Inter_convex:
+  fixes \<F> :: "'n::euclidean_space set set"
+  assumes  "\<And>S. S \<in> \<F> \<Longrightarrow> convex S" and "\<Inter>(rel_interior ` \<F>) \<noteq> {}"
+  shows "closure(\<Inter>\<F>) = \<Inter>(closure ` \<F>)"
+proof -
+  have "\<Inter>(closure ` \<F>) \<le> closure (\<Inter>(rel_interior ` \<F>))"
+    by (meson assms convex_closure_rel_interior_Int)
+  moreover
+  have "closure (\<Inter>(rel_interior ` \<F>)) \<subseteq> closure (\<Inter>\<F>)"
+    using rel_interior_inter_aux closure_mono[of "\<Inter>(rel_interior ` \<F>)" "\<Inter>\<F>"]
+    by auto
+  ultimately show ?thesis
+    using closure_Int[of \<F>] by blast
+qed
+
+lemma closure_Inter_convex_open:
+  "(\<And>S::'n::euclidean_space set. S \<in> \<F> \<Longrightarrow> convex S \<and> open S)
+            \<Longrightarrow> closure(\<Inter>\<F>) = (if \<Inter>\<F> = {} then {} else \<Inter>(closure ` \<F>))"
+  by (simp add: closure_Inter_convex rel_interior_open)
+
+lemma empty_interior_subset_hyperplane_aux:
+  fixes S :: "'a::euclidean_space set"
+  assumes "convex S" "0 \<in> S" and empty_int: "interior S = {}"
+  shows "\<exists>a b. a\<noteq>0 \<and> S \<subseteq> {x. a \<bullet> x = b}"
+proof -
+  have False if "\<And>a. a = 0 \<or> (\<forall>b. \<exists>T \<in> S. a \<bullet> T \<noteq> b)"
+  proof -
+    have rel_int: "rel_interior S \<noteq> {}"
+      using assms rel_interior_eq_empty by auto
+    moreover 
+    have "dim S \<noteq> dim (UNIV::'a set)"
+    then obtain a where "a \<noteq> 0" and a: "span S \<subseteq> {x. a \<bullet> x = 0}"
+      using lowdim_subset_hyperplane
+      by (metis dim_UNIV dim_subset_UNIV order_less_le)
+    have "span UNIV = span S"
+      by (metis span_base span_not_UNIV_orthogonal that)
+    then have "UNIV \<subseteq> affine hull S"
+    ultimately show False
+  qed
+  then show ?thesis
+    by blast
+qed
+
+lemma empty_interior_subset_hyperplane:
+  fixes S :: "'a::euclidean_space set"
+  assumes "convex S" and int: "interior S = {}"
+  obtains a b where "a \<noteq> 0" "S \<subseteq> {x. a \<bullet> x = b}"
+proof (cases "S = {}")
+  case True
+  then show ?thesis
+    using that by blast
+next
+  case False
+  then obtain u where "u \<in> S"
+    by blast
+  have "\<exists>a b. a \<noteq> 0 \<and> (\<lambda>x. x - u) ` S \<subseteq> {x. a \<bullet> x = b}"
+  proof (rule empty_interior_subset_hyperplane_aux)
+    show "convex ((\<lambda>x. x - u) ` S)"
+    show "0 \<in> (\<lambda>x. x - u) ` S"
+    show "interior ((\<lambda>x. x - u) ` S) = {}"
+      by (simp add: int interior_translation_subtract)
+  qed
+  then obtain a b where "a \<noteq> 0" and ab: "(\<lambda>x. x - u) ` S \<subseteq> {x. a \<bullet> x = b}"
+    by metis
+  then have "S \<subseteq> {x. a \<bullet> x = b + (a \<bullet> u)}"
+    using ab by (auto simp: algebra_simps)
+  then show ?thesis
+qed
+
+lemma aff_dim_psubset:
+  "(affine hull S) \<subset> (affine hull T) \<Longrightarrow> aff_dim S < aff_dim T"
+  by (metis aff_dim_affine_hull aff_dim_empty aff_dim_subset affine_affine_hull affine_dim_equal order_less_le)
+
+lemma aff_dim_eq_full_gen:
+  "S \<subseteq> T \<Longrightarrow> (aff_dim S = aff_dim T \<longleftrightarrow> affine hull S = affine hull T)"
+  by (smt (verit, del_insts) aff_dim_affine_hull2 aff_dim_psubset hull_mono psubsetI)
+
+lemma aff_dim_eq_full:
+  fixes S :: "'n::euclidean_space set"
+  shows "aff_dim S = (DIM('n)) \<longleftrightarrow> affine hull S = UNIV"
+  by (metis aff_dim_UNIV aff_dim_affine_hull affine_hull_UNIV)
+
+
+
+definition conic :: "'a::real_vector set \<Rightarrow> bool"
+  where "conic S \<equiv> \<forall>x c. x \<in> S \<longrightarrow> 0 \<le> c \<longrightarrow> (c *\<^sub>R x) \<in> S"
+
+lemma conicD: "\<lbrakk>conic S; x \<in> S; 0 \<le> c\<rbrakk> \<Longrightarrow> (c *\<^sub>R x) \<in> S"
+  by (meson conic_def)
+
+lemma subspace_imp_conic: "subspace S \<Longrightarrow> conic S"
+  by (simp add: conic_def subspace_def)
+
+lemma conic_empty [simp]: "conic {}"
+  using conic_def by blast
+
+lemma conic_UNIV: "conic UNIV"
+  by (simp add: conic_def)
+
+lemma conic_Inter: "(\<And>S. S \<in> \<F> \<Longrightarrow> conic S) \<Longrightarrow> conic(\<Inter>\<F>)"
+  by (simp add: conic_def)
+
+lemma conic_linear_image:
+  "\<lbrakk>conic S; linear f\<rbrakk> \<Longrightarrow> conic(f ` S)"
+  by (smt (verit) conic_def image_iff linear.scaleR)
+
+lemma conic_linear_image_eq:
+  "\<lbrakk>linear f; inj f\<rbrakk> \<Longrightarrow> conic (f ` S) \<longleftrightarrow> conic S"
+  by (smt (verit) conic_def conic_linear_image inj_image_mem_iff linear_cmul)
+
+lemma conic_mul: "\<lbrakk>conic S; x \<in> S; 0 \<le> c\<rbrakk> \<Longrightarrow> (c *\<^sub>R x) \<in> S"
+  using conic_def by blast
+
+lemma conic_conic_hull: "conic(conic hull S)"
+  by (metis (no_types, lifting) conic_Inter hull_def mem_Collect_eq)
+
+lemma conic_hull_eq: "(conic hull S = S) \<longleftrightarrow> conic S"
+  by (metis conic_conic_hull hull_same)
+
+lemma conic_hull_UNIV [simp]: "conic hull UNIV = UNIV"
+  by simp
+
+lemma conic_negations: "conic S \<Longrightarrow> conic (image uminus S)"
+  by (auto simp: conic_def image_iff)
+
+lemma conic_span [iff]: "conic(span S)"
+  by (simp add: subspace_imp_conic)
+
+lemma conic_hull_explicit:
+  "conic hull S = {c *\<^sub>R x| c x. 0 \<le> c \<and> x \<in> S}"
+proof (rule hull_unique)
+  show "S \<subseteq> {c *\<^sub>R x |c x. 0 \<le> c \<and> x \<in> S}"
+    by (metis (no_types) cone_hull_expl hull_subset)
+  show "conic {c *\<^sub>R x |c x. 0 \<le> c \<and> x \<in> S}"
+    using mult_nonneg_nonneg by (force simp: conic_def)
+qed (auto simp: conic_def)
+
+lemma conic_hull_as_image:
+  "conic hull S = (\<lambda>z. fst z *\<^sub>R snd z) ` ({0..} \<times> S)"
+  by (force simp: conic_hull_explicit)
+
+lemma conic_hull_linear_image:
+  "linear f \<Longrightarrow> conic hull f ` S = f ` (conic hull S)"
+  by (force simp: conic_hull_explicit image_iff set_eq_iff linear_scale) 
+
+lemma conic_hull_image_scale:
+  assumes "\<And>x. x \<in> S \<Longrightarrow> 0 < c x"
+  shows   "conic hull (\<lambda>x. c x *\<^sub>R x) ` S = conic hull S"
+proof
+  show "conic hull (\<lambda>x. c x *\<^sub>R x) ` S \<subseteq> conic hull S"
+  proof (rule hull_minimal)
+    show "(\<lambda>x. c x *\<^sub>R x) ` S \<subseteq> conic hull S"
+      using assms conic_hull_explicit by fastforce
+  qed (simp add: conic_conic_hull)
+  show "conic hull S \<subseteq> conic hull (\<lambda>x. c x *\<^sub>R x) ` S"
+  proof (rule hull_minimal)
+    { fix x
+      assume "x \<in> S"
+      then have "x = inverse(c x) *\<^sub>R c x *\<^sub>R x"
+        using assms by fastforce
+      then have "x \<in> conic hull (\<lambda>x. c x *\<^sub>R x) ` S"
+    }
+    then show "S \<subseteq> conic hull (\<lambda>x. c x *\<^sub>R x) ` S" by auto
+  qed (simp add: conic_conic_hull)
+qed
+
+lemma convex_conic_hull:
+  assumes "convex S"
+  shows "convex (conic hull S)"
+proof -
+  { fix c x d y and u :: real
+    assume \<section>: "(0::real) \<le> c" "x \<in> S" "(0::real) \<le> d" "y \<in> S" "0 \<le> u" "u \<le> 1"
+    have "\<exists>c'' x''. ((1 - u) * c) *\<^sub>R x + (u * d) *\<^sub>R y = c'' *\<^sub>R x'' \<and> 0 \<le> c'' \<and> x'' \<in> S"
+    proof (cases "(1 - u) * c = 0")
+      case True
+      show ?thesis by force
+    next
+      case False
+      define \<xi> where "\<xi> \<equiv> (1 - u) * c + u * d"
+      have *: "c * u \<le> c"
+        by (simp add: "\<section>" mult_left_le)
+      have "\<xi> > 0"
+        using False \<section> by (smt (verit, best) \<xi>_def split_mult_pos_le)
+      then have **: "c + d * u = \<xi> + c * u"
+        by (simp add: \<xi>_def mult.commute right_diff_distrib')
+      show ?thesis
+      proof (intro exI conjI)
+        show "0 \<le> \<xi>"
+        show "((1 - u) * c) *\<^sub>R x + (u * d) *\<^sub>R y = \<xi> *\<^sub>R (((1 - u) * c / \<xi>) *\<^sub>R x + (u * d / \<xi>) *\<^sub>R y)"
+        show "((1 - u) * c / \<xi>) *\<^sub>R x + (u * d / \<xi>) *\<^sub>R y \<in> S"
+          by (intro convexD [OF assms]) (auto simp: \<section> field_split_simps * **)

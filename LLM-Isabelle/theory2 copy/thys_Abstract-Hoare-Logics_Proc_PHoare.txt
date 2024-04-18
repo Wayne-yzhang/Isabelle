@@ -1,0 +1,146 @@
+theory PHoare imports PLang begin
+
+
+
+type_synonym 'a assn = "'a \<Rightarrow> state \<Rightarrow> bool"
+
+
+type_synonym 'a cntxt = "('a assn \<times> com \<times> 'a assn)set"
+
+
+definition
+ valid :: "'a assn \<Rightarrow> com \<Rightarrow> 'a assn \<Rightarrow> bool" ("\<Turnstile> {(1_)}/ (_)/ {(1_)}" 50) where
+     "\<Turnstile> {P}c{Q} \<longleftrightarrow> (\<forall>s t. s -c\<rightarrow> t \<longrightarrow> (\<forall>z. P z s \<longrightarrow> Q z t))"
+
+
+definition
+ valids :: "'a cntxt \<Rightarrow> bool" ("|\<Turnstile> _" 50) where
+  [simp]: "|\<Turnstile> C \<equiv> (\<forall>(P,c,Q) \<in> C. \<Turnstile> {P}c{Q})"
+
+definition
+ cvalid :: "'a cntxt \<Rightarrow> 'a assn \<Rightarrow> com \<Rightarrow> 'a assn \<Rightarrow> bool" ("_ \<Turnstile>/ {(1_)}/ (_)/ {(1_)}" 50) where
+  "C \<Turnstile> {P}c{Q} \<longleftrightarrow> |\<Turnstile> C \<longrightarrow> \<Turnstile> {P}c{Q}"
+
+
+definition
+ nvalid :: "nat \<Rightarrow> 'a assn \<Rightarrow> com \<Rightarrow> 'a assn \<Rightarrow> bool" ("\<Turnstile>_ {(1_)}/ (_)/ {(1_)}" 50) where
+  "\<Turnstile>n {P}c{Q} \<equiv> (\<forall>s t. s -c-n\<rightarrow> t \<longrightarrow> (\<forall>z. P z s \<longrightarrow> Q z t))"
+
+definition
+ nvalids :: "nat \<Rightarrow> 'a cntxt \<Rightarrow> bool" ("|\<Turnstile>'__/ _" 50) where
+  "|\<Turnstile>_n C \<equiv> (\<forall>(P,c,Q) \<in> C. \<Turnstile>n {P}c{Q})"
+
+definition
+ cnvalid :: "'a cntxt \<Rightarrow> nat \<Rightarrow> 'a assn \<Rightarrow> com \<Rightarrow> 'a assn \<Rightarrow> bool" ("_ \<Turnstile>_/ {(1_)}/ (_)/ {(1_)}" 50) where
+  "C \<Turnstile>n {P}c{Q} \<longleftrightarrow> |\<Turnstile>_n C \<longrightarrow> \<Turnstile>n {P}c{Q}"
+
+
+inductive
+  hoare :: "'a cntxt \<Rightarrow> 'a assn \<Rightarrow> com \<Rightarrow> 'a assn \<Rightarrow> bool" ("_ \<turnstile>/ ({(1_)}/ (_)/ {(1_)})" 50)
+where
+
+
+   \<Longrightarrow> C \<turnstile> {P} IF b THEN c1 ELSE c2 {Q}"
+
+   \<Longrightarrow> C \<turnstile> {P} WHILE b DO c {\<lambda>z s. P z s \<and> \<not>b s}"
+
+   \<Longrightarrow> C \<turnstile> {P}c{Q}"
+
+
+        C \<turnstile> {P} LOCAL f;c;g {Q}"
+
+abbreviation hoare1 :: "'a cntxt \<Rightarrow> 'a assn \<times> com \<times> 'a assn \<Rightarrow> bool" ("_ \<turnstile> _") where
+  "C \<turnstile> x \<equiv> C \<turnstile> {fst x}fst (snd x){snd (snd x)}"
+
+
+lemma strengthen_pre:
+ "\<lbrakk> \<forall>z s. P' z s \<longrightarrow> P z s; C\<turnstile> {P}c{Q}  \<rbrakk> \<Longrightarrow> C\<turnstile> {P'}c{Q}"
+by(rule hoare.Conseq, assumption, blast)
+
+lemmas valid_defs = valid_def valids_def cvalid_def
+                    nvalid_def nvalids_def cnvalid_def
+
+theorem hoare_sound: "C \<turnstile> {P}c{Q}  \<Longrightarrow>  C \<Turnstile> {P}c{Q}"
+apply(subgoal_tac "\<forall>n. C \<Turnstile>n {P}c{Q}")
+apply(unfold valid_defs exec_iff_execn)
+ apply fast
+apply(erule hoare.induct)
+        apply simp
+       apply fast
+      apply simp
+     apply clarify
+     apply(drule while_rule)
+       prefer 3
+       apply (assumption, assumption)
+     apply fast
+    apply fast
+   prefer 2
+   apply simp
+ apply(rule allI, rule impI)
+ apply(induct_tac n)
+  apply blast
+ apply clarify
+ apply (simp(no_asm_use))
+ apply blast
+apply auto
+done
+
+
+definition
+  MGT :: "com \<Rightarrow> state assn \<times> com \<times> state assn" where
+  "MGT c = (\<lambda>z s. z = s, c, \<lambda>z t. z -c\<rightarrow> t)"
+
+declare MGT_def[simp]
+
+
+lemma MGT_implies_complete:
+ "{} \<turnstile> MGT c  \<Longrightarrow>  {} \<Turnstile> {P}c{Q}  \<Longrightarrow>  {} \<turnstile> {P}c{Q::state assn}"
+apply(simp add: MGT_def)
+apply (erule hoare.Conseq)
+apply(simp add: valid_defs)
+done
+
+
+lemma MGT_lemma: "C \<turnstile> MGT CALL  \<Longrightarrow>  C \<turnstile> MGT c"
+apply (simp)
+apply(induct_tac c)
+      apply (rule strengthen_pre[OF _ hoare.Do])
+      apply blast
+     apply(blast intro:hoare.Semi hoare.Conseq)
+    apply(rule hoare.If)
+    apply(erule hoare.Conseq)
+     apply simp
+    apply(erule hoare.Conseq)
+    apply simp
+   prefer 2
+   apply simp
+ apply(rename_tac b c)
+ apply(rule hoare.Conseq)
+  apply(rule_tac P = "\<lambda>z s. (z,s) \<in> ({(s,t). b s \<and> s -c\<rightarrow> t})^*"
+        in hoare.While)
+  apply(erule hoare.Conseq)
+  apply(blast intro:rtrancl_into_rtrancl)
+ apply clarsimp
+ apply(rename_tac s t)
+ apply(erule_tac x = s in allE)
+ apply clarsimp
+ apply(erule converse_rtrancl_induct)
+  apply simp
+ apply(fast elim:exec.WhileTrue)
+apply(fastforce intro: hoare.Local elim!: hoare.Conseq)
+done
+
+
+lemma MGT_CALL: "{} \<turnstile> MGT CALL"
+apply(simp add: MGT_def)
+apply (rule hoare.Call)
+apply (rule hoare.Conseq[OF MGT_lemma[simplified], OF hoare.Asm])
+apply (fast intro:exec.intros)
+done
+
+
+theorem "{} \<Turnstile> {P}c{Q}  \<Longrightarrow>  {} \<turnstile> {P}c{Q::state assn}"
+apply(erule MGT_implies_complete[OF MGT_lemma[OF MGT_CALL]])
+done
+
+end

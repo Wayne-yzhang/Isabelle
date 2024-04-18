@@ -1,0 +1,53 @@
+theory MiniSC_Craig
+imports MiniSC Formulas
+begin
+
+abbreviation atoms_mset where "atoms_mset \<Theta> \<equiv> \<Union>F \<in> set_mset \<Theta>. atoms F"
+  
+lemma interpolation_equal_styles: "
+(\<forall>\<Gamma> \<Delta> \<Gamma>' \<Delta>'. \<Gamma> + \<Gamma>' \<Rightarrow> \<Delta> + \<Delta>' \<longrightarrow> (\<exists>F :: 'a formula. \<Gamma> \<Rightarrow> F,\<Delta> \<and> F,\<Gamma>' \<Rightarrow> \<Delta>' \<and> atoms F \<subseteq> atoms_mset (\<Gamma> + \<Delta>) \<and> atoms F \<subseteq> atoms_mset (\<Gamma>' + \<Delta>')))
+  \<longleftrightarrow>
+(\<forall>\<Gamma> \<Delta>. \<Gamma> \<Rightarrow> \<Delta> \<longrightarrow> (\<exists>F :: 'a formula. \<Gamma> \<Rightarrow> {#F#} \<and> {#F#} \<Rightarrow> \<Delta> \<and> atoms F \<subseteq> atoms_mset \<Gamma> \<and> atoms F \<subseteq> atoms_mset \<Delta>))"
+proof(intro iffI allI impI, goal_cases)
+  case (1 \<Gamma> \<Delta>)
+  hence "\<Gamma> + {#} \<Rightarrow> {#} + \<Delta> \<longrightarrow> (\<exists>F. \<Gamma> \<Rightarrow> F, {#} \<and> F, {#} \<Rightarrow> \<Delta> \<and> atoms F \<subseteq> atoms_mset (\<Gamma> + {#}) \<and> atoms F \<subseteq> atoms_mset ({#} + \<Delta>))"  by presburger
+  with 1 show ?case by auto
+next
+  case (2 \<Gamma> \<Delta> \<Gamma>' \<Delta>')
+  from 2(2) have "\<Gamma> \<Rightarrow> \<Delta> + image_mset Not \<Gamma>' + \<Delta>'" by(induction \<Gamma>' arbitrary: \<Gamma>; simp add: SCp.NotR)
+  hence "\<Gamma> + image_mset Not \<Delta> \<Rightarrow> image_mset Not \<Gamma>' + \<Delta>'" by(induction \<Delta> arbitrary: \<Delta>'; simp add: SCp.NotL) (metis SCp.NotL union_mset_add_mset_right)
+  from 2(1)[THEN spec, THEN spec, THEN mp, OF this]
+  have "\<exists>F. \<Gamma> + image_mset \<^bold>\<not> \<Delta> \<Rightarrow> {#F#} \<and> {#F#} \<Rightarrow> image_mset \<^bold>\<not> \<Gamma>' + \<Delta>' \<and> atoms F \<subseteq> atoms_mset (\<Gamma> + image_mset \<^bold>\<not> \<Delta>) \<and> atoms F \<subseteq> atoms_mset (image_mset \<^bold>\<not> \<Gamma>' + \<Delta>')" .
+  then obtain F where n: "\<Gamma> + image_mset \<^bold>\<not> \<Delta> \<Rightarrow> {#F#}" and p: "{#F#} \<Rightarrow> image_mset \<^bold>\<not> \<Gamma>' + \<Delta>'" and at: "atoms F \<subseteq> atoms_mset (\<Gamma> + \<Delta>)" "atoms F \<subseteq> atoms_mset (\<Gamma>' + \<Delta>')" by auto
+  from n have n: "\<Gamma> \<Rightarrow> F, \<Delta>" by(induction \<Delta> arbitrary: \<Gamma>; simp add: NotL_inv inR1)
+  from p have p: "F,\<Gamma>' \<Rightarrow> \<Delta>'" by(induction \<Gamma>' arbitrary: \<Delta>'; simp add: NotR_inv inL1)
+  show ?case using p at n by blast
+qed
+    
+
+especially with the mini formulas, adds its own spin.\<close>
+      thus ?thesis unfolding \<Delta> proof(intro exI[where x=Fa] conjI \<open>is_mini_formula Fa\<close>)
+      show ?thesis unfolding \<Delta>' proof(intro exI[where x=Fa] conjI \<open>is_mini_formula Fa\<close>)
+      text\<open>A big part of the difficulty of this proof is finding a way to instantiate the IHs.
+        Interestingly, this is not the only way that works. 
+        Originally, we used @{term "\<Gamma>'' = H' + \<Gamma>'"} and @{term "F, \<Delta> + \<Delta>' = (F,\<Delta>) + \<Delta>'"}
+        to instantiate the IH (which is in some sense more natural, less use of commutativity).
+        This gave us a @{term Fa} that verifies @{term "H' \<Rightarrow> Fa, F, \<Delta>"} and @{term "Fa, \<Gamma>' \<Rightarrow> \<Delta>'"}
+         and resulted in the interpolant @{term "to_mini_formula (Fa \<^bold>\<or> Ga)"}.\<close>
+        show "is_mini_formula ?w" using \<open>is_mini_formula Fa\<close> \<open>is_mini_formula Ga\<close> by simp
+        using ImpL(5) by (simp_all add: add_ac \<open>\<Gamma>'' = \<Gamma> + I'\<close>)
+      text\<open>Same thing as in the other case, just with 
+        @{term "G, \<Gamma>'' = (G, I') + \<Gamma>"}, @{term "\<Delta> + \<Delta>' = \<Delta>' + \<Delta>"},
+        @{term "\<Gamma>'' = I' + \<Gamma>"}, and @{term "F, \<Delta> + \<Delta>' = (F,\<Delta>') + \<Delta>"}
+       resulting in @{term "to_mini_formula (\<^bold>\<not>(Fa \<^bold>\<or> Ga))"}\<close>
+        show "is_mini_formula ?w" using \<open>is_mini_formula Fa\<close> \<open>is_mini_formula Ga\<close> by simp
+    text\<open>The rest is just those cases that can't happen because of the mini formula property.\<close>
+  with su show ?thesis using \<open>\<And>\<Gamma>. atoms_mset (tms \<Gamma>) = atoms_mset \<Gamma>\<close> image_mset_union that by auto
+text\<open>Note that there is an extension to Craig interpolation:
+One can show that atoms that only appear positively/negatively in the original formulas will only appear
+positively/negatively in the interpolant. \<close>
+      thus ?thesis unfolding \<Delta> proof(intro exI[where x=Fa] conjI \<open>is_mini_formula Fa\<close>)
+      show ?thesis unfolding \<Delta>' proof(intro exI[where x=Fa] conjI \<open>is_mini_formula Fa\<close>)
+        show "is_mini_formula ?w" using \<open>is_mini_formula Fa\<close> \<open>is_mini_formula Ga\<close> by simp
+        using ImpL(5) by (simp_all add: add_ac \<open>\<Gamma>'' = \<Gamma> + I'\<close>)
+        show "is_mini_formula ?w" using \<open>is_mini_formula Fa\<close> \<open>is_mini_formula Ga\<close> by simp

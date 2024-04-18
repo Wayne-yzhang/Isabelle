@@ -1,0 +1,223 @@
+theory Dirichlet_Product
+  imports
+     Complex_Main
+     Multiplicative_Function
+begin
+
+lemma sum_coprime_dvd_cong:
+  "(\<Sum>r | r dvd a. \<Sum>s | s dvd b. f r s) = (\<Sum>r | r dvd a. \<Sum>s | s dvd b. g r s)"
+  if "coprime a b" "\<And>r s. coprime r s \<Longrightarrow> r dvd a \<Longrightarrow> s dvd b \<Longrightarrow> f r s = g r s"
+proof (intro sum.cong)
+  fix r s
+  assume "r \<in> {r. r dvd a}" and "s \<in> {s. s dvd b}"
+  then have "r dvd a" and "s dvd b"
+    by simp_all
+    by (auto intro: coprime_imp_coprime dvd_trans)
+  ultimately show "f r s = g r s"
+    using that by simp
+qed auto
+
+definition dirichlet_prod :: "(nat \<Rightarrow> 'a :: semiring_0) \<Rightarrow> (nat \<Rightarrow> 'a) \<Rightarrow> nat \<Rightarrow> 'a" where
+  "dirichlet_prod f g = (\<lambda>n. \<Sum>d | d dvd n. f d * g (n div d))"
+
+lemma sum_divisors_code:
+  assumes "n > (0::nat)"
+  shows   "(\<Sum>d | d dvd n. f d) = 
+             fold_atLeastAtMost_nat (\<lambda>d acc. if d dvd n then f d + acc else acc) 1 n 0"
+proof -
+  have "(\<lambda>d acc. if d dvd n then f d + acc else acc) = (\<lambda>d acc. (if d dvd n then f d else 0) + acc)"
+    by (simp add: fun_eq_iff)
+  hence "fold_atLeastAtMost_nat (\<lambda>d acc. if d dvd n then f d + acc else acc) 1 n 0 =
+           fold_atLeastAtMost_nat (\<lambda>d acc. (if d dvd n then f d else 0) + acc) 1 n 0"
+    by (simp only: )
+  also have "\<dots> = (\<Sum>d = 1..n. if d dvd n then f d else 0)"
+    by (rule sum_atLeastAtMost_code [symmetric])
+  also from assms have "\<dots> = (\<Sum>d | d dvd n. f d)"
+    by (intro sum.mono_neutral_cong_right) (auto elim: dvdE dest: dvd_imp_le)
+  finally show ?thesis ..
+qed
+
+lemma dirichlet_prod_code [code]:
+  "dirichlet_prod f g n = (if n = 0 then 0 else
+     fold_atLeastAtMost_nat (\<lambda>d acc. if d dvd n then f d * g (n div d) + acc else acc) 1 n 0)"
+  unfolding dirichlet_prod_def by (simp add: sum_divisors_code)
+  
+lemma dirichlet_prod_0 [simp]: "dirichlet_prod f g 0 = 0"
+  by (simp add: dirichlet_prod_def)
+    
+lemma dirichlet_prod_Suc_0 [simp]: "dirichlet_prod f g (Suc 0) = f (Suc 0) * g (Suc 0)"
+  by (simp add: dirichlet_prod_def)
+
+lemma dirichlet_prod_cong [cong]: 
+  assumes "(\<And>n. n > 0 \<Longrightarrow> f n = f' n)" "(\<And>n. n > 0 \<Longrightarrow> g n = g' n)"
+  shows   "dirichlet_prod f g = dirichlet_prod f' g'"
+proof
+  fix n :: nat
+  show "dirichlet_prod f g n = dirichlet_prod f' g' n"
+  proof (cases "n = 0")
+    case False
+    with assms show ?thesis unfolding dirichlet_prod_def
+      by (intro ext sum.cong refl) (auto elim!: dvdE)
+  qed simp_all
+qed
+  
+lemma dirichlet_prod_altdef1:
+  "dirichlet_prod f g = (\<lambda>n. \<Sum>d | d dvd n. f (n div d) * g d)"
+proof
+  fix n :: nat
+  show "dirichlet_prod f g n = (\<Sum>d | d dvd n. f (n div d) * g d)"
+  proof (cases "n = 0")
+    case False
+    hence "dirichlet_prod f g n = (\<Sum>d | d dvd n. f (n div (n div d)) * g (n div d))"
+      unfolding dirichlet_prod_def by (intro sum.cong refl) (auto elim!: dvdE)
+    also from False have "\<dots> = (\<Sum>d | d dvd n. f (n div d) * g d)" 
+      by (intro sum.reindex_bij_witness[of _ "(div) n" "(div) n"]) (auto elim!: dvdE)
+    finally show ?thesis .
+  qed simp
+qed
+
+lemma dirichlet_prod_altdef2:
+  "dirichlet_prod f g = (\<lambda>n. \<Sum>(r,d) | r * d = n. f r * g d)"
+proof
+  fix n
+  show "dirichlet_prod f g n = (\<Sum>(r,d) | r * d = n. f r * g d)"
+  proof (cases "n = 0")
+    case True
+    have "(\<lambda>n::nat. (0, n)) ` UNIV \<subseteq> {(r,d). r * d = 0}" by auto
+    moreover have "\<not>finite ((\<lambda>n::nat. (0, n)) ` UNIV)"
+      by (subst finite_image_iff) (auto simp: inj_on_def)
+    ultimately have "infinite {(r,d). r * d = (0::nat)}"
+      by (blast dest: finite_subset)
+    with True show ?thesis by simp
+  next
+    case False
+    have "(\<Sum>d | d dvd n. f d * g (n div d)) = (\<Sum>r | r dvd n. (\<Sum>d | d = n div r. f r * g d))"
+      by (intro sum.cong refl) auto
+    also from False have "\<dots> = (\<Sum>(r,d)\<in>(SIGMA x:{r. r dvd n}. {d. d = n div x}). f r * g d)"
+      by (intro sum.Sigma) auto
+    also from False have "(SIGMA x:{r. r dvd n}. {d. d = n div x}) = {(r,d). r * d = n}"
+      by auto
+    finally show ?thesis by (simp add: dirichlet_prod_def)
+  qed
+qed 
+  
+lemma dirichlet_prod_commutes:
+  "dirichlet_prod (f :: nat \<Rightarrow> 'a :: comm_semiring_0) g = dirichlet_prod g f"
+proof
+  fix n :: nat
+  show "dirichlet_prod f g n = dirichlet_prod g f n"
+  proof (cases "n = 0")
+    case False
+    have "(\<Sum>(r,d) | r * d = n. f r * g d) = (\<Sum>(d,r) | r * d = n. f r * g d)"
+      by (rule sum.reindex_bij_witness [of _ "\<lambda>(x,y). (y,x)" "\<lambda>(x,y). (y,x)"]) auto
+    thus ?thesis by (simp add: dirichlet_prod_altdef2 mult.commute)
+  qed (simp add: dirichlet_prod_def)
+qed
+
+lemma finite_divisors_nat': "n > (0 :: nat) \<Longrightarrow> finite {(a,b). a * b = n}"
+  by (rule finite_subset[of _ "{0<..n} \<times> {0<..n}"]) auto
+
+lemma dirichlet_prod_assoc_aux1:
+  assumes "n > 0"
+  shows "dirichlet_prod f (dirichlet_prod g h) n = 
+           (\<Sum>(a, b, c)\<in>{(a, b, c). a * b * c = n}. f a * g b * h c)"
+proof -
+  have "dirichlet_prod f (dirichlet_prod g h) n = 
+          (\<Sum>x\<in>{(a,b). a * b = n}. (\<Sum>(c,d) | c * d = snd x. f (fst x) * g c * h d))"
+    by (auto intro!: sum.cong simp: dirichlet_prod_altdef2 sum_distrib_left mult.assoc)
+  also from assms have "\<dots> = (\<Sum>x\<in>(SIGMA x:{(a, b). a * b = n}. {(c, d). c * d = snd x}).
+                               case x of (x, c, d) \<Rightarrow> f (fst x) * g c * h d)"
+    by (intro sum.Sigma finite_divisors_nat' ballI) auto
+  also have "\<dots> = (\<Sum>(a,b,c) | a * b * c = n. f a * g b * h c)"
+    by (rule sum.reindex_bij_witness
+               [of _ "\<lambda>(a,b,c). ((a, b*c), (b,c))" "\<lambda>((a,b),(c,d)). (a, c, d)"])
+       (auto simp: mult_ac)
+  finally show ?thesis .
+qed
+
+lemma dirichlet_prod_assoc_aux2:
+  assumes "n > 0"
+  shows "dirichlet_prod (dirichlet_prod f g) h n = 
+           (\<Sum>(a, b, c)\<in>{(a, b, c). a * b * c = n}. f a * g b * h c)"
+proof -
+  have "dirichlet_prod (dirichlet_prod f g) h n = 
+          (\<Sum>x\<in>{(a,b). a * b = n}. (\<Sum>(c,d) | c * d = fst x. f c * g d * h (snd x)))"
+    by (auto intro!: sum.cong simp: dirichlet_prod_altdef2 sum_distrib_right mult.assoc)
+  also from assms have "\<dots> = (\<Sum>x\<in>(SIGMA x:{(a, b). a * b = n}. {(c, d). c * d = fst x}).
+                               case x of (x, c, d) \<Rightarrow> f c * g d * h (snd x))"
+    by (intro sum.Sigma finite_divisors_nat' ballI) auto
+  also have "\<dots> = (\<Sum>(a,b,c) | a * b * c = n. f a * g b * h c)"
+    by (rule sum.reindex_bij_witness
+               [of _ "\<lambda>(a,b,c). ((a*b, c), (a,b))" "\<lambda>((a,b),(c,d)). (c, d, b)"])
+       (auto simp: mult_ac)
+  finally show ?thesis .
+qed
+
+lemma dirichlet_prod_assoc: 
+  "dirichlet_prod (dirichlet_prod f g) h = dirichlet_prod f (dirichlet_prod g h)"
+proof
+  fix n :: nat
+  show "dirichlet_prod (dirichlet_prod f g) h n = dirichlet_prod f (dirichlet_prod g h) n"
+    by (cases "n = 0") (simp_all add: dirichlet_prod_assoc_aux1 dirichlet_prod_assoc_aux2)
+qed
+    
+lemma dirichlet_prod_const_right [simp]:
+  assumes "n > 0"
+  shows   "dirichlet_prod f (\<lambda>n. if n = Suc 0 then c else 0) n = f n * c"
+proof -
+  have "dirichlet_prod f (\<lambda>n. if n = Suc 0 then c else 0) n = 
+          (\<Sum>d | d dvd n. (if d = n then f n * c else 0))"
+    unfolding dirichlet_prod_def using assms
+    by (intro sum.cong refl) (auto elim!: dvdE split: if_splits)
+  also have "\<dots> = f n * c" using assms by (subst sum.delta) auto
+  finally show ?thesis .
+qed
+  
+lemma dirichlet_prod_const_left [simp]:
+  assumes "n > 0"
+  shows   "dirichlet_prod (\<lambda>n. if n = Suc 0 then c else 0) g n = c * g n"
+proof -
+  have "dirichlet_prod (\<lambda>n. if n = Suc 0 then c else 0) g n = 
+          (\<Sum>d | d dvd n. (if d = 1 then c * g n else 0))"
+    unfolding dirichlet_prod_def using assms
+    by (intro sum.cong refl) (auto elim!: dvdE split: if_splits)
+  also have "\<dots> = c * g n" using assms by (subst sum.delta) auto
+  finally show ?thesis .
+qed
+
+
+fun dirichlet_inverse :: "(nat \<Rightarrow> 'a :: comm_ring_1) \<Rightarrow> 'a \<Rightarrow> nat \<Rightarrow> 'a" where
+  "dirichlet_inverse f i n = 
+     (if n = 0 then 0 else if n = 1 then i
+      else -i * (\<Sum>d | d dvd n \<and> d < n. f (n div d) * dirichlet_inverse f i d))"
+  
+lemma dirichlet_inverse_induct [case_names 0 1 gt1]:
+  "P 0 \<Longrightarrow> P (Suc 0) \<Longrightarrow> (\<And>n. n > 1 \<Longrightarrow> (\<And>k. k < n \<Longrightarrow> P k) \<Longrightarrow> P n) \<Longrightarrow> P n"
+  by induction_schema (force, rule wf_measure [of id], simp)
+
+lemma dirichlet_inverse_0 [simp]: "dirichlet_inverse f i 0 = 0"
+  by simp  
+
+lemma dirichlet_inverse_Suc_0 [simp]: "dirichlet_inverse f i (Suc 0) = i"
+  by simp
+
+declare dirichlet_inverse.simps [simp del]
+
+lemma dirichlet_inverse_gt_1:
+  "n > 1 \<Longrightarrow> dirichlet_inverse f i n =
+     -i * (\<Sum>d | d dvd n \<and> d < n. f (n div d) * dirichlet_inverse f i d)"
+  by (simp add: dirichlet_inverse.simps)
+
+lemma dirichlet_inverse_cong [cong]:
+  assumes "\<And>n. n > 0 \<Longrightarrow> f n = f' n" "i = i'" "n = n'"
+  shows   "dirichlet_inverse f i n = dirichlet_inverse f' i' n'"
+proof -
+  have "dirichlet_inverse f i n = dirichlet_inverse f' i n"
+  using assms(1)
+  proof (induction n rule: dirichlet_inverse_induct) 
+    case (gt1 n)
+    have *: "dirichlet_inverse f i k = dirichlet_inverse f' i k" if "k dvd n \<and> k < n" for k
+      using that by (intro gt1) auto
+    have *: "(\<Sum>d | d dvd n \<and> d < n. f (n div d) * dirichlet_inverse f i d) =
+               (\<Sum>d | d dvd n \<and> d < n. f' (n div d) * dirichlet_inverse f' i d)"
+      by (intro sum.cong refl) (subst gt1.prems, auto elim: dvdE simp: *)

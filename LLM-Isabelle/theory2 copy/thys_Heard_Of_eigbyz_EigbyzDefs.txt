@@ -1,0 +1,168 @@
+theory EigbyzDefs
+imports "../HOModel"
+begin
+
+
+
+
+axiomatization where Proc_finite: "OFCLASS(Proc, finite_class)"
+instance Proc :: finite by (rule Proc_finite)
+
+abbreviation
+
+
+axiomatization f::nat
+where f: "f < N"
+
+
+
+definition "Label = {xs::Proc list. length xs \<le> Suc f \<and> distinct xs}"
+typedef Label = Label
+
+
+lemma finite_Label: "finite Label"
+proof -
+  have "Label \<subseteq> {xs. set xs \<subseteq> (UNIV::Proc set) \<and> length xs \<le> Suc f}" 
+    by (auto simp: Label_def)
+  moreover
+  have "finite {xs. set xs \<subseteq> (UNIV::Proc set) \<and> length xs \<le> Suc f}"
+    by (rule finite_lists_length_le) auto
+  ultimately
+  show ?thesis by (auto elim: finite_subset)
+qed
+
+lemma finite_UNIV_Label: "finite (UNIV::Label set)"
+proof -
+  from finite_Label have "finite (Abs_Label ` Label)" by simp
+  moreover
+  {
+    fix l::Label
+    have "l \<in> Abs_Label ` Label"
+      by (rule Abs_Label_cases) auto
+  }
+  hence "(UNIV::Label set) = (Abs_Label ` Label)" by auto
+  ultimately show ?thesis by simp
+qed
+
+lemma finite_Label_set [iff]: "finite (S :: Label set)"
+  using finite_UNIV_Label by (auto intro: finite_subset)
+
+
+definition root_node where
+  "root_node \<equiv> Abs_Label []"
+
+definition length_lbl where
+  "length_lbl l \<equiv> length (Rep_Label l)"
+lemma length_lbl [intro]: "length_lbl l \<le> Suc f"
+  unfolding length_lbl_def using Label_def Rep_Label by auto
+
+definition is_leaf where
+ "is_leaf l \<equiv> length_lbl l = Suc f"
+
+definition last_lbl where
+  "last_lbl l \<equiv> last (Rep_Label l)"
+
+definition butlast_lbl where
+  "butlast_lbl l \<equiv> Abs_Label (butlast (Rep_Label l))"
+
+definition set_lbl where
+  "set_lbl l = set (Rep_Label l)"
+
+
+definition children where
+  "children l \<equiv> 
+   if is_leaf l
+   then {} 
+   else { Abs_Label (Rep_Label l @ [p]) | p . p \<notin> set_lbl l }"
+
+
+
+
+record 'val pstate =
+  vals :: "Label \<Rightarrow> 'val option"
+  newvals :: "Label \<Rightarrow> 'val"
+  decide :: "'val option"
+
+
+  "EIG_initState p st \<equiv>
+     (\<forall>l. (vals st l = None) = (l \<noteq> root_node))
+   \<and> decide st = None"
+
+type_synonym 'val Msg = "Label \<Rightarrow> 'val option"
+
+
+  "EIG_sendMsg r p q st \<equiv> vals st"
+
+
+definition extend_vals where
+  "extend_vals r p st msgs st' \<equiv>
+   vals st' = (\<lambda> l.
+      if length_lbl l = Suc r \<and> msgs (last_lbl l) \<noteq> None
+      then (the (msgs (last_lbl l))) (butlast_lbl l)
+      else if length_lbl l = Suc r \<and> msgs (last_lbl l) = None then None
+      else vals st l)"
+
+definition next_main where
+  "next_main r p st msgs st' \<equiv> extend_vals r p st msgs st' \<and> decide st' = None"
+
+
+fun fixupval :: "'val option \<Rightarrow> 'val" where
+  "fixupval None = undefined"
+| "fixupval (Some v) = v"
+
+definition has_majority :: "'val \<Rightarrow> ('a \<Rightarrow> 'val) \<Rightarrow> 'a set \<Rightarrow> bool" where
+  "has_majority v g S \<equiv> card {e \<in> S. g e = v} > (card S) div 2"
+
+definition check_newvals :: "'val pstate \<Rightarrow> bool" where
+  "check_newvals st \<equiv>
+   \<forall>l. is_leaf l \<and> newvals st l = fixupval (vals st l)
+     \<or> \<not>(is_leaf l) \<and>
+       ( (\<exists>w. has_majority w (newvals st) (children l) \<and> newvals st l = w)
+       \<or> (\<not>(\<exists>w. has_majority w (newvals st) (children l))
+             \<and> newvals st l = undefined))"
+
+definition next_end where
+  "next_end r p st msgs st' \<equiv> 
+     extend_vals r p st msgs st'
+   \<and> check_newvals st'
+   \<and> decide st' = Some (newvals st' root_node)"
+
+definition EIG_nextState where
+  "EIG_nextState r \<equiv> 
+   if r < f then next_main r
+   else if r = f then next_end r
+   else (\<lambda>p st msgs st'. st' = st)"
+
+
+
+
+definition SKr :: "Proc HO \<Rightarrow> Proc HO \<Rightarrow> Proc set" where
+  "SKr HO SHO \<equiv> { q . \<forall>p. q \<in> HO p \<inter> SHO p}"
+
+
+definition SK :: "(nat \<Rightarrow> Proc HO) \<Rightarrow> (nat \<Rightarrow> Proc HO) \<Rightarrow> Proc set" where
+  "SK HOs SHOs \<equiv> {q. \<forall>r. q \<in> SKr (HOs r) (SHOs r)}"
+
+
+definition EIG_commPerRd where
+  "EIG_commPerRd HO SHO \<equiv> card (SKr HO SHO) > (N + f) div 2"
+
+
+definition EIG_commGlobal where
+  "EIG_commGlobal HOs SHOs \<equiv> card (SK HOs SHOs) \<ge> N - f"
+
+
+
+
+
+definition EIG_SHOMachine where
+  "EIG_SHOMachine = \<lparr>
+    CinitState =  (\<lambda> p st crd. EIG_initState p st),
+    sendMsg =  EIG_sendMsg,
+    CnextState = (\<lambda> r p st msgs crd st'. EIG_nextState r p st msgs st'),
+    SHOcommPerRd = EIG_commPerRd,
+    SHOcommGlobal = EIG_commGlobal 
+   \<rparr>"
+
+abbreviation "EIG_M \<equiv> (EIG_SHOMachine::(Proc, 'val pstate, 'val Msg) SHOMachine)"
+

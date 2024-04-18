@@ -1,0 +1,84 @@
+theory Hoare_MonadSE
+  imports Symbex_MonadSE
+begin
+  
+
+
+
+
+definition hoare\<^sub>3 :: "('\<sigma> \<Rightarrow> bool) \<Rightarrow> ('\<alpha>, '\<sigma>)MON\<^sub>S\<^sub>E \<Rightarrow> ('\<alpha> \<Rightarrow> '\<sigma> \<Rightarrow> bool) \<Rightarrow> bool" ("(\<lbrace>(1_)\<rbrace>/ (_)/ \<lbrace>(1_)\<rbrace>)" 50)
+where   "\<lbrace>P\<rbrace> M \<lbrace>Q\<rbrace> \<equiv> (\<forall>\<sigma>. P \<sigma> \<longrightarrow> (case M \<sigma> of None => False | Some(x, \<sigma>') => Q x \<sigma>'))" 
+
+definition hoare\<^sub>3' :: "('\<sigma> \<Rightarrow> bool) \<Rightarrow> ('\<alpha>, '\<sigma>)MON\<^sub>S\<^sub>E \<Rightarrow> bool" ("(\<lbrace>(1_)\<rbrace>/ (_)/\<dagger>)" 50)
+where   "\<lbrace>P\<rbrace> M \<dagger> \<equiv> (\<forall>\<sigma>. P \<sigma> \<longrightarrow> (case M \<sigma> of None => True | _ => False))" 
+
+  
+lemma skip: " \<lbrace>P\<rbrace> skip\<^sub>S\<^sub>E \<lbrace>\<lambda>_. P\<rbrace>"
+  unfolding hoare\<^sub>3_def skip\<^sub>S\<^sub>E_def unit_SE_def
+  by auto
+    
+lemma fail: "\<lbrace>P\<rbrace> fail\<^sub>S\<^sub>E \<dagger>"
+  unfolding hoare\<^sub>3'_def fail_SE_def unit_SE_def by auto
+
+lemma assert: "\<lbrace>P\<rbrace> assert\<^sub>S\<^sub>E P \<lbrace>\<lambda> _ _. True\<rbrace>"    
+  unfolding hoare\<^sub>3_def assert_SE_def unit_SE_def
+  by auto
+
+lemma assert_conseq: "Collect P \<subseteq> Collect Q \<Longrightarrow> \<lbrace>P\<rbrace> assert\<^sub>S\<^sub>E Q \<lbrace>\<lambda> _ _. True\<rbrace>"    
+  unfolding hoare\<^sub>3_def assert_SE_def unit_SE_def
+  by auto
+
+lemma assume_conseq: 
+  assumes "\<exists> \<sigma>. Q \<sigma>"
+  shows   "\<lbrace>P\<rbrace> assume\<^sub>S\<^sub>E Q \<lbrace>\<lambda> _ . Q\<rbrace>"    
+  unfolding hoare\<^sub>3_def assume_SE_def unit_SE_def
+  apply (auto simp : someI2)
+  using assms by auto
+
+    
+
+lemma sequence : 
+  "    \<lbrace>P\<rbrace> M \<lbrace>\<lambda>x \<sigma>. x\<in>A \<and> Q x \<sigma>\<rbrace>
+   \<Longrightarrow> \<forall>x\<in>A. \<lbrace>Q x\<rbrace> M' x \<lbrace>R\<rbrace> 
+   \<Longrightarrow> \<lbrace>P\<rbrace> x \<leftarrow> M; M' x \<lbrace>R\<rbrace>" 
+  unfolding hoare\<^sub>3_def bind_SE_def 
+  by(auto,erule_tac x="\<sigma>" in allE, auto split: Option.option.split_asm Option.option.split)
+
+lemma sequence_irpt_l : "\<lbrace>P\<rbrace> M \<dagger>  \<Longrightarrow> \<lbrace>P\<rbrace> x \<leftarrow> M; M' x \<dagger>" 
+  unfolding hoare\<^sub>3'_def bind_SE_def 
+  by(auto,erule_tac x="\<sigma>" in allE, auto split: Option.option.split_asm Option.option.split)
+
+lemma sequence_irpt_r : "\<lbrace>P\<rbrace> M \<lbrace>\<lambda>x \<sigma>. x\<in>A \<and> Q x \<sigma>\<rbrace> \<Longrightarrow> \<forall>x\<in>A. \<lbrace>Q x\<rbrace> M' x \<dagger>  \<Longrightarrow> \<lbrace>P\<rbrace> x \<leftarrow> M; M' x \<dagger>" 
+  unfolding hoare\<^sub>3'_def hoare\<^sub>3_def bind_SE_def 
+  by(auto,erule_tac x="\<sigma>" in allE, auto split: Option.option.split_asm Option.option.split)
+        
+lemma sequence' : "\<lbrace>P\<rbrace> M \<lbrace>\<lambda>_. Q \<rbrace> \<Longrightarrow> \<lbrace>Q\<rbrace> M' \<lbrace>R\<rbrace> \<Longrightarrow> \<lbrace>P\<rbrace> M;- M' \<lbrace>R\<rbrace>"     
+  unfolding hoare\<^sub>3_def hoare\<^sub>3_def bind_SE_def bind_SE'_def
+  by(auto,erule_tac x="\<sigma>" in allE, auto split: Option.option.split_asm Option.option.split)
+
+lemma sequence_irpt_l' : "\<lbrace>P\<rbrace> M \<dagger> \<Longrightarrow> \<lbrace>P\<rbrace> M;- M' \<dagger>" 
+  unfolding hoare\<^sub>3'_def bind_SE_def bind_SE'_def
+  by(auto,erule_tac x="\<sigma>" in allE, auto split: Option.option.split_asm Option.option.split)
+    
+lemma sequence_irpt_r' : "\<lbrace>P\<rbrace> M \<lbrace>\<lambda>_. Q \<rbrace> \<Longrightarrow> \<lbrace>Q\<rbrace> M' \<dagger> \<Longrightarrow> \<lbrace>P\<rbrace> M;- M' \<dagger>" 
+  unfolding hoare\<^sub>3'_def hoare\<^sub>3_def bind_SE_def bind_SE'_def
+  by(auto,erule_tac x="\<sigma>" in allE, auto split: Option.option.split_asm Option.option.split)
+
+lemma consequence : 
+  "    Collect P \<subseteq> Collect P'
+   \<Longrightarrow> \<lbrace>P'\<rbrace> M \<lbrace>\<lambda>x \<sigma>. x\<in>A \<and> Q' x \<sigma>\<rbrace> 
+   \<Longrightarrow> \<forall> x\<in>A. Collect(Q' x) \<subseteq> Collect (Q x)
+   \<Longrightarrow> \<lbrace>P\<rbrace> M \<lbrace>\<lambda>x \<sigma>. x\<in>A \<and> Q x \<sigma>\<rbrace>"
+  unfolding hoare\<^sub>3_def bind_SE_def 
+  by(auto,erule_tac x="\<sigma>" in allE,auto split: Option.option.split_asm Option.option.split)
+
+lemma consequence_unit : 
+  assumes "(\<And> \<sigma>. P \<sigma> \<longrightarrow> P' \<sigma>)" 
+   and  "\<lbrace>P'\<rbrace> M \<lbrace>\<lambda>x::unit. \<lambda> \<sigma>.  Q' \<sigma>\<rbrace>" 
+   and  " (\<And> \<sigma>. Q'  \<sigma> \<longrightarrow> Q  \<sigma>)" 
+   shows "\<lbrace>P\<rbrace> M \<lbrace>\<lambda>x \<sigma>. Q \<sigma>\<rbrace>"
+proof -
+  have * : "(\<lambda>x \<sigma>. Q  \<sigma>) = (\<lambda>x::unit. \<lambda> \<sigma>. x\<in>UNIV \<and> Q  \<sigma>) " by auto
+  show ?thesis
+    apply(subst *)
+(* Problem: Severe Deviation for the case of an unsatisfyable precondition *)

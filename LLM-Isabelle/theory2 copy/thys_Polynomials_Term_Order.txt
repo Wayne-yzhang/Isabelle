@@ -1,0 +1,749 @@
+theory Term_Order
+  imports OAlist_Poly_Mapping "HOL-Library.Product_Lexorder"
+begin
+
+
+class nat = zero + plus + minus + order + equal +
+  fixes rep_nat :: "'a \<Rightarrow> nat"
+    and abs_nat :: "nat \<Rightarrow> 'a"
+  assumes rep_inverse [simp]: "abs_nat (rep_nat x) = x"
+    and abs_inverse [simp]: "rep_nat (abs_nat n) = n"
+    and abs_zero [simp]: "abs_nat 0 = 0"
+    and abs_plus: "abs_nat m + abs_nat n = abs_nat (m + n)"
+    and abs_minus: "abs_nat m - abs_nat n = abs_nat (m - n)"
+    and abs_ord: "m \<le> n \<Longrightarrow> abs_nat m \<le> abs_nat n"
+begin
+
+lemma rep_inj:
+  assumes "rep_nat x = rep_nat y"
+  shows "x = y"
+proof -
+  have "abs_nat (rep_nat x) = abs_nat (rep_nat y)" by (simp only: assms)
+  thus ?thesis by (simp only: rep_inverse)
+qed
+
+corollary rep_eq_iff: "(rep_nat x = rep_nat y) \<longleftrightarrow> (x = y)"
+  by (auto elim: rep_inj)
+
+lemma abs_inj:
+  assumes "abs_nat m = abs_nat n"
+  shows "m = n"
+proof -
+  have "rep_nat (abs_nat m) = rep_nat (abs_nat n)" by (simp only: assms)
+  thus ?thesis by (simp only: abs_inverse)
+qed
+
+corollary abs_eq_iff: "(abs_nat m = abs_nat n) \<longleftrightarrow> (m = n)"
+  by (auto elim: abs_inj)
+
+lemma rep_zero [simp]: "rep_nat 0 = 0"
+  using abs_inverse abs_zero by fastforce
+
+lemma rep_zero_iff: "(rep_nat x = 0) \<longleftrightarrow> (x = 0)"
+  using rep_eq_iff by fastforce
+
+lemma plus_eq: "x + y = abs_nat (rep_nat x + rep_nat y)"
+  by (metis abs_plus rep_inverse)
+
+lemma rep_plus: "rep_nat (x + y) = rep_nat x + rep_nat y"
+  by (simp add: plus_eq)
+
+lemma minus_eq: "x - y = abs_nat (rep_nat x - rep_nat y)"
+  by (metis abs_minus rep_inverse)
+
+lemma rep_minus: "rep_nat (x - y) = rep_nat x - rep_nat y"
+  by (simp add: minus_eq)
+
+lemma ord_iff:
+  "x \<le> y \<longleftrightarrow> rep_nat x \<le> rep_nat y" (is ?thesis1)
+  "x < y \<longleftrightarrow> rep_nat x < rep_nat y" (is ?thesis2)
+proof -
+  show ?thesis1
+  proof
+    assume "x \<le> y"
+    show "rep_nat x \<le> rep_nat y"
+    proof (rule ccontr)
+      assume "\<not> rep_nat x \<le> rep_nat y"
+      hence "rep_nat y \<le> rep_nat x" and "rep_nat x \<noteq> rep_nat y" by simp_all
+      from this(1) have "abs_nat (rep_nat y) \<le> abs_nat (rep_nat x)" by (rule abs_ord)
+      hence "y \<le> x" by (simp only: rep_inverse)
+      ultimately have "y < x" by simp
+    qed
+  next
+    assume "rep_nat x \<le> rep_nat y"
+    hence "abs_nat (rep_nat x) \<le> abs_nat (rep_nat y)" by (rule abs_ord)
+    thus "x \<le> y" by (simp only: rep_inverse)
+  qed
+  thus ?thesis2 using rep_inj[of x y] by (auto simp: less_le Nat.nat_less_le)
+qed
+
+lemma ex_iff_abs: "(\<exists>x::'a. P x) \<longleftrightarrow> (\<exists>n::nat. P (abs_nat n))"
+  by (metis rep_inverse)
+
+lemma ex_iff_abs': "(\<exists>x<abs_nat m. P x) \<longleftrightarrow> (\<exists>n::nat<m. P (abs_nat n))"
+  by (metis abs_inverse rep_inverse ord_iff(2))
+
+lemma all_iff_abs: "(\<forall>x::'a. P x) \<longleftrightarrow> (\<forall>n::nat. P (abs_nat n))"
+  by (metis rep_inverse)
+
+lemma all_iff_abs': "(\<forall>x<abs_nat m. P x) \<longleftrightarrow> (\<forall>n::nat<m. P (abs_nat n))"
+  by (metis abs_inverse rep_inverse ord_iff(2))
+
+subclass linorder by (standard, auto simp: ord_iff rep_inj)
+
+lemma comparator_of_rep [simp]: "comparator_of (rep_nat x) (rep_nat y) = comparator_of x y"
+  by (simp add: comparator_of_def linorder_class.comparator_of_def ord_iff rep_inj)
+
+subclass wellorder
+proof
+  fix P::"'a \<Rightarrow> bool" and a::'a
+  let ?P = "\<lambda>n::nat. P (abs_nat n)"
+  assume a: "\<And>x. (\<And>y. y < x \<Longrightarrow> P y) \<Longrightarrow> P x"
+  have "P (abs_nat (rep_nat a))"
+  proof (rule less_induct[of _ "rep_nat a"])
+    fix n::nat
+    assume b: "\<And>m. m < n \<Longrightarrow> ?P m"
+    show "?P n"
+    proof (rule a)
+      fix y
+      assume "y < abs_nat n"
+      hence "rep_nat y < n" by (simp only: ord_iff abs_inverse)
+      hence "?P (rep_nat y)" by (rule b)
+      thus "P y" by (simp only: rep_inverse)
+    qed
+  qed
+  thus "P a" by (simp only: rep_inverse)
+qed
+
+subclass comm_monoid_add by (standard, auto simp: plus_eq intro: arg_cong)
+
+lemma sum_rep: "sum (rep_nat \<circ> f) A = rep_nat (sum f A)" for f :: "'b \<Rightarrow> 'a" and A :: "'b set"
+proof (induct A rule: infinite_finite_induct)
+  case (infinite A)
+  thus ?case by simp
+next
+  case empty
+  show ?case by simp
+next
+  case (insert a A)
+  from insert(1, 2) show ?case by (simp del: comp_apply add: insert(3) rep_plus, simp)
+qed
+
+subclass ordered_comm_monoid_add by (standard, simp add: ord_iff plus_eq)
+
+subclass countable by intro_classes (intro exI[of _ rep_nat] injI, elim rep_inj)
+
+subclass cancel_comm_monoid_add
+  apply standard
+  subgoal by (simp add: minus_eq rep_plus)
+  subgoal by (simp add: minus_eq rep_plus)
+  done
+
+subclass add_wellorder
+  apply standard
+  subgoal by (simp add: ord_iff rep_plus)
+  subgoal unfolding ord_iff by (drule le_imp_add, metis abs_plus rep_inverse)
+  subgoal by (simp add: ord_iff)
+  done
+
+end
+
+lemma the_min_eq_zero: "the_min = (0::'a::{the_min,nat})"
+proof -
+  have "the_min \<le> (0::'a)" by (fact the_min_min)
+  hence "rep_nat (the_min::'a) \<le> rep_nat (0::'a)" by (simp only: ord_iff)
+  also have "... = 0" by simp
+  finally have "rep_nat (the_min::'a) = 0" by simp
+  thus ?thesis by (simp only: rep_zero_iff)
+qed
+
+instantiation nat :: nat
+begin
+
+definition rep_nat_nat :: "nat \<Rightarrow> nat" where rep_nat_nat_def [code_unfold]: "rep_nat_nat = (\<lambda>x. x)"
+definition abs_nat_nat :: "nat \<Rightarrow> nat" where abs_nat_nat_def [code_unfold]: "abs_nat_nat = (\<lambda>x. x)"
+
+instance by (standard, simp_all add: rep_nat_nat_def abs_nat_nat_def)
+
+end
+
+instantiation natural :: nat
+begin
+
+definition rep_nat_natural :: "natural \<Rightarrow> nat"
+  where rep_nat_natural_def [code_unfold]: "rep_nat_natural = nat_of_natural"
+definition abs_nat_natural :: "nat \<Rightarrow> natural"
+  where abs_nat_natural_def [code_unfold]: "abs_nat_natural = natural_of_nat"
+
+instance by (standard, simp_all add: rep_nat_natural_def abs_nat_natural_def, metis minus_natural.rep_eq nat_of_natural_of_nat of_nat_of_natural)
+
+end
+
+
+
+class nat_pp_compare = linorder + zero + plus +
+  fixes rep_nat_pp :: "'a \<Rightarrow> (nat, nat) pp"
+    and abs_nat_pp :: "(nat, nat) pp \<Rightarrow> 'a"
+    and lex_comp' :: "'a comparator"
+    and deg' :: "'a \<Rightarrow> nat"
+  assumes rep_nat_pp_inverse [simp]: "abs_nat_pp (rep_nat_pp x) = x"
+    and abs_nat_pp_inverse [simp]: "rep_nat_pp (abs_nat_pp t) = t"
+    and lex_comp': "lex_comp' x y = comp_of_ord lex_pp (rep_nat_pp x) (rep_nat_pp y)"
+    and deg': "deg' x = deg_pp (rep_nat_pp x)"
+    and le_pp: "rep_nat_pp x \<le> rep_nat_pp y \<Longrightarrow> x \<le> y"
+    and zero_pp: "rep_nat_pp 0 = 0"
+    and plus_pp: "rep_nat_pp (x + y) = rep_nat_pp x + rep_nat_pp y"
+begin
+
+lemma less_pp:
+  assumes "rep_nat_pp x < rep_nat_pp y"
+  shows "x < y"
+proof -
+  from assms have 1: "rep_nat_pp x \<le> rep_nat_pp y" and 2: "rep_nat_pp x \<noteq> rep_nat_pp y" by simp_all
+  from 1 have "x \<le> y" by (rule le_pp)
+  moreover from 2 have "x \<noteq> y" by auto
+  ultimately show ?thesis by simp
+qed
+
+lemma rep_nat_pp_inj:
+  assumes "rep_nat_pp x = rep_nat_pp y"
+  shows "x = y"
+proof -
+  have "abs_nat_pp (rep_nat_pp x) = abs_nat_pp (rep_nat_pp y)" by (simp only: assms)
+  thus ?thesis by simp
+qed
+
+lemma lex_comp'_EqD:
+  assumes "lex_comp' x y = Eq"
+  shows "x = y"
+proof (rule rep_nat_pp_inj)
+  from assms show "rep_nat_pp x = rep_nat_pp y" by (simp add: lex_comp' comp_of_ord_def split: if_split_asm)
+qed
+
+lemma lex_comp'_valE:
+  assumes "lex_comp' s t \<noteq> Eq"
+  obtains x where "x \<in> keys_pp (rep_nat_pp s) \<union> keys_pp (rep_nat_pp t)"
+    and "comparator_of (lookup_pp (rep_nat_pp s) x) (lookup_pp (rep_nat_pp t) x) = lex_comp' s t"
+    and "\<And>y. y < x \<Longrightarrow> lookup_pp (rep_nat_pp s) y = lookup_pp (rep_nat_pp t) y"
+proof (cases "lex_comp' s t")
+  case Eq
+  with assms show ?thesis ..
+next
+  case Lt
+  hence "rep_nat_pp s \<noteq> rep_nat_pp t" and "lex_pp (rep_nat_pp s) (rep_nat_pp t)"
+    by (auto simp: lex_comp' comp_of_ord_def split: if_split_asm)
+  hence "\<exists>x. lookup_pp (rep_nat_pp s) x < lookup_pp (rep_nat_pp t) x \<and>
+             (\<forall>y<x. lookup_pp (rep_nat_pp s) y = lookup_pp (rep_nat_pp t) y)"
+    by (simp add: lex_pp_alt)
+  then obtain x where 1: "lookup_pp (rep_nat_pp s) x < lookup_pp (rep_nat_pp t) x"
+    and 2: "\<And>y. y < x \<Longrightarrow> lookup_pp (rep_nat_pp s) y = lookup_pp (rep_nat_pp t) y" by blast
+  show ?thesis
+  proof
+    show "x \<in> keys_pp (rep_nat_pp s) \<union> keys_pp (rep_nat_pp t)"
+    proof (rule ccontr)
+      assume "x \<notin> keys_pp (rep_nat_pp s) \<union> keys_pp (rep_nat_pp t)"
+      with 1 show False by (simp add: keys_pp_iff)
+    qed
+  next
+    show "comparator_of (lookup_pp (rep_nat_pp s) x) (lookup_pp (rep_nat_pp t) x) = lex_comp' s t"
+      by (simp add: linorder_class.comparator_of_def 1 Lt)
+  qed (fact 2)
+next
+  case Gt
+  hence "\<not> lex_pp (rep_nat_pp s) (rep_nat_pp t)"
+    by (auto simp: lex_comp' comp_of_ord_def split: if_split_asm)
+  hence "lex_pp (rep_nat_pp t) (rep_nat_pp s)" by (rule lex_pp_lin')
+  moreover have "rep_nat_pp t \<noteq> rep_nat_pp s"
+  proof
+    assume "rep_nat_pp t = rep_nat_pp s"
+    moreover from this have "lex_pp (rep_nat_pp s) (rep_nat_pp t)" by (simp add: lex_pp_refl)
+    ultimately have "lex_comp' s t = Eq" by (simp add: lex_comp' comp_of_ord_def)
+    with Gt show False by simp
+  qed
+  ultimately have "\<exists>x. lookup_pp (rep_nat_pp t) x < lookup_pp (rep_nat_pp s) x \<and>
+                    (\<forall>y<x. lookup_pp (rep_nat_pp t) y = lookup_pp (rep_nat_pp s) y)"
+    by (simp add: lex_pp_alt)
+  then obtain x where 1: "lookup_pp (rep_nat_pp t) x < lookup_pp (rep_nat_pp s) x"
+    and 2: "\<And>y. y < x \<Longrightarrow> lookup_pp (rep_nat_pp t) y = lookup_pp (rep_nat_pp s) y" by blast
+  show ?thesis
+  proof
+    show "x \<in> keys_pp (rep_nat_pp s) \<union> keys_pp (rep_nat_pp t)"
+    proof (rule ccontr)
+      assume "x \<notin> keys_pp (rep_nat_pp s) \<union> keys_pp (rep_nat_pp t)"
+      with 1 show False by (simp add: keys_pp_iff)
+    qed
+  next
+    from 1 have "\<not> lookup_pp (rep_nat_pp s) x < lookup_pp (rep_nat_pp t) x"
+      and "lookup_pp (rep_nat_pp s) x \<noteq> lookup_pp (rep_nat_pp t) x" by simp_all
+    thus "comparator_of (lookup_pp (rep_nat_pp s) x) (lookup_pp (rep_nat_pp t) x) = lex_comp' s t"
+      by (simp add: linorder_class.comparator_of_def Gt)
+  qed (simp add: 2)
+qed
+
+end
+
+class nat_term_compare = linorder + nat_term +
+  fixes is_scalar :: "'a itself \<Rightarrow> bool"
+    and lex_comp :: "'a comparator"
+    and deg_comp :: "'a comparator \<Rightarrow> 'a comparator"
+    and pot_comp :: "'a comparator \<Rightarrow> 'a comparator"
+  assumes zero_component: "\<exists>x. snd (rep_nat_term x) = 0"
+    and is_scalar: "is_scalar = (\<lambda>_. \<forall>x. snd (rep_nat_term x) = 0)"
+    and deg_comp: "deg_comp cmp = (\<lambda>x y. case comparator_of (deg_pp (fst (rep_nat_term x))) (deg_pp (fst (rep_nat_term y))) of Eq \<Rightarrow> cmp x y | val \<Rightarrow> val)"
+    and pot_comp: "pot_comp cmp = (\<lambda>x y. case comparator_of (snd (rep_nat_term x)) (snd (rep_nat_term y)) of Eq \<Rightarrow> cmp x y | val \<Rightarrow> val)"
+    and le_term: "rep_nat_term x \<le> rep_nat_term y \<Longrightarrow> x \<le> y"
+begin
+
+
+lemma less_term:
+  assumes "rep_nat_term x < rep_nat_term y"
+  shows "x < y"
+proof -
+  from assms have 1: "rep_nat_term x \<le> rep_nat_term y" and 2: "rep_nat_term x \<noteq> rep_nat_term y" by simp_all
+  from 1 have "x \<le> y" by (rule le_term)
+  moreover from 2 have "x \<noteq> y" by auto
+  ultimately show ?thesis by simp
+qed
+
+lemma lex_comp_alt: "lex_comp = (comparator_of::'a comparator)"
+proof -
+  from lex_pp_antisym have as: "antisymp lex_pp" by (rule antisympI)
+  interpret lex: comparator "comp_of_ord (lex_pp::(nat, nat) pp \<Rightarrow> _)"
+    unfolding comp_of_ord_eq_comp_of_ords[OF as]
+    by (rule comp_of_ords, unfold_locales,
+        auto simp: lex_pp_refl intro: lex_pp_trans lex_pp_lin' elim!: lex_pp_antisym)
+
+  have 1: "x = y" if "fst (rep_nat_term x) = fst (rep_nat_term y)"
+                  and "snd (rep_nat_term x) = snd (rep_nat_term y)" for x y
+    by (rule rep_nat_term_inj, rule prod_eqI, fact+)
+  have 2: "x < y" if "fst (rep_nat_term x) = fst (rep_nat_term y)"
+                  and "snd (rep_nat_term x) < snd (rep_nat_term y)" for x y
+    by (rule less_term, simp add: less_prod_def that)
+  have 3: False if "fst (rep_nat_term x) = fst (rep_nat_term y)"
+                and "\<not> snd (rep_nat_term x) < snd (rep_nat_term y)" and "x < y" for x y
+  proof -
+    from that(2) have a: "snd (rep_nat_term y) \<le> snd (rep_nat_term x)" by simp
+    have "y \<le> x" by (rule le_term, simp add: less_eq_prod_def that(1) a)
+    also have "... < y" by fact
+    finally show False ..
+  qed
+  have 4: "x < y" if "fst (rep_nat_term x) \<noteq> fst (rep_nat_term y)"
+                  and "lex_pp (fst (rep_nat_term x)) (fst (rep_nat_term y))" for x y
+  proof -
+    from that(2) have "fst (rep_nat_term x) \<le> fst (rep_nat_term y)" by (simp only: less_eq_pp_def)
+    with that(1) have "fst (rep_nat_term x) < fst (rep_nat_term y)" by simp
+    hence "rep_nat_term x < rep_nat_term y" by (simp add: less_prod_def)
+    thus ?thesis by (rule less_term)
+  qed
+  have 5: False if "fst (rep_nat_term x) \<noteq> fst (rep_nat_term y)"
+                and "\<not> lex_pp (fst (rep_nat_term x)) (fst (rep_nat_term y))" and "x < y" for x y
+  proof -
+    from that(2) have a: "lex_pp (fst (rep_nat_term y)) (fst (rep_nat_term x))" by (rule lex_pp_lin')
+    with that(1)[symmetric] have "y < x" by (rule 4)
+    also have "... < y" by fact
+    finally show False ..
+  qed
+
+  show ?thesis
+    by (intro ext, simp add: lex_comp lex_comp_aux_def comparator_of_def linorder_class.comparator_of_def lex.eq split: order.splits,
+        auto simp: lex_pp_refl comp_of_ord_def elim: 1 2 3 4 5)
+qed
+
+lemma full_component_zeroE: obtains x where "rep_nat_term x = (t, 0)"
+proof -
+  from zero_component obtain x' where "snd (rep_nat_term x') = 0" ..
+  then obtain x where "rep_nat_term x = (t, 0)" by (rule full_componentE)
+  thus ?thesis ..
+qed
+
+end
+
+
+lemma comparator_lex_comp: "comparator lex_comp"
+  unfolding lex_comp by (fact comparator_lex_comp_aux)
+
+lemma nat_term_comp_lex_comp: "nat_term_comp lex_comp"
+  unfolding lex_comp by (fact nat_term_comp_lex_comp_aux)
+
+lemma comparator_deg_comp:
+  assumes "comparator cmp"
+  shows "comparator (deg_comp cmp)"
+  unfolding deg_comp using comparator_of assms by (rule comparator_lexicographic)
+
+lemma comparator_pot_comp:
+  assumes "comparator cmp"
+  shows "comparator (pot_comp cmp)"
+  unfolding pot_comp using comparator_of assms by (rule comparator_lexicographic)
+
+lemma deg_comp_zero_min:
+  assumes "comparator cmp" and "snd (rep_nat_term u) = snd (rep_nat_term v)" and "fst (rep_nat_term u) = 0"
+  shows "deg_comp cmp u v \<noteq> Gt"
+proof (simp add: deg_comp assms(3) comparator_of_def split: order.split, intro impI)
+  assume "fst (rep_nat_term v) = 0"
+  with assms(3) have "fst (rep_nat_term u) = fst (rep_nat_term v)" by simp
+  hence "rep_nat_term u = rep_nat_term v" using assms(2) by (rule prod_eqI)
+  hence "u = v" by (rule rep_nat_term_inj)
+  from assms(1) interpret c: comparator cmp .
+qed
+
+lemma deg_comp_pos:
+  assumes "cmp u v = Lt" and "fst (rep_nat_term u) = fst (rep_nat_term v)"
+  shows "deg_comp cmp u v = Lt"
+  by (simp add: deg_comp assms split: order.split)
+
+lemma deg_comp_monotone:
+  assumes "cmp u v = Lt \<Longrightarrow> cmp (splus t u) (splus t v) = Lt" and "deg_comp cmp u v = Lt"
+  shows "deg_comp cmp (splus t u) (splus t v) = Lt"
+  using assms(2) by (auto simp: deg_comp splus_term pprod.splus_def comparator_of_def deg_pp_plus
+                          split: order.splits if_splits intro: assms(1))
+
+lemma pot_comp_zero_min:
+  assumes "cmp u v \<noteq> Gt" and "snd (rep_nat_term u) = snd (rep_nat_term v)"
+  shows "pot_comp cmp u v \<noteq> Gt"
+  by (simp add: pot_comp comparator_of_def assms split: order.split)
+
+lemma pot_comp_pos:
+  assumes "snd (rep_nat_term u) < snd (rep_nat_term v)"
+  shows "pot_comp cmp u v = Lt"
+  by (simp add: pot_comp comparator_of_def assms split: order.split)
+
+lemma pot_comp_monotone:
+  assumes "cmp u v = Lt \<Longrightarrow> cmp (splus t u) (splus t v) = Lt" and "pot_comp cmp u v = Lt"
+  shows "pot_comp cmp (splus t u) (splus t v) = Lt"
+  using assms(2) by (auto simp: pot_comp splus_term pprod.splus_def comparator_of_def deg_pp_plus
+                          split: order.splits if_splits intro: assms(1))
+
+lemma deg_comp_cong:
+  assumes "deg_pp (fst (rep_nat_term u)) = deg_pp (fst (rep_nat_term v)) \<Longrightarrow> to1 u v = to2 u v"
+  shows "deg_comp to1 u v = deg_comp to2 u v"
+  using assms by (simp add: deg_comp comparator_of_def split: order.split)
+
+lemma pot_comp_cong:
+  assumes "snd (rep_nat_term u) = snd (rep_nat_term v) \<Longrightarrow> to1 u v = to2 u v"
+  shows "pot_comp to1 u v = pot_comp to2 u v"
+  using assms by (simp add: pot_comp comparator_of_def split: order.split)
+
+instantiation pp :: (nat, nat) nat_pp_compare
+begin
+
+definition rep_nat_pp_pp :: "('a, 'b) pp \<Rightarrow> (nat, nat) pp"
+  where rep_nat_pp_pp_def [code del]: "rep_nat_pp_pp x = pp_of_fun (\<lambda>n::nat. rep_nat (lookup_pp x (abs_nat n)))"
+
+definition abs_nat_pp_pp :: "(nat, nat) pp \<Rightarrow> ('a, 'b) pp"
+  where abs_nat_pp_pp_def [code del]: "abs_nat_pp_pp t = pp_of_fun (\<lambda>n::'a. abs_nat (lookup_pp t (rep_nat n)))"
+
+definition lex_comp'_pp :: "('a, 'b) pp comparator"
+  where lex_comp'_pp_def [code del]: "lex_comp'_pp = comp_of_ord lex_pp"
+
+definition deg'_pp :: "('a, 'b) pp \<Rightarrow> nat"
+  where "deg'_pp x = rep_nat (deg_pp x)"
+
+lemma lookup_rep_nat_pp_pp:
+  "lookup_pp (rep_nat_pp t) = (\<lambda>n::nat. rep_nat (lookup_pp t (abs_nat n)))"
+  unfolding rep_nat_pp_pp_def
+proof (rule lookup_pp_of_fun)
+  have "{n. lookup_pp t (abs_nat n) \<noteq> 0} \<subseteq> rep_nat ` {x. lookup_pp t x \<noteq> 0}"
+  proof
+    fix n
+    have "n = rep_nat (abs_nat n)" by (simp only: nat_class.abs_inverse)
+    assume "n \<in> {n. lookup_pp t (abs_nat n) \<noteq> 0}"
+    hence "abs_nat n \<in> {x. lookup_pp t x \<noteq> 0}" by simp
+  qed
+  also have "finite ..." by (rule finite_imageI, transfer, simp)
+  also (finite_subset) have "{n. lookup_pp t (abs_nat n) \<noteq> 0} = {n. rep_nat (lookup_pp t (abs_nat n)) \<noteq> 0}"
+    by (metis rep_inj rep_zero)
+  finally show "finite {x. rep_nat (lookup_pp t (abs_nat x)) \<noteq> 0}" .
+qed
+
+lemma lookup_abs_nat_pp_pp:
+  "lookup_pp (abs_nat_pp t) = (\<lambda>n::'a. abs_nat (lookup_pp t (rep_nat n)))"
+  unfolding abs_nat_pp_pp_def
+proof (rule lookup_pp_of_fun)
+  have "{n::'a. lookup_pp t (rep_nat n) \<noteq> 0} \<subseteq> abs_nat ` {x. lookup_pp t x \<noteq> 0}"
+  proof
+    fix n :: 'a
+    have "n = abs_nat (rep_nat n)" by (simp only: nat_class.rep_inverse)
+    assume "n \<in> {n. lookup_pp t (rep_nat n) \<noteq> 0}"
+    hence "rep_nat n \<in> {x. lookup_pp t x \<noteq> 0}" by simp
+  qed
+  also have "finite ..." by (rule finite_imageI, transfer, simp)
+  also (finite_subset) have "{n::'a. lookup_pp t (rep_nat n) \<noteq> 0} = {n. abs_nat (lookup_pp t (rep_nat n)) \<noteq> 0}"
+    by (metis abs_inverse abs_zero)
+  finally show "finite {n::'a. abs_nat (lookup_pp t (rep_nat n)) \<noteq> 0}" .
+qed
+
+lemma keys_rep_nat_pp_pp: "keys_pp (rep_nat_pp t) = rep_nat ` keys_pp t"
+  by (rule set_eqI,
+      simp add: keys_pp_iff lookup_rep_nat_pp_pp image_iff Bex_def ex_iff_abs[where 'a='a] rep_zero_iff del: neq0_conv)
+
+lemma rep_nat_pp_pp_inverse: "abs_nat_pp (rep_nat_pp x) = x" for x::"('a, 'b) pp"
+  by (rule pp_eqI, simp add: lookup_abs_nat_pp_pp lookup_rep_nat_pp_pp)
+
+lemma abs_nat_pp_pp_inverse: "rep_nat_pp ((abs_nat_pp t)::('a, 'b) pp) = t"
+  by (rule pp_eqI, simp add: lookup_abs_nat_pp_pp lookup_rep_nat_pp_pp)
+
+corollary rep_nat_pp_pp_inj:
+  fixes x y :: "('a, 'b) pp"
+  assumes "rep_nat_pp x = rep_nat_pp y"
+  shows "x = y"
+  by (metis (no_types) rep_nat_pp_pp_inverse assms)
+
+corollary rep_nat_pp_pp_eq_iff: "(rep_nat_pp x = rep_nat_pp y) \<longleftrightarrow> (x = y)" for x y :: "('a, 'b) pp"
+  by (auto elim: rep_nat_pp_pp_inj)
+
+lemma lex_rep_nat_pp: "lex_pp (rep_nat_pp x) (rep_nat_pp y) \<longleftrightarrow> lex_pp x y"
+  by (simp add: lex_pp_alt rep_nat_pp_pp_eq_iff lookup_rep_nat_pp_pp rep_eq_iff
+      ord_iff[symmetric] ex_iff_abs[where 'a='a] all_iff_abs')
+
+corollary lex_comp'_pp: "lex_comp' x y = comp_of_ord lex_pp (rep_nat_pp x) (rep_nat_pp y)" for x y :: "('a, 'b) pp"
+  by (simp add: lex_comp'_pp_def comp_of_ord_def rep_nat_pp_pp_eq_iff lex_rep_nat_pp)
+
+corollary le_pp_pp: "rep_nat_pp x \<le> rep_nat_pp y \<Longrightarrow> x \<le> y" for x y :: "('a, 'b) pp"
+  by (simp only: less_eq_pp_def lex_rep_nat_pp)
+
+lemma deg_rep_nat_pp: "deg_pp (rep_nat_pp t) = rep_nat (deg_pp t)" for t :: "('a, 'b) pp"
+proof -
+  have "keys_pp (rep_nat_pp t) = rep_nat ` keys_pp t"
+    by (rule set_eqI, simp add: keys_pp_iff image_iff lookup_rep_nat_pp_pp Bex_def ex_iff_abs[where 'a='a] rep_zero_iff del: neq0_conv)
+  hence "deg_pp (rep_nat_pp t) = sum (lookup_pp (rep_nat_pp t)) (rep_nat ` keys_pp t)"
+    by (simp add: deg_pp_alt)
+  also have "... = sum (lookup_pp (rep_nat_pp t) \<circ> rep_nat) (keys_pp t)"
+    by (rule sum.reindex, rule inj_onI, elim rep_inj)
+  also have "... = sum (rep_nat \<circ> (lookup_pp t)) (keys_pp t)"
+    by (simp add: lookup_rep_nat_pp_pp)
+  also have "... = rep_nat (deg_pp t)" by (simp only: deg_pp_alt sum_rep)
+  finally show ?thesis .
+qed
+
+corollary deg'_pp: "deg' t = deg_pp (rep_nat_pp t)" for t :: "('a, 'b) pp"
+  by (simp add: deg'_pp_def deg_rep_nat_pp)
+
+lemma zero_pp_pp: "rep_nat_pp (0::('a, 'b) pp) = 0"
+  by (rule pp_eqI, simp add: lookup_rep_nat_pp_pp)
+
+lemma plus_pp_pp: "rep_nat_pp (x + y) = rep_nat_pp x + rep_nat_pp y"
+  for x y :: "('a, 'b) pp"
+  by (rule pp_eqI, simp add: lookup_rep_nat_pp_pp lookup_plus_pp rep_plus)
+
+instance
+  apply intro_classes
+  subgoal by (fact rep_nat_pp_pp_inverse)
+  subgoal by (fact abs_nat_pp_pp_inverse)
+  subgoal by (fact lex_comp'_pp)
+  subgoal by (fact deg'_pp)
+  subgoal by (rule le_pp_pp)
+  subgoal by (fact zero_pp_pp)
+  subgoal by (fact plus_pp_pp)
+  done
+
+end
+
+instantiation pp :: (nat, nat) nat_term
+begin
+
+definition rep_nat_term_pp :: "('a, 'b) pp \<Rightarrow> (nat, nat) pp \<times> nat"
+  where rep_nat_term_pp_def [code del]: "rep_nat_term_pp t = (rep_nat_pp t, 0)"
+
+definition splus_pp :: "('a, 'b) pp \<Rightarrow> ('a, 'b) pp \<Rightarrow> ('a, 'b) pp"
+  where splus_pp_def [code del]: "splus_pp = (+)"
+
+instance proof
+  fix x y :: "('a, 'b) pp"
+  assume "rep_nat_term x = rep_nat_term y"
+  hence "rep_nat_pp x = rep_nat_pp y" by (simp add: rep_nat_term_pp_def)
+  thus "x = y" by (rule rep_nat_pp_pp_inj)
+next
+  fix x::"('a, 'b) pp" and i t
+  assume "snd (rep_nat_term x) = i"
+  hence "i = 0" by (simp add: rep_nat_term_pp_def)
+  proof
+    show "rep_nat_term ((abs_nat_pp t)::('a, 'b) pp) = (t, 0)" by (simp add: rep_nat_term_pp_def)
+  qed
+next
+  fix x y :: "('a, 'b) pp"
+  show "rep_nat_term (splus x y) = pprod.splus (fst (rep_nat_term x)) (rep_nat_term y)"
+    by (simp add: splus_pp_def rep_nat_term_pp_def pprod.splus_def plus_pp_pp)
+qed
+
+end
+
+instantiation pp :: (nat, nat) nat_term_compare
+begin
+
+definition is_scalar_pp :: "('a, 'b) pp itself \<Rightarrow> bool"
+  where is_scalar_pp_def [code_unfold]: "is_scalar_pp = (\<lambda>_. True)"
+
+definition lex_comp_pp :: "('a, 'b) pp comparator"
+  where lex_comp_pp_def [code_unfold]: "lex_comp_pp = lex_comp'"
+
+definition deg_comp_pp :: "('a, 'b) pp comparator \<Rightarrow> ('a, 'b) pp comparator"
+  where deg_comp_pp_def: "deg_comp_pp cmp = (\<lambda>x y. case comparator_of (deg_pp x) (deg_pp y) of Eq \<Rightarrow> cmp x y | val \<Rightarrow> val)"
+
+definition pot_comp_pp :: "('a, 'b) pp comparator \<Rightarrow> ('a, 'b) pp comparator"
+  where pot_comp_pp_def [code_unfold]: "pot_comp_pp = (\<lambda>cmp. cmp)"
+
+instance proof
+  show "\<exists>x::('a, 'b) pp. snd (rep_nat_term x) = 0"
+  proof
+    show "snd (rep_nat_term (0::('a, 'b) pp)) = 0" by (simp add: rep_nat_term_pp_def)
+  qed
+next
+  show "is_scalar = (\<lambda>_::('a, 'b) pp itself. \<forall>x::('a, 'b) pp. snd (rep_nat_term x) = 0)"
+    by (simp add: is_scalar_pp_def rep_nat_term_pp_def)
+next
+  show "lex_comp = (lex_comp_aux::('a, 'b) pp comparator)"
+    by (auto simp: lex_comp_pp_def lex_comp_aux_def rep_nat_term_pp_def lex_comp'_pp split: order.split intro!: ext)
+next
+  fix cmp :: "('a, 'b) pp comparator"
+  show "deg_comp cmp =
+         (\<lambda>x y. case comparator_of (deg_pp (fst (rep_nat_term x))) (deg_pp (fst (rep_nat_term y))) of Eq \<Rightarrow> cmp x y
+                      | Lt \<Rightarrow> Lt | Gt \<Rightarrow> Gt)"
+    by (simp add: rep_nat_term_pp_def deg_comp_pp_def deg_rep_nat_pp comparator_of_rep)
+next
+  fix cmp :: "('a, 'b) pp comparator"
+  show "pot_comp cmp =
+         (\<lambda>x y. case comparator_of (snd (rep_nat_term x)) (snd (rep_nat_term y)) of Eq \<Rightarrow> cmp x y | Lt \<Rightarrow> Lt | Gt \<Rightarrow> Gt)"
+    by (simp add: rep_nat_term_pp_def pot_comp_pp_def)
+next
+  fix x y :: "('a, 'b) pp"
+  assume "rep_nat_term x \<le> rep_nat_term y"
+  hence "rep_nat_pp x \<le> rep_nat_pp y" by (auto simp: rep_nat_term_pp_def)
+  thus "x \<le> y" by (rule le_pp_pp)
+qed
+
+end
+
+instance pp :: (nat, nat) nat_pp_term
+proof
+  show "rep_nat_term (0::('a, 'b) pp) = (0, 0)"
+    by (simp add: rep_nat_term_pp_def) (metis deg_pp_eq_0_iff deg_rep_nat_pp rep_zero)
+next
+  show "splus = ((+)::('a, 'b) pp \<Rightarrow> _)" by (simp add: splus_pp_def)
+qed
+
+instantiation prod :: ("{nat_pp_compare, comm_powerprod}", nat) nat_term
+begin
+
+definition rep_nat_term_prod :: "('a \<times> 'b) \<Rightarrow> ((nat, nat) pp \<times> nat)"
+  where rep_nat_term_prod_def [code del]: "rep_nat_term_prod u = (rep_nat_pp (fst u), rep_nat (snd u))"
+
+definition splus_prod :: "('a \<times> 'b) \<Rightarrow> ('a \<times> 'b) \<Rightarrow> ('a \<times> 'b)"
+  where splus_prod_def [code del]: "splus_prod t u = pprod.splus (fst t) u"
+
+instance proof
+  fix x y :: "'a \<times> 'b"
+  assume "rep_nat_term x = rep_nat_term y"
+  hence 1: "rep_nat_pp (fst x) = rep_nat_pp (fst y)" and 2: "rep_nat (snd x) = rep_nat (snd y)"
+    by (simp_all add: rep_nat_term_prod_def)
+  from 1 have "fst x = fst y" by (rule rep_nat_pp_inj)
+  moreover from 2 have "snd x = snd y" by (rule rep_inj)
+  ultimately show "x = y" by (rule prod_eqI)
+next
+  fix i t
+  show "\<exists>y::'a \<times> 'b. rep_nat_term y = (t, i)"
+  proof
+    show "rep_nat_term (abs_nat_pp t, abs_nat i) = (t, i)" by (simp add: rep_nat_term_prod_def)
+  qed
+next
+  fix x y :: "'a \<times> 'b"
+  show "rep_nat_term (splus x y) = pprod.splus (fst (rep_nat_term x)) (rep_nat_term y)"
+    by (simp add: splus_prod_def rep_nat_term_prod_def pprod.splus_def plus_pp)
+qed
+
+end
+
+instantiation prod :: ("{nat_pp_compare, comm_powerprod}", nat) nat_term_compare
+begin
+
+definition is_scalar_prod :: "('a \<times> 'b) itself \<Rightarrow> bool"
+  where is_scalar_prod_def [code_unfold]: "is_scalar_prod = (\<lambda>_. False)"
+
+definition lex_comp_prod :: "('a \<times> 'b) comparator"
+  where "lex_comp_prod = (\<lambda>u v. case lex_comp' (fst u) (fst v) of Eq \<Rightarrow> comparator_of (snd u) (snd v) | val \<Rightarrow> val)"
+
+definition deg_comp_prod :: "('a \<times> 'b) comparator \<Rightarrow> ('a \<times> 'b) comparator"
+  where deg_comp_prod_def: "deg_comp_prod cmp = (\<lambda>x y. case comparator_of (deg' (fst x)) (deg' (fst y)) of Eq \<Rightarrow> cmp x y | val \<Rightarrow> val)"
+
+definition pot_comp_prod :: "('a \<times> 'b) comparator \<Rightarrow> ('a \<times> 'b) comparator"
+  where "pot_comp_prod cmp = (\<lambda>u v. case comparator_of (snd u) (snd v) of Eq \<Rightarrow> cmp u v | val \<Rightarrow> val)"
+
+instance proof
+  show "\<exists>x::'a \<times> 'b. snd (rep_nat_term x) = 0"
+  proof
+    show "snd (rep_nat_term (abs_nat_pp 0, 0)) = 0" by (simp add: rep_nat_term_prod_def)
+  qed
+next
+  have "\<not> (\<forall>a. rep_nat (a::'b) = 0)"
+  proof
+    assume "\<forall>a. rep_nat (a::'b) = 0"
+    hence "rep_nat ((abs_nat 1)::'b) = 0" by blast
+    hence "((abs_nat 1)::'b) = 0" by (simp only: rep_zero_iff)
+    hence "(1::nat) = 0" by (metis abs_inj abs_zero)
+    thus False by simp
+  qed
+  thus "is_scalar = (\<lambda>_::('a \<times> 'b) itself. \<forall>x. snd (rep_nat_term (x::'a \<times> 'b)) = 0)"
+    by (auto simp add: is_scalar_prod_def rep_nat_term_prod_def intro!: ext)
+next
+  show "lex_comp = (lex_comp_aux::('a \<times> 'b) comparator)"
+    by (auto simp: lex_comp_prod_def lex_comp_aux_def rep_nat_term_prod_def lex_comp' comparator_of_rep split: order.split intro!: ext)
+next
+  fix cmp :: "('a \<times> 'b) comparator"
+  show "deg_comp cmp =
+         (\<lambda>x y. case comparator_of (deg_pp (fst (rep_nat_term x))) (deg_pp (fst (rep_nat_term y))) of Eq \<Rightarrow> cmp x y
+                   | Lt \<Rightarrow> Lt | Gt \<Rightarrow> Gt)"
+    by (simp add: rep_nat_term_prod_def deg_comp_prod_def deg')
+next
+  fix cmp :: "('a \<times> 'b) comparator"
+  show "pot_comp cmp =
+         (\<lambda>x y. case comparator_of (snd (rep_nat_term x)) (snd (rep_nat_term y)) of Eq \<Rightarrow> cmp x y | Lt \<Rightarrow> Lt | Gt \<Rightarrow> Gt)"
+    by (simp add: rep_nat_term_prod_def pot_comp_prod_def comparator_of_rep)
+next
+  fix x y :: "'a \<times> 'b"
+  assume "rep_nat_term x \<le> rep_nat_term y"
+  hence "rep_nat_pp (fst x) < rep_nat_pp (fst y) \<or> (rep_nat_pp (fst x) \<le> rep_nat_pp (fst y) \<and> rep_nat (snd x) \<le> rep_nat (snd y))"
+    by (simp add: rep_nat_term_prod_def)
+  thus "x \<le> y" by (auto simp: less_eq_prod_def ord_iff[symmetric] intro: le_pp less_pp)
+qed
+
+end
+
+lemmas [code del] = deg_pp.rep_eq plus_pp.abs_eq minus_pp.abs_eq
+
+lemma rep_nat_pp_nat [code_unfold]: "(rep_nat_pp::(nat, nat) pp \<Rightarrow> (nat, nat) pp) = (\<lambda>x. x)"
+  by (intro ext pp_eqI, simp add: lookup_rep_nat_pp_pp abs_nat_nat_def rep_nat_nat_def)
+
+
+definition LEX :: "'a::nat_term_compare nat_term_order" where "LEX = Abs_nat_term_order lex_comp"
+
+definition DRLEX :: "'a::nat_term_compare nat_term_order"
+  where "DRLEX = Abs_nat_term_order (deg_comp (pot_comp (\<lambda>x y. lex_comp y x)))"
+
+definition DEG :: "'a::nat_term_compare nat_term_order \<Rightarrow> 'a nat_term_order"
+  where "DEG to = Abs_nat_term_order (deg_comp (nat_term_compare to))"
+
+definition POT :: "'a::nat_term_compare nat_term_order \<Rightarrow> 'a nat_term_order"
+  where "POT to = Abs_nat_term_order (pot_comp (nat_term_compare to))"
+
+
+  to @{const DEG} and @{const POT}. Then, however, proving (in)equalities of the term orders gets
+  really messy (think of @{prop "DEG (POT to) = DEGREV (DEGREV to)"}, for instance).
+  So, we restrict the formalization to @{const DRLEX} only.\<close>
+subsubsection \<open>Equality of Term Orders\<close>
+text \<open>@{const of_exps} is an auxiliary function needed for proving the equalities of the various
+  term orders.\<close>
+        from 1 show ?thesis by (simp add: lookup_pp_of_exps \<open>x = 0\<close>)
+        from 1 show ?thesis by (simp add: lookup_pp_of_exps \<open>x = 1\<close> \<open>a1 = a2\<close>)
+        from \<open>a1 < a2\<close> show "lookup_pp ?u 0 < lookup_pp ?v 0" by (simp add: lookup_pp_of_exps)
+          from \<open>b1 < b2\<close> show "lookup_pp ?u 1 < lookup_pp ?v 1" by (simp add: lookup_pp_of_exps)
+          show "lookup_pp ?u y = lookup_pp ?v y" by (simp add: lookup_pp_of_exps \<open>y = 0\<close> \<open>a1 = a2\<close>)
+        show ?thesis by (simp add: lex_pp_alt eq_of_exps \<open>a1 = a2\<close> \<open>b1 = b2\<close>)
+        by (rule nat_term_order_eqD, fact a, simp_all add: \<open>\<not> dg\<close>)
+    proof (intro conjI \<open>dg\<close> nat_term_order_eqI)
+      from \<open>dg\<close> have eq: "deg_pp (fst (rep_nat_term u)) = deg_pp (fst (rep_nat_term v))" by (rule 1)
+      from \<open>dg\<close> have eq: "deg_pp (fst (rep_nat_term u)) = deg_pp (fst (rep_nat_term v))" by (rule 1)
+        by (rule nat_term_order_eqD, fact a, simp_all add: \<open>\<not> ps\<close>)
+            comparator_of_def comp_of_ord_def lex_pp_of_exps eq_of_exps eq \<open>i \<noteq> 0\<close> del: One_nat_def)
+        by (rule nat_term_order_eqD, fact a, simp_all add: \<open>\<not> ps\<close> \<open>\<not> dg\<close>)
+            comparator_of_def eq \<open>i \<noteq> 0\<close> del: One_nat_def)
+          by (rule nat_term_order_eqD, fact a, simp_all add: \<open>\<not> ps\<close>)
+              comparator_of_def comp_of_ord_def lex_pp_of_exps eq_of_exps eq \<open>i \<noteq> 0\<close> del: One_nat_def)

@@ -1,0 +1,123 @@
+theory KD_Region_Nested
+imports "HOL-Library.NList"
+begin
+
+lemma nlists_Suc: "nlists (Suc n) A = (\<Union>a\<in>A. (#) a ` nlists n A)"
+  by(auto simp: set_eq_iff image_iff in_nlists_Suc_iff)
+lemma nlists_singleton: "nlists n {a} = {replicate n a}"
+  unfolding nlists_def by(auto simp: replicate_length_same dest!: subset_singletonD)
+
+fun cube :: "nat \<Rightarrow> nat \<Rightarrow> nat list set" where
+  "cube k n = nlists k {0..<2^n}"
+
+datatype 'a tree1 = Lf 'a | Br "'a tree1" "'a tree1"
+datatype 'a kdt = Cube 'a | Dims "'a kdt tree1"
+
+datatype_compat tree1
+datatype_compat kdt
+
+type_synonym kdtb = "bool kdt"
+
+lemma set_tree1_finite_ne: "finite (set_tree1 t) \<and> set_tree1 t \<noteq> {}"
+  by(induction t) auto
+
+lemma kdt_tree1_term[termination_simp]: "x \<in> set_tree1 t \<Longrightarrow> size_kdt f x < Suc (size_tree1 (size_kdt f) t)"
+  by(induction t)(auto)
+
+fun h_tree1 :: "'a tree1 \<Rightarrow> nat" where
+  "h_tree1 (Lf _) = 0" |
+  "h_tree1 (Br l r) = max (h_tree1 l) (h_tree1 r) + 1"
+
+function (sequential) h_kdt :: "'a kdt \<Rightarrow> nat" where
+  "h_kdt (Cube _) = 0" |
+  "h_kdt (Dims t) = Max (h_kdt ` (set_tree1 t)) + 1"
+  by pat_completeness auto
+termination
+  by(relation "measure (size_kdt (\<lambda>_. 1))")
+    (auto simp add: wf_lex_prod kdt_tree1_term)
+
+function (sequential) inv_kdt :: "nat \<Rightarrow> 'a kdt \<Rightarrow> bool" where
+  "inv_kdt k (Cube b) = True" |
+  "inv_kdt k (Dims t) = (h_tree1 t \<le> k \<and> (\<forall>kt \<in> set_tree1 t. inv_kdt k kt))"
+  by pat_completeness auto
+termination
+  by(relation "{} <*lex*> measure (size_kdt (\<lambda>_. 1))")
+    (auto simp add: wf_lex_prod kdt_tree1_term)
+
+definition bits :: "nat \<Rightarrow> bool list set" where
+  "bits n = nlists n UNIV"
+
+lemma bits_0[code]: "bits 0 = {[]}"
+  by (auto simp: bits_def)
+
+lemma bits_Suc[code]: "bits (Suc n) = (let B = bits n in (#) True ` B \<union> (#) False ` B)"
+  unfolding bits_def nlists_Suc UN_bool_eq by metis
+
+fun leaf :: "'a tree1 \<Rightarrow> bool list \<Rightarrow> 'a" where
+  "leaf (Lf x) _ = x" |
+  "leaf (Br l r) (b#bs) = leaf (if b then r else l) bs" |
+
+definition mv :: "bool list \<Rightarrow> nat list \<Rightarrow> nat list" where
+  "mv = map2 (\<lambda>b x. 2*x + (if b then 0 else 1))"
+
+fun points :: "nat \<Rightarrow> nat \<Rightarrow> kdtb \<Rightarrow> nat list set" where
+  "points k n (Cube b) = (if b then cube k n else {})" |
+  "points k (Suc n) (Dims t) = (\<Union>bs \<in> bits k. mv bs ` points k n (leaf t bs))"
+
+lemma bits_nonempty: "bits n \<noteq> {}"
+  by(auto simp: bits_def Ex_list_of_length)
+
+lemma finite_bits: "finite (bits n)"
+  by (metis List.finite_set List.set_insert UNIV_bool bits_def empty_set nlists_set)
+
+lemma mv_in_nlists:
+  "\<lbrakk> p \<in> nlists k {0..<2 ^ n}; bs \<in> bits k \<rbrakk> \<Longrightarrow> mv bs p \<in> nlists k {0..<2 * 2 ^ n}"
+  unfolding mv_def nlists_def bits_def
+  by (fastforce dest: set_zip_rightD)
+
+lemma leaf_append: "length bs \<ge> h_tree1 t  \<Longrightarrow> leaf t (bs@bs') = leaf t bs"
+  by (induction t bs arbitrary: bs' rule: leaf.induct) auto
+
+lemma leaf_take: "length bs \<ge> h_tree1 t  \<Longrightarrow> leaf t (bs) = leaf t (take (h_tree1 t) bs)"
+  by (metis append_take_drop_id leaf_append length_take min.absorb2 order_refl)
+
+lemma Union_bits_le:
+  "h_tree1 t \<le> n \<Longrightarrow> (\<Union>bs\<in>bits n. {leaf t bs}) = (\<Union>bs\<in>bits (h_tree1 t). {leaf t bs})"
+  unfolding bits_def nlists_def
+  apply rule
+  using leaf_take apply (force)
+  by auto (metis Ex_list_of_length order.refl le_add_diff_inverse leaf_append length_append)
+
+lemma set_tree1_leafs:
+  "set_tree1 t = (\<Union>bs \<in> bits (h_tree1 t). {leaf t bs})"
+proof(induction t)
+  case (Lf x)
+  then show ?case by (simp add: bits_nonempty)
+next
+  case (Br t1 t2)
+  then show ?case using Union_bits_le[of t1 "h_tree1 t2"] Union_bits_le[of t2 "h_tree1 t1"]
+    by (auto simp add: Let_def bits_Suc max_def)
+qed
+
+lemma points_subset: "inv_kdt k t \<Longrightarrow> h_kdt t \<le> n \<Longrightarrow> points k n t \<subseteq> nlists k {0..<2^n}"
+proof(induction k n t rule: points.induct)
+  case (2 k n t)
+  have "mv bs ps \<in> nlists k {0..<2 * 2 ^ n}" if *: "bs \<in> bits k" "ps \<in> points k n (leaf t bs)" for bs ps
+  proof -
+    have "inv_kdt k (leaf t bs)" using *(1) "2.prems"(1)
+      by(auto simp: set_tree1_leafs )
+        (metis bits_def leaf_take length_take min.absorb2 nlistsE_length nlistsI subset_UNIV)
+    moreover have "h_kdt (leaf t bs) \<le> n" using *(1) "2.prems"
+        by(auto simp add: set_tree1_leafs bits_nonempty finite_bits)
+          (metis bits_def leaf_take length_take min.absorb2 nlistsE_length nlistsI subset_UNIV)
+    ultimately show ?thesis using * "2.IH"[of bs] mv_in_nlists by(auto)
+  qed
+  thus ?case by(auto)
+qed auto
+
+fun comb1 :: "('a \<Rightarrow> 'a \<Rightarrow> 'a) \<Rightarrow> 'a tree1 \<Rightarrow> 'a tree1 \<Rightarrow> 'a tree1" where
+"comb1 f (Lf x1) (Lf x2) = Lf (f x1 x2)" |
+"comb1 f (Br l1 r1) (Br l2 r2) = Br (comb1 f l1 l2) (comb1 f r1 r2)" |
+"comb1 f (Br l1 r1) (Lf x) = Br (comb1 f l1 (Lf x)) (comb1 f r1 (Lf x))" |
+"comb1 f (Lf x) (Br l2 r2) = Br (comb1 f (Lf x) l2) (comb1 f (Lf x) r2)"
+

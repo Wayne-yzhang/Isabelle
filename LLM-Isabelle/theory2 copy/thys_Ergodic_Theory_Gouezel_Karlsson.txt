@@ -1,0 +1,165 @@
+theory Gouezel_Karlsson
+  imports Asymptotic_Density Kingman
+begin
+
+
+
+lemma upper_density_eventually_measure:
+  fixes a::real
+  assumes [measurable]: "\<And>n. {x \<in> space M. P x n} \<in> sets M"
+    and "emeasure M {x \<in> space M. upper_asymptotic_density {n. P x n} < a} > b"
+  shows "\<exists>N. emeasure M {x \<in> space M. \<forall>n \<ge> N. card ({n. P x n} \<inter> {..<n}) < a * n} > b"
+proof -
+  define G where "G = {x \<in> space M. upper_asymptotic_density {n. P x n} < a}"
+  define H where "H = (\<lambda>N. {x \<in> space M. \<forall>n \<ge> N. card ({n. P x n} \<inter> {..<n}) < a * n})"
+  have [measurable]: "G \<in> sets M" "\<And>N. H N \<in> sets M" unfolding G_def H_def by auto
+  have "G \<subseteq> (\<Union>N. H N)"
+  proof
+    fix x assume "x \<in> G"
+    then have "x \<in> space M" unfolding G_def by simp
+    have "eventually (\<lambda>n. card({n. P x n} \<inter> {..<n}) < a * n) sequentially"
+    then obtain N where "\<And>n. n \<ge> N \<Longrightarrow> card({n. P x n} \<inter> {..<n}) < a * n"
+      using eventually_sequentially by auto
+    then show "x \<in> (\<Union>N. H N)" by blast
+  qed
+  have "b < emeasure M G" using assms(2) unfolding G_def by simp
+  also have "... \<le> emeasure M (\<Union>N. H N)"
+  finally have "emeasure M (\<Union>N. H N) > b" by simp
+  moreover have "(\<lambda>N. emeasure M (H N)) \<longlonglongrightarrow> emeasure M (\<Union>N. H N)"
+    apply (rule Lim_emeasure_incseq) unfolding H_def incseq_def by auto
+  ultimately have "eventually (\<lambda>N. emeasure M (H N) > b) sequentially"
+    by (simp add: order_tendsto_iff)
+  then obtain N where "emeasure M (H N) > b"
+    using eventually_False_sequentially eventually_mono by blast
+  then show ?thesis unfolding H_def by blast
+qed
+
+
+locale Gouezel_Karlsson_Kingman = pmpt +
+  fixes u::"nat \<Rightarrow> 'a \<Rightarrow> real"
+  assumes subu: "subcocycle u"
+    and subu_fin: "subcocycle_avg_ereal u > -\<infinity>"
+    and subu_0: "AE x in M. subcocycle_lim u x = 0"
+begin
+
+lemma int_u [measurable]:
+  "integrable M (u n)"
+using subu unfolding subcocycle_def by auto
+
+
+lemma upper_density_all_times:
+  assumes "d > (0::real)"
+  shows "\<exists>c> (0::real).
+        emeasure M {x \<in> space M. upper_asymptotic_density {n. \<exists>l \<in> {1..n}. u n x - u (n-l) x \<le> - c * l} < d} > 1 - d"
+proof -
+  define f where "f = (\<lambda>x. abs (u 1 x))"
+  have [measurable]: "f \<in> borel_measurable M" unfolding f_def by auto
+  define G where "G = {x \<in> space M. (\<lambda>n. birkhoff_sum f n x / n) \<longlonglongrightarrow> real_cond_exp M Invariants f x
+                      \<and> (\<lambda>n. u n x / n) \<longlonglongrightarrow> 0}"
+  have [measurable]: "G \<in> sets M" unfolding G_def by auto
+  have "AE x in M. (\<lambda>n. birkhoff_sum f n x / n) \<longlonglongrightarrow> real_cond_exp M Invariants f x"
+    apply (rule birkhoff_theorem_AE_nonergodic) using subu unfolding f_def subcocycle_def by auto
+  moreover have "AE x in M. (\<lambda>n. u n x / n) \<longlonglongrightarrow> 0"
+    using subu_0 kingman_theorem_nonergodic(1)[OF subu subu_fin] by auto
+  ultimately have "AE x in M. x \<in> G" unfolding G_def by auto
+  then have "emeasure M G = 1" by (simp add: emeasure_eq_1_AE)
+
+  define V where "V = (\<lambda>c x. {n. \<exists>l \<in> {1..n}. u n x - u (n-l) x \<le> - c * l})"
+  define Good where "Good = (\<lambda>c. {x \<in> G. upper_asymptotic_density (V c x) < d})"
+  have [measurable]: "Good c \<in> sets M" for c unfolding Good_def V_def by auto
+
+  have I: "upper_asymptotic_density (V c x) \<le> real_cond_exp M Invariants f x / c" if "c>0" "x \<in> G" for c x
+  proof -
+    define U where "U = (\<lambda>n. abs(u 0 x) + birkhoff_sum f n x - c * card (V c x \<inter> {1..n}))"
+    have main: "u n x \<le> U n" for n
+    proof (rule nat_less_induct)
+      fix n assume H: "\<forall>m<n. u m x \<le> U m"
+      consider "n = 0" | "n\<ge>1 \<and> n \<notin> V c x" | "n\<ge>1 \<and> n \<in> V c x" by linarith
+      then show "u n x \<le> U n"
+      proof (cases)
+        assume "n = 0"
+        then show ?thesis unfolding U_def by auto
+      next
+        assume A: "n\<ge>1 \<and> n \<notin> V c x"
+        then have "n \<ge> 1" by simp
+        then have "n-1<n" by simp
+        then have *: "card (V c x \<inter> {1..n}) = card (V c x \<inter> {1..n-1})" using A by auto
+        have "u n x \<le> u (n-1) x + u 1 ((T^^(n-1)) x)"
+        also have "... = abs(u 0 x) + birkhoff_sum f (n-1) x + f ((T^^(n-1)) x) - c * card (V c x \<inter> {1..n-1})"
+          unfolding U_def by auto
+        also have "... = abs(u 0 x) + birkhoff_sum f n x - c * card (V c x \<inter> {1..n})"
+        also have "... = U n" unfolding U_def by simp
+        finally show ?thesis by auto
+      next
+        assume B: "n\<ge>1 \<and> n \<in> V c x"
+        then obtain l where l: "l\<in>{1..n}" "u n x - u (n-l) x \<le> - c * l" unfolding V_def by blast
+        then have "n-l < n" by simp
+        have m: "- (r * ra) - r * rb = - (r * (rb + ra))" for r ra rb::real
+          by (simp add: algebra_simps)
+
+        have "card(V c x \<inter> {1..n}) \<le> card ((V c x \<inter> {1..n-l}) \<union> {n-l+1..n})"
+          by (rule card_mono, auto)
+        also have "... \<le> card (V c x \<inter> {1..n-l}) + card {n-l+1..n}"
+          by (rule card_Un_le)
+        also have "... \<le> card (V c x \<inter> {1..n-l}) + l" by auto
+        finally have "card(V c x \<inter> {1..n}) \<le> card (V c x \<inter> {1..n-l}) + real l" by auto
+        then have *: "-c * card (V c x \<inter> {1..n-l}) - c * l \<le> -c * card(V c x \<inter> {1..n})"
+          using m by auto
+
+        have "birkhoff_sum f ((n-l) + l) x = birkhoff_sum f (n-l) x + birkhoff_sum f l ((T^^(n-l))x)"
+          by (rule birkhoff_sum_cocycle)
+        moreover have "birkhoff_sum f l ((T^^(n-l))x) \<ge> 0"
+          unfolding f_def birkhoff_sum_def using sum_nonneg by auto
+        ultimately have **: "birkhoff_sum f (n-l) x \<le> birkhoff_sum f n x" using l(1) by auto
+
+        have "u n x \<le> u (n-l) x - c * l" using l by simp
+        also have "... = abs(u 0 x) + birkhoff_sum f (n-l) x - c * card (V c x \<inter> {1..n-l}) - c*l"
+          unfolding U_def by auto
+        also have "... \<le> abs(u 0 x) + birkhoff_sum f n x - c * card (V c x \<inter> {1..n})"
+          using * ** by simp
+        finally show ?thesis unfolding U_def by auto
+      qed
+    qed
+
+    have "(\<lambda>n. abs(u 0 x) * (1/n) + birkhoff_sum f n x / n - u n x / n) \<longlonglongrightarrow> abs(u 0 x) * 0 + real_cond_exp M Invariants f x - 0"
+    moreover have "(abs(u 0 x) + birkhoff_sum f n x - u n x)/n = abs(u 0 x) * (1/n) + birkhoff_sum f n x / n - u n x / n" for n
+      by (auto simp add: add_divide_distrib diff_divide_distrib)
+    ultimately have "(\<lambda>n. (abs(u 0 x) + birkhoff_sum f n x - u n x)/n) \<longlonglongrightarrow> real_cond_exp M Invariants f x"
+      by auto
+    then have a: "limsup (\<lambda>n. (abs(u 0 x) + birkhoff_sum f n x - u n x)/n) = real_cond_exp M Invariants f x"
+      by (simp add: assms lim_imp_Limsup)
+
+    have "c * card (V c x \<inter> {1..n})/n \<le> (abs(u 0 x) + birkhoff_sum f n x - u n x)/n" for n
+      using main[of n] unfolding U_def by (simp add: divide_right_mono)
+    then have "limsup (\<lambda>n. c * card (V c x \<inter> {1..n})/n) \<le> limsup (\<lambda>n. (abs(u 0 x) + birkhoff_sum f n x - u n x)/n)"
+      by (simp add: Limsup_mono)
+    then have b: "limsup (\<lambda>n. c * card (V c x \<inter> {1..n})/n) \<le> real_cond_exp M Invariants f x"
+      using a by simp
+
+    have "ereal(upper_asymptotic_density (V c x)) = limsup (\<lambda>n. card (V c x \<inter> {1..n})/n)"
+      using upper_asymptotic_density_shift[of "V c x" 1 0] by auto
+    also have "... = limsup (\<lambda>n. ereal(1/c) * ereal(c * card (V c x \<inter> {1..n})/n))"
+      by auto
+    also have "... = (1/c) * limsup (\<lambda>n. c * card (V c x \<inter> {1..n})/n)"
+      by (rule limsup_ereal_mult_left, auto)
+    also have "... \<le> ereal (1/c) * real_cond_exp M Invariants f x"
+      by (rule ereal_mult_left_mono[OF b], auto)
+    finally show "upper_asymptotic_density (V c x) \<le> real_cond_exp M Invariants f x / c"
+      by auto
+  qed
+
+  {
+    fix r::real
+    obtain c::nat where "r / d < c" using reals_Archimedean2 by auto
+    then have "r/d < real c+1" by auto
+    then have "\<exists>c::nat. r / (real c+1) < d" by auto
+  }
+  then have unG: "(\<Union>c::nat. {x \<in> G. real_cond_exp M Invariants f x / (c+1) < d}) = G"
+    by auto
+
+  have *: "r < d * (real n + 1)" if "m \<le> n" "r < d * (real m + 1)" for m n r
+  proof -
+  qed
+  have "(\<lambda>c. emeasure M {x \<in> G. real_cond_exp M Invariants f x / (real c+1) < d})
+          \<longlonglongrightarrow> emeasure M (\<Union>c::nat. {x \<in> G. real_cond_exp M Invariants f x / (c+1) < d})"
+    apply (rule Lim_emeasure_incseq) unfolding incseq_def by (auto simp add: divide_simps *)

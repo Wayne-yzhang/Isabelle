@@ -1,0 +1,330 @@
+theory PCF
+imports
+  Basis
+  Logical_Relations
+begin
+
+
+type_synonym var = nat
+
+datatype expr =
+    Var var
+  | App expr expr
+  | Diverge ("\<Omega>")
+  | Fix var expr
+  | tt
+  | ff
+  | Cond expr expr expr
+  | Num nat
+  | Succ expr
+  | Pred expr
+  | IsZero expr
+
+
+
+domain ValD =
+   ValF (lazy appF :: "ValD \<rightarrow> ValD")
+ | ValTT | ValFF
+ | ValN (lazy "nat")
+
+
+lemma ValD_case_ID [simp]:
+  "ValD_case\<cdot>ValF\<cdot>ValTT\<cdot>ValFF\<cdot>ValN = ID"
+  apply (rule cfun_eqI)
+  apply (case_tac x)
+  apply simp_all
+  done
+
+lemma below_monic_ValF [iff]:
+  "below_monic_cfun ValF"
+  by (rule below_monicI) simp
+
+lemma below_monic_ValN [iff]:
+  "below_monic_cfun ValN"
+  by (rule below_monicI) simp
+
+
+fixrec
+  ValD_copy_rec :: "(ValD \<rightarrow> ValD) \<rightarrow> (ValD \<rightarrow> ValD)"
+where
+  "ValD_copy_rec\<cdot>r\<cdot>(ValF\<cdot>f) = ValF\<cdot>(cfun_map\<cdot>r\<cdot>r\<cdot>f)"
+| "ValD_copy_rec\<cdot>r\<cdot>(ValTT) = ValTT"
+| "ValD_copy_rec\<cdot>r\<cdot>(ValFF) = ValFF"
+| "ValD_copy_rec\<cdot>r\<cdot>(ValN\<cdot>n) = ValN\<cdot>n"
+
+lemma ValD_copy_rec_strict [simp]:
+  "ValD_copy_rec\<cdot>r\<cdot>\<bottom> = \<bottom>"
+  by fixrec_simp
+
+abbreviation
+  "ValD_copy \<equiv> fix\<cdot>ValD_copy_rec"
+
+lemma ValD_copy_strict [simp]:
+  "ValD_copy\<cdot>\<bottom> = \<bottom>"
+  by (subst fix_eq) simp
+
+lemma ValD_copy_ID [simp]:
+  "ValD_copy = ID"
+proof -
+  { fix x :: ValD
+    fix i :: nat
+    have "ValD_take i\<cdot>(ValD_copy\<cdot>(ValD_take i\<cdot>x)) = ValD_take i\<cdot>x"
+    proof (induct i arbitrary: x)
+      case (Suc n) then show ?case
+        by (cases x) (subst fix_eq, simp add: cfun_map_def)+
+    qed simp }
+  then have "\<And>x :: ValD. (\<Squnion>i. ValD_take i\<cdot>(ValD_copy\<cdot>(ValD_take i\<cdot>x))) = (\<Squnion>i. ValD_take i\<cdot>x)"
+    by (blast intro: lub_eq)
+  then show ?thesis by (simp add: lub_distribs ValD.lub_take cfun_eq_iff)
+qed
+
+
+definition cond :: "ValD \<rightarrow> ValD \<rightarrow> ValD \<rightarrow> ValD" where
+  "cond \<equiv> \<Lambda> i t e. case i of ValF\<cdot>f \<Rightarrow> \<bottom> | ValTT \<Rightarrow> t | ValFF \<Rightarrow> e | ValN\<cdot>n \<Rightarrow> \<bottom>"
+
+definition succ :: "ValD \<rightarrow> ValD" where
+  "succ \<equiv> \<Lambda> (ValN\<cdot>n). ValN\<cdot>(n + 1)"
+
+definition pred :: "ValD \<rightarrow> ValD" where
+  "pred \<equiv> \<Lambda> (ValN\<cdot>n). case n of 0 \<Rightarrow> \<bottom> | Suc n \<Rightarrow> ValN\<cdot>n"
+
+definition isZero :: "ValD \<rightarrow> ValD" where
+  "isZero \<equiv> \<Lambda> (ValN\<cdot>n). if n = 0 then ValTT else ValFF"
+
+
+type_synonym Var = "var"
+type_synonym 'a Env = "Var \<rightarrow> 'a"
+
+definition env_empty :: "'a Env" where
+  "env_empty \<equiv> \<bottom>"
+
+definition env_ext :: "Var \<rightarrow> 'a \<rightarrow> 'a Env \<rightarrow> 'a Env" where
+  "env_ext \<equiv> \<Lambda> v x \<rho> v'. if v = v' then x else \<rho>\<cdot>v'"
+
+lemma env_ext_same: "env_ext\<cdot>v\<cdot>x\<cdot>\<rho>\<cdot>v = x"
+  by (simp add: env_ext_def)
+
+lemma env_ext_neq: "v \<noteq> v' \<Longrightarrow> env_ext\<cdot>v\<cdot>x\<cdot>\<rho>\<cdot>v' = \<rho>\<cdot>v'"
+  by (simp add: env_ext_def)
+
+lemmas env_ext_simps[simp] = env_ext_same env_ext_neq
+
+
+type_synonym EnvD = "ValD Env"
+
+primrec
+  evalD :: "expr \<Rightarrow> EnvD \<rightarrow> ValD"
+where
+  "evalD (Var v) = (\<Lambda> \<rho>. \<rho>\<cdot>v)"
+| "evalD (App f x) = (\<Lambda> \<rho>. appF\<cdot>(evalD f\<cdot>\<rho>)\<cdot>(evalD x\<cdot>\<rho>))"
+| "evalD (AbsN v e) = (\<Lambda> \<rho>. ValF\<cdot>(\<Lambda> x. evalD e\<cdot>(env_ext\<cdot>v\<cdot>x\<cdot>\<rho>)))"
+| "evalD (AbsV v e) = (\<Lambda> \<rho>. ValF\<cdot>(strictify\<cdot>(\<Lambda> x. evalD e\<cdot>(env_ext\<cdot>v\<cdot>x\<cdot>\<rho>))))"
+| "evalD (Diverge) = (\<Lambda> \<rho>. \<bottom>)"
+| "evalD (Fix v e) = (\<Lambda> \<rho>. \<mu> x. evalD e\<cdot>(env_ext\<cdot>v\<cdot>x\<cdot>\<rho>))"
+| "evalD (tt) = (\<Lambda> \<rho>. ValTT)"
+| "evalD (ff) = (\<Lambda> \<rho>. ValFF)"
+| "evalD (Cond i t e) = (\<Lambda> \<rho>. cond\<cdot>(evalD i\<cdot>\<rho>)\<cdot>(evalD t\<cdot>\<rho>)\<cdot>(evalD e\<cdot>\<rho>))"
+| "evalD (Num n) = (\<Lambda> \<rho>. ValN\<cdot>n)"
+| "evalD (Succ e) = (\<Lambda> \<rho>. succ\<cdot>(evalD e\<cdot>\<rho>))"
+| "evalD (Pred e) = (\<Lambda> \<rho>. pred\<cdot>(evalD e\<cdot>\<rho>))"
+| "evalD (IsZero e) = (\<Lambda> \<rho>. isZero\<cdot>(evalD e\<cdot>\<rho>))"
+
+abbreviation eval' :: "expr \<Rightarrow> ValD Env \<Rightarrow> ValD" ("\<lbrakk>_\<rbrakk>_" [0,1000] 60) where
+  "eval' M \<rho> \<equiv> evalD M\<cdot>\<rho>"
+
+
+
+
+Note the numbers here are names, not de Bruijn indices.
+
+\<close>
+subsection\<open>Logical relations for definability\<close>
+text\<open>
+
+\label{sec:pcfdefinability}
+
+An element of @{typ "ValD"} is definable if there is an expression
+that denotes it.
+
+\<close>
+text\<open>
+
+A classical result about PCF is that while the denotational semantics
+is \emph{adequate}, as we show in \S\ref{sec:opsem}, it is not
+\emph{fully abstract}, i.e. it contains undefinable values (junk).
+
+One way of showing this is to reason operationally; see, for instance,
+
+Another is to use \emph{logical relations}, following
+
+For this purpose we define a logical relation to be a set of vectors
+over @{typ "ValD"} that is closed under continuous functions of type
+@{typ "ValD \<rightarrow> ValD"}. This is complicated by the @{term "ValF"} tag
+and having strict function abstraction.
+
+\<close>
+text\<open>
+
+In the context of PCF these relations also need to respect the
+constants.
+
+\<close>
+text\<open>\<close>
+text\<open>
+
+The fundamental property of logical relations states that all PCF
+expressions satisfy all PCF logical relations. This result is
+straightforward induction on the expression @{term "M"}.
+
+\<close>
+text\<open>
+
+We can use this result to show that there is no PCF term that maps the
+vector @{term "args \<in> R"} to @{term "result \<notin> R"} for some logical
+relation @{term "R"}. If we further show that there is a function
+@{term "f"} in @{term "ValD"} such that @{term "f args = result"} then
+we can conclude that @{term "f"} is not definable.
+
+\<close>
+text\<open>\<close>
+subsection\<open>Parallel OR is not definable\<close>
+text \<open>
+
+\label{sec:por}
+
+
+Parallel-or is similar to the familiar short-circuting or except that
+if the first argument is @{term "\<bottom>"} and the second one is
+@{term "ValTT"}, we get @{term "ValTT"} (and not @{term
+"\<bottom>"}). It is continuous and then have included in the @{typ
+"ValD"} domain.
+
+\<close>
+text\<open>The defining properties of parallel-or.\<close>
+text\<open>
+
+We show that parallel-or is a continuous function.
+
+\<close>
+text\<open>
+
+We need three-element vectors.
+
+\<close>
+text\<open>
+
+The standard logical relation @{term "R"} that demonstrates POR is not
+definable is:
+\[
+  (x, y, z) \in R\ \mbox{iff}\ x = y = z \lor (x = \bot \lor y = \bot)
+\]
+That POR satisfies this relation can be seen from its truth table (see
+below).
+
+values. Adding functions breaks the ``logical relations'' property.
+
+\<close>
+     { (\<lambda>i. ValTT) } \<union> { (\<lambda>i. ValFF) } \<comment> \<open>\<open>x = y = z\<close> for bools\<close>
+   \<union> (\<Union>n. { (\<lambda>i. ValN\<cdot>n) }) \<comment> \<open>\<open>x = y = z\<close> for numerals\<close>
+   \<union> { f . f One = \<bottom> } \<comment> \<open>\<open>x = \<bottom>\<close>\<close>
+   \<union> { f . f Two = \<bottom> } \<comment> \<open>\<open>y = \<bottom>\<close>\<close>"
+text\<open>
+
+We close this relation with respect to continuous functions. This
+functor yields an admissible relation for all @{term "r"} and is
+monotonic.
+
+\<close>
+text\<open>\<close>
+text\<open>
+
+Again it yields an admissible relation and is monotonic.
+
+We need to show the functor respects the minimal invariant.
+
+\<close>
+text\<open>
+
+We can show that the solution satisfies the expectations of the
+fundamental theorem @{thm [source] "lr_fundamental"}.
+
+\<close>
+text\<open>
+
+This is the truth-table for POR rendered as a vector: we seek a
+function that simultaneously maps the two argument vectors to the
+result.
+
+\<close>
+text\<open>
+
+Parallel-or satisfies these tests:
+
+\<close>
+text\<open>
+
+... but is not PCF-definable:
+
+\<close>
+subsection\<open>Plotkin's existential quantifier\<close>
+text\<open>
+
+We can also show that the existential quantifier of
+
+Our definition is quite loose; if the argument function @{term "f"}
+maps any value to @{term "ValTT"} then @{term "plotkin_exists"} yields
+@{term "ValTT"}. It may be more plausible to test @{term "f"} on
+numerals only.
+
+\<close>
+text\<open>
+
+We can show this function is continuous.
+
+\<close>
+text\<open>
+
+Again we construct argument and result test vectors such that @{term
+"plotkin_exists"} satisfies these tests but no PCF-definable term
+does.
+
+\<close>
+text\<open>
+
+Note that unlike the POR case the argument relation does not
+characterise PE: we don't treat functions that return @{term "ValTT"}s
+and @{term "ValFF"}s.
+
+The Plotkin existential satisfies these tests:
+
+\<close>
+text\<open>
+
+As for POR, the difference between the two vectors is that the
+argument can diverge but not the result.
+
+\<close>
+   \<union> { (\<lambda>i. ValTT) } \<union> { (\<lambda>i. ValFF) } \<comment> \<open>\<open>x = y = z\<close> for bools\<close>
+   \<union> (\<Union>n. { (\<lambda>i. ValN\<cdot>n) }) \<comment> \<open>\<open>x = y = z\<close> for numerals\<close>
+   \<union> { f . f 1 = \<bottom> \<or> f 2 = \<bottom> } \<comment> \<open>Vectors that diverge on one or two.\<close>"
+text\<open>
+
+Again we close this under the function space, and show that it is
+admissible, monotonic and respects the minimal invariant.
+
+\<close>
+text\<open>
+
+The solution satisfies the expectations of the fundamental theorem:
+
+\<close>
+subsection\<open>Concluding remarks\<close>
+text\<open>
+
+operation is not PCF-definable. (It is definable for each base
+``type'' separately, and requires some care on function values.) If we
+added an (unlifted) product type then it should be provable that
+internet by Lennart Augustsson.) This may be difficult to do plausibly
+without adding a type system.
+
+\<close>

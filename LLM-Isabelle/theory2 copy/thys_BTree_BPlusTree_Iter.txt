@@ -1,0 +1,164 @@
+theory BPlusTree_Iter
+  imports
+    BPlusTree_Imp
+    "HOL-Real_Asymp.Inst_Existentials"
+    "Separation_Logic_Imperative_HOL.Imp_List_Spec"
+    Flatten_Iter_Spec
+    Partially_Filled_Array_Iter
+    Subst_Mod_Mult_AC
+begin
+
+
+
+fun bplustree_assn_leafs :: "nat \<Rightarrow> ('a::heap) bplustree \<Rightarrow> 'a btnode ref \<Rightarrow> 'a btnode ref option \<Rightarrow> 'a btnode ref option \<Rightarrow> 'a btnode ref list \<Rightarrow> assn" where
+  "bplustree_assn_leafs k (Leaf xs) a r z leafptrs = 
+ (\<exists>\<^sub>A xsi fwd.
+      a \<mapsto>\<^sub>r Btleaf xsi fwd
+    * is_pfa (2*k) xs xsi
+    * \<up>(fwd = z)
+    * \<up>(r = Some a)
+    * \<up>(leafptrs = [a])
+  )" |
+  "bplustree_assn_leafs k (Node ts t) a r z leafptrs = 
+ (\<exists>\<^sub>A tsi ti tsi' tsi'' rs split.
+      a \<mapsto>\<^sub>r Btnode tsi ti
+    * bplustree_assn_leafs k t ti (last (r#rs)) (last (rs@[z])) (last split)
+    * is_pfa (2*k) tsi' tsi
+    * \<up>(concat split = leafptrs)
+    * \<up>(length tsi' = length rs)
+    * \<up>(length split = length rs + 1)
+    * \<up>(tsi'' = zip (zip (map fst tsi') (zip (butlast (r#rs)) (zip (butlast (rs@[z])) (butlast split)))) (map snd tsi'))
+    * list_assn ((\<lambda> t (ti,r',z',lptrs). bplustree_assn_leafs k t (the ti) r' z' lptrs) \<times>\<^sub>a id_assn) ts tsi''
+    )"
+
+
+lemma inst_same: "(\<And>x. P x = Q x) \<Longrightarrow> (\<exists>\<^sub>A x. P x) = (\<exists>\<^sub>A x. Q x)"
+  by simp
+
+
+lemma reorder_ex: 
+  "\<And>z. (\<exists>\<^sub>Aa b c d e f g. z a b c d e f g) = (\<exists>\<^sub>Ab c d e f a g. z a b c d e f g)"
+  "\<And>z. (\<exists>\<^sub>Aa b . z a b) = (\<exists>\<^sub>Ab a. z a b)"
+  "\<And>z. (\<exists>\<^sub>Aa b c d. z a b c d) = (\<exists>\<^sub>Ab c a d. z a b c d)"
+  apply(intro ent_iffI; sep_auto)+
+  done
+
+lemma inst_same2: "(\<And>x. P = Q x) \<Longrightarrow> P = (\<exists>\<^sub>A x. Q x)"
+  by simp
+
+lemma pure_eq_pre:
+ "(P \<Longrightarrow> Q = R) \<Longrightarrow> (Q * \<up>P = R * \<up>P)"
+  by fastforce
+
+
+lemma otf_lem_comm_ex:
+"\<And>a b c d e f g. (\<exists>\<^sub>A x. a * b x * c * d x * e x * f x * g x) = a * c * (\<exists>\<^sub>A x.  b x * d x * e x * f x * g x)"
+"\<And>a b c d e. (\<exists>\<^sub>Aaa x. a * b x * c * d aa * e aa) = (a * c * (\<exists>\<^sub>A aa x. b x * d aa * e aa))"
+"\<And>b d e. (\<exists>\<^sub>A aa x. b x * d aa * e aa) = (\<exists>\<^sub>A x. b x) * (\<exists>\<^sub>A aa. d aa * e aa)"
+  by (auto simp add: algebra_simps)
+
+declare last.simps[simp del] butlast.simps[simp del]
+lemma bplustree_extract_leafs:
+ "bplustree_assn k t ti r z = (\<exists>\<^sub>Aleafptrs. bplustree_assn_leafs k t ti r z leafptrs)"
+proof(induction arbitrary: r rule: bplustree_assn.induct )
+  case (1 k xs a r z)
+  then show ?case
+    apply (rule ent_iffI)
+    subgoal
+      apply(inst_ex_assn "[a]")
+      apply sep_auto
+      done
+    subgoal
+      apply(rule ent_ex_preI)
+      apply clarsimp
+      apply(rule ent_ex_preI)+
+      subgoal for x xsi fwd
+      apply(inst_ex_assn xsi fwd)
+        apply simp
+        done
+      done
+    done
+next
+  case Istep: (2 k ts t a r z)
+  show ?case
+    apply(simp (no_asm))
+    thm bplustree_assn_leafs.simps(2)
+    apply(subst reorder_ex(1))
+    apply(intro inst_same)
+    thm reorder_ex(2)
+    apply(subst reorder_ex(2))
+    apply(subst reorder_ex(3))
+    apply(rule inst_same)
+  proof(goal_cases)
+    case (1 tsi ti tsi' rs)
+    have *: "
+        length tsi's = length tss \<Longrightarrow>
+        length tss = length rss \<Longrightarrow>
+        set tsi's \<subseteq> set tsi' \<Longrightarrow>
+        set rss \<subseteq> set rs \<Longrightarrow>
+        set tss \<subseteq> set ts \<Longrightarrow>
+       blist_assn k tss
+        (zip (zip (subtrees tsi's) (zip (butlast (ra # rss)) rss)) (separators tsi's)) =
+       (\<exists>\<^sub>Asplit. list_assn ((\<lambda> t (ti,r',z',lptrs). bplustree_assn_leafs k t (the ti) r' z' lptrs) \<times>\<^sub>a id_assn) tss 
+        (zip (zip (subtrees tsi's) (zip (butlast (ra # rss)) (zip rss split))) (separators tsi's)) *
+        \<up>(length split = length rss))"
+      for rss tsi's tss ra
+    proof (induct arbitrary: ra rule: list_induct3)
+      case Nil
+      then show ?case
+        apply sep_auto
+        apply(subst ex_one_point_gen[where v="[]"])
+        apply simp_all
+        done
+    next
+    case (Cons subsepi tsi's subsep tss subleaf rss r)
+      then show ?case 
+        apply (auto simp add: butlast_double_Cons last_double_Cons)
+        apply(auto simp add: prod_assn_def split: prod.splits)
+      proof(goal_cases)
+        case (1 sub sep)
+        then have *: "bplustree_assn k sub (the (fst subsepi)) r subleaf = (\<exists>\<^sub>As. bplustree_assn_leafs k sub (the (fst subsepi)) r subleaf s)"
+        proof -
+          have "subsep \<in> set ts"
+            by (simp add: "1"(10) "1"(8))
+          moreover obtain temp1 temp2 where "((fst subsepi, (temp1:: 'a btnode ref option), subleaf), (temp2::'a)) \<in> set [((fst subsepi, temp1, subleaf), temp2)]"
+            by auto
+          ultimately  show ?thesis
+            using Istep(2)[of "(sub,sep)" "((fst subsepi, temp1, subleaf), temp2)" "[((fst subsepi, temp1, subleaf), temp2)]" "fst subsepi" "(temp1, subleaf)" temp1 subleaf r]
+            using 1
+            by simp
+        qed
+        show ?case
+          apply (simp add: * 1(3)[of subleaf])
+          apply(intro ent_iffI)
+          subgoal
+            apply(intro ent_ex_preI)
+            subgoal for split x
+            apply(inst_ex_assn "x#split")
+              apply simp
+              done
+            done
+          subgoal
+            apply(intro ent_ex_preI)
+            subgoal for split
+              apply(cases split)
+              apply simp
+            subgoal for hdsplit tlsplit
+            apply(inst_ex_assn "tlsplit" "hdsplit")
+              apply (auto)
+            done
+          done
+        done
+      done
+     qed
+  qed
+  have **: "bplustree_assn k t ti (last (r # rs)) z = (\<exists>\<^sub>Alsplit. bplustree_assn_leafs k t ti (last (r # rs)) z lsplit)" 
+    using Istep(1)[of ti "last(r #rs)" "[]"]
+    by (auto simp add: last.simps)
+  show ?case
+    apply(subst **)
+(* apply IH to list via rule just shown *)
+(* show that the remainder is equivalent *)
+(* apply IH to list via rule just shown (other direction) *)
+(* even without the existential quantifier, we get our general assertion, used in insertion etc back*)
+(* same procedure as for bplustree_nodes_assn_leaf *)

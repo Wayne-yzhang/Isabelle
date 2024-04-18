@@ -1,0 +1,358 @@
+theory Mertens_Theorems
+imports
+  Prime_Counting_Functions
+  "Stirling_Formula.Stirling_Formula"
+begin
+
+unbundle prime_counting_notation
+
+
+
+lemma exponents_le_finite:
+  assumes "p > (1 :: nat)" "k > 0"
+  shows   "finite {i. real (p ^ (k * i + l)) \<le> x}"
+proof (rule finite_subset)
+  show "{i. real (p ^ (k * i + l)) \<le> x} \<subseteq> {..nat \<lfloor>x\<rfloor>}"
+  proof safe
+    fix i assume i: "real (p ^ (k * i + l)) \<le> x"
+    have "i < 2 ^ i" by (rule less_exp)
+    also from assms have "i \<le> k * i + l" by (cases k) auto
+    hence "2 ^ i \<le> (2 ^ (k * i + l) :: nat)"
+      using assms by (intro power_increasing) auto
+    also have "\<dots> \<le> p ^ (k * i + l)" using assms by (intro power_mono) auto
+    also have "real \<dots> \<le> x" using i by simp
+    finally show "i \<le> nat \<lfloor>x\<rfloor>" by linarith
+  qed
+qed auto
+
+lemma deriv_zeta_2_bound: "Re (deriv zeta 2) > -1"
+proof -
+  have "((\<lambda>x::real. ln (x + 3) * (x + 3) powr -2) has_integral (ln 3 + 1) / 3) (interior {0..})"
+    using ln_powr_has_integral_at_top[of 1 0 3 "-2"]
+    by (simp add: interior_real_atLeast powr_minus)
+  hence "((\<lambda>x::real. ln (x + 3) * (x + 3) powr -2) has_integral (ln 3 + 1) / 3) {0..}"
+    by (subst (asm) has_integral_interior) auto
+  also have "?this \<longleftrightarrow> ((\<lambda>x::real. ln (x + 3) / (x + 3) ^ 2) has_integral (ln 3 + 1) / 3) {0..}"
+    by (intro has_integral_cong) (auto simp: powr_minus field_simps) 
+  finally have int: \<dots> .  
+  have "exp (1 / 2 :: real) ^ 2 \<le> 2 ^ 2"
+    using exp_le by (subst exp_double [symmetric]) simp_all
+  hence exp_half: "exp (1 / 2 :: real) \<le> 2"
+    by (rule power2_le_imp_le) auto
+
+  have mono: "ln x / x ^ 2 \<le> ln y / y ^ 2" if "y \<ge> exp (1/2)" "x \<ge> y" for x y :: real
+  proof (rule DERIV_nonpos_imp_nonincreasing[of _ _ "\<lambda>x. ln x / x ^ 2"])
+    fix t assume t: "t \<ge> y" "t \<le> x"
+    have "y > 0" by (rule less_le_trans[OF _ that(1)]) auto
+    with t that have "ln t \<ge> ln (exp (1 / 2))"
+      by (subst ln_le_cancel_iff) auto
+    hence "ln t \<ge> 1 / 2" by (simp only: ln_exp)
+      by (auto intro!: derivative_eq_intros simp: eval_nat_numeral field_simps)
+    moreover have "(1 - 2 * ln t) / t ^ 3 \<le> 0"
+    ultimately show "\<exists>f'. ((\<lambda>x. ln x / x ^ 2) has_field_derivative f') (at t) \<and> f' \<le> 0" by blast
+  qed fact+
+
+  have "fds_converges (fds_deriv fds_zeta) (2 :: complex)"
+    by (intro fds_converges_deriv) auto
+  hence "(\<lambda>n. of_real (-ln (real (Suc n)) / (of_nat (Suc n)) ^ 2)) sums deriv zeta 2"
+    by (auto simp: fds_converges_altdef add_ac eval_fds_deriv_zeta fds_nth_deriv scaleR_conv_of_real 
+             simp del: of_nat_Suc)
+  note * = sums_split_initial_segment[OF sums_minus[OF sums_Re[OF this]], of 3]
+    have "(\<lambda>n. ln (real (n+4)) / real (n+4) ^ 2) sums (-Re (deriv zeta 2) - (ln 2 / 4 + ln 3 / 9))"
+      using * by (simp add: eval_nat_numeral)
+  hence "-Re (deriv zeta 2) - (ln 2 / 4 + ln 3 / 9) =
+            (\<Sum>n. ln (real (Suc n) + 3) / (real (Suc n) + 3) ^ 2)"
+    by (simp_all add: sums_iff algebra_simps)
+  also have "\<dots> \<le> (ln 3 + 1) / 3" using int exp_half
+    by (intro decreasing_sum_le_integral divide_nonneg_pos mono) (auto simp: powr_minus field_simps)
+  finally have "-Re (deriv zeta 2) \<le> (16 * ln 3 + 9 * ln 2 + 12) / 36"
+    by simp
+  also have "ln 3 \<le> (11 / 10 :: real)"
+    using ln_approx_bounds[of 3 2] by (simp add: power_numeral_reduce numeral_2_eq_2)
+  hence "(16 * ln 3 + 9 * ln 2 + 12) / 36 \<le> (16 * (11 / 10) + 9 * 25 / 36 + 12) / (36 :: real)"
+    using ln2_le_25_over_36 by (intro add_mono mult_left_mono divide_right_mono) auto
+  also have "\<dots> < 1" by simp
+  finally show ?thesis by simp
+qed
+
+lemma mertens_remainder_aux_bound:
+  fixes x :: real
+  defines "R \<equiv> (\<Sum>(p,i) | prime p \<and> i > 1 \<and> real (p ^ i) \<le> x. ln (real p) / p ^ i)"
+  shows   "R < 9 / pi\<^sup>2"
+proof -
+  define S' where "S' = {(p, i). prime p \<and> i > 1 \<and> real (p ^ i) \<le> x}"
+  define S'' where "S'' = {(p, i). prime p \<and> i > 1 \<and> real (p ^ Suc i) \<le> x}"
+
+  have finite_row: "finite {i. i > 1 \<and> real (p ^ (i + k)) \<le> x}" if p: "prime p" for p k
+  proof (rule finite_subset)
+    show "{i. i > 1 \<and> real (p ^ (i + k)) \<le> x} \<subseteq> {..nat \<lfloor>x\<rfloor>}"
+    proof safe
+      fix i assume i: "i > 1" "real (p ^ (i + k)) \<le> x"
+      have "i < 2 ^ (i + k)" by (induction i) auto
+      also from p have "\<dots> \<le> p ^ (i + k)" by (intro power_mono) (auto dest: prime_gt_1_nat) 
+      also have "real \<dots> \<le> x" using i by simp
+      finally show "i \<le> nat \<lfloor>x\<rfloor>" by linarith
+    qed
+  qed auto
+
+  have "S'' \<subseteq> S'" unfolding S''_def S'_def
+  proof safe
+    fix p i assume pi: "prime p" "real (p ^ Suc i) \<le> x" "i > 1"
+    have "real (p ^ i) \<le> real (p ^ Suc i)"
+      using pi unfolding of_nat_le_iff by (intro power_increasing) (auto dest: prime_gt_1_nat)
+    also have "\<dots> \<le> x" by fact
+    finally show "real (p ^ i) \<le> x" .
+  qed
+
+  have S'_alt:  "S' = (SIGMA p:{p. prime p \<and> real p \<le> x}. {i. i > 1 \<and> real (p ^ i) \<le> x})"
+    unfolding S'_def
+  proof safe
+    fix p i assume "prime p" "real (p ^ i) \<le> x" "i > 1"
+    hence "p ^ 1 \<le> p ^ i"
+      by (intro power_increasing) (auto dest: prime_gt_1_nat)
+    also have "real \<dots> \<le> x" by fact
+    finally show "real p \<le> x" by simp
+  qed
+
+  have finite: "finite {p. prime p \<and> real p \<le> x}"
+    by (rule finite_subset[OF _ finite_Nats_le_real[of x]]) (auto dest: prime_gt_0_nat)
+  have "finite S'" unfolding S'_alt using finite_row[of _ 0]
+    by (intro finite_SigmaI finite) auto
+
+  have "R \<le> 3 / 2 * (\<Sum>(p, i) | (p, i) \<in> S' \<and> even i. ln (real p) / real (p ^ i))"
+  proof -
+    have "R = (\<Sum>y\<in>{0, 1}. \<Sum>z | z \<in> S' \<and> snd z mod 2 = y. ln (real (fst z)) / real (fst z ^ snd z))"
+    also have "\<dots> = (\<Sum>(p,i) | (p, i) \<in> S' \<and> even i. ln (real p) / real (p ^ i)) +
+                    (\<Sum>(p,i) | (p, i) \<in> S' \<and> odd i. ln (real p) / real (p ^ i))"
+      unfolding even_iff_mod_2_eq_zero odd_iff_mod_2_eq_one by (simp add: case_prod_unfold)
+    also have "(\<Sum>(p,i) | (p, i) \<in> S' \<and> odd i. ln (real p) / real (p ^ i)) =
+                 (\<Sum>(p,i) | (p, i) \<in> S'' \<and> even i. ln (real p) / real (p ^ Suc i))"
+      by (intro sum.reindex_bij_witness[of _ "\<lambda>(p,i). (p, Suc i)" "\<lambda>(p,i). (p, i - 1)"])
+         (auto simp: case_prod_unfold S'_def S''_def elim: oddE simp del: power_Suc)
+    also have "\<dots> \<le> (\<Sum>(p,i) | (p, i) \<in> S' \<and> even i. ln (real p) / real (p ^ Suc i))"
+         (auto simp: S'_def S''_def case_prod_unfold dest: prime_gt_0_nat simp del: power_Suc)
+    also have "\<dots> \<le> (\<Sum>(p,i) | (p, i) \<in> S' \<and> even i. ln (real p) / real (2 * p ^ i))"
+      unfolding case_prod_unfold
+      by (intro sum_mono divide_left_mono) (auto simp: S'_def dest!: prime_gt_1_nat)
+    also have "\<dots> = (1 / 2) * (\<Sum>(p,i) | (p, i) \<in> S' \<and> even i. ln (real p) / real (p ^ i))"
+      by (subst sum_distrib_left) (auto simp: case_prod_unfold)
+    also have "(\<Sum>(p,i) | (p, i) \<in> S' \<and> even i. ln (real p) / real (p ^ i)) + \<dots> =
+                   3 / 2 * (\<Sum>(p,i) | (p, i) \<in> S' \<and> even i. ln (real p) / real (p ^ i))"
+      by simp
+    finally show ?thesis by simp
+  qed
+
+  also have "(\<Sum>(p,i) | (p, i) \<in> S' \<and> even i. ln (real p) / real (p ^ i)) =
+               (\<Sum>p | prime p \<and> real p \<le> x. ln (real p) * 
+                 (\<Sum>i | i > 0 \<and> even i \<and> real (p ^ i) \<le> x. (1 / real p) ^ i))"
+   unfolding sum_distrib_left
+  proof (subst sum.Sigma[OF _ ballI])
+    fix p assume p: "p \<in> {p. prime p \<and> real p \<le> x}"
+    thus "finite {i. 0 < i \<and> even i \<and> real (p ^ i) \<le> x}"
+      by (intro finite_subset[OF _ exponents_le_finite[of p 1 0 x]]) (auto dest: prime_gt_1_nat)
+  qed (auto intro!: sum.cong finite_subset[OF _ finite_Nats_le_real[of x]]
+            dest: prime_gt_0_nat simp: S'_alt power_divide)
+  also have "\<dots> \<le> (\<Sum>p | prime p \<and> real p \<le> x. ln (real p) / (real p ^ 2 - 1))"
+  proof (rule sum_mono)
+    fix p assume p: "p \<in> {p. prime p \<and> real p \<le> x}"
+    have "p > 1" using p by (auto dest: prime_gt_1_nat)
+    have "(\<Sum>i | i > 0 \<and> even i \<and> real (p ^ i) \<le> x. (1 / real p) ^ i) =
+            (\<Sum>i | real (p ^ (2 * i + 2)) \<le> x. (1 / real p) ^ (2 * i)) / real p ^ 2"
+      (is "_ = ?S / _") unfolding sum_divide_distrib
+      by (rule sum.reindex_bij_witness[of _ "\<lambda>i. 2 * Suc i" "\<lambda>i. (i - 2) div 2"])
+                 algebra_simps elim!: evenE)
+    also have "?S = (\<Sum>i | real (p ^ (2 * i + 2)) \<le> x. (1 / real p ^ 2) ^ i)"
+      by (subst power_mult) (simp_all add: algebra_simps power_divide)
+    also have "\<dots> \<le> (\<Sum>i. (1 / real p ^ 2) ^ i)"
+      by (intro sum_le_suminf) (auto simp: summable_geometric_iff)
+    also have "\<dots> = real p ^ 2 / (real p ^ 2 - 1)"
+    also have "\<dots> / real p ^ 2 = 1 / (real p ^ 2 - 1)"
+    finally have "(\<Sum>i | 0 < i \<and> even i \<and> real (p ^ i) \<le> x. (1 / real p) ^ i) \<le>
+                     1 / (real p ^ 2 - 1)" (is "?lhs \<le> ?rhs")
+    thus "ln (real p) * ?lhs \<le> ln (real p) / (real p ^ 2 - 1)"
+  qed
+  also have "\<dots> = (\<Sum>\<^sub>a p | prime p \<and> real p \<le> x. ln (real p) / (real p ^ 2 - 1))"
+    using finite by (intro infsetsum_finite [symmetric]) auto
+  also have "\<dots> \<le> (\<Sum>\<^sub>a p | prime p. ln (real p) / (real p ^ 2 - 1))"
+    using eval_fds_logderiv_zeta_real[of 2] finite
+    by (intro infsetsum_mono_neutral_left divide_nonneg_pos) (auto simp: dest: prime_gt_1_nat)
+  also have "\<dots> = -Re (deriv zeta (of_real 2) / zeta (of_real 2))"
+    by (subst eval_fds_logderiv_zeta_real) auto
+  also have "\<dots> = (-Re (deriv zeta 2)) * (6 / pi\<^sup>2)"
+    by (simp add: zeta_even_numeral)
+  also have "\<dots> < 1 * (6 / pi\<^sup>2)"
+    using deriv_zeta_2_bound by (intro mult_strict_right_mono) auto
+  also have "3 / 2 * \<dots> = 9 / pi\<^sup>2" by simp
+  finally show ?thesis by simp
+qed
+
+theorem mertens_bound_strong:
+  fixes n :: nat assumes n: "n > 0"
+  shows   "\<MM> n - ln n \<in> {-1 - 9 / pi\<^sup>2<..ln 4}"
+proof (cases "n \<ge> 3")
+  case False
+  with n consider "n = 1" | "n = 2" by force
+  thus ?thesis
+  proof cases
+    assume [simp]: "n = 1"
+    have "-1 + (-9 / pi\<^sup>2) < 0"
+      by (intro add_neg_neg divide_neg_pos) auto
+    thus ?thesis by simp
+  next
+    assume [simp]: "n = 2"
+    have eq: "\<MM> n - ln n = -ln 2 / 2" by (simp add: eval_\<MM>)
+    have "-1 - 9 / pi ^ 2 + ln 2 / 2 \<le> -1 - 9 / 4 ^ 2 + 25 / 36 / 2"
+      using pi_less_4 ln2_le_25_over_36
+      by (intro diff_mono add_mono divide_left_mono divide_right_mono power_mono) auto
+    also have "\<dots> < 0" by simp
+    finally have "-ln 2 / 2 > -1 - 9 / pi\<^sup>2" by simp
+    moreover {
+      have "-ln 2 / 2 \<le> (0::real)" by (intro divide_nonpos_pos) auto
+      also have "\<dots> \<le> ln 4" by simp
+      finally have "-ln 2 / 2 \<le> ln (4 :: real)" by simp
+    }
+    ultimately show ?thesis unfolding eq by simp
+  qed
+
+next
+  case True
+  hence n: "n \<ge> 3" by simp
+  have finite: "finite {(p, i). prime p \<and> i \<ge> 1 \<and> p ^ i \<le> n}"
+  proof (rule finite_subset)
+    show "{(p, i). prime p \<and> i \<ge> 1 \<and> p ^ i \<le> n}
+            \<subseteq> {..nat \<lfloor>root 1 (real n)\<rfloor>} \<times> {..nat \<lfloor>log 2 (real n)\<rfloor>}"
+      using primepows_le_subset[of "real n" 1] n unfolding of_nat_le_iff by auto
+  qed auto
+
+  define r where "r = prime_sum_upto (\<lambda>p. ln (real p) * frac (real n / real p)) n"
+  define R where "R = (\<Sum>(p,i) | prime p \<and> i > 1 \<and> p ^ i \<le> n. ln (real p) * real (n div (p ^ i)))"
+  define R' where "R' = (\<Sum>(p,i) | prime p \<and> i > 1 \<and> p ^ i \<le> n. ln (real p) / p ^ i)"
+  have [simp]: "ln (4 :: real) = 2 * ln 2"
+    using ln_realpow[of 2 2] by simp
+  from pi_less_4 have "ln pi \<le> ln 4" by (subst ln_le_cancel_iff) auto
+  also have "\<dots> = 2 * ln 2" by simp
+  also have "\<dots> \<le> 2 * (25 / 36)" by (intro mult_left_mono ln2_le_25_over_36) auto
+  finally have ln_pi: "ln pi \<le> 25 / 18" by simp
+  have "ln 3 \<le> ln (4::nat)" by (subst ln_le_cancel_iff) auto
+  also have "\<dots> = 2 * ln 2" by simp
+  also have "\<dots> \<le> 2 * (25 / 36)" by (intro mult_left_mono ln2_le_25_over_36) auto
+  finally have ln_3: "ln (3::real) \<le> 25 / 18" by simp
+  
+  have "R / n = (\<Sum>(p,i) | prime p \<and> i > 1 \<and> p ^ i \<le> n. ln (real p) * (real (n div (p ^ i)) / n))"
+    by (simp add: R_def sum_divide_distrib field_simps case_prod_unfold)
+  also have "\<dots> \<le> (\<Sum>(p,i) | prime p \<and> i > 1 \<and> p ^ i \<le> n. ln (real p) * (1 / p ^ i))"
+    unfolding R'_def case_prod_unfold using n
+    by (intro sum_mono mult_left_mono) (auto simp: field_simps real_of_nat_div dest: prime_gt_0_nat)
+  also have "\<dots> = R'" by (simp add: R'_def)
+  also have "R' < 9 / pi\<^sup>2"
+    unfolding R'_def using mertens_remainder_aux_bound[of n] by simp
+  finally have "R / n < 9 / pi\<^sup>2" .
+  moreover have "R \<ge> 0"
+    unfolding R_def by (intro sum_nonneg mult_nonneg_nonneg) (auto dest: prime_gt_0_nat)
+  ultimately have R_bounds: "R / n \<in> {0..<9 / pi\<^sup>2}" by simp
+
+  have "ln (fact n :: real) \<le> ln (2 * pi * n) / 2 + n * ln n - n + 1 / (12 * n)"
+    using ln_fact_bounds(2)[of n] n by simp
+  also have "\<dots> / n - ln n = -1 + (ln 2 + ln pi) / (2 * n) + (ln n / n) / 2 + 1 / (12 * real n ^ 2)"
+    using n by (simp add: power2_eq_square field_simps ln_mult)
+  also have "\<dots> \<le> -1 + (ln 2 + ln pi) / (2 * 3) + (ln 3 / 3) / 2 + 1 / (12 * 3\<^sup>2)"
+    using exp_le n pi_gt3
+    by (intro add_mono divide_right_mono divide_left_mono mult_mono
+              mult_pos_pos ln_x_over_x_mono power_mono) auto
+  also have "\<dots> \<le> -1 + (25 / 36 + 25 / 18) / (2 * 3) + (25 / 18 / 3) / 2 + 1 / (12 * 3\<^sup>2)"
+    using ln_pi ln2_le_25_over_36 ln_3 by (intro add_mono divide_left_mono divide_right_mono) auto
+  also have "\<dots> \<le> 0" by simp
+  finally have "ln n - ln (fact n) / n \<ge> 0" using n by (simp add: divide_right_mono)
+  have "-ln (fact n) \<le> -ln (2 * pi * n) / 2 - n * ln n + n"
+    using ln_fact_bounds(1)[of n] n by simp
+  also have "ln n + \<dots> / n = -ln (2 * pi) / (2 * n) - (ln n / n) / 2 + 1"
+    using n by (simp add: field_simps ln_mult)
+  also have "\<dots> \<le> 0 - 0 + 1"
+    using pi_gt3 n by (intro add_mono diff_mono) auto
+  finally have upper: "ln n - ln (fact n) / n \<le> 1"
+    using n by (simp add: divide_right_mono)
+
+  have "r \<le> prime_sum_upto (\<lambda>p. ln p * 1) n"
+    using less_imp_le[OF frac_lt_1] unfolding r_def \<theta>_def prime_sum_upto_def
+    by (intro sum_mono mult_left_mono) (auto simp: dest: prime_gt_0_nat)
+  also have "\<dots> = \<theta> n" by (simp add: \<theta>_def)
+  also have "\<dots> < ln 4 * n" using n by (intro \<theta>_upper_bound) auto
+  finally have "r / n < ln 4" using n by (simp add: field_simps)
+  moreover have "r \<ge> 0" unfolding r_def prime_sum_upto_def
+    by (intro sum_nonneg mult_nonneg_nonneg) (auto dest: prime_gt_0_nat)
+  ultimately have r_bounds: "r / n \<in> {0..<ln 4}" by simp
+
+  have "ln (fact n :: real) = sum_upto (\<lambda>k. mangoldt k * real (n div k)) (real n)"
+    by (simp add: ln_fact_conv_sum_upto_mangoldt)
+  also have "\<dots> = (\<Sum>(p,i) | prime p \<and> i > 0 \<and> real (p ^ i) \<le> real n.
+                       ln (real p) * real (n div (p ^ i)))"
+    by (intro sum_upto_primepows) (auto simp: mangoldt_non_primepow)
+  also have "{(p, i). prime p \<and> i > 0 \<and> real (p ^ i) \<le> real n} =
+               {(p, i). prime p \<and> i = 1 \<and> p \<le> n} \<union>
+               {(p, i). prime p \<and> i > 1 \<and> (p ^ i) \<le> n}" unfolding of_nat_le_iff
+    by (auto simp: not_less le_Suc_eq)
+  also have "(\<Sum>(p,i)\<in>\<dots>. ln (real p) * real (n div (p ^ i))) =
+               (\<Sum>(p,i) | prime p \<and> i = 1 \<and> p \<le> n. ln (real p) * real (n div (p ^ i))) + R"
+    (is "_ = ?S + _")
+    by (subst sum.union_disjoint) (auto intro!: finite_subset[OF _ finite] simp: R_def)
+  also have "?S = prime_sum_upto (\<lambda>p. ln (real p) * real (n div p)) n"
+    unfolding prime_sum_upto_def
+    by (intro sum.reindex_bij_witness[of _ "\<lambda>p. (p, 1)" fst]) auto
+  also have "\<dots> = prime_sum_upto (\<lambda>p. ln (real p) * real n / real p) n - r"
+    unfolding r_def prime_sum_upto_def sum_subtractf[symmetric] using n
+    by (intro sum.cong) (auto simp: frac_def real_of_nat_div algebra_simps)
+  also have "prime_sum_upto (\<lambda>p. ln (real p) * real n / real p) n = n * \<MM> n"
+    by (simp add: primes_M_def sum_distrib_left sum_distrib_right prime_sum_upto_def field_simps)
+  finally have "\<MM> n - ln n = ln (fact n) / n - ln n + r / n - R / n"
+    using n by (simp add: field_simps)
+  hence "ln n - \<MM> n = ln n - ln (fact n) / n - r / n + R / n"
+    by simp
+  with fact_bounds r_bounds R_bounds show "\<MM> n - ln n \<in> {-1 - 9 / pi\<^sup>2<..ln 4}"
+    by simp
+qed
+
+lemma mertens_bound_real_strong:
+  fixes x :: real assumes x: "x \<ge> 1"
+  shows   "\<MM> x - ln x \<in> {-1 - 9 / pi ^ 2 - ln (1 + frac x / real (nat \<lfloor>x\<rfloor>)) <.. ln 4}"
+proof -
+  have "\<MM> x - ln x \<le> \<MM> (real (nat \<lfloor>x\<rfloor>)) - ln (real (nat \<lfloor>x\<rfloor>))"
+    using assms by simp
+  also have "\<dots> \<le> ln 4"
+    using mertens_bound_strong[of "nat \<lfloor>x\<rfloor>"] assms by simp
+  finally have "\<MM> x - ln x \<le> ln 4" .
+
+  from assms have pos: "real_of_int \<lfloor>x\<rfloor> \<noteq> 0" by linarith
+  have "frac x / real (nat \<lfloor>x\<rfloor>) \<ge> 0"
+    using assms by (intro divide_nonneg_pos) auto
+  moreover have "frac x / real (nat \<lfloor>x\<rfloor>) \<le> 1 / 1"
+    using assms frac_lt_1[of x] by (intro frac_le) auto
+  ultimately have *: "frac x / real (nat \<lfloor>x\<rfloor>) \<in> {0..1}" by auto
+  have "ln x - ln (real (nat \<lfloor>x\<rfloor>)) = ln (x / real (nat \<lfloor>x\<rfloor>))"
+    using assms by (subst ln_div) auto
+  also have "x / real (nat \<lfloor>x\<rfloor>) = 1 + frac x / real (nat \<lfloor>x\<rfloor>)"
+    using assms pos by (simp add: frac_def field_simps)
+  finally have "\<MM> x - ln x > -1-9/pi^2-ln (1 + frac x / real (nat \<lfloor>x\<rfloor>))"
+    using mertens_bound_strong[of "nat \<lfloor>x\<rfloor>"] x by simp
+qed
+
+lemma mertens_bound_real':
+  fixes x :: real assumes x: "x \<ge> 1"
+  shows   "\<MM> x - ln x \<in> {-2<..25/18}"
+proof -
+  have "\<MM> x - ln x \<le> ln 4"
+    using mertens_bound_real_strong[of x] x by simp
+  also have "\<dots> \<le> 25 / 18"
+    using ln_realpow[of 2 2] ln2_le_25_over_36 by simp
+  finally have "\<MM> x - ln x \<le> 25 / 18" .
+
+  have ln2: "ln (2 :: real) \<in> {2/3..25/36}"
+    using ln_approx_bounds[of 2 1] by (simp add: eval_nat_numeral)
+  have ln3: "ln (3::real) \<in> {1..10/9}"
+    using ln_approx_bounds[of 3 1] by (simp add: eval_nat_numeral)
+  have ln5: "ln (5::real) \<in> {4/3..76/45}"
+    using ln_approx_bounds[of 5 1] by (simp add: eval_nat_numeral)
+  have ln7: "ln (7::real) \<in> {3/2..15/7}"
+    using ln_approx_bounds[of 7 1] by (simp add: eval_nat_numeral)
+  have ln11: "ln (11::real) \<in> {5/3..290/99}"
+    using ln_approx_bounds[of 11 1] by (simp add: eval_nat_numeral)
+

@@ -1,0 +1,197 @@
+theory Error_Function
+  imports "HOL-Complex_Analysis.Complex_Analysis" "HOL-Library.Landau_Symbols"
+begin
+
+
+lemma tendsto_sandwich_mono:
+  assumes "(\<lambda>n. f (real n)) \<longlonglongrightarrow> (c::real)"
+  assumes "eventually (\<lambda>x. \<forall>y z. x \<le> y \<and> y \<le> z \<longrightarrow> f y \<le> f z) at_top"
+  shows   "(f \<longlongrightarrow> c) at_top"
+proof (rule tendsto_sandwich)
+  from assms(2) obtain C where C: "\<And>x y. C \<le> x \<Longrightarrow> x \<le> y \<Longrightarrow> f x \<le> f y"
+    by (auto simp: eventually_at_top_linorder)
+  show "eventually (\<lambda>x. f (real (nat \<lfloor>x\<rfloor>)) \<le> f x) at_top"
+    using eventually_gt_at_top[of "0::real"] eventually_gt_at_top[of "C+1::real"]
+    by eventually_elim (rule C, linarith+)
+  show "eventually (\<lambda>x. f (real (Suc (nat \<lfloor>x\<rfloor>))) \<ge> f x) at_top"
+    using eventually_gt_at_top[of "0::real"] eventually_gt_at_top[of "C+1::real"]
+    by eventually_elim (rule C, linarith+)
+qed (auto intro!: filterlim_compose[OF assms(1)]
+                  filterlim_compose[OF filterlim_nat_sequentially]
+                  filterlim_compose[OF filterlim_Suc] filterlim_floor_sequentially
+          simp del: of_nat_Suc)
+
+lemma tendsto_sandwich_antimono:
+  assumes "(\<lambda>n. f (real n)) \<longlonglongrightarrow> (c::real)"
+  assumes "eventually (\<lambda>x. \<forall>y z. x \<le> y \<and> y \<le> z \<longrightarrow> f y \<ge> f z) at_top"
+  shows   "(f \<longlongrightarrow> c) at_top"
+proof (rule tendsto_sandwich)
+  from assms(2) obtain C where C: "\<And>x y. C \<le> x \<Longrightarrow> x \<le> y \<Longrightarrow> f x \<ge> f y"
+    by (auto simp: eventually_at_top_linorder)
+  show "eventually (\<lambda>x. f (real (nat \<lfloor>x\<rfloor>)) \<ge> f x) at_top"
+    using eventually_gt_at_top[of "0::real"] eventually_gt_at_top[of "C+1::real"]
+    by eventually_elim (rule C, linarith+)
+  show "eventually (\<lambda>x. f (real (Suc (nat \<lfloor>x\<rfloor>))) \<le> f x) at_top"
+    using eventually_gt_at_top[of "0::real"] eventually_gt_at_top[of "C+1::real"]
+    by eventually_elim (rule C, linarith+)
+qed (auto intro!: filterlim_compose[OF assms(1)]
+                  filterlim_compose[OF filterlim_nat_sequentially]
+                  filterlim_compose[OF filterlim_Suc] filterlim_floor_sequentially
+          simp del: of_nat_Suc)
+
+lemma has_bochner_integral_completion [intro]:
+  fixes f :: "'a \<Rightarrow> 'b::{banach, second_countable_topology}"
+  shows "has_bochner_integral M f I \<Longrightarrow> has_bochner_integral (completion M) f I"
+  by (auto simp: has_bochner_integral_iff integrable_completion integral_completion 
+                 borel_measurable_integrable)
+
+lemma has_bochner_integral_imp_has_integral:
+  "has_bochner_integral lebesgue (\<lambda>x. indicator S x *\<^sub>R f x) I \<Longrightarrow> 
+     (f has_integral (I :: 'b :: euclidean_space)) S"
+  using has_integral_set_lebesgue[of S f] 
+  by (simp add: has_bochner_integral_iff set_integrable_def set_lebesgue_integral_def) 
+    
+lemma has_bochner_integral_imp_has_integral':
+  "has_bochner_integral lborel (\<lambda>x. indicator S x *\<^sub>R f x) I \<Longrightarrow> 
+     (f has_integral (I :: 'b :: euclidean_space)) S"
+  by (intro has_bochner_integral_imp_has_integral has_bochner_integral_completion)
+
+lemma has_bochner_integral_erf_aux:
+  "has_bochner_integral lborel (\<lambda>x. indicator {0..} x *\<^sub>R exp (- x\<^sup>2)) (sqrt pi / 2)"
+proof -
+  let ?pI = "\<lambda>f. (\<integral>\<^sup>+s. f (s::real) * indicator {0..} s \<partial>lborel)"
+  let ?gauss = "\<lambda>x. exp (- x\<^sup>2)"
+  let ?I = "indicator {0<..} :: real \<Rightarrow> real"
+  let ?ff= "\<lambda>x s. x * exp (- x\<^sup>2 * (1 + s\<^sup>2)) :: real"
+  have *: "?pI ?gauss = (\<integral>\<^sup>+x. ?gauss x * ?I x \<partial>lborel)"
+    by (intro nn_integral_cong_AE AE_I[where N="{0}"]) (auto split: split_indicator)
+
+  have "?pI ?gauss * ?pI ?gauss = (\<integral>\<^sup>+x. \<integral>\<^sup>+s. ?gauss x * ?gauss s * ?I s * ?I x \<partial>lborel \<partial>lborel)"
+    by (auto simp: nn_integral_cmult[symmetric] nn_integral_multc[symmetric] * 
+                   ennreal_mult[symmetric] intro!: nn_integral_cong split: split_indicator)
+  also have "\<dots> = (\<integral>\<^sup>+x. \<integral>\<^sup>+s. ?ff x s * ?I s * ?I x \<partial>lborel \<partial>lborel)"
+  proof (rule nn_integral_cong, cases)
+    fix x :: real assume "x \<noteq> 0"
+    then show "(\<integral>\<^sup>+s. ?gauss x * ?gauss s * ?I s * ?I x \<partial>lborel) =
+                 (\<integral>\<^sup>+s. ?ff x s * ?I s * ?I x \<partial>lborel)"
+      by (subst nn_integral_real_affine[where t="0" and c="x"])
+         (auto simp: mult_exp_exp nn_integral_cmult[symmetric] field_simps zero_less_mult_iff ennreal_mult[symmetric]
+               intro!: nn_integral_cong split: split_indicator)
+  qed simp
+  also have "... = \<integral>\<^sup>+s. \<integral>\<^sup>+x. ?ff x s * ?I s * ?I x \<partial>lborel \<partial>lborel"
+    by (rule lborel_pair.Fubini'[symmetric]) auto
+  also have "... = ?pI (\<lambda>s. ?pI (\<lambda>x. ?ff x s))"
+    by (rule nn_integral_cong_AE)
+       (auto intro!: nn_integral_cong_AE AE_I[where N="{0}"] split: split_indicator_asm)
+  also have "\<dots> = ?pI (\<lambda>s. ennreal (1 / (2 * (1 + s\<^sup>2))))"
+  proof (intro nn_integral_cong ennreal_mult_right_cong)
+    fix s :: real show "?pI (\<lambda>x. ?ff x s) = ennreal (1 / (2 * (1 + s\<^sup>2)))"
+    proof (subst nn_integral_FTC_atLeast)
+      have "((\<lambda>a. - (exp (- ((1 + s\<^sup>2) * a\<^sup>2)) / (2 + 2 * s\<^sup>2))) \<longlongrightarrow> (- (0 / (2 + 2 * s\<^sup>2)))) at_top"
+        by (intro tendsto_intros filterlim_compose[OF exp_at_bot]
+                  filterlim_compose[OF filterlim_uminus_at_bot_at_top]
+                  filterlim_tendsto_pos_mult_at_top)
+           (auto intro!: filterlim_at_top_mult_at_top[OF filterlim_ident filterlim_ident]
+                 simp: add_pos_nonneg  power2_eq_square add_nonneg_eq_0_iff)
+      then show "((\<lambda>a. - (exp (- a\<^sup>2 - s\<^sup>2 * a\<^sup>2) / (2 + 2 * s\<^sup>2))) \<longlongrightarrow> 0) at_top"
+        by (simp add: field_simps)
+    qed (auto intro!: derivative_eq_intros simp: field_simps add_nonneg_eq_0_iff)
+  qed
+  also have "... = ennreal (pi / 4)"
+  proof (subst nn_integral_FTC_atLeast)
+    show "((\<lambda>a. arctan a / 2) \<longlongrightarrow> (pi / 2) / 2 ) at_top"
+      by (intro tendsto_intros) (simp_all add: tendsto_arctan_at_top)
+  qed (auto intro!: derivative_eq_intros simp: add_nonneg_eq_0_iff field_simps power2_eq_square)
+  finally have "?pI ?gauss^2 = pi / 4"
+    by (simp add: power2_eq_square)
+  then have "?pI ?gauss = sqrt (pi / 4)"
+    using power_eq_iff_eq_base[of 2 "enn2real (?pI ?gauss)" "sqrt (pi / 4)"]
+    by (cases "?pI ?gauss") (auto simp: power2_eq_square ennreal_mult[symmetric] ennreal_top_mult)
+  also have "?pI ?gauss = (\<integral>\<^sup>+x. indicator {0..} x *\<^sub>R exp (- x\<^sup>2) \<partial>lborel)"
+    by (intro nn_integral_cong) (simp split: split_indicator)
+  also have "sqrt (pi / 4) = sqrt pi / 2"
+    by (simp add: real_sqrt_divide)
+  finally show ?thesis
+    by (rule has_bochner_integral_nn_integral[rotated 3])
+       auto
+qed
+
+lemma has_integral_erf_aux: "((\<lambda>t::real. exp (-t\<^sup>2)) has_integral (sqrt pi / 2)) {0..}"
+  by (intro has_bochner_integral_imp_has_integral' has_bochner_integral_erf_aux)
+
+lemma contour_integrable_on_linepath_neg_exp_squared [simp, intro]:
+  "(\<lambda>t. exp (-(t^2))) contour_integrable_on linepath 0 z"
+  by (auto intro!: contour_integrable_continuous_linepath continuous_intros)
+
+lemma holomorphic_on_chain:
+  "g holomorphic_on t \<Longrightarrow> f holomorphic_on s \<Longrightarrow> f ` s \<subseteq> t \<Longrightarrow> 
+    (\<lambda>x. g (f x)) holomorphic_on s"
+  using holomorphic_on_compose_gen[of f s g t] by (simp add: o_def)
+    
+lemma holomorphic_on_chain_UNIV:
+  "g holomorphic_on UNIV \<Longrightarrow> f holomorphic_on s\<Longrightarrow> 
+    (\<lambda>x. g (f x)) holomorphic_on s"
+  using holomorphic_on_compose_gen[of f s g UNIV] by (simp add: o_def)
+
+lemmas holomorphic_on_exp' [holomorphic_intros] = 
+  holomorphic_on_exp [THEN holomorphic_on_chain_UNIV]
+
+lemma leibniz_rule_field_derivative_real:
+  fixes f::"'a::{real_normed_field, banach} \<Rightarrow> real \<Rightarrow> 'a"
+  assumes fx: "\<And>x t. x \<in> U \<Longrightarrow> t \<in> {a..b} \<Longrightarrow> ((\<lambda>x. f x t) has_field_derivative fx x t) (at x within U)"
+  assumes integrable_f2: "\<And>x. x \<in> U \<Longrightarrow> (f x) integrable_on {a..b}"
+  assumes cont_fx: "continuous_on (U \<times> {a..b}) (\<lambda>(x, t). fx x t)"
+  assumes U: "x0 \<in> U" "convex U"
+  shows "((\<lambda>x. integral {a..b} (f x)) has_field_derivative integral {a..b} (fx x0)) (at x0 within U)"    
+  using leibniz_rule_field_derivative[of U a b f fx x0] assms by simp
+
+lemma has_vector_derivative_linepath_within [derivative_intros]:
+  assumes [derivative_intros]: 
+    "(f has_vector_derivative f') (at x within S)" "(g has_vector_derivative g') (at x within S)"
+    "(h has_real_derivative h') (at x within S)"
+  shows "((\<lambda>x. linepath (f x) (g x) (h x)) has_vector_derivative 
+           (1 - h x) *\<^sub>R f' + h x *\<^sub>R g' - h' *\<^sub>R (f x - g x)) (at x within S)"
+  unfolding linepath_def [abs_def]
+  by (auto intro!: derivative_eq_intros simp: field_simps scaleR_diff_right)
+    
+lemma has_field_derivative_linepath_within [derivative_intros]:
+  assumes [derivative_intros]: 
+    "(f has_field_derivative f') (at x within S)" "(g has_field_derivative g') (at x within S)"
+    "(h has_real_derivative h') (at x within S)"
+  shows "((\<lambda>x. linepath (f x) (g x) (h x)) has_field_derivative 
+           (1 - h x) *\<^sub>R f' + h x *\<^sub>R g' - h' *\<^sub>R (f x - g x)) (at x within S)"
+  unfolding linepath_def [abs_def]
+  by (auto intro!: derivative_eq_intros simp: field_simps scaleR_diff_right)
+
+lemma continuous_on_linepath' [continuous_intros]:
+  assumes [continuous_intros]: "continuous_on A f" "continuous_on A g" "continuous_on A h"
+  shows   "continuous_on A (\<lambda>x. linepath (f x) (g x) (h x))"
+  using assms unfolding linepath_def by (auto intro!: continuous_intros)
+    
+lemma contour_integral_has_field_derivative:
+  assumes A: "open A" "convex A" "a \<in> A" "z \<in> A"
+  assumes integrable: "\<And>z. z \<in> A \<Longrightarrow> f contour_integrable_on linepath a z"
+  assumes holo: "f holomorphic_on A"
+  shows   "((\<lambda>z. contour_integral (linepath a z) f) has_field_derivative f z) (at z within B)"
+proof -
+  have "(f has_field_derivative deriv f z) (at z)" if "z \<in> A" for z
+    using that assms by (auto intro!: holomorphic_derivI)
+  note [derivative_intros] = DERIV_chain2[OF this]
+  note [continuous_intros] = 
+    continuous_on_compose2[OF holomorphic_on_imp_continuous_on [OF holo]]
+    continuous_on_compose2[OF holomorphic_on_imp_continuous_on [OF holomorphic_deriv[OF holo]]]
+  have [derivative_intros]:
+      "((\<lambda>x. linepath a x t) has_field_derivative of_real t) (at x within A)" for t x
+    by (auto simp: linepath_def scaleR_conv_of_real intro!: derivative_eq_intros)
+ 
+  have *: "linepath a b t \<in> A" if "a \<in> A" "b \<in> A" "t \<in> {0..1}" for a b t
+    
+  have "((\<lambda>z. integral {0..1} (\<lambda>x. f (linepath a z x)) * (z - a)) has_field_derivative 
+      integral {0..1} (\<lambda>t. deriv f (linepath a z t) * of_real t) * (z - a) +
+      integral {0..1} (\<lambda>x. f (linepath a z x))) (at z within A)" 
+      (is "(_ has_field_derivative ?I) _")
+    by (rule derivative_eq_intros leibniz_rule_field_derivative_real)+
+       (insert assms,
+        auto intro!: derivative_eq_intros leibniz_rule_field_derivative_real
+                     integrable_continuous_real continuous_intros 
+             simp:   split_beta scaleR_conv_of_real *)

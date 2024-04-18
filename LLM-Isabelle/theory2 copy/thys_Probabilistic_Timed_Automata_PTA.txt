@@ -1,0 +1,235 @@
+theory PTA
+  imports "library/Lib"
+begin
+
+
+definition rel_set_strong :: "('a \<Rightarrow> 'b \<Rightarrow> bool) \<Rightarrow> 'a set \<Rightarrow> 'b set \<Rightarrow> bool"
+  where "rel_set_strong R A B \<longleftrightarrow> (\<forall>x y. R x y \<longrightarrow> (x \<in> A \<longleftrightarrow> y \<in> B))"
+
+lemma T_eq_rel_half[consumes 4, case_names prob sets cont]:
+  fixes R :: "'s \<Rightarrow> 't \<Rightarrow> bool" and f :: "'s \<Rightarrow> 't" and S :: "'s set"
+  assumes R_def: "\<And>s t. R s t \<longleftrightarrow> (s \<in> S \<and> f s = t)"
+  assumes A[measurable]: "A \<in> sets (stream_space (count_space UNIV))"
+    and B[measurable]: "B \<in> sets (stream_space (count_space UNIV))"
+    and AB: "rel_set_strong (stream_all2 R) A B" and KL: "rel_fun R (rel_pmf R) K L" and xy: "R x y"
+  shows "MC_syntax.T K x A = MC_syntax.T L y B"
+proof -
+  interpret K: MC_syntax K by unfold_locales
+  interpret L: MC_syntax L by unfold_locales
+
+
+  define g where "g t = (SOME s. R s t)" for t
+  have measurable_g: "g \<in> count_space UNIV \<rightarrow>\<^sub>M count_space UNIV" by auto
+  have g: "R i j \<Longrightarrow> R (g j) j" for i j
+    unfolding g_def by (rule someI)
+  
+  have K_subset: "x \<in> S \<Longrightarrow> K x \<subseteq> S" for x
+    using KL[THEN rel_funD, of x "f x", THEN rel_pmf_imp_rel_set] by (auto simp: rel_set_def R_def)
+
+  have in_S: "AE \<omega> in K.T x. \<omega> \<in> streams S"
+    using K.AE_T_enabled
+  proof eventually_elim 
+      apply (coinduction arbitrary: x \<omega>)
+      subgoal for x \<omega> using K_subset by (cases \<omega>) (auto simp: K.enabled_Stream)
+      done
+  qed
+
+  have L_eq: "L y = map_pmf f (K x)" if xy: "R x y" for x y
+  proof -
+    have "rel_pmf (\<lambda>x y. x = y) (map_pmf f (K x)) (L y)"
+      using KL[THEN rel_funD, OF xy] by (auto intro: pmf.rel_mono_strong simp: R_def pmf.rel_map)
+    then show ?thesis unfolding pmf.rel_eq by simp
+  qed
+
+  let ?D = "\<lambda>x. distr (K.T x) K.S (smap f)"
+  have prob_space_D: "?D x \<in> space (prob_algebra K.S)" for x 
+    by (auto simp: space_prob_algebra K.T.prob_space_distr)
+
+  have D_eq_D: "?D x = ?D x'" if "R x y" "R x' y" for x x' y
+  proof (rule stream_space_eq_sstart)
+    define A where "A = K.acc `` {x, x'}"
+    have x_A: "x \<in> A" "x' \<in> A" by (auto simp: A_def)
+    let ?\<Omega> = "f ` A"
+    show "countable ?\<Omega>"
+      unfolding A_def by (intro countable_image K.countable_acc) auto
+    show "prob_space (?D x)" "prob_space (?D x')" by (auto intro!: K.T.prob_space_distr)
+    show "sets (?D x) = sets L.S" "sets (?D x') = sets L.S" by auto
+    have AE_streams: "AE x in ?D x''. x \<in> streams ?\<Omega>" if "x'' \<in> A" for x''
+      apply (simp add: space_stream_space streams_sets AE_distr_iff)
+      using K.AE_T_reachable[of x''] unfolding alw_HLD_iff_streams
+    proof eventually_elim
+      fix s assume "s \<in> streams (K.acc `` {x''})"
+      moreover have "K.acc `` {x''} \<subseteq> A"
+      ultimately show "smap f s \<in> streams (f ` A)"
+        by (auto intro: smap_streams)
+    qed
+    with x_A show "AE x in ?D x'. x \<in> streams ?\<Omega>" "AE x in ?D x. x \<in> streams ?\<Omega>"
+      by auto
+    proof (induction xs arbitrary: x x' y)
+      case Nil
+      moreover have "?D x (streams (f ` A)) = 1" if "x \<in> A" for x
+        using AE_streams[of x] that
+        by (intro prob_space.emeasure_eq_1_AE[OF K.T.prob_space_distr]) (auto simp: streams_sets)
+      ultimately show ?case by simp
+    next
+      case (Cons z zs x x' y)
+      have "rel_pmf (R OO R\<inverse>\<inverse>) (K x) (K x')"
+        using KL[THEN rel_funD, OF Cons(4)] KL[THEN rel_funD, OF Cons(5)]
+        unfolding pmf.rel_compp pmf.rel_flip by auto
+      then obtain p :: "('s \<times> 's) pmf" where p: "\<And>a b. (a, b) \<in> p \<Longrightarrow> (R OO R\<inverse>\<inverse>) a b" and
+        eq: "map_pmf fst p = K x" "map_pmf snd p = K x'"
+        by (auto simp: pmf.in_rel)
+      let ?S = "stream_space (count_space UNIV)"
+      have *: "(##) y -` smap f -` sstart (f ` A) (z # zs) = (if f y = z then smap f -` sstart (f ` A) zs else {})" for y z zs
+        by auto
+      have **: "?D x (sstart (f ` A) (z # zs)) = (\<integral>\<^sup>+ y'. (if f y' = z then ?D y' (sstart (f ` A) zs) else 0) \<partial>K x)" for x
+        apply (simp add: emeasure_distr)
+        apply (subst K.T_eq_bind)
+        apply (subst emeasure_bind[where N="?S"])
+           apply simp
+          apply (rule measurable_distr2[where M="?S"])
+           apply measurable
+        apply (intro nn_integral_cong_AE AE_pmfI)
+        apply (auto simp add: emeasure_distr)
+        apply (simp_all add: * space_stream_space)
+        done
+      have fst_A: "fst ab \<in> A" if "ab \<in> p" for ab
+      proof -
+          by (auto simp: A_def intro: rtrancl.rtrancl_into_rtrancl)
+      qed
+      have snd_A: "snd ab \<in> A" if "ab \<in> p" for ab
+      proof -
+          by (auto simp: A_def intro: rtrancl.rtrancl_into_rtrancl)
+      qed
+      show ?case
+        unfolding ** eq[symmetric] nn_integral_map_pmf
+        apply (intro nn_integral_cong_AE AE_pmfI)
+        subgoal for ab using p[of "fst ab" "snd ab"] by (auto simp: R_def intro!: Cons(1) fst_A snd_A)
+        done
+    qed
+  qed
+
+  have L_eq_D: "L.T y = ?D x"
+  proof (coinduction arbitrary: x y rule: L.T_coinduct)
+    case (cont x y)
+    then have Kx_Ly: "rel_pmf R (K x) (L y)"
+      by (rule KL[THEN rel_funD])
+    then have *: "y' \<in> L y \<Longrightarrow> \<exists>x'\<in>K x. R x' y'" for y'
+      by (auto dest!: rel_pmf_imp_rel_set simp: rel_set_def)
+    have **: "y' \<in> L y \<Longrightarrow> R (g y') y'" for y'
+      using *[of y'] unfolding g_def by (auto intro: someI)
+
+    have D_SCons_eq_D_D: "distr (K.T i) K.S (\<lambda>x. z ## smap f x) = distr (?D i) K.S (\<lambda>x. z ## x)" for i z
+      by (subst distr_distr) (auto simp: comp_def)
+    have D_eq_D_gi: "?D i = ?D (g (f i))" if i: "i \<in> K x" for i
+    proof -
+      obtain j where "j \<in> L y" "R i j" "f i = j"
+        using Kx_Ly i by (force dest!: rel_pmf_imp_rel_set simp: rel_set_def R_def)
+      then show ?thesis
+    qed
+
+    have ***: "?D x = measure_pmf (L y) \<bind> (\<lambda>y. distr (?D (g y)) K.S ((##) y))"
+      apply (subst K.T_eq_bind)
+      apply (subst distr_bind[of _ _ K.S])
+         apply (rule measurable_distr2[of _  _ "K.S"])
+          apply (simp_all add: Pi_iff)
+      apply (simp add: distr_distr comp_def L_eq[OF cont] map_pmf_rep_eq)
+      apply (subst bind_distr[where K=K.S])
+         apply measurable []
+        apply (rule measurable_distr2[of _  _ "K.S"])
+        apply measurable []
+        apply (rule measurable_compose[OF measurable_g])
+        apply measurable []
+       apply simp
+      apply (rule bind_measure_pmf_cong[where N="K.S"])
+        apply (auto simp: space_subprob_algebra space_stream_space intro!: K.T.subprob_space_distr)
+        unfolding D_SCons_eq_D_D D_eq_D_gi ..
+    show ?case
+      by (intro exI[of _ "\<lambda>t. distr (K.T (g t)) (stream_space (count_space UNIV)) (smap f)"])
+         (auto simp add: K.T.prob_space_distr *** dest: **)
+(* XXX Move this to a theory on Timed Automata *)
+(* XXX Remove old successor definition *)
+  (* XXX Does this lemma actually need the finiteness assumption? *)
+(* XXX Remove Caml case *)
+(* XXX Clean *)
+(* XXX Move *)
+  (* XXX Declare globally? *)
+end (* Alpha Closure global *)
+(* XXX Move *)
+(* XXX Move *)
+(*
+lemma guard_continuous:
+  assumes "u \<turnstile> g" "u \<oplus> t \<turnstile> g" "0 \<le> t'" "t' \<le> t"
+  shows "u \<oplus> t' \<turnstile> g"
+  using assms by (auto 4 4 intro: atomic_guard_continuous simp: list_all_iff)
+*)
+(* XXX Remove sort constraints *)
+end (* Probabilistic Timed Automaton *)
+(* XXX Move definition of V somewhere else *)
+  (* 
+  -- "Passage of time" delay:
+  "st \<in> \<S> \<Longrightarrow> st = (l,R) \<Longrightarrow> succ \<R> R \<subseteq> \<lbrace>inv_of A l\<rbrace> \<Longrightarrow> return_pmf (l, succ \<R> R) \<in> \<K> st" |
+  *)
+(* XXX Move *)
+(* XXX Obsolete in here, move to Regions *)
+(* XXX Clean this for regular automata too *)
+(* Assumption of valid too strong? i.e. do not need l \<in> L here *)
+  notes alpha_interp.valid_regions_distinct_spec[intro] (* XXX Declare somewhere else *)
+    (* XXX Refactor -- doing that kind of proof at other places too *)
+(* XXX Move up *)
+(* XXX Correct binding strength *)
+(*
+definition
+  rept :: "'s * ('c, t) cval \<Rightarrow> ('s * ('c, t) cval set) pmf \<Rightarrow> ('s * ('c, t) cval) pmf"
+where
+  "rept s \<mu>_abs \<equiv> let (l, u) = s in
+    if \<mu>_abs = return_pmf (abss s)
+    then if (\<exists> c \<in> \<X>. \<exists> d. u c = real d)
+         then return_pmf s
+         else return_pmf (l, u \<oplus> 0.5)
+    else SOME \<mu>. \<mu> \<in> K s \<and> abst \<mu> = \<mu>_abs"
+*)
+(* definition "shiftedR R \<equiv> let u = (SOME u. u \<in> R) in (u \<oplus> max 0 (0.1 - Max {frac (u c) | c. c \<in> \<X>}))" *)
+(*
+definition "delayedR R u \<equiv>
+  u \<oplus> (
+    let (I, r) = (SOME x. \<exists> I r. x = (I, r) \<and> valid_region \<X> k I r \<and> R = region \<X> I r);
+        m = Min {of_nat (intv_const (I c)) + 1 - u c | c. c \<in> \<X> \<and> isConst (I c)}
+    in if m \<ge> 1 then SOME t. u \<oplus> t \<in> R else m / 2
+  )"
+*)
+(*
+definition "delayedR R u \<equiv>
+  u \<oplus> (
+    let (I, r) = (SOME x. \<exists> I r. x = (I, r) \<and> valid_region \<X> k I r \<and> R = region \<X> I r);
+        m = 1 - Max ({frac (u c) | c. c \<in> \<X> \<and> isIntv (I c) \<and> intv_const (I c) = 0} \<union> {0})
+    in if m \<ge> 1 then SOME t. u \<oplus> t \<in> R else m / 2
+  )"
+*)
+(* XXX Move, generated by sledgehammer *)
+(* Working alternative:
+by (smt One_nat_def add.right_neutral add_Suc_right assms nat_intv_frac_decomp)
+*)
+(* XXX Move to valid_regions_distinct *)
+(* XXX Move *)
+(* XXX Move *)
+(* XXX Move this. Does this exist anywhere? More elegant pattern? *)
+(* XXX Declare simp? *)
+(* XXX Move to different locale *)
+(* XXX Move *)
+(* XXX Move *)
+(* XXX Simplifier looping problems on cfg_on
+   If R_G.cfg_onD_state is not removed from simpset, the simplifier rewrites state cfg = state cfg.
+*)
+(* XXX Simplifier looping problems on cfg_on
+   If R_G.cfg_onD_state is not removed from simpset, the simplifier rewrites state cfg = state cfg.
+*)
+(* XXX Move *)
+(* XXX Move to different locale *)
+(* XXX Move *)
+(* XXX Move *)
+(* XXX Move *)
+(* TODO: Clean *)
+(* TODO: Clean duplication *)
+end (* Probabilistic Timed Automaton Regions *)
+end (* Theory *)

@@ -1,0 +1,280 @@
+theory NonInterferenceInter 
+  imports "HRB-Slicing.FundamentalProperty"
+begin
+
+
+
+locale NonInterferenceInterGraph =
+  SDG sourcenode targetnode kind valid_edge Entry 
+    get_proc get_return_edges procs Main Exit Def Use ParamDefs ParamUses 
+  for sourcenode :: "'edge \<Rightarrow> 'node" and targetnode :: "'edge \<Rightarrow> 'node"
+  and kind :: "'edge \<Rightarrow> ('var,'val,'ret,'pname) edge_kind" 
+  and valid_edge :: "'edge \<Rightarrow> bool"
+  and Entry :: "'node" ("'('_Entry'_')")  and get_proc :: "'node \<Rightarrow> 'pname"
+  and get_return_edges :: "'edge \<Rightarrow> 'edge set"
+  and procs :: "('pname \<times> 'var list \<times> 'var list) list" and Main :: "'pname"
+  and Exit::"'node"  ("'('_Exit'_')") 
+  and Def :: "'node \<Rightarrow> 'var set" and Use :: "'node \<Rightarrow> 'var set"
+  and ParamDefs :: "'node \<Rightarrow> 'var list" and ParamUses :: "'node \<Rightarrow> 'var set list" +
+  fixes H :: "'var set"
+  fixes L :: "'var set"
+  fixes High :: "'node"  ("'('_High'_')")
+  fixes Low :: "'node"   ("'('_Low'_')")
+  assumes Entry_edge_Exit_or_High:
+  "\<lbrakk>valid_edge a; sourcenode a = (_Entry_)\<rbrakk> 
+    \<Longrightarrow> targetnode a = (_Exit_) \<or> targetnode a = (_High_)"
+  and High_target_Entry_edge:
+  "\<exists>a. valid_edge a \<and> sourcenode a = (_Entry_) \<and> targetnode a = (_High_) \<and>
+       kind a = (\<lambda>s. True)\<^sub>\<surd>"
+  and Entry_predecessor_of_High:
+  "\<lbrakk>valid_edge a; targetnode a = (_High_)\<rbrakk> \<Longrightarrow> sourcenode a = (_Entry_)"
+  and Exit_edge_Entry_or_Low: "\<lbrakk>valid_edge a; targetnode a = (_Exit_)\<rbrakk> 
+    \<Longrightarrow> sourcenode a = (_Entry_) \<or> sourcenode a = (_Low_)"
+  and Low_source_Exit_edge:
+  "\<exists>a. valid_edge a \<and> sourcenode a = (_Low_) \<and> targetnode a = (_Exit_) \<and> 
+       kind a = (\<lambda>s. True)\<^sub>\<surd>"
+  and Exit_successor_of_Low:
+  "\<lbrakk>valid_edge a; sourcenode a = (_Low_)\<rbrakk> \<Longrightarrow> targetnode a = (_Exit_)"
+  and DefHigh: "Def (_High_) = H" 
+  and UseHigh: "Use (_High_) = H"
+  and UseLow: "Use (_Low_) = L"
+  and HighLowDistinct: "H \<inter> L = {}"
+  and HighLowUNIV: "H \<union> L = UNIV"
+
+begin
+
+lemma Low_neq_Exit: assumes "L \<noteq> {}" shows "(_Low_) \<noteq> (_Exit_)"
+proof
+  assume "(_Low_) = (_Exit_)"
+  have "Use (_Exit_) = {}" by fastforce
+qed
+
+
+lemma valid_node_High [simp]:"valid_node (_High_)"
+  using High_target_Entry_edge by fastforce
+
+lemma valid_node_Low [simp]:"valid_node (_Low_)"
+  using Low_source_Exit_edge by fastforce
+
+
+lemma get_proc_Low:
+  "get_proc (_Low_) = Main"
+proof -
+  from Low_source_Exit_edge obtain a where "valid_edge a"
+    and "sourcenode a = (_Low_)" and "targetnode a = (_Exit_)"
+    and "intra_kind (kind a)" by(fastforce simp:intra_kind_def)
+  have "get_proc (sourcenode a) = get_proc (targetnode a)" by(rule get_proc_intra)
+  show ?thesis by simp
+qed
+
+lemma get_proc_High:
+  "get_proc (_High_) = Main"
+proof -
+  from High_target_Entry_edge obtain a where "valid_edge a"
+    and "sourcenode a = (_Entry_)" and "targetnode a = (_High_)"
+    and "intra_kind (kind a)" by(fastforce simp:intra_kind_def)
+  have "get_proc (sourcenode a) = get_proc (targetnode a)" by(rule get_proc_intra)
+  show ?thesis by simp
+qed
+
+
+
+lemma Entry_path_High_path:
+  assumes "(_Entry_) -as\<rightarrow>* n" and "inner_node n"
+  obtains a' as' where "as = a'#as'" and "(_High_) -as'\<rightarrow>* n" 
+  and "kind a' = (\<lambda>s. True)\<^sub>\<surd>"
+proof(atomize_elim)
+  show "\<exists>a' as'. as = a'#as' \<and> (_High_) -as'\<rightarrow>* n \<and> kind a' = (\<lambda>s. True)\<^sub>\<surd>"
+  proof(induct n'\<equiv>"(_Entry_)" as n rule:path.induct)
+    case (Cons_path n'' as n' a)
+      by(fastforce simp:inner_node_def)
+    have "n'' = (_High_)" by -(drule Entry_edge_Exit_or_High,auto)
+    from High_target_Entry_edge
+    obtain a' where "valid_edge a'" and "sourcenode a' = (_Entry_)"
+      and "targetnode a' = (_High_)" and "kind a' = (\<lambda>s. True)\<^sub>\<surd>"
+      by blast
+    have "a = a'" by(auto dest:edge_det)
+  qed fastforce
+qed
+
+
+lemma Exit_path_Low_path:
+  assumes "n -as\<rightarrow>* (_Exit_)" and "inner_node n"
+  obtains a' as' where "as = as'@[a']" and "n -as'\<rightarrow>* (_Low_)"
+  and "kind a' = (\<lambda>s. True)\<^sub>\<surd>"
+proof(atomize_elim)
+  show "\<exists>as' a'. as = as'@[a'] \<and> n -as'\<rightarrow>* (_Low_) \<and> kind a' = (\<lambda>s. True)\<^sub>\<surd>"
+  proof(induct as rule:rev_induct)
+    case Nil
+  next
+    case (snoc a' as')
+    have "n -as'\<rightarrow>* sourcenode a'" and "valid_edge a'" and "targetnode a' = (_Exit_)"
+      by(auto elim:path_split_snoc)
+    { assume "sourcenode a' = (_Entry_)"
+        by(blast intro!:path_Entry_target)
+      by(blast dest!:Exit_edge_Entry_or_Low)
+    from Low_source_Exit_edge
+    obtain ax where "valid_edge ax" and "sourcenode ax = (_Low_)"
+      and "targetnode ax = (_Exit_)" and "kind ax = (\<lambda>s. True)\<^sub>\<surd>"
+      by blast
+    have "a' = ax" by(fastforce intro:edge_det)
+    show ?case by blast
+  qed
+qed
+
+
+lemma not_Low_High: "V \<notin> L \<Longrightarrow> V \<in> H"
+  using HighLowUNIV
+  by fastforce
+
+lemma not_High_Low: "V \<notin> H \<Longrightarrow> V \<in> L"
+  using HighLowUNIV
+  by fastforce
+
+
+
+
+definition lowEquivalence :: "('var \<rightharpoonup> 'val) list \<Rightarrow> ('var \<rightharpoonup> 'val) list \<Rightarrow> bool" 
+(infixl "\<approx>\<^sub>L" 50)
+  where "s \<approx>\<^sub>L s' \<equiv> \<forall>V \<in> L. hd s V = hd s' V"
+
+
+lemma relevant_vars_Entry:
+  assumes "V \<in> rv S (CFG_node (_Entry_))" and "(_High_) \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+  shows "V \<in> L"
+proof -
+    where "(_Entry_) -as\<rightarrow>\<^sub>\<iota>* parent_node n'" 
+    and "n' \<in> HRB_slice S" and "V \<in> Use\<^bsub>SDG\<^esub> n'"
+    and "\<forall>n''. valid_SDG_node n'' \<and> parent_node n'' \<in> set (sourcenodes as) 
+          \<longrightarrow> V \<notin> Def\<^bsub>SDG\<^esub> n''" by(fastforce elim:rvE)
+    by(fastforce intro:path_valid_node simp:intra_path_def)
+  thus ?thesis
+  proof(cases "parent_node n'" rule:valid_node_cases)
+    case Entry
+      by -(drule SDG_Use_parent_Use,simp add:Entry_empty)
+    thus ?thesis by simp
+  next
+    case Exit
+      by -(drule SDG_Use_parent_Use,simp add:Exit_empty)
+    thus ?thesis by simp
+  next
+    case inner
+      and "(_High_) -as'\<rightarrow>\<^sub>\<iota>* parent_node n'"
+      by(fastforce elim:Entry_path_High_path simp:intra_path_def)
+    have "sourcenode a' = (_Entry_)" by(fastforce elim:path.cases simp:intra_path_def)
+    show ?thesis
+    proof(cases "as' = []")
+      case True
+        by(fastforce simp:intra_path_def)
+      have False 
+        by(fastforce dest:valid_SDG_node_in_slice_parent_node_in_slice 
+                    simp:SDG_to_CFG_set_def)
+      thus ?thesis by simp
+    next
+      case False
+        by(fastforce intro:path_sourcenode simp:intra_path_def)
+      from False have "hd (sourcenodes as') \<in> set (sourcenodes as')"
+        by(fastforce intro:hd_in_set simp:sourcenodes_def)
+        by(simp add:sourcenodes_def)
+      have "valid_node (hd (sourcenodes as'))" by simp
+      have "valid_SDG_node (CFG_node (_High_))" by simp
+      have "V \<notin> Def (_High_)"
+      hence "V \<notin> H" by(simp add:DefHigh)
+      thus ?thesis by(rule not_High_Low)
+    qed
+  qed
+qed
+
+
+
+lemma lowEquivalence_relevant_nodes_Entry:
+  assumes "s \<approx>\<^sub>L s'" and "(_High_) \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+  shows "\<forall>V \<in> rv S (CFG_node (_Entry_)). hd s V = hd s' V"
+proof
+  fix V assume "V \<in> rv S (CFG_node (_Entry_))"
+qed
+
+
+
+
+theorem nonInterference:
+  assumes "[cf\<^sub>1] \<approx>\<^sub>L [cf\<^sub>2]" and "(_High_) \<notin> \<lfloor>HRB_slice S\<rfloor>\<^bsub>CFG\<^esub>"
+  and "CFG_node (_Low_) \<in> S"
+  and "valid_edge a" and "sourcenode a = (_High_)" and "targetnode a = n" 
+  and "kind a = (\<lambda>s. True)\<^sub>\<surd>" and "n \<triangleq> c" and "final c'"
+  and "\<langle>c,[cf\<^sub>1]\<rangle> \<Rightarrow> \<langle>c',s\<^sub>1\<rangle>" and "\<langle>c,[cf\<^sub>2]\<rangle> \<Rightarrow> \<langle>c',s\<^sub>2\<rangle>"
+  shows "s\<^sub>1 \<approx>\<^sub>L s\<^sub>2"
+proof -
+  from High_target_Entry_edge obtain ax where "valid_edge ax"
+    and "sourcenode ax = (_Entry_)" and "targetnode ax = (_High_)"
+    and "kind ax = (\<lambda>s. True)\<^sub>\<surd>" by blast
+  obtain n\<^sub>1 as\<^sub>1 cfs\<^sub>1 where "n -as\<^sub>1\<rightarrow>\<^sub>\<surd>* n\<^sub>1" and "n\<^sub>1 \<triangleq> c'"
+    and "preds (kinds as\<^sub>1) [(cf\<^sub>1,undefined)]" 
+    and "transfers (kinds as\<^sub>1) [(cf\<^sub>1,undefined)] = cfs\<^sub>1" and "map fst cfs\<^sub>1 = s\<^sub>1"
+    by(fastforce dest:fundamental_property)
+  have "(_High_) -a#as\<^sub>1\<rightarrow>\<^sub>\<surd>* n\<^sub>1" by(fastforce intro:Cons_path simp:vp_def valid_path_def)
+  obtain a\<^sub>1 where "valid_edge a\<^sub>1" and "sourcenode a\<^sub>1 = n\<^sub>1" 
+    and "targetnode a\<^sub>1 = (_Low_)" and "kind a\<^sub>1 = \<Up>id" by(fastforce dest:final_edge_Low)
+  hence "n\<^sub>1 -[a\<^sub>1]\<rightarrow>* (_Low_)" by(fastforce intro:path_edge)
+    by(fastforce intro!:path_Append simp:vp_def)
+  have "(_Entry_) -ax#((a#as\<^sub>1)@[a\<^sub>1])\<rightarrow>* (_Low_)" by -(rule Cons_path)
+  moreover
+    by(simp add:vp_def valid_path_def)
+    by(fastforce intro:valid_path_aux_Append)
+    by simp
+  ultimately have "(_Entry_) -ax#((a#as\<^sub>1)@[a\<^sub>1])\<rightarrow>\<^sub>\<surd>* (_Low_)"
+    by(simp add:vp_def valid_path_def)
+  have "get_proc n = get_proc (_High_)"
+    by(fastforce dest:get_proc_intra simp:intra_kind_def)
+  with get_proc_High have "get_proc n = Main" by simp
+  have "get_proc n\<^sub>1 = get_proc (_Low_)"
+    by(fastforce dest:get_proc_intra simp:intra_kind_def)
+  with get_proc_Low have "get_proc n\<^sub>1 = Main" by simp
+    by(cases as\<^sub>1)
+             simp:vp_def valid_path_def valid_call_list_def slp_def 
+                  same_level_path_def simp del:valid_path_aux.simps)
+  then obtain cfx r where cfx:"transfers (map kind as\<^sub>1) [(cf\<^sub>1,undefined)] = [(cfx,r)]"
+    by(fastforce elim:slp_callstack_length_equal simp:kinds_def)
+  have "preds (kinds (ax#((a#as\<^sub>1)@[a\<^sub>1]))) [(cf\<^sub>1,undefined)]"
+    by(auto simp:kinds_def preds_split)
+  obtain n\<^sub>2 as\<^sub>2 cfs\<^sub>2 where "n -as\<^sub>2\<rightarrow>\<^sub>\<surd>* n\<^sub>2" and "n\<^sub>2 \<triangleq> c'"
+    and "preds (kinds as\<^sub>2) [(cf\<^sub>2,undefined)]" 
+    and "transfers (kinds as\<^sub>2) [(cf\<^sub>2,undefined)] = cfs\<^sub>2" and "map fst cfs\<^sub>2 = s\<^sub>2"
+    by(fastforce dest:fundamental_property)
+  have "(_High_) -a#as\<^sub>2\<rightarrow>\<^sub>\<surd>* n\<^sub>2" by(fastforce intro:Cons_path simp:vp_def valid_path_def)
+  obtain a\<^sub>2 where "valid_edge a\<^sub>2" and "sourcenode a\<^sub>2 = n\<^sub>2" 
+    and "targetnode a\<^sub>2 = (_Low_)" and "kind a\<^sub>2 = \<Up>id" by(fastforce dest:final_edge_Low)
+  hence "n\<^sub>2 -[a\<^sub>2]\<rightarrow>* (_Low_)" by(fastforce intro:path_edge)
+    by(fastforce intro!:path_Append simp:vp_def)
+  have "(_Entry_) -ax#((a#as\<^sub>2)@[a\<^sub>2])\<rightarrow>* (_Low_)" by -(rule Cons_path)
+  moreover
+    by(simp add:vp_def valid_path_def)
+    by(fastforce intro:valid_path_aux_Append)
+    by simp
+  ultimately have "(_Entry_) -ax#((a#as\<^sub>2)@[a\<^sub>2])\<rightarrow>\<^sub>\<surd>* (_Low_)"
+    by(simp add:vp_def valid_path_def)
+  have "get_proc n = get_proc (_High_)"
+    by(fastforce dest:get_proc_intra simp:intra_kind_def)
+  with get_proc_High have "get_proc n = Main" by simp
+  have "get_proc n\<^sub>2 = get_proc (_Low_)"
+    by(fastforce dest:get_proc_intra simp:intra_kind_def)
+  with get_proc_Low have "get_proc n\<^sub>2 = Main" by simp
+    by(cases as\<^sub>2)
+             simp:vp_def valid_path_def valid_call_list_def slp_def 
+                  same_level_path_def simp del:valid_path_aux.simps)
+  then obtain cfx' r' 
+    where cfx':"transfers (map kind as\<^sub>2) [(cf\<^sub>2,undefined)] = [(cfx',r')]"
+    by(fastforce elim:slp_callstack_length_equal simp:kinds_def)
+  have "preds (kinds (ax#((a#as\<^sub>2)@[a\<^sub>2]))) [(cf\<^sub>2,undefined)]"
+    by(auto simp:kinds_def preds_split)
+  have "map fst (transfers (kinds (ax#((a#as\<^sub>1)@[a\<^sub>1]))) [(cf\<^sub>1,undefined)]) \<approx>\<^sub>L 
+        map fst (transfers (kinds (ax#((a#as\<^sub>2)@[a\<^sub>2]))) [(cf\<^sub>2,undefined)])"
+    by(rule nonInterference_path_to_Low)
+  show ?thesis by(cases s\<^sub>1)(cases s\<^sub>2,(fastforce simp:kinds_def transfers_split)+)+
+qed
+
+
+end
+
+end
+

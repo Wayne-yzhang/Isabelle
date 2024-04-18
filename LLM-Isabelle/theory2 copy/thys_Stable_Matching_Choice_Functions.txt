@@ -1,0 +1,405 @@
+theory Choice_Functions
+imports
+  Basis
+begin
+
+
+
+type_synonym 'a cfun = "'a set \<Rightarrow> 'a set"
+
+
+definition f_range_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> bool" where
+  "f_range_on A f \<longleftrightarrow> (\<forall>B\<subseteq>A. f B \<subseteq> B)"
+
+abbreviation f_range :: "'a cfun \<Rightarrow> bool" where
+  "f_range \<equiv> f_range_on UNIV"
+
+lemma f_range_onI:
+  "(\<And>B. B \<subseteq> A \<Longrightarrow> f B \<subseteq> B) \<Longrightarrow> f_range_on A f"
+unfolding f_range_on_def by blast
+
+lemmas f_range_onD = iffD1[OF f_range_on_def, rule_format]
+lemmas f_range_onD' = subsetD[OF f_range_onD, rotated -1]
+
+lemma f_range_on_antimono:
+  assumes "f_range_on B f"
+  assumes "A \<subseteq> B"
+  shows "f_range_on A f"
+using assms unfolding f_range_on_def by blast
+
+
+definition decisive_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> bool" where
+  "decisive_on A f \<longleftrightarrow> (\<forall>B\<subseteq>A. B \<noteq> {} \<longrightarrow> f B \<noteq> {})"
+
+abbreviation decisive :: "'a cfun \<Rightarrow> bool" where
+  "decisive \<equiv> decisive_on UNIV"
+
+lemmas decisive_onD = iffD1[OF decisive_on_def, rule_format]
+lemmas decisive_onI = iffD2[OF decisive_on_def, rule_format]
+
+lemma decisive_on_empty:
+  shows "decisive_on {} f"
+unfolding decisive_on_def by simp
+
+lemma decisive_on_mono:
+  assumes "decisive_on A f"
+  assumes "B \<subseteq> A"
+  shows "decisive_on B f"
+using assms order_trans unfolding decisive_on_def by auto
+
+
+definition resolute_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> bool" where
+  "resolute_on A f \<longleftrightarrow> (\<forall>B\<subseteq>A. B \<noteq> {} \<longrightarrow> (\<exists>a. f B = {a}))"
+
+abbreviation resolute :: "'a cfun \<Rightarrow> bool" where
+  "resolute \<equiv> resolute_on UNIV"
+
+lemma resolute_on_decisive_on:
+  assumes "resolute_on A f"
+  shows "decisive_on A f"
+using %invisible assms unfolding resolute_on_def by - (rule decisive_onI; auto)
+
+
+abbreviation Rf :: "'a cfun \<Rightarrow> 'a cfun" where
+  "Rf f X \<equiv> X - f X"
+
+
+
+
+
+definition substitutes_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> bool" where
+  "substitutes_on A f \<longleftrightarrow> \<not>(\<exists>B\<subseteq>A. \<exists>a b. {a, b} \<subseteq> A - B \<and> b \<notin> f (B \<union> {b}) \<and> b \<in> f (B \<union> {a, b}))"
+
+abbreviation substitutes :: "'a cfun \<Rightarrow> bool" where
+  "substitutes \<equiv> substitutes_on UNIV"
+
+lemma substitutes_on_def2[simplified]:
+  "substitutes_on A f \<longleftrightarrow> (\<forall>B\<subseteq>A. \<forall>a\<in>A. \<forall>b\<in>A. b \<notin> f (B \<union> {b}) \<longrightarrow> b \<notin> f (B \<union> {a, b}))"
+(is "?lhs \<longleftrightarrow> ?rhs")
+proof (rule iffI, clarsimp)
+  fix B a b
+  assume lhs: ?lhs and XXX: "B \<subseteq> A" "a \<in> A" "b \<in> A" "b \<notin> f (insert b B)" "b \<in> f (insert a (insert b B))"
+  show False
+  proof(cases "a \<in> B")
+    case True with XXX show ?thesis by (simp add: insert_absorb)
+  next
+    case False with lhs XXX show ?thesis
+      unfolding substitutes_on_def
+      by (cases "b \<in> B") (fastforce dest: spec[where x="B - {a, b}"] simp: insert_commute insert_absorb)+
+  qed
+qed (fastforce simp: substitutes_on_def)
+
+lemmas substitutes_onI = iffD2[OF substitutes_on_def2, rule_format, simplified]
+lemmas substitutes_onD = iffD1[OF substitutes_on_def2, rule_format, simplified]
+
+lemmas substitutesD = substitutes_onD[where A=UNIV, simplified]
+
+
+lemma substitutes_on_union:
+  assumes "a \<notin> f (B \<union> {a})"
+  assumes "substitutes_on (A \<union> B \<union> {a}) f"
+  assumes "finite A"
+  shows "a \<notin> f (A \<union> B \<union> {a})"
+using %invisible assms(3,1-2) by induct (simp_all add: insert_commute substitutes_on_def2 le_iff_sup)
+
+lemma substitutes_on_antimono:
+  assumes "substitutes_on B f"
+  assumes "A \<subseteq> B"
+  shows "substitutes_on A f"
+using %invisible assms unfolding substitutes_on_def2 by auto
+
+
+lemma substitutes_on_Rf_mono_on:
+  assumes "substitutes_on A f"
+  assumes "finite A"
+  shows "mono_on (Pow A) (Rf f)"
+proof %invisible (rule mono_onI, rule subsetI)
+  fix B C x assume "B \<in> Pow A" "C \<in> Pow A" "B \<subseteq> C" "x \<in> Rf f B"
+  with assms substitutes_on_union[where a=x and A=C and B=B and f=f] show "x \<in> Rf f C"
+    by (clarsimp simp: insert_absorb) (metis rev_finite_subset subsetCE substitutes_on_antimono sup.orderE)
+qed
+
+lemma Rf_mono_on_substitutes:
+  assumes "mono_on (Pow A) (Rf f)"
+  shows "substitutes_on A f"
+proof %invisible (rule substitutes_onI)
+  fix B a b assume "B \<subseteq> A" "a \<in> A" "b \<in> A" "b \<notin> f (insert b B)"
+  with assms show "b \<notin> f (insert a (insert b B))"
+    by (auto elim: mono_onE[where x="insert b B" and y="insert a (insert b B)"])
+qed
+
+
+definition iia_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> bool" where
+  "iia_on A f \<longleftrightarrow> (\<forall>B\<subseteq>A. \<forall>C\<subseteq>B. \<forall>a\<in>C. a \<in> f B \<longrightarrow> a \<in> f C)"
+
+abbreviation iia :: "'a cfun \<Rightarrow> bool" where
+  "iia \<equiv> iia_on UNIV"
+
+lemmas %invisible iia_onI = iffD2[OF iia_on_def, rule_format, unfolded conj_imp_eq_imp_imp]
+lemmas %invisible iia_onD = iffD1[OF iia_on_def, rule_format, unfolded conj_imp_eq_imp_imp]
+
+lemma Rf_mono_on_iia_on:
+  shows "mono_on (Pow A) (Rf f) \<longleftrightarrow> iia_on A f"
+unfolding %invisible iia_on_def by (rule iffI) (blast elim: mono_onE intro!: mono_onI)+
+
+lemma Rf_mono_iia:
+  shows "mono (Rf f) \<longleftrightarrow> iia f"
+using %invisible Rf_mono_on_iia_on[of UNIV f] mono_on_mono by (simp add: fun_eq_iff) blast
+
+lemma substitutes_iia:
+  assumes "finite A"
+  shows "substitutes_on A f \<longleftrightarrow> iia_on A f"
+using %invisible Rf_mono_on_iia_on Rf_mono_on_substitutes substitutes_on_Rf_mono_on[OF _ assms] by blast
+
+
+lemma iia_f_idem:
+  assumes "f_range_on A f"
+  assumes "iia_on A f"
+  assumes "B \<subseteq> A"
+  shows "f (f B) = f B"
+using %invisible assms unfolding iia_on_def
+by (meson f_range_onD f_range_on_antimono subset_antisym subset_eq)
+
+
+definition substitutable_preferences_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> bool" where
+  "substitutable_preferences_on A f \<longleftrightarrow> (\<forall>B\<subseteq>A. \<forall>a\<in>B. \<forall>b\<in>B. a \<noteq> b \<and> a \<in> f B \<longrightarrow> a \<in> f (B - {b}))"
+
+lemmas %invisible substitutable_preferences_onI = iffD2[OF substitutable_preferences_on_def, rule_format, unfolded conj_imp_eq_imp_imp]
+
+lemma substitutable_preferences_on_substitutes_on:
+  shows "substitutable_preferences_on A f \<longleftrightarrow> substitutes_on A f" (is "?lhs \<longleftrightarrow> ?rhs")
+proof %invisible (rule iffI)
+  assume ?lhs then show ?rhs
+    unfolding substitutable_preferences_on_def
+    by - (rule substitutes_onI; metis Diff_insert_absorb insertCI insert_absorb insert_subset)
+next
+  assume ?rhs show ?lhs
+  proof(rule substitutable_preferences_onI)
+    fix B a b
+    assume XXX: "B \<subseteq> A" "a \<in> B" "b \<in> B" "a \<noteq> b" "a \<in> f B"
+    then have "a \<in> A" "b \<in> A" "B - {b} - {a} \<subseteq> A" by blast+
+      unfolding substitutes_on_def2 by (metis insertE insert_Diff)
+  qed
+qed
+
+
+definition Chernoff_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> bool" where
+  "Chernoff_on A f \<longleftrightarrow> (\<forall>B\<subseteq>A. \<forall>C\<subseteq>B. f B \<inter> C \<subseteq> f C)"
+
+abbreviation Chernoff :: "'a cfun \<Rightarrow> bool" where
+  "Chernoff \<equiv> Chernoff_on UNIV"
+
+lemmas Chernoff_onI = iffD2[OF Chernoff_on_def, rule_format]
+lemmas Chernoff_def = Chernoff_on_def[where A=UNIV, simplified]
+
+lemma Chernoff_on_iia_on:
+  shows "Chernoff_on A f \<longleftrightarrow> iia_on A f"
+unfolding %invisible Chernoff_on_def iia_on_def by blast
+
+lemma Chernoff_on_union:
+  assumes "Chernoff_on A f"
+  assumes "f_range_on A f"
+  assumes "B \<subseteq> A" "C \<subseteq> A"
+  shows "f (B \<union> C) \<subseteq> f B \<union> f C"
+using %invisible assms unfolding Chernoff_on_def f_range_on_def
+by clarsimp (metis (mono_tags, lifting) Int_iff Un_iff Un_subset_iff contra_subsetD inf_sup_ord(3,4))
+
+
+lemma Chernoff_a:
+  assumes "f_range_on A f"
+  shows "Chernoff_on A f \<longleftrightarrow> (\<forall>B C. B \<subseteq> A \<and> C \<subseteq> A \<longrightarrow> f (B \<union> C) \<subseteq> f B \<union> C)" (is "?lhs \<longleftrightarrow> ?rhs")
+proof %invisible (rule iffI)
+next
+  assume ?rhs show ?lhs
+  proof(rule Chernoff_onI)
+    fix B C assume "B \<subseteq> A" "C \<subseteq> B"
+      by (fastforce simp add: Un_absorb1)
+  qed
+qed
+
+  assumes "f_range_on A f"
+  shows "Chernoff_on A f \<longleftrightarrow> (\<forall>B C. B \<subseteq> A \<and> C \<subseteq> A \<longrightarrow> f (B \<union> C) \<subseteq> f B \<union> f C)" (is "?lhs \<longleftrightarrow> ?rhs")
+proof %invisible (rule iffI)
+next
+  assume ?rhs show ?lhs
+  proof(rule Chernoff_onI)
+    fix B C assume "B \<subseteq> A" "C \<subseteq> B"
+    show "f B \<inter> C \<subseteq> f C" by (clarsimp simp: Un_absorb1) (blast dest: f_range_onD')
+  qed
+qed
+
+lemma Chernoff_c:
+  assumes "f_range_on A f"
+  shows "Chernoff_on A f \<longleftrightarrow> (\<forall>B C. B \<subseteq> A \<and> C \<subseteq> A \<longrightarrow> f (B \<union> C) \<subseteq> f (f B \<union> C))" (is "?lhs \<longleftrightarrow> ?rhs")
+proof %invisible (rule iffI)
+  assume ?lhs show ?rhs
+  proof(safe)
+    fix B C x
+    assume B: "B \<subseteq> A" and C: "C \<subseteq> A" and x: "x \<in> f (B \<union> C)"
+    moreover note B C x
+    ultimately show "x \<in> f (f B \<union> C)"
+  qed
+next
+    unfolding f_range_on_def
+       (metis (no_types, lifting) Un_iff Un_subset_iff rev_subsetD subset_trans)
+qed
+
+lemma Chernoff_d:
+  assumes "f_range_on A f"
+  shows "Chernoff_on A f \<longleftrightarrow> (\<forall>B C. B \<subseteq> A \<and> C \<subseteq> A \<longrightarrow> f (B \<union> C) \<subseteq> f (f B \<union> f C))" (is "?lhs \<longleftrightarrow> ?rhs")
+proof %invisible (rule iffI)
+  assume ?lhs show ?rhs
+  proof(intro allI impI)
+    fix B C x
+    assume BC: "B \<subseteq> A \<and> C \<subseteq> A"
+      unfolding f_range_on_def by (metis Un_commute inf.absorb_iff2 le_infI1)
+  qed
+next
+    unfolding f_range_on_def
+    by (clarsimp simp: Chernoff_a[OF assms])
+       (metis (no_types, lifting) Un_iff Un_subset_iff rev_subsetD subset_trans)
+qed
+
+
+
+choice function @{term "f"} to ignore unchosen alternatives.
+
+\<close>
+text\<open>
+
+formulation generalizes to infinite universes.
+
+\<close>
+  with \<open>B \<subseteq>A\<close> \<open>finite A\<close> show "f B = f C"
+text\<open>
+
+These conditions imply that @{term "f"} is idempotent:
+
+\<close>
+text\<open>
+
+
+\<close>
+text\<open>
+
+The converse requires @{term "f"} to be idempotent
+
+\<close>
+subsection\<open> The @{emph \<open>law of aggregate demand\<close>} condition aka @{emph \<open>size monotonicity\<close>} \label{sec:cf-lad} \<close>
+text\<open>
+
+hospitals theorem (\S\ref{sec:contracts-rh}). It captures the
+following intuition:
+\begin{quote}
+
+[...] Roughly, this law states that as the price falls, agents should
+demand more of a good. Here, price falls correspond to more contracts
+being available, and more demand corresponds to taking on (weakly)
+more contracts.
+
+\end{quote}
+
+The @{const "card"} function takes a finite set into its cardinality
+(as a natural number).
+
+\<close>
+text\<open>
+
+This definition is identical amongst
+
+\<close>
+text\<open>
+
+"substitutes"} and @{const "lad"} imply @{const "irc"}, which
+therefore rescues many results in the matching-with-contracts
+literature.
+
+\<close>
+    with \<open>f_range_on A f\<close> bB have "insert x B = B \<or> x = b"
+    with \<open>substitutes_on A f\<close> bB x show "x \<in> f B"
+  from \<open>lad_on A f\<close> bB show "card (f B) \<le> card (f (insert b B))"
+text\<open>
+
+The converse does not hold.
+
+\<close>
+subsection\<open> The @{emph \<open>expansion\<close>} condition \<close>
+text\<open>
+
+from their union.
+
+\<close>
+text\<open>
+
+@{const "expansion"} to collections of sets of choices.
+
+\<close>
+  from \<open>finite As\<close> this show "x \<in> f (\<Union>As)"
+text\<open>
+
+The @{const "expansion"} condition plays a major role in the study of
+next.
+
+\<close>
+subsection\<open> Axioms of revealed preference \label{sec:cf-revealed_preference} \<close>
+text\<open>
+
+We digress from our taxonomy of conditions on choice functions to
+of the given set of alternatives:
+
+\<close>
+text\<open>
+
+Note that @{const "greatest"} requires the relation to be reflexive
+and total, and @{const "maximal"} requires it to be irreflexive, for
+the choice functions to ever yield non-empty sets.
+
+This game of uncovering the preference relations (if any) underlying a
+contrast, later we show how these conditions guarantee the existence
+
+We adopt the following notion here:
+
+\<close>
+text\<open>
+
+In words, relation @{term "r"} rationalizes the choice function @{term
+"f"} over universe @{term "A"} if @{term "f B"} picks out the @{term
+"greatest"} elements of @{term "B \<subseteq> A"} with respect to
+@{term "r"}. At this point @{term "r"} can be any relation that does
+the job, but soon enough we will ask that it satisfy some familiar
+ordering properties.
+
+The analysis begins by determining under what constraints @{term "f"}
+can be rationalized, continues by establishing some properties of all
+rationalizable choice functions, and concludes by considering what it
+takes to establish stronger properties.
+
+weakly preferred\<close>} relation for the choice function @{term "f"}:
+The @{emph \<open>V-axiom\<close>} asserts that whatever is revealed to be at least as
+\<^citet>\<open>\<open>Theorem~7\<close> in "Border:2012"\<close>. \<^citet>\<open>\<open>\S3\<close> in "Sen:1971"\<close> calls a decisive
+choice function that satisfies @{const "V_axiom"} @{emph \<open>normal\<close>}.
+behaves on pairs (\<^citet>\<open>"Sen:1971"\<close>, \<^citet>\<open>\<open>p151\<close> in "Moulin:1985"\<close>), which
+"expansion"} (\<^citet>\<open>"Sen:1971"\<close>, \<^citet>\<open>\<open>p152\<close> in "Moulin:1985"\<close>).
+For instance, the following shows that the @{emph \<open>axioms of revealed
+complete (total), reflexive, and transitive. Alternative names are:
+complete pre-ordering, complete quasi-ordering, and weak
+ordering.}. These are alo equivalent to some congruence axioms due to
+
+@{term "y"} if there is a situation where both are on offer and only
+@{term "y"} is chosen:
+
+\<close>
+definition rsp_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> 'a rel" where \<comment> \<open>\citep[Definition~8]{Sen:1971}\<close>
+text\<open>
+
+This relation is typically denoted by @{term "P"}, for strict
+preference. The not-worse-than relation @{term "R"} is recovered by:
+
+\<close>
+definition rspR_on :: "'a set \<Rightarrow> 'a cfun \<Rightarrow> 'a rel" where \<comment> \<open>\citep[Definition~9]{Sen:1971}\<close>
+text\<open>
+
+preference\<close>} (WARP) as follows:
+The @{emph \<open>strong axiom of revealed preference\<close>} (SARP) is essentially
+the transitive closure of @{const "warp"} \<^citep>\<open>\<open>p309\<close> in "Sen:1971"\<close>:
+"sarp"}. We show this following \<^citet>\<open>"Sen:1971"\<close>, via the @{emph \<open>weak

@@ -1,0 +1,477 @@
+theory Matrix_Kernel
+imports 
+  VS_Connect
+  Missing_VectorSpace
+  Determinant
+begin
+
+hide_const real_vector.span
+hide_const (open) Real_Vector_Spaces.span
+hide_const real_vector.dim
+hide_const (open) Real_Vector_Spaces.dim
+
+definition mat_kernel :: "'a :: comm_ring_1 mat \<Rightarrow> 'a vec set" where
+  "mat_kernel A = { v . v \<in> carrier_vec (dim_col A) \<and> A *\<^sub>v v = 0\<^sub>v (dim_row A)}"
+
+lemma mat_kernelI: assumes "A \<in> carrier_mat nr nc" "v \<in> carrier_vec nc" "A *\<^sub>v v = 0\<^sub>v nr"
+  shows "v \<in> mat_kernel A"
+  using assms unfolding mat_kernel_def by auto
+
+lemma mat_kernelD: assumes "A \<in> carrier_mat nr nc" "v \<in> mat_kernel A"
+  shows "v \<in> carrier_vec nc" "A *\<^sub>v v = 0\<^sub>v nr"
+  using assms unfolding mat_kernel_def by auto
+
+lemma mat_kernel: assumes "A \<in> carrier_mat nr nc" 
+  shows "mat_kernel A = {v. v \<in> carrier_vec nc \<and> A *\<^sub>v v = 0\<^sub>v nr}"
+  unfolding mat_kernel_def using assms by auto
+
+lemma mat_kernel_carrier:
+  assumes "A \<in> carrier_mat nr nc" shows "mat_kernel A \<subseteq> carrier_vec nc"
+  using assms mat_kernel by auto
+
+lemma mat_kernel_mult_subset: assumes A: "A \<in> carrier_mat nr nc"
+  and B: "B \<in> carrier_mat n nr"
+  shows "mat_kernel A \<subseteq> mat_kernel (B * A)"
+proof -
+  from A B have BA: "B * A \<in> carrier_mat n nc" by auto
+  show ?thesis unfolding mat_kernel[OF BA] mat_kernel[OF A] using A B by auto
+qed
+
+lemma mat_kernel_smult: assumes A: "A \<in> carrier_mat nr nc"
+  and v: "v \<in> mat_kernel A"
+  shows "a \<cdot>\<^sub>v v \<in>  mat_kernel A"
+proof -
+  from mat_kernelD[OF A v] have v: "v \<in> carrier_vec nc"
+    and z: "A *\<^sub>v v = 0\<^sub>v nr" by auto
+  from arg_cong[OF z, of "\<lambda> v. a \<cdot>\<^sub>v v"] v 
+  have "a \<cdot>\<^sub>v (A *\<^sub>v v) = 0\<^sub>v nr" by auto
+  also have "a \<cdot>\<^sub>v (A *\<^sub>v v) = A *\<^sub>v (a \<cdot>\<^sub>v v)" using A v by auto
+  finally show ?thesis using v A
+    by (intro mat_kernelI, auto)
+qed
+
+lemma mat_kernel_mult_eq: assumes A: "A \<in> carrier_mat nr nc"
+  and B: "B \<in> carrier_mat nr nr"
+  and C: "C \<in> carrier_mat nr nr"
+  and inv: "C * B = 1\<^sub>m nr"
+  shows "mat_kernel (B * A) = mat_kernel A"
+proof 
+  from B A have BA: "B * A \<in> carrier_mat nr nc" by auto
+  show "mat_kernel A \<subseteq> mat_kernel (B * A)" by (rule mat_kernel_mult_subset[OF A B])
+  {
+    fix v
+    assume v: "v \<in> mat_kernel (B * A)"
+    from mat_kernelD[OF BA this] have v: "v \<in> carrier_vec nc" and z: "B * A *\<^sub>v v = 0\<^sub>v nr" by auto
+    from arg_cong[OF z, of "\<lambda> v. C *\<^sub>v v"] 
+    have "C *\<^sub>v (B * A *\<^sub>v v) = 0\<^sub>v nr" using C v by auto
+    also have "C *\<^sub>v (B * A *\<^sub>v v) = ((C * B) * A) *\<^sub>v v" 
+      unfolding assoc_mult_mat_vec[symmetric, OF C BA v]    
+      unfolding assoc_mult_mat[OF C B A] by simp
+    also have "\<dots> = A *\<^sub>v v" unfolding inv using A v by auto
+    finally have "v \<in> mat_kernel A"
+      by (intro mat_kernelI[OF A v])
+  }
+  thus "mat_kernel (B * A) \<subseteq> mat_kernel A" by auto
+qed
+
+locale kernel =
+  fixes nr :: nat
+    and nc :: nat
+    and A :: "'a :: field mat"
+  assumes A: "A \<in> carrier_mat nr nc"
+begin
+
+sublocale NC: vec_space "TYPE('a)" nc .
+
+abbreviation "VK \<equiv> NC.V\<lparr>carrier := mat_kernel A\<rparr>"
+
+sublocale Ker: vectorspace class_ring VK 
+  rewrites "carrier VK = mat_kernel A"
+    and [simp]: "add VK = (+)"
+    and [simp]: "zero VK = 0\<^sub>v nc"
+    and [simp]: "module.smult VK = (\<cdot>\<^sub>v)"
+    and "carrier class_ring = UNIV"
+    and "add class_ring = (+)"
+    and "one class_ring = 1"
+    and "zero class_ring = 0"
+    and "a_inv (class_ring :: 'a ring) = uminus"
+    and "a_minus (class_ring :: 'a ring) = minus"
+    and "pow (class_ring :: 'a ring) = (^)"
+    and "finsum (class_ring :: 'a ring) = sum"
+    and "finprod (class_ring :: 'a ring) = prod"
+    and "m_inv (class_ring :: 'a ring) x = (if x = 0 then div0 else inverse x)"
+  apply (intro vectorspace.intro)
+  apply (rule NC.submodule_is_module)
+  apply (unfold_locales)
+  by (insert A mult_add_distrib_mat_vec[OF A] mult_mat_vec[OF A] mat_kernel[OF A], auto simp: class_ring_simps)
+
+abbreviation "basis \<equiv> Ker.basis"
+abbreviation "span \<equiv> Ker.span"
+abbreviation "lincomb \<equiv> Ker.lincomb"
+abbreviation "dim \<equiv> Ker.dim"
+abbreviation "lin_dep \<equiv> Ker.lin_dep"
+abbreviation "lin_indpt \<equiv> Ker.lin_indpt"
+abbreviation "gen_set \<equiv> Ker.gen_set"
+
+lemma finsum_same:
+  assumes "f : S \<rightarrow> mat_kernel A"
+  shows "finsum VK f S = finsum NC.V f S"
+  using assms
+proof (induct S rule: infinite_finite_induct)
+  case (insert s S)
+    hence base: "finite S" "s \<notin> S"
+      and f_VK: "f : S \<rightarrow> mat_kernel A" "f s : mat_kernel A" by auto
+    hence f_NC: "f : S \<rightarrow> carrier_vec nc" "f s : carrier_vec nc" using mat_kernel[OF A] by auto
+    have IH: "finsum VK f S = finsum NC.V f S" using insert f_VK by auto
+    thus ?case
+      unfolding NC.M.finsum_insert[OF base f_NC]
+      unfolding Ker.finsum_insert[OF base f_VK]
+      by simp
+qed auto
+
+lemma lincomb_same:
+  assumes S_kernel: "S \<subseteq> mat_kernel A"
+  shows "lincomb a S = NC.lincomb a S"
+  unfolding Ker.lincomb_def
+  unfolding NC.lincomb_def
+  apply(subst finsum_same)
+  using S_kernel Ker.smult_closed[unfolded module_vec_simps class_ring_simps] by auto
+
+lemma span_same:
+  assumes S_kernel: "S \<subseteq> mat_kernel A"
+  shows "span S = NC.span S"
+proof (rule;rule)
+  fix v assume L: "v : span S" show "v : NC.span S"
+  proof -
+    obtain a U where know: "finite U" "U \<subseteq> S" "a : U \<rightarrow> UNIV" "v = lincomb a U"
+      using L unfolding Ker.span_def by auto
+    hence v: "v = NC.lincomb a U" using lincomb_same S_kernel by auto
+    show ?thesis
+      unfolding NC.span_def by (rule,intro exI conjI;fact)
+  qed
+  next fix v assume R: "v : NC.span S" show "v : span S"
+  proof -
+    obtain a U where know: "finite U" "U \<subseteq> S" "v = NC.lincomb a U"
+      using R unfolding NC.span_def by auto
+    hence v: "v = lincomb a U" using lincomb_same S_kernel by auto
+    show ?thesis unfolding Ker.span_def by (rule, intro exI conjI, insert v know, auto)
+  qed
+qed
+
+lemma lindep_same:
+  assumes S_kernel: "S \<subseteq> mat_kernel A"
+  shows "Ker.lin_dep S = NC.lin_dep S"
+proof
+  note [simp] = module_vec_simps class_ring_simps
+  { assume L: "Ker.lin_dep S"
+    then obtain v a U
+    where finU: "finite U" and US: "U \<subseteq> S"
+      and lc: "lincomb a U = 0\<^sub>v nc"
+      and vU: "v \<in> U"
+      and av0: "a v \<noteq> 0"
+      unfolding Ker.lin_dep_def by auto
+    have lc': "NC.lincomb a U = 0\<^sub>v nc"
+      using lc lincomb_same US S_kernel by auto
+    show "NC.lin_dep S" unfolding NC.lin_dep_def
+      by (intro exI conjI, insert finU US lc' vU av0, auto)
+  }
+  assume R: "NC.lin_dep S"
+  then obtain v a U
+  where finU: "finite U" and US: "U \<subseteq> S"
+    and lc: "NC.lincomb a U = 0\<^sub>v nc"
+    and vU: "v : U"
+    and av0: "a v \<noteq> 0"
+    unfolding NC.lin_dep_def by auto
+  have lc': "lincomb a U = zero VK"
+    using lc lincomb_same US S_kernel by auto
+  show "Ker.lin_dep S" unfolding Ker.lin_dep_def
+    by (intro exI conjI,insert finU US lc' vU av0, auto)
+qed
+
+lemma lincomb_index:
+  assumes i: "i < nc"
+    and Xk: "X \<subseteq> mat_kernel A"
+  shows "lincomb a X $ i = sum (\<lambda>x. a x * x $ i) X"
+proof -
+  have X: "X \<subseteq> carrier_vec nc" using Xk mat_kernel_def A by auto
+  show ?thesis
+    using vec_space.lincomb_index[OF i X]
+    using lincomb_same[OF Xk] by auto
+qed
+
+end
+
+lemma find_base_vectors: assumes ref: "row_echelon_form A" 
+  and A: "A \<in> carrier_mat nr nc" shows
+  "set (find_base_vectors A) \<subseteq> mat_kernel A"
+  "0\<^sub>v nc \<notin> set (find_base_vectors A)"
+  "kernel.basis nc A (set (find_base_vectors A))"
+  "card (set (find_base_vectors A)) = nc - card { i. i < nr \<and> row A i \<noteq> 0\<^sub>v nc}"
+  "length (pivot_positions A) = card { i. i < nr \<and> row A i \<noteq> 0\<^sub>v nc}"
+  "kernel.dim nc A = nc - card { i. i < nr \<and> row A i \<noteq> 0\<^sub>v nc}"
+proof -
+  note non_pivot_base = non_pivot_base[OF ref A]
+  let ?B = "set (find_base_vectors A)"
+  let ?pp = "set (pivot_positions A)"
+  from A have dim: "dim_row A = nr" "dim_col A = nc" by auto
+  from ref[unfolded row_echelon_form_def] obtain p 
+  where pivot: "pivot_fun A p nc" using dim by auto
+  note piv = pivot_funD[OF dim(1) pivot]
+  {
+    fix v
+    assume "v \<in> ?B"
+    from this[unfolded find_base_vectors_def Let_def dim]
+      obtain c where c: "c < nc" "c \<notin> snd ` ?pp"
+      and res: "v = non_pivot_base A (pivot_positions A) c" by auto
+    from non_pivot_base[OF c, folded res] c
+    have "v \<in> mat_kernel A" "v \<noteq> 0\<^sub>v nc" 
+      by (intro mat_kernelI[OF A], auto)
+  }
+  thus sub: "?B \<subseteq> mat_kernel A" and
+    "0\<^sub>v nc \<notin> ?B" by auto
+  {
+    fix j j'
+    assume j: "j < nc" "j \<notin> snd ` ?pp" and j': "j' < nc" "j' \<notin> snd ` ?pp" and neq: "j' \<noteq> j"
+    from non_pivot_base(2)[OF j] non_pivot_base(4)[OF j' j neq]
+    have "non_pivot_base A (pivot_positions A) j \<noteq> non_pivot_base A (pivot_positions A) j'" by auto
+  }
+  hence inj: "inj_on (non_pivot_base A (pivot_positions A))
+     (set [j\<leftarrow>[0..<nc] . j \<notin> snd ` ?pp])" unfolding inj_on_def by auto
+    note pp = pivot_positions[OF A pivot]
+  have lc: "length (pivot_positions A) = card (snd ` ?pp)"
+    using distinct_card[OF pp(3)] by auto
+  show card: "card ?B = nc - card { i. i < nr \<and> row A i \<noteq> 0\<^sub>v nc}"
+    "length (pivot_positions A) = card { i. i < nr \<and> row A i \<noteq> 0\<^sub>v nc}"
+    unfolding find_base_vectors_def Let_def dim set_map  card_image[OF inj] pp(4)[symmetric]
+    unfolding pp(1) lc
+  proof -
+    have "nc - card (snd ` {(i, p i) |i. i < nr \<and> p i \<noteq> nc})
+      = card {0 ..< nc} - card (snd ` {(i, p i) |i. i < nr \<and> p i \<noteq> nc})" by auto
+    also have "\<dots> = card ({0 ..< nc} - snd ` {(i, p i) |i. i < nr \<and> p i \<noteq> nc})"
+      by (rule card_Diff_subset[symmetric], insert piv(1), force+)
+    also have "{0 ..< nc} - snd ` {(i, p i) |i. i < nr \<and> p i \<noteq> nc} = (set [j\<leftarrow>[0..<nc] . j \<notin> snd ` {(i, p i) |i. i < nr \<and> p i \<noteq> nc}])"
+      by auto
+    finally show "card (set [j\<leftarrow>[0..<nc] . j \<notin> snd ` {(i, p i) |i. i < nr \<and> p i \<noteq> nc}]) =
+      nc - card (snd ` {(i, p i) |i. i < nr \<and> p i \<noteq> nc})" by simp
+  qed auto
+  interpret kernel nr nc A by (unfold_locales, rule A)
+  show basis: "basis ?B"
+    unfolding Ker.basis_def
+  proof (intro conjI)
+    show "span ?B = mat_kernel A"
+    proof
+      show "span ?B \<subseteq> mat_kernel A"
+        using sub by (rule Ker.span_is_subset2)
+      show "mat_kernel A \<subseteq> Ker.span ?B"
+      proof
+        fix v
+        assume "v \<in> mat_kernel A" 
+        from mat_kernelD[OF A this]
+        have v: "v \<in> carrier_vec nc" and Av: "A *\<^sub>v v = 0\<^sub>v nr" by auto
+        let ?bi = "non_pivot_base A (pivot_positions A)"
+        let ?ran = "set [j\<leftarrow>[0..<nc] . j \<notin> snd ` ?pp]"
+        let ?ran' = "set [j\<leftarrow>[0..<nc] . j \<in> snd ` ?pp]"
+        have dimv: "dim_vec v = nc" using v by auto
+        define I where "I = (\<lambda> b. SOME i. i \<in> ?ran \<and> ?bi i = b)"
+        {
+          fix j
+          assume j: "j \<in> ?ran"
+          hence "\<exists> i. i \<in> ?ran \<and> ?bi i = ?bi j" unfolding find_base_vectors_def Let_def dim by auto
+          from someI_ex[OF this] have I: "I (?bi j) \<in> ?ran" and id: "?bi (I (?bi j)) = ?bi j" unfolding I_def by blast+
+          from inj_onD[OF inj id I j] have "I (?bi j) = j" .
+        } note I = this        
+        define a where "a = (\<lambda> b. v $ (I b))"
+        from Ker.lincomb_closed[OF sub] have diml: "dim_vec (lincomb a ?B) = nc"
+          unfolding mat_kernel_def using dim lincomb_same by auto
+        have "v = lincomb a ?B"
+        proof (rule eq_vecI; unfold diml dimv)
+          fix j
+          assume j: "j < nc"
+          have "Ker.lincomb a ?B $ j = (\<Sum>b\<in> ?B. a b * b $ j)" by (rule lincomb_index[OF j sub])
+          also have "\<dots> = (\<Sum> i\<in> ?ran. v $ i * ?bi i $ j)"
+          proof (subst sum.reindex_cong[OF inj])
+            show "?B = ?bi ` ?ran"  unfolding find_base_vectors_def Let_def dim by auto
+            fix i
+            assume "i \<in> ?ran"
+            hence "I (?bi i) = i" by (rule I)
+            hence "a (?bi i) = v $ i" unfolding a_def by simp
+            thus "a (?bi i) * ?bi i $ j = v $ i * ?bi i $ j" by simp
+          qed auto
+          also have "\<dots> = v $ j"
+          proof (cases "j \<in> ?ran")
+            case True
+            hence nmem: "j \<notin> snd ` set (pivot_positions A)" by auto 
+            note npb = non_pivot_base[OF j nmem]
+            have "(\<Sum> i\<in> ?ran. v $ i * (?bi i) $ j) =
+              v $ j * ?bi j $ j + (\<Sum> i\<in> ?ran - {j}. v $ i * ?bi i $ j)"
+              by (subst sum.remove[OF _ True], auto)
+            also have "?bi j $ j = 1" using npb by simp
+            also have "(\<Sum> i \<in> ?ran - {j}. v $ i * ?bi i $ j) = 0"
+              using insert non_pivot_base(4)[OF _ _ j nmem] by (intro sum.neutral, auto)
+            finally show ?thesis by simp
+          next
+            case False
+            with j have jpp: "j \<in> snd ` ?pp" by auto
+            with j pp obtain i where i: "i < nr" and ji: "j = p i" and pi: "p i < nc" by auto
+            from arg_cong[OF Av, of "\<lambda> u. u $ i"] i A
+            have "v $ j = v $ j - row A i \<bullet> v" by auto
+            also have "row A i \<bullet> v = (\<Sum> j = 0 ..< nc. A $$ (i,j) * v $ j)" unfolding scalar_prod_def using v A i by auto
+            also have "\<dots> = (\<Sum> j \<in> ?ran. A $$ (i,j) * v $ j) +  (\<Sum> j \<in> ?ran'. A $$ (i,j) * v $ j)"
+              by (subst sum.union_disjoint[symmetric], auto intro: sum.cong)
+            also have "(\<Sum> j \<in> ?ran'. A $$ (i,j) * v $ j) =
+              A $$ (i,p i) * v $ j + (\<Sum> j \<in> ?ran' - {p i}. A $$ (i,j) * v $ j)"
+              using jpp by (subst sum.remove, auto simp: ji i pi)
+            also have "A $$ (i, p i) = 1" using piv(4)[OF i] pi ji by auto
+            also have "(\<Sum> j \<in> ?ran' - {p i}. A $$ (i,j) * v $ j) = 0"
+            proof (rule sum.neutral, intro ballI)
+              fix j'
+              assume "j' \<in> ?ran' - {p i}"
+              then obtain i' where i': "i' < nr" and j': "j' = p i'" and pi': "p i' \<noteq> nc" and neq: "p i' \<noteq> p i"
+                unfolding pp by auto
+              from pi' piv[OF i'] have pi': "p i' < nc" by auto
+              from pp pi' neq j i' i have "i \<noteq> i'" by auto
+              from piv(5)[OF i' pi' i this]
+              show "A $$ (i,j') * v $ j' = 0" unfolding j' by simp
+            qed
+            also have "(\<Sum> j \<in> ?ran. A $$ (i,j) * v $ j) = - (\<Sum> j \<in> ?ran. v $ j * - A $$ (i,j))" 
+              unfolding sum_negf[symmetric] by (rule sum.cong, auto)
+            finally have vj: "v $ j = (\<Sum> j \<in> ?ran. v $ j * - A $$ (i,j))" by simp
+            show ?thesis unfolding vj j
+            proof (rule sum.cong[OF refl])
+              fix j'
+              assume j': "j' \<in> ?ran"
+              from jpp j' have jj': "j \<noteq> j'" by auto
+              let ?map = "map prod.swap (pivot_positions A)"
+              from ji i j have "(i,j) \<in> set (pivot_positions A)" unfolding pp by auto
+              hence mem: "(j,i) \<in> set ?map" by auto
+              from pp have "distinct (map fst ?map)" unfolding map_map o_def prod.swap_def fst_conv by auto
+              from map_of_is_SomeI[OF this mem] have "map_of ?map j = Some i" by auto
+              hence "?bi j' $ j = - A $$ (i, j')" 
+                unfolding non_pivot_base_def Let_def dim using j jj' by auto
+              thus "v $ j' * ?bi j' $ j = v $ j' * - A $$ (i,j')" by simp
+            qed
+          qed
+          finally show "v $ j = lincomb a ?B $ j" ..
+        qed auto
+        thus "v \<in> span ?B" unfolding Ker.span_def by auto
+      qed
+    qed
+    show "?B \<subseteq> mat_kernel A" by (rule sub)
+    {
+      fix a v
+      assume lc: "lincomb a ?B = 0\<^sub>v nc" and vB: "v \<in> ?B"
+      from vB[unfolded find_base_vectors_def Let_def dim]
+        obtain j where j: "j < nc" "j \<notin> snd ` ?pp" and v: "v = non_pivot_base A (pivot_positions A) j"
+        by auto         
+      from arg_cong[OF lc, of "\<lambda> v. v $ j"] j
+      have "0 = lincomb a ?B $ j" by auto
+      also have "\<dots> = (\<Sum>v\<in>?B. a v * v $ j)" 
+        by (subst lincomb_index[OF j(1) sub], simp)
+      also have "\<dots> = a v * v $ j + (\<Sum>w\<in>?B - {v}. a w * w $ j)"
+        by (subst sum.remove[OF _ vB], auto)
+      also have "a v * v $ j = a v" using non_pivot_base[OF j, folded v] by simp
+      also have "(\<Sum>w\<in>?B - {v}. a w * w $ j) = 0"
+      proof (rule sum.neutral, intro ballI)
+        fix w
+        assume wB: "w \<in> ?B - {v}"
+        from this[unfolded find_base_vectors_def Let_def dim]
+        obtain j' where j': "j' < nc" "j' \<notin> snd ` ?pp" and w: "w = non_pivot_base A (pivot_positions A) j'"
+          by auto    
+        with wB v have "j' \<noteq> j" by auto
+        from non_pivot_base(4)[OF j' j this]
+        show "a w * w $ j = 0" unfolding w by simp
+      qed
+      finally have "a v = 0" by simp
+    }
+    thus "\<not> lin_dep ?B"
+      by (intro Ker.finite_lin_indpt2[OF finite_set sub], auto simp: class_field_def)
+  qed
+  show "dim = nc - card { i. i < nr \<and> row A i \<noteq> 0\<^sub>v nc}"
+    using Ker.dim_basis[OF finite_set basis] card by simp
+qed
+
+
+definition kernel_dim :: "'a :: field mat \<Rightarrow> nat" where
+  [code del]: "kernel_dim A = kernel.dim (dim_col A) A"
+
+lemma (in kernel) kernel_dim [simp]: "kernel_dim A = dim" unfolding kernel_dim_def
+  using A by simp
+
+lemma kernel_dim_code[code]: 
+  "kernel_dim A = dim_col A - length (pivot_positions (gauss_jordan_single A))"
+proof -
+  define nr where "nr = dim_row A" 
+  define nc where "nc = dim_col A"
+  let ?B = "gauss_jordan_single A"
+  have A: "A \<in> carrier_mat nr nc" unfolding nr_def nc_def by auto
+  from gauss_jordan_single[OF A refl]
+    obtain P Q where AB: "?B = P * A" and QP: "Q * P = 1\<^sub>m nr" and
+    P: "P \<in> carrier_mat nr nr" and Q: "Q \<in> carrier_mat nr nr" and B: "?B \<in> carrier_mat nr nc" 
+    and row: "row_echelon_form ?B" by auto
+  interpret K: kernel nr nc ?B
+    by (unfold_locales, rule B)
+  from mat_kernel_mult_eq[OF A P Q QP, folded AB]
+  have "kernel_dim A = K.dim" unfolding kernel_dim_def using A by simp
+  also have "\<dots> = nc - length (pivot_positions ?B)" using find_base_vectors[OF row B] by auto
+  also have "\<dots> = dim_col A - length (pivot_positions ?B)"
+    unfolding nc_def by simp
+  finally show ?thesis .
+qed
+
+
+lemma kernel_one_mat: fixes A :: "'a :: field mat" and n :: nat
+  defines A: "A \<equiv> 1\<^sub>m n"
+  shows 
+    "kernel.dim n A = 0"
+    "kernel.basis n A {}"
+proof -
+  have Ac: "A \<in> carrier_mat n n" unfolding A by auto
+  have "pivot_fun A id n"
+    unfolding A by (rule pivot_funI, auto)
+  hence row: "row_echelon_form A" unfolding row_echelon_form_def A by auto
+  have "{i. i < n \<and> row A i \<noteq> 0\<^sub>v n} = {0 ..< n}" unfolding A by auto
+  hence id: "card {i. i < n \<and> row A i \<noteq> 0\<^sub>v n} = n" by auto
+  interpret kernel n n A by (unfold_locales, rule Ac)
+  from find_base_vectors[OF row Ac, unfolded id]
+  show "dim = 0" "basis {}" by auto
+qed
+
+lemma kernel_upper_triangular: assumes A: "A \<in> carrier_mat n n"
+  and ut: "upper_triangular A" and 0: "0 \<notin> set (diag_mat A)"
+  shows "kernel.dim n A = 0" "kernel.basis n A {}"
+proof -
+  define ma where "ma = diag_mat A"
+  from det_upper_triangular[OF ut A] have "det A = prod_list (diag_mat A)" .
+  also have "\<dots> \<noteq> 0" using 0 unfolding ma_def[symmetric]
+    by (induct ma, auto)
+  finally have "det A \<noteq> 0" .
+  from det_non_zero_imp_unit[OF A this, unfolded Units_def, of "()"]
+    obtain B where B: "B \<in> carrier_mat n n" and BA: "B * A = 1\<^sub>m n" and AB: "A * B = 1\<^sub>m n"
+    by (auto simp: ring_mat_def)
+  from mat_kernel_mult_eq[OF A B A AB, unfolded BA]
+  have id: "mat_kernel A = mat_kernel (1\<^sub>m n)" ..
+  show "kernel.dim n A = 0" "kernel.basis n A {}"
+    unfolding id by (rule kernel_one_mat)+
+qed
+
+lemma kernel_basis_exists: assumes A: "A \<in> carrier_mat nr nc"
+  shows "\<exists> B. finite B \<and> kernel.basis nc A B"
+proof -
+  obtain C where gj: "gauss_jordan_single A = C" by auto
+  from gauss_jordan_single[OF A gj]
+  obtain P Q where CPA: "C = P * A" and QP: "Q * P = 1\<^sub>m nr"
+    and P: "P \<in> carrier_mat nr nr" and Q: "Q \<in> carrier_mat nr nr"   
+    and C: "C \<in> carrier_mat nr nc" and row: "row_echelon_form C"
+    by auto
+  from find_base_vectors[OF row C] have "\<exists> B. finite B \<and> kernel.basis nc C B" by blast
+  also have "mat_kernel C = mat_kernel A" unfolding CPA
+    by (rule mat_kernel_mult_eq[OF A P Q QP])
+  finally show ?thesis .
+qed
+
+
+lemma mat_kernel_mult_right_gen_set: assumes A: "A \<in> carrier_mat nr nc"
+  and B: "B \<in> carrier_mat nc nc"
+  and C: "C \<in> carrier_mat nc nc"
+  and inv: "B * C = 1\<^sub>m nc"
+  and gen_set: "kernel.gen_set nc (A * B) gen" and gen: "gen \<subseteq> mat_kernel (A * B)"

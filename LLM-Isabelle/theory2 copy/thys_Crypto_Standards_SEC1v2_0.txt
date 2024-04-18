@@ -1,0 +1,1448 @@
+theory SEC1v2_0
+  imports "Words"
+          "EC_Common"
+
+begin
+
+
+context residues_prime_gt2
+begin
+
+
+
+
+
+lemma p_mod2: "p mod 2 = 1"
+  using gt2 p_prime prime_odd_nat by presburger 
+
+lemma octet_len_p: "0 < octet_length p"
+  by (metis gt2 nat_to_words_nil_iff_zero2 neq0_conv not_less_iff_gr_or_eq zero_less_numeral)
+
+lemma octet_len_p':
+  assumes "l = octet_length p"
+  shows   "1 \<noteq> l + 1 \<and> 1 \<noteq> 2*l + 1 \<and> l + 1 \<noteq> 2*l + 1"
+  using assms octet_len_p by linarith
+
+
+lemma inCarrier: "(a \<in> carrier R) = (0 \<le> a \<and> a < p)"
+  by (metis int_ops(1) mod_pos_pos_trivial not_one_less_zero of_int_closed of_nat_le_0_iff 
+            pos_mod_conj r_one res_mult_eq res_of_integer_eq residues_axioms residues_def 
+            verit_comp_simplify1(3))
+
+lemma inCarrierNatInt: 
+  assumes "a \<in> carrier R"
+  shows   "int (nat a) = a"
+  by (metis assms local.minus_minus m_gt_one nat_eq_iff2 nat_int of_nat_1 of_nat_less_iff 
+            pos_mod_conj res_neg_eq zless_nat_conj)
+
+lemma nonsingularEq:
+  assumes "nonsingular a b"
+  shows   "(4*a^3 + 27*b^2) mod p \<noteq> 0" 
+  by (metis nonsingular_def add_cong assms mult_cong res_of_integer_eq res_pow_eq zero_cong)
+
+lemma nonsingularEq_nat:
+  fixes a b :: nat
+  assumes "nonsingular (int a) (int b)"
+  shows   "(4*a^3 + 27*b^2) mod p \<noteq> 0"
+proof - 
+  have "(4*(int a)^3 + 27*(int b)^2) mod p \<noteq> 0" using assms nonsingularEq by meson
+  then show ?thesis
+    by (metis (mono_tags, opaque_lifting) cring_class.of_nat_add cring_class.of_nat_mult of_nat_mod
+              of_nat_numeral of_nat_power semiring_1_class.of_nat_0)
+qed
+
+lemma onCurveEq:
+  assumes "on_curve a b P"  "P = Point x y"
+  shows   "y^2 mod p = (x^3 + a*x + b) mod p"
+proof - 
+  have "y [^] (2::nat) = x [^] (3::nat) \<oplus> a \<otimes> x \<oplus> b" using assms(1,2) on_curve_def by simp
+  then show ?thesis
+    by (metis add.commute mod_add_right_eq res_add_eq res_mult_eq res_pow_eq) 
+qed
+
+lemma onCurveEq2: 
+  assumes "on_curve a b (Point x y)" 
+  shows   "(x \<in> carrier R) \<and> (y \<in> carrier R) \<and> (y^2 mod p = (x^3 + a*x + b) mod p)"
+proof - 
+  have 1: "y^2 mod p = (x^3 + a*x + b) mod p" using assms onCurveEq by blast
+  have 2: "x \<in> carrier R \<and> y \<in> carrier R"     using assms on_curve_def by auto
+  show ?thesis                                using 1 2 on_curve_def by fast
+qed
+
+lemma onCurveEq3: 
+  assumes "(x \<in> carrier R) \<and> (y \<in> carrier R) \<and> (y^2 mod p = (x^3 + a*x + b) mod p)" 
+  shows   "on_curve a b (Point x y)"
+  by (smt (z3) assms on_curve_def mod_add_right_eq point.case(2) res_add_eq res_mult_eq res_pow_eq)
+
+lemma onCurveEq4: 
+  "on_curve a b (Point x y) = 
+    ((x \<in> carrier R) \<and> (y \<in> carrier R) \<and> (y^2 mod p = (x^3 + a*x + b) mod p))" 
+  using onCurveEq2 onCurveEq3 by blast
+
+
+lemma CurveFinite: "finite {P. on_curve a b P}" 
+proof - 
+  let ?S = "{P. on_curve a b P}"
+  have 1: "Infinity \<in> ?S"           using on_curve_def by force
+  let ?S' = "{P. P \<noteq> Infinity \<and> on_curve a b P}"
+  have 2: "?S = {Infinity} \<union> ?S'"   using 1 by fast
+  have 3: "?S' = {P. \<exists>x y. (P = Point x y) \<and> (x \<in> carrier R) \<and> (y \<in> carrier R) \<and> 
+                           (y^2 mod p = (x^3 + a*x + b) mod p)}"
+    by (metis (no_types, lifting) onCurveEq2 onCurveEq3 point.distinct(2) point.exhaust) 
+  have 4: "?S' \<subseteq> {P. \<exists>x y. (P = Point x y) \<and> (x \<in> carrier R) \<and> (y \<in> carrier R)}"
+    using 3 by auto
+  have 5: "finite {P. \<exists>x y. (P = Point x y) \<and> (x \<in> carrier R) \<and> (y \<in> carrier R)}"
+    by (simp add: finite_image_set2)
+  have 6: "finite ?S'"    using 4 5 finite_subset by blast
+  show ?thesis            using 2 6 by force
+qed
+
+lemma CurveOrderPrime:
+  assumes "a \<in> carrier R"  "b \<in> carrier R"  "nonsingular a b" 
+          "C = {P. on_curve a b P}"  "prime n"  "card C = n" "Q \<in> C"
+  shows   "point_mult a n Q = Infinity" 
+proof - 
+  have 1: "ell_prime_field p (nat a) (nat b)" 
+    using assms(1,2,3) ell_prime_field_def R_def ell_prime_field_axioms_def inCarrierNatInt 
+          nonsingularEq_nat residues_prime_gt2_axioms by algebra
+  interpret EPF: ell_prime_field p R "(nat a)" "(nat b)" 
+    using 1 apply blast using R_def by presburger
+  have 2: "C = carrier EPF.curve" using assms(1,2,4) EPF.curve_def inCarrierNatInt by simp
+  have 3: "Q [^]\<^bsub>EPF.curve\<^esub>n = \<one>\<^bsub>EPF.curve\<^esub>" 
+    using 2 assms(5,6,7) EPF.curve.power_order_eq_one EPF.finite_curve by presburger
+  show ?thesis 
+  by (metis 2 3 EPF.in_carrier_curve EPF.multEqPowInCurve EPF.one_curve assms(1,7) inCarrierNatInt)
+qed
+
+lemma oppEq: "opp (Point x y) = Point x ((-y) mod p)" 
+  using opp_Point res_neg_eq by presburger
+
+lemma oppEq':
+  fixes   x y :: int 
+  assumes "0 < y"  "y < p"
+  shows   "opp (Point x y) = Point x (p-y)" 
+proof - 
+  let ?y = "(-y) mod p"
+  have "?y = p - y" using assms(1,2) zmod_zminus1_eq_if by auto 
+  then show ?thesis using oppEq by presburger
+qed
+
+
+
+
+
+
+
+
+
+
+definition point_to_octets_nocomp :: "nat \<Rightarrow> nat \<Rightarrow> octets" where
+  "point_to_octets_nocomp x y = 
+  ( let l = octet_length p;
+        X = nat_to_octets_len x l;
+        Y = nat_to_octets_len y l
+    in
+        4 # X @ Y
+  )" 
+
+definition point_to_octets_comp :: "nat \<Rightarrow> nat \<Rightarrow> octets" where
+  "point_to_octets_comp x y =
+  (let l = octet_length p;
+       X = nat_to_octets_len x l;
+       Y = [2 + (y mod 2)]
+   in 
+       Y @ X
+  )" 
+
+definition point_to_octets :: "int point \<Rightarrow> bool \<Rightarrow> octets" where
+  "point_to_octets P Compress = 
+  ( case P of
+    Infinity  \<Rightarrow> [0]
+  | Point x y \<Rightarrow> 
+    ( if Compress then (point_to_octets_comp   (nat x) (nat y))
+                  else (point_to_octets_nocomp (nat x) (nat y))
+    )
+  )" 
+
+
+lemma point_to_octets_len_Inf: "length (point_to_octets Infinity C) = 1"
+  using point_to_octets_def by simp
+
+lemma point_to_octets_nocomp_len_bnd: 
+  assumes "l = octet_length p" 
+  shows   "2*l + 1 \<le> length (point_to_octets_nocomp x y)"  
+proof - 
+  let ?X = "nat_to_octets_len x l" 
+  have 1: "l \<le> length ?X"  using assms(1) nat_to_words_len_len by auto 
+  let ?Y = "nat_to_octets_len y l" 
+  have 2: "l \<le> length ?Y"  using assms(1) nat_to_words_len_len by auto 
+  have 3: "point_to_octets_nocomp x y = 4 # ?X @ ?Y" 
+                           using point_to_octets_nocomp_def assms(1) by meson
+  then show ?thesis        using 1 2 by simp
+qed
+
+lemma point_to_octets_nocomp_len:
+  assumes "x < p"  "y < p"  "l = octet_length p" 
+  shows   "length (point_to_octets_nocomp x y) = 2*l + 1"  
+proof - 
+  let ?X = "nat_to_octets_len x l" 
+  have 1: "length ?X = l"  using assms(1,3) nat_to_word_len_mono' zero_less_numeral by blast 
+  let ?Y = "nat_to_octets_len y l" 
+  have 2: "length ?Y = l"  using assms(2,3) nat_to_word_len_mono' zero_less_numeral by blast 
+  have 3: "point_to_octets_nocomp x y = 4 # ?X @ ?Y" 
+                           using point_to_octets_nocomp_def assms(3) by meson
+  show ?thesis             using 1 2 3 by auto
+qed
+
+lemma point_to_octets_len_F_bnd:
+  assumes "P = Point x y"  "l = octet_length p" 
+  shows   "2*l + 1 \<le> length (point_to_octets P False)"  
+  using assms point_to_octets_nocomp_len_bnd point_to_octets_def by auto
+
+lemma point_to_octets_len_F':
+  assumes "P = Point (x::int) (y::int)"  "x < p"  "y < p"  "l = octet_length p" 
+  shows   "length (point_to_octets P False) = 2*l + 1"  
+proof - 
+  have x2: "(nat x) < p"    using assms(2) m_gt_one by linarith 
+  have y2: "(nat y) < p"    using assms(3) m_gt_one by linarith 
+  have "length (point_to_octets P False) = length (point_to_octets_nocomp (nat x) (nat y))" 
+                            using assms(1) point_to_octets_def by simp
+  then show ?thesis         using assms(4) point_to_octets_nocomp_len x2 y2 by presburger 
+qed
+
+lemma point_to_octets_len_F:
+  assumes "on_curve a b P"  "l = octet_length p"  "P \<noteq> Infinity" 
+  shows   "length (point_to_octets P False) = 2*l + 1"
+proof - 
+  obtain x and y where 1: "P = Point x y"   using assms(3) by (meson point.exhaust)
+  have x1: "x < p" using 1 assms(1) on_curve_def inCarrier by auto
+  have y1: "y < p" using 1 assms(1) on_curve_def inCarrier by auto
+  show ?thesis     using 1 x1 y1 assms(2) point_to_octets_len_F' by blast
+qed
+
+lemma point_to_octets_comp_len_bnd: 
+  assumes "l = octet_length p" 
+  shows   "l + 1 \<le> length (point_to_octets_comp x y)"  
+proof - 
+  let ?X = "nat_to_octets_len x l" 
+  have 1: "l \<le> length ?X"  using assms(1) nat_to_words_len_len by auto 
+  let ?Y = "[2 + (y mod 2)]"
+  have 2: "length ?Y = 1"  by simp 
+  have 3: "point_to_octets_comp x y = ?Y @ ?X" 
+                           using point_to_octets_comp_def assms(1) by meson
+  then show ?thesis        using 1 2 by simp
+qed
+
+lemma point_to_octets_comp_len:
+  assumes "x < p"  "l = octet_length p" 
+  shows   "length (point_to_octets_comp x y) = l + 1"  
+proof - 
+  let ?X = "nat_to_octets_len x l" 
+  have 1: "length ?X = l"  using assms(1,2) nat_to_word_len_mono' zero_less_numeral by blast 
+  then show ?thesis 
+    by (metis 1 assms(2) point_to_octets_comp_def One_nat_def length_append list.size(3,4) 
+              Suc_eq_plus1 plus_1_eq_Suc) 
+qed
+
+lemma point_to_octets_len_T_bnd:
+  assumes "P = Point x y"  "l = octet_length p" 
+  shows   "l + 1 \<le> length (point_to_octets P True)"  
+  using assms point_to_octets_comp_len_bnd point_to_octets_def by auto
+
+lemma point_to_octets_len_T':
+  assumes "P = Point (x::int) (y::int)"  "x < p"  "l = octet_length p" 
+  shows   "length (point_to_octets P True) = l + 1"
+proof -
+  have 1: "(nat x) < p" using assms(2) m_gt_one by linarith 
+  have    "length (point_to_octets P True) = length (point_to_octets_comp (nat x) (nat y))" 
+                        using assms(1) point_to_octets_def by simp
+  then show ?thesis     using assms(3) point_to_octets_comp_len 1 by presburger 
+qed
+
+lemma point_to_octets_len_T:
+  assumes "on_curve a b P"  "l = octet_length p"  "P \<noteq> Infinity" 
+  shows   "length (point_to_octets P True) = l + 1"
+proof - 
+  obtain x and y where 1: "P = Point x y" using assms(3) by (meson point.exhaust)
+  have x1: "x < p" using 1    assms(1) on_curve_def inCarrier by auto
+  show ?thesis     using 1 x1 assms(2) point_to_octets_len_T' by blast
+qed
+
+lemma point_to_octets_len1:
+  assumes "length (point_to_octets P C) = 1"  
+  shows   "P = Infinity"
+  apply (cases P)
+  apply simp
+  by (metis (full_types) add_diff_cancel_right' assms diff_is_0_eq' mult_is_0 neq0_conv octet_len_p
+            point_to_octets_len_F_bnd point_to_octets_len_T_bnd zero_neq_numeral)
+
+lemma point_to_octets_len_oncurve:
+  assumes "on_curve a b P" "l = octet_length p" "L = length (point_to_octets P C)"
+  shows   "L = 1 \<or> L = l+1 \<or> L = 2*l+1" 
+  apply (cases P)
+  using point_to_octets_len_Inf assms(3)   apply presburger
+  apply (cases C)
+  using point_to_octets_len_T assms(1,2,3) apply simp
+  using point_to_octets_len_F assms(1,2,3)    by simp
+
+
+
+lemma point_to_octets_comp_valid: "octets_valid (point_to_octets_comp x y)"
+proof - 
+  have "2 + (y mod 2) < 256" by linarith
+  then show ?thesis 
+    using point_to_octets_comp_def nat_to_words_len_valid words_valid_cons words_valid_concat 
+    by force
+qed
+
+lemma point_to_octets_nocomp_valid: "octets_valid (point_to_octets_nocomp x y)"
+proof - 
+  have "(4::nat) < 256" by fastforce
+  then show ?thesis
+    by (metis point_to_octets_nocomp_def nat_to_words_len_valid words_valid_cons 
+              words_valid_concat Twoto8)
+qed
+
+lemma point_to_octets_valid: "octets_valid (point_to_octets P C)"
+  apply (cases P)
+  apply (simp add: point_to_octets_def words_valid_cons words_valid_nil)
+  apply (cases C)
+  apply (simp add: point_to_octets_comp_valid   point_to_octets_def) 
+  by    (simp add: point_to_octets_nocomp_valid point_to_octets_def) 
+
+
+lemma point_to_octets_nocomp_inj:
+  assumes "point_to_octets_nocomp x y = point_to_octets_nocomp x' y'" 
+          "x < p"  "x' < p"  
+  shows   "x = x' \<and> y = y'"
+proof - 
+  let ?l  = "octet_length p"
+  let ?M  = "point_to_octets_nocomp x  y"
+  let ?M' = "point_to_octets_nocomp x' y'"
+  let ?X  = "nat_to_octets_len x  ?l" 
+  let ?X' = "nat_to_octets_len x' ?l" 
+  let ?Y  = "nat_to_octets_len y  ?l" 
+  let ?Y' = "nat_to_octets_len y' ?l" 
+  have l: "length ?X  = ?l \<and> length ?X' = ?l" 
+    by (meson assms(2,3) le_trans less_or_eq_imp_le nat_lowbnd_word_len2 nat_to_words_len_upbnd
+              not_le zero_less_numeral)
+  have m1: "?M  = 4 # ?X  @ ?Y"         using point_to_octets_nocomp_def by meson
+  have m2: "?M' = 4 # ?X' @ ?Y'"        using point_to_octets_nocomp_def by meson
+  have x1: "?X  = take ?l (drop 1 ?M)"  using m1 l by simp
+  have x2: "?X' = take ?l (drop 1 ?M')" using m2 l by simp
+  have x3: "?X = ?X'"                   using x1 x2 assms(1) by argo
+  have x4: "x = x'"                     using nat_to_words_len_inj x3 by auto
+  have y1: "?Y  = drop (1+?l) ?M"       using m1 l by simp
+  have y2: "?Y' = drop (1+?l) ?M'"      using m2 l by simp
+  have y3: "?Y = ?Y'"                   using y1 y2 assms(1) by argo
+  have y4: "y = y'"                     using nat_to_words_len_inj y3 by auto
+  show ?thesis                          using x4 y4 by fast
+qed
+
+lemma point_to_octets_nocomp_inj':
+  assumes "point_to_octets_nocomp x y = point_to_octets_nocomp x' y'" 
+          "x < p"  "y < p" 
+  shows   "x = x' \<and> y = y'"
+proof - 
+  let ?l  = "octet_length p"
+  let ?M  = "point_to_octets_nocomp x  y"
+  let ?M' = "point_to_octets_nocomp x' y'"
+  let ?X  = "nat_to_octets_len x  ?l" 
+  let ?X' = "nat_to_octets_len x' ?l" 
+  let ?Y  = "nat_to_octets_len y  ?l" 
+  let ?Y' = "nat_to_octets_len y' ?l" 
+  have l1: "length ?X  = ?l \<and> length ?Y = ?l" 
+    by (meson assms(2,3) le_trans less_or_eq_imp_le nat_lowbnd_word_len2 nat_to_words_len_upbnd 
+              not_le zero_less_numeral)
+  have l2: "?l \<le> length ?X' \<and> ?l \<le> length ?Y'" using nat_to_words_len_len by auto 
+  have m1: "?M  = 4 # ?X  @ ?Y"                 using point_to_octets_nocomp_def by meson
+  have m2: "?M' = 4 # ?X' @ ?Y'"                using point_to_octets_nocomp_def by meson
+  have l3: "length ?M  = 1 + length ?X  + length ?Y"          using m1 by force
+  have l4: "length ?M' = 1 + length ?X' + length ?Y'"         using m2 by force
+  have l5: "length ?X  + length ?Y = length ?X' + length ?Y'" using assms(1) l3 l4 by simp
+  have l6: "length ?X'  = ?l \<and> length ?Y' = ?l"               using l5 l2 l1 by simp
+  have x1: "?X  = take ?l (drop 1 ?M)"          using m1 l1 by simp
+  have x2: "?X' = take ?l (drop 1 ?M')"         using m2 l6 by simp
+  have x3: "?X = ?X'"                           using x1 x2 assms(1) by argo
+  have x4: "x = x'"                             using nat_to_words_len_inj x3 by auto
+  have y1: "?Y  = drop (1+?l) ?M"               using m1 l1 by simp
+  have y2: "?Y' = drop (1+?l) ?M'"              using m2 l6 by simp
+  have y3: "?Y = ?Y'"                           using y1 y2 assms(1) by argo
+  have y4: "y = y'"                             using nat_to_words_len_inj y3 by auto
+  show ?thesis                                  using x4 y4 by fast
+qed
+
+
+
+definition FlipY :: "nat \<Rightarrow> nat" where
+  "FlipY Y = (if Y = 2 then 3 else 2)" 
+
+definition FlipYhd :: "octets \<Rightarrow> octets" where
+  "FlipYhd M = (FlipY (hd M)) # (tl M)"
+
+lemma point_to_octets_comp_opp:
+  assumes "M = point_to_octets_comp x y"  "M' = point_to_octets_comp x (p-y)"
+          "y < p"  "0 < y" 
+  shows   "M = FlipYhd M' \<and> M' = FlipYhd M" 
+proof -
+  let ?l = "octet_length p"
+  let ?X = "nat_to_octets_len x ?l"
+  let ?Y = "2 + (y mod 2)"
+  let ?y = "(p-y)" 
+  let ?Y' = "2 + (?y mod 2)" 
+  have 1: "M = ?Y # ?X \<and> M' = ?Y' # ?X"         using assms(1,2) point_to_octets_comp_def by force
+  have 2: "(y mod 2 = 0) = (?y mod 2 = 1)"
+    by (metis p_mod2 assms(3) dvd_imp_mod_0 le_add_diff_inverse less_imp_le_nat odd_add 
+              odd_iff_mod_2_eq_one) 
+  have 3: "(?Y = 2) = (?Y' = 3)"                using 2 by auto
+  have 4: "(?Y = FlipY ?Y') \<and> (?Y' = FlipY ?Y)" using FlipY_def 3 by fastforce
+  show ?thesis                                  using FlipYhd_def 4 1 by force
+qed
+
+lemma point_to_octets_comp_opp':
+  assumes "P = Point x y"  "0 < y"  "y < p" 
+          "M = point_to_octets P True"  "M' = point_to_octets (opp P) True"
+  shows   "M = FlipYhd M' \<and> M' = FlipYhd M" 
+  by (simp add: assms point_to_octets_comp_opp oppEq' point_to_octets_def nat_minus_as_int) 
+
+
+definition octets_to_point_nocomp_validInput :: "int \<Rightarrow> int \<Rightarrow> octets \<Rightarrow> bool" where
+"octets_to_point_nocomp_validInput a b M = 
+  ( let W  = hd M;
+        M' = drop 1 M;
+        l  = octet_length p;
+        X  = take l M';
+        x  = int (octets_to_nat X);
+        Y  = drop l M';
+        y  = int (octets_to_nat Y);
+        P  = Point x y
+    in
+      (octets_valid M) \<and> (W = 4) \<and> (on_curve a b P) \<and> (length M = 2*l + 1)
+  )"
+
+definition octets_to_point_nocomp :: "int \<Rightarrow> int \<Rightarrow> octets \<Rightarrow> int point option" where
+  "octets_to_point_nocomp a b M = 
+  ( let W  = hd M;
+        M' = drop 1 M;
+        l  = octet_length p;
+        X  = take l M';
+        x  = int (octets_to_nat X);
+        Y  = drop l M';
+        y  = int (octets_to_nat Y);
+        P  = Point x y
+    in
+      if (octets_to_point_nocomp_validInput a b M) then Some P else None
+  )" 
+
+
+definition octets_to_point_comp_validInput :: "int \<Rightarrow> int \<Rightarrow> octets \<Rightarrow> bool" where
+"octets_to_point_comp_validInput a b M = 
+  ( let Y  = hd M;
+        T  = (Y = 2) \<or> (Y = 3);
+        l  = octet_length p;
+        X  = drop 1 M;
+        x  = int (octets_to_nat X);
+        \<alpha>  = (x^3 + a*x + b) mod p
+    in
+      (octets_valid M) \<and> (x < p) \<and> T \<and> (\<alpha> = 0 \<longrightarrow> Y = 2) \<and> (QuadRes' p \<alpha>) \<and> (length M = l + 1)
+  )" 
+
+definition octets_to_point_comp :: "int \<Rightarrow> int \<Rightarrow> octets \<Rightarrow> int point option" where
+  "octets_to_point_comp a b M = 
+  ( let Y  = hd M;
+        y  = Y - 2;
+        X  = drop 1 M;
+        x  = int (octets_to_nat X);
+        \<alpha>  = (x^3 + a*x + b) mod p;
+        \<beta>  = some_root_nat p \<alpha>;
+        y' = int (if \<beta> mod 2 = y then \<beta> else (p-\<beta>));
+        P  = Point x y'
+    in
+      if (octets_to_point_comp_validInput a b M) then Some P else None
+  )"
+
+definition octets_to_point_validInput :: "int \<Rightarrow> int \<Rightarrow> octets \<Rightarrow> bool" where
+  "octets_to_point_validInput a b M \<equiv> (M = [0]) \<or> 
+    (octets_to_point_comp_validInput a b M) \<or> (octets_to_point_nocomp_validInput a b M)"
+
+definition octets_to_point :: "int \<Rightarrow> int \<Rightarrow> octets \<Rightarrow> int point option" where
+  "octets_to_point a b M = 
+  ( let lp = octet_length p;
+        lM = length M 
+    in
+        if  M = [0]      then Some Infinity else (
+        if lM =   lp + 1 then octets_to_point_comp   a b M else (
+        if lM = 2*lp + 1 then octets_to_point_nocomp a b M
+        else None
+      )
+    )
+  )" 
+
+
+lemma octets2PointNoCompNotInf:
+  assumes "octets_to_point_nocomp a b M = Some P" 
+  shows   "P \<noteq> Infinity"
+  by (smt (z3) assms octets_to_point_nocomp_def option.distinct(1) option.inject point.distinct(1))
+
+lemma octets2PointCompNotInf:
+  assumes "octets_to_point_comp a b M = Some P" 
+  shows   "P \<noteq> Infinity"
+  by (smt (z3) assms octets_to_point_comp_def option.distinct(1) option.inject point.distinct(1))
+
+lemma octets2PointInf1: "octets_to_point a b [0] = Some Infinity"
+  using octets_to_point_def by presburger
+
+lemma octets2PointInf2:
+  assumes "octets_to_point a b M = Some Infinity"
+  shows   "M = [0]"
+  by (smt (z3) assms octets_to_point_def octets2PointNoCompNotInf octets2PointCompNotInf 
+               option.distinct(1)) 
+
+lemma octets2PointInf: "(octets_to_point a b M = Some Infinity) = (M = [0])"
+  using octets2PointInf1 octets2PointInf2 by blast
+
+
+lemma octets2PointNoCompOnCurve:
+  assumes "octets_to_point_nocomp a b M = Some P" 
+  shows   "on_curve a b P"
+  by (smt (z3) assms octets_to_point_nocomp_def octets_to_point_nocomp_validInput_def 
+               option.distinct(1) option.inject)
+
+lemma octets2PointCompOnCurve:
+  assumes "octets_to_point_comp a b M = Some P"  
+  shows   "on_curve a b P"
+proof - 
+  let ?Y  = "hd M"
+  let ?T  = "(?Y = 2) \<or> (?Y = 3)"
+  let ?y  = "?Y - 2"
+  let ?X  = "drop 1 M"
+  let ?x  = "int (octets_to_nat ?X)"
+  let ?\<alpha>  = "(?x^3 + a*?x + b) mod p"
+  let ?\<beta>  = "some_root_nat p ?\<alpha>"
+  let ?y' = "int (if ?\<beta> mod 2 = ?y then ?\<beta> else (p-?\<beta>))"
+  have 1: "P = Point ?x ?y'" 
+    by (smt (z3) assms(1) octets_to_point_comp_def option.distinct(1) option.inject)
+  have 2: "octets_to_point_comp_validInput a b M" 
+    by (smt (verit, best) assms(1) octets_to_point_comp_def option.simps(3)) 
+  have 3: "QuadRes' p ?\<alpha>"      using 2 octets_to_point_comp_validInput_def by meson
+  have a1: "?\<alpha> = 0 \<longrightarrow> ?y = 0" 
+    by (metis 2 octets_to_point_comp_validInput_def diff_self_eq_0) 
+  have a2: "?\<alpha> \<noteq> 0 \<longrightarrow> 0 < ?\<beta>"
+    by (metis (mono_tags, opaque_lifting) 3 QuadRes'HasNatRoot bits_mod_0 mod_mod_trivial 
+              bot_nat_0.not_eq_extremum cong_def int_ops(1) power_zero_numeral) 
+  have x1: "0 \<le> ?x"            using of_nat_0_le_iff by blast
+  have x2: "?x < p"            using 2 octets_to_point_comp_validInput_def by meson
+  have x3: "?x \<in> carrier R"    using x1 x2 inCarrier by blast 
+  have y1: "0 \<le> ?y'"           using of_nat_0_le_iff by blast
+  have y2: "?y' < p"
+    by (smt (verit, ccfv_threshold) 3 a1 a2 QuadRes'HasNatRoot dvd_imp_mod_0 even_diff_nat gr0I
+            int_ops(6) of_nat_0_less_iff zero_less_diff)
+  have y3: "?y' \<in> carrier R"   using y1 y2 inCarrier by blast 
+  have y4: "?y'^2 mod p = (?x^3 + a*?x + b) mod p"
+    by (smt (z3) 3 QuadRes'HasNatRoot QuadRes'HasTwoNatRoots cong_def mod_mod_trivial of_nat_power)
+  show ?thesis                 using 1 y4 x3 y3 onCurveEq3 by presburger
+qed
+
+lemma octets2PointOnCurve:
+  assumes "octets_to_point a b M = Some P" 
+  shows   "on_curve a b P"
+  by (smt (verit) assms octets2PointCompOnCurve octets2PointNoCompOnCurve octets_to_point_def 
+          on_curve_infinity option.inject option.simps(3))
+
+
+
+lemma  
+  assumes "on_curve a b P"  "P = Point x y"  "M = point_to_octets_nocomp (nat x) (nat y)"
+  shows   point2OctetsNoComp_validInput: "octets_to_point_nocomp_validInput a b M"
+  and     point2Octets2PointNoComp:      "octets_to_point_nocomp a b M = Some P"
+proof -
+  let ?l = "octet_length p"
+  let ?X = "nat_to_octets_len (nat x) ?l"
+  let ?Y = "nat_to_octets_len (nat y) ?l"
+  have x1: "nat x < p"        using assms(1,2) on_curve_def inCarrier by fastforce
+  have x2: "length ?X = ?l"   using nat_to_word_len_mono' x1 zero_less_numeral by blast
+  have y1: "nat y < p"        using assms(1,2) on_curve_def inCarrier by fastforce
+  have y2: "length ?Y = ?l"   using nat_to_word_len_mono' y1 zero_less_numeral by blast
+  have m1: "M = 4 # ?X @ ?Y"  using assms(3) point_to_octets_nocomp_def by meson
+  have m2: "octets_valid M"   using assms(3) point_to_octets_nocomp_valid by blast 
+  let ?M' = "drop  1 M"
+  let ?X' = "take ?l ?M'"
+  let ?Y' = "drop ?l ?M'"
+  have x3: "?X = ?X'"         using m1 x2 by fastforce
+  have y3: "?Y = ?Y'"         using m1 x2 by fastforce
+  let ?x = "int (octets_to_nat ?X')"
+  let ?y = "int (octets_to_nat ?Y')"
+  have x4: "?x = int (nat x)" by (metis x3 nat_to_words_len_to_nat zero_less_numeral) 
+  have x5: "?x = x"           using assms(1,2) on_curve_def inCarrierNatInt x4 by auto
+  have y4: "?y = int (nat y)" by (metis y3 nat_to_words_len_to_nat zero_less_numeral) 
+  have y5: "?y = y"           using assms(1,2) on_curve_def inCarrierNatInt y4 by auto
+  show     "octets_to_point_nocomp_validInput a b M"
+    using m2 m1 octets_to_point_nocomp_validInput_def assms(1,2) x2 x5 y2 y5 by auto
+  then show "octets_to_point_nocomp a b M = Some P"
+    using assms(2) octets_to_point_nocomp_def x5 y5 by presburger
+qed
+
+
+lemma 
+  assumes "on_curve a b P"  "P = Point x y"  "M = point_to_octets_comp (nat x) (nat y)"
+  shows   point2OctetsValidInputComp: "octets_to_point_comp_validInput a b M"
+  and     point2Octets2PointComp:     "octets_to_point_comp a b M = Some P"
+proof -
+  let ?l  = "octet_length p"
+  let ?X  = "nat_to_octets_len (nat x) ?l"
+  let ?Y  = "[2 + ((nat y) mod 2)]" 
+  have m1: "M = ?Y @ ?X"             using assms(3) point_to_octets_comp_def by presburger
+  let ?Y' = "hd M" 
+  have y1: "?Y' = 2 + (nat y) mod 2" using m1 by fastforce
+  let ?T  = "?Y' = 2 \<or> ?Y' = 3"
+  have T1: "?T"                      using y1 by force
+  let ?X' = "drop 1 M"
+  have x1: "?X' = ?X"                using m1 by auto
+  let ?x  = "int (octets_to_nat ?X')"
+  have x2: "?x = int (nat x)"        by (metis x1 nat_to_words_len_to_nat zero_less_numeral)
+  have x3: "?x = x"                  using assms(1,2) on_curve_def inCarrierNatInt x2 by auto
+  have x4: "?x < p"                  using x3 assms(1,2) inCarrier on_curve_def by auto 
+  let ?\<alpha>  = "((?x^3 + a*?x + b) mod p)" 
+  have y2: "y^2 mod p = ?\<alpha>"          using assms(1,2) onCurveEq x3 by presburger 
+  have y3: "0 \<le> y \<and> y < p"           using assms(1,2) inCarrier onCurveEq2 by blast 
+  have a1: "QuadRes' p ?\<alpha>" 
+    by (metis y2 QuadRes'_def QuadResImplQuadRes'2 QuadRes_def cong_def mod_mod_trivial p_prime)   
+  have y4: "?\<alpha> = 0 \<longrightarrow> y^2 mod p = 0" using y2 by argo
+  have y5: "?\<alpha> = 0 \<longrightarrow> y = 0"         by (meson y4 y3 ZeroSqrtMod p_prime prime_nat_int_transfer) 
+  have y6: "?\<alpha> = 0 \<longrightarrow> ?Y' = 2"       using y1 y5 by fastforce
+  have l1: "length ?X = ?l"           using nat_to_word_len_mono' x3 x4 by force 
+  have l2: "length  M = ?l + 1"       using l1 m1 by auto
+  show A1: "octets_to_point_comp_validInput a b M" 
+    by (metis assms(3) x4 T1 y6 a1 l2 octets_to_point_comp_validInput_def 
+              point_to_octets_comp_valid)
+  let ?y  = "?Y' - 2"
+  have y7: "?y = (nat y) mod 2"      using y1 by force
+  let ?\<beta>  = "some_root_nat p ?\<alpha>"
+  have b1: "?\<beta> < p"                  using QuadRes'HasNatRoot a1 by blast 
+  let ?y' = "int (if ?\<beta> mod 2 = ?y then ?\<beta> else (p-?\<beta>))"
+  let ?P  = "Point ?x ?y'"
+  have A2: "octets_to_point_comp a b M = Some ?P"  by (smt (verit) A1 octets_to_point_comp_def) 
+  show "octets_to_point_comp a b M = Some P"       proof (cases "?\<alpha> = 0")
+    case T0: True
+    have T1: "y = 0"   by (metis ZeroSqrtMod y4 y3 p_prime T0 prime_nat_int_transfer) 
+    show ?thesis       using A2 T0 T1 ZeroSqrtMod' assms(2) p_prime x3 y7 by force
+  next
+    case False
+    then have "0 < ?\<alpha>" by (smt (verit, best) m_gt_one pos_mod_conj)
+    then have "(nat y) = ?\<beta> \<or> (nat y) = p - ?\<beta>"
+      by (metis Euclidean_Rings.pos_mod_bound QuadResHasExactlyTwoRoots2 a1 gt2 int_ops(1)
+                nat_int not_less of_nat_le_0_iff p_prime y2 y3) 
+    then show ?thesis 
+      by (smt (verit) A2 assms(2) b1 diff_is_0_eq' even_diff_nat int_nat_eq less_imp_le_nat 
+              less_numeral_extra(3) odd_add odd_iff_mod_2_eq_one p_mod2 x3 y7 y3 zero_less_diff)  
+  qed
+qed
+
+lemma point_to_octets_comp_inj:
+  assumes "point_to_octets_comp x y = point_to_octets_comp x' y'" 
+          "on_curve a b (Point (int x) (int y))"  "on_curve a b (Point (int x') (int y'))"
+  shows   "x = x' \<and> y = y'"
+  by (metis assms(1,2,3) nat_int option.inject point.inject point2Octets2PointComp)
+
+lemma point_to_octets_comp_inj':
+  assumes "point_to_octets_comp (nat x) (nat y) = point_to_octets_comp (nat x') (nat y')" 
+          "on_curve a b (Point x y)"  "on_curve a b (Point x' y')"
+  shows   "x = x' \<and> y = y'"
+  by (metis assms(1,2,3) option.inject point.inject point2Octets2PointComp)
+
+lemma point2Octets2PointComp_forgot_Y2:
+  assumes "on_curve a b P"  "P = Point x y"  "y mod 2 = 0"
+          "l = octet_length p"  "X = nat_to_octets_len (nat x) l"  "M = 2 # X" 
+  shows   "octets_to_point_comp a b M = Some P"
+proof -
+  have "M = point_to_octets_comp (nat x) (nat y)" 
+    by (metis assms(3,4,5,6) point_to_octets_comp_def add.right_neutral append_Cons append_Nil
+              dvd_imp_mod_0 even_mod_2_iff even_of_nat int_nat_eq odd_add) 
+  then show ?thesis using assms(1,2) point2Octets2PointComp by blast 
+qed
+
+lemma point2Octets2PointComp_forgot_Y2':
+  assumes "on_curve a b P"  "P = Point x y"  "y mod 2 = 1"
+          "l = octet_length p"  "X = nat_to_octets_len (nat x) l"  "M = 2 # X" 
+  shows   "octets_to_point_comp a b M = Some (opp P)"
+proof -
+  have 0: "y \<noteq> 0"       using assms(3) by force
+  have 1: "0 < y"       using 0 assms(1,2) on_curve_def inCarrier by force 
+  have 2: "y < p"       using   assms(1,2) on_curve_def inCarrier by force 
+  let ?y = "p - y"
+  let ?P = "Point x ?y"
+  have 3: "?P = opp P"  using oppEq'[OF 1 2] assms(2) by presburger
+  have 4: "(nat ?y) mod 2 = 0"
+    by (metis assms(3) cancel_comm_monoid_add_class.diff_cancel even_of_nat int_nat_eq mod_0 
+              mod_diff_right_eq not_mod_2_eq_1_eq_0 odd_iff_mod_2_eq_one p_mod2) 
+  have 5: "M = point_to_octets_comp (nat x) (nat ?y)" 
+                        using 4 assms(4,5,6) point_to_octets_comp_def by fastforce
+  show ?thesis          using 3 5 assms(1,2) point2Octets2PointComp opp_closed by auto
+qed
+
+lemma point2Octets2PointComp_PoppP:
+  assumes "on_curve a b P"  "P = Point x y"  "l = octet_length p"  
+          "X = nat_to_octets_len (nat x) l"  "M = 2 # X" 
+  shows   "octets_to_point_comp a b M = Some P \<or> octets_to_point_comp a b M = Some (opp P)"
+  apply (cases "y mod 2 = 0")
+  using assms(1,2,3,4,5) point2Octets2PointComp_forgot_Y2  apply presburger
+  using assms(1,2,3,4,5) point2Octets2PointComp_forgot_Y2'    by presburger
+
+lemma point2Octets2PointComp_PoppP':
+  assumes "on_curve a b P"  "P = Point x y"  "l = octet_length p"  
+          "X = nat_to_octets_len (nat x) l"  "M = 2 # X" 
+  shows   "octets_to_point a b M = Some P \<or> octets_to_point a b M = Some (opp P)"
+proof - 
+  have      "x < p"             using assms(1,2) inCarrier onCurveEq2 by blast 
+  then have "nat x < p"         using m_gt_one by linarith 
+  then have "length X = l"      using assms(3,4) nat_to_word_len_mono' zero_less_numeral by blast  
+  then have "octets_to_point a b M = octets_to_point_comp a b M"
+                                by (simp add: octets_to_point_def assms(3,5)) 
+  then show ?thesis             using assms point2Octets2PointComp_PoppP by algebra
+qed
+
+lemma point2Octets2Point:
+  assumes "on_curve a b P" "M = point_to_octets P C"
+  shows   "octets_to_point a b M = Some P"
+proof (cases P)
+  case Infinity
+  then show ?thesis by (simp add: assms(2) octets_to_point_def point_to_octets_def)
+next
+  case P: (Point x y)
+  then show ?thesis proof (cases C)
+    case T0: True
+    let ?lp = "octet_length p"
+    have T1: "length M = ?lp + 1" using P assms(1,2) T0 point_to_octets_len_T by fastforce 
+    have T2: "octets_to_point a b M = octets_to_point_comp a b M" 
+      by (smt (verit, best) octet_len_p' T1 octets_to_point_def One_nat_def Suc_eq_plus1 
+              list.size(3,4))
+    show ?thesis using T2 P T0 assms(1,2) point2Octets2PointComp point_to_octets_def by auto 
+  next
+    case F0: False
+    let ?lp = "octet_length p"
+    have l: "0 < ?lp"
+      by (metis gr_implies_not_zero gt2 nat_to_words_nil_iff_zero2 neq0_conv zero_less_numeral) 
+    have F1: "length M = 2*?lp + 1" using P assms(1,2) F0 point_to_octets_len_F by fastforce 
+    have F2: "octets_to_point a b M = octets_to_point_nocomp a b M" 
+      by (smt (verit, best) F1 octet_len_p' octets_to_point_def One_nat_def Suc_eq_plus1 
+              list.size(3,4)) 
+    then show ?thesis using F2 P F0 assms(1,2) point2Octets2PointNoComp point_to_octets_def by simp
+  qed
+qed
+
+
+lemma octets2PointNoCompValidInIFF1:
+  "(octets_to_point_nocomp a b M \<noteq> None) = (octets_to_point_nocomp_validInput a b M)" 
+  by (smt (z3) not_None_eq octets_to_point_nocomp_def)
+
+lemma octets2PointNoCompalidInIFF2:
+  "(\<exists>P. octets_to_point_nocomp a b M = Some P) = (octets_to_point_nocomp_validInput a b M)"
+  using octets2PointNoCompValidInIFF1 by force 
+
+lemma octets2Point2OctetsNoComp:
+  assumes "octets_to_point_nocomp a b M = Some P"
+  shows   "point_to_octets P False = M"
+proof - 
+  let ?W  = "hd M"
+  let ?M' = "drop 1 M"
+  let ?l  = "octet_length p"
+  let ?X  = "take ?l ?M'"
+  let ?x  = "int (octets_to_nat ?X)"
+  let ?Y  = "drop ?l ?M'"
+  let ?y  = "int (octets_to_nat ?Y)"
+  let ?P  = "Point ?x ?y"
+  have V: "octets_to_point_nocomp_validInput a b M"
+    using assms octets2PointNoCompValidInIFF1 by blast 
+  have P1: "?P = P"              by (smt (z3) assms(1) V octets_to_point_nocomp_def option.inject) 
+  have M1: "length M = 2*?l + 1" using V octets_to_point_nocomp_validInput_def by meson
+  have M2: "octets_valid M"      using V octets_to_point_nocomp_validInput_def by meson
+  have W1: "?W = 4"              using V octets_to_point_nocomp_validInput_def by meson
+  have X1: "length ?X = ?l"      using M1 by force
+  have X2: "octets_valid ?X"     using M2 words_valid_take words_valid_drop by blast
+  have Y1: "length ?Y = ?l"      using M1 by force
+  have Y2: "octets_valid ?Y"     using M2 words_valid_drop by blast
+  have M3: "M = ?W # ?X @ ?Y"
+    by (metis M1 One_nat_def append_take_drop_id drop_0 drop_Suc_Cons hd_Cons_tl leD le_add2 
+              list.size(3) zero_less_one) 
+  have O1: "point_to_octets P False = point_to_octets_nocomp (nat ?x) (nat ?y)"
+                                       using P1 point_to_octets_def by force
+  have x1: "nat ?x = octets_to_nat ?X" by (meson nat_int) 
+  have y1: "nat ?y = octets_to_nat ?Y" by (meson nat_int) 
+  let ?X' = "nat_to_octets_len (nat ?x) ?l"
+  have X3: "?X' = ?X"                  by (metis X1 X2 x1 words_to_nat_to_words_len2) 
+  let ?Y' = "nat_to_octets_len (nat ?y) ?l"
+  have Y3: "?Y' = ?Y"                  by (metis Y1 Y2 y1 words_to_nat_to_words_len2) 
+  show ?thesis using M3 O1 X3 Y3 W1 point_to_octets_nocomp_def by algebra
+qed
+
+lemma octets2PointCompValidInIFF1:
+  "(octets_to_point_comp a b M \<noteq> None) = (octets_to_point_comp_validInput a b M)" 
+  by (smt (z3) not_None_eq octets_to_point_comp_def)
+
+lemma octets2PointCompValidInIFF2:
+  "(\<exists>P. octets_to_point_comp a b M = Some P) = (octets_to_point_comp_validInput a b M)"
+  using octets2PointCompValidInIFF1 by force 
+
+lemma octets2Point2OctetsComp:
+  assumes "octets_to_point_comp a b M = Some P"
+  shows   "point_to_octets P True = M"
+proof - 
+  let ?Y  = "hd M"
+  let ?T  = "(?Y = 2) \<or> (?Y = 3)"
+  let ?y  = "?Y - 2"
+  let ?l  = "octet_length p"
+  let ?X  = "drop 1 M"
+  let ?x  = "int (octets_to_nat ?X)"
+  let ?\<alpha>  = "(?x^3 + a*?x + b) mod p"
+  let ?\<beta>  = "some_root_nat p ?\<alpha>"
+  let ?y' = "int (if ?\<beta> mod 2 = ?y then ?\<beta> else (p-?\<beta>))"
+  let ?P  = "Point ?x ?y'"
+  have V: "octets_to_point_comp_validInput a b M"
+    using assms octets2PointCompValidInIFF1 by blast 
+  have P1: "?P = P" 
+    by (smt (z3) assms(1) V octets_to_point_comp_def option.inject) 
+  let ?X' = "nat_to_octets_len (nat ?x) ?l"
+  let ?Y' = "[2 + ((nat ?y') mod 2)]" 
+  let ?M  = "?Y' @ ?X'"
+  have O1: "point_to_octets P True = ?M" 
+    using P1 point_to_octets_def point_to_octets_comp_def by force
+  have x1: "?X = ?X'"
+    by (metis V add_diff_cancel_right' length_drop nat_int octets_to_point_comp_validInput_def
+              words_to_nat_to_words_len2 words_valid_drop)
+  have a1: "QuadRes' p ?\<alpha>"     by (meson V octets_to_point_comp_validInput_def) 
+  have M1: "length M = ?l + 1" by (meson V octets_to_point_comp_validInput_def)
+  have y1: "?y = 0 \<or> ?y = 1"
+    by (metis V add_diff_cancel_right' diff_self_eq_0 numeral_2_eq_2 numeral_3_eq_3
+              octets_to_point_comp_validInput_def plus_1_eq_Suc) 
+  have y3: "(nat ?y') mod 2 = ?y"
+    by (smt (verit, ccfv_threshold) QuadRes'HasNatRoot a1 even_add even_diff_nat 
+            less_imp_of_nat_less mod2_eq_if nat_int p_mod2 y1)
+  have y4: "[?Y] = ?Y'"
+    by (metis V add.commute add.left_neutral add_diff_cancel_right' numeral_2_eq_2 numeral_3_eq_3
+              octets_to_point_comp_validInput_def plus_1_eq_Suc y3)  
+  have M2: "?M = M" 
+    by (metis (mono_tags, opaque_lifting) x1 y4 M1 One_nat_def Suc_eq_plus1 append_Cons append_Nil
+              drop0 drop_Suc list.exhaust_sel list.size(3) nat.simps(3))
+  show ?thesis using O1 M2 by argo
+qed
+
+lemma octets2PointValidInIFF1:
+  "(octets_to_point a b M \<noteq> None) = (octets_to_point_validInput a b M)"
+  by (smt (verit, best) R_def octets2Point2OctetsNoComp octets2PointCompValidInIFF1 
+          octets2PointNoCompOnCurve octets_to_point_comp_validInput_def octets_to_point_def 
+          octets_to_point_nocomp_def octets_to_point_validInput_def option.simps(3) 
+          point2Octets2Point residues_prime_gt2_axioms)
+
+lemma octets2PointValidInIFF2:
+  "(\<exists>P. octets_to_point a b M = Some P) = (octets_to_point_validInput a b M)"
+  using octets2PointValidInIFF1 by auto
+
+lemma octets2Point2Octets:
+  assumes "octets_to_point a b M = Some P"  "lM = length M"  "lp = octet_length p"
+          "C = (if lM = lp + 1 then True else False)" 
+  shows   "point_to_octets P C = M"
+proof - 
+  have 1: "(M = [0]) \<or> (lM = lp + 1) \<or> (lM = 2*lp + 1)" 
+    by (smt (z3) assms(1,2,3) octets_to_point_def option.simps(3)) 
+  have 2: "M = [0] \<longrightarrow> point_to_octets P C = M"
+    using assms(1) octets_to_point_def point_to_octets_def by force
+  have 3: "lM = lp + 1 \<longrightarrow> point_to_octets P C = M"
+    using 2   assms(1,2,3,4) octets_to_point_def octets2Point2OctetsComp   by force
+  have 4: "lM = 2*lp + 1 \<longrightarrow> point_to_octets P C = M"
+    using 2 3 assms(1,2,3,4) octets_to_point_def octets2Point2OctetsNoComp by force
+  show ?thesis using 1 2 3 4 by fast
+qed
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+SEC 1 only allows a security level t of 80, 112, 128, 192, or 256.  Then "twice the security
+level" will actually be 2*t except for t = 80 and 256, where it's merely close to 2*t.\<close>
+text \<open>The standard writes \<lceil>log 2 p\<rceil>.  Note that because p is odd (thus not a power of 2), 
+\<lceil>log 2 p\<rceil> = bit_length p.  See Words.bitLenLog2Prime.  Also, the standard explains that the number
+of points on the elliptic curve is n*h.  (h is called the "cofactor".)  It doesn't make a lot of
+sense to consider an elliptic curve that has zero points on it.  So we must have 0 < h.  (We
+know that 0 < n because the standard insists that n is prime.)  So while not explicitly written
+in the standard, we include the requirement that 0 < h.\<close>
+text \<open>The security level t is not always explicitly listed in elliptic curve parameters.\<close>
+text \<open>Even when not explicitly stated, the security level can be recovered from the bit length
+of the prime modulus p.\<close>
+text \<open>The following lemma is convenient below when showing that valid EC domain parameters
+meet the definition of "Elliptic Prime Field" defined in EC_Common.\<close>
+text \<open>The following lemmas are useful for the Public Key Recovery Operation below.\<close>
+text \<open>Next up we show that h < n.  The number of points on the elliptic curve is n*h.  For 
+recommended curves, the cofactor h is typically small, like h < 10.  The prime n is very large,
+around the size of p.  So in some sense, it's not surprising that h < n.  The only issue here is
+to show that given the definition of valid parameters.\<close>
+text \<open>It is sometimes helpful to know that n is an odd prime.  In the following proof, we see if
+n = 2, then h = 1 and p = 2.  We already know that p cannot be that small, so we are done.  But
+also, if n = 2, the n*h = p, which also contradicts the definition of valid elliptic curve
+parameters.\<close>
+text \<open>In fact, n must be a great deal larger than 2.\<close>
+text \<open>Now we know what valid elliptic curve parameters are.  So we fix a set of parameters and
+define the cryptographic primitives below using those valid parameters.\<close>
+text \<open>Elliptic_Locale defines elliptic curve operations.  In this locale, we have fixed a set of
+elliptic curve parameters.  We use the coefficients a and b to make convenient abbreviations
+for definitions found in Elliptic_Locale as well as a data conversion primitive defined above.\<close>
+text \<open>We show that the valid elliptic curve parameters meet the assumptions of the ell_prime_field
+locale in EC_Common.  We then write some properties in terms of "curve" which is defined in 
+ell_prime_field.  Of note: the definitions in Elliptic_Locale use additive notation for the 
+
+sublocale EPF: ell_prime_field p R a b
+  using ECparamsValid paramsValidEllPrimeField' apply blast
+  by (simp add: R_def) 
+
+lemma order_EPF_curve: "order EPF.curve = n*h"
+  using order_def ECparamsValid ECdomainParametersValid_def EPF.curve_def
+  by (metis partial_object.select_convs(1)) 
+
+lemma order_EPF_curve_h1: 
+  assumes "h = 1"
+  shows   "order EPF.curve = n"
+  using assms order_EPF_curve by simp
+
+lemma order_EPF_curve_h1': 
+  assumes "h = 1"
+  shows   "prime (order EPF.curve)"
+  using assms order_EPF_curve_h1 ECparamsValid ECdomainParametersValid_def by blast
+
+lemma EC_h1_cyclic:
+  assumes "h = 1" 
+  shows   "carrier EPF.curve = {Q. (\<exists>d<n. Q = point_mult' d G)}" 
+proof - 
+  have H: "on_curve' G \<and> G \<noteq> Infinity \<and> point_mult' n G = Infinity\<and> prime (n::nat)"
+    using ECparamsValid ECdomainParametersValid_def by blast 
+  let ?S1 = "carrier EPF.curve"
+  let ?S2 = "{Q. (\<exists>d<n. Q = point_mult' d G)}"
+  have 1: "card ?S1 = n"  by (metis assms(1) order_EPF_curve_h1 order_def) 
+  have 2: "card ?S2 = n"  using EPF.curve_cycle_n2[of G n] H by fast
+  have 3: "\<forall>d. on_curve' (point_mult' d G)" by (simp add: H point_mult_closed)
+  have 4: "?S2 \<subseteq> ?S1"     using 3 EPF.curve_def by force
+  show ?thesis            using 1 2 4 EPF.finite_curve card_subset_eq by blast 
+qed
+
+lemma EC_h1_cyclic':
+  assumes "h = 1"  "on_curve' P" 
+  shows   "\<exists>d<n. P = point_mult' d G" 
+  using assms EC_h1_cyclic EPF.curve_def by auto
+
+lemma GonEPFcurve: "G \<in> carrier EPF.curve"
+  using ECdomainParametersValid_def ECparamsValid EPF.in_carrier_curve by presburger
+
+lemma dGonEPFcurve:
+  assumes "P = point_mult' d G"
+  shows   "P \<in> carrier EPF.curve" 
+  using GonEPFcurve EPF.multEqPowInCurve EPF.curve.nat_pow_closed EPF.in_carrier_curve assms 
+  by force
+
+lemma Gnot1onEPFcurve: "G \<noteq> \<one>\<^bsub>EPF.curve\<^esub>"
+  using ECdomainParametersValid_def ECparamsValid EPF.one_curve by presburger
+
+lemma nGeq1onEPFcurve: "G [^]\<^bsub>EPF.curve\<^esub> n = \<one>\<^bsub>EPF.curve\<^esub>"
+proof - 
+  have "point_mult' n G = Infinity" 
+    using ECdomainParametersValid_def ECparamsValid by presburger 
+  then show ?thesis 
+    using GonEPFcurve EPF.in_carrier_curve EPF.one_curve EPF.multEqPowInCurve by auto 
+qed
+
+lemma invG: "inv\<^bsub>EPF.curve\<^esub> G = G [^]\<^bsub>EPF.curve\<^esub> (n-1)"
+proof -
+  have "prime n"             using ECparamsValid ECdomainParametersValid_def by blast
+  then have "1 < n"          using prime_gt_1_nat by simp
+  then have "1 + (n-1) = n"  by auto
+  then have "G \<otimes>\<^bsub>EPF.curve\<^esub> (G [^]\<^bsub>EPF.curve\<^esub> (n-1)) = \<one>\<^bsub>EPF.curve\<^esub>"
+    by (metis nGeq1onEPFcurve EPF.curve.nat_pow_Suc2 GonEPFcurve plus_1_eq_Suc)
+  then show ?thesis
+    using EPF.curve.comm_inv_char EPF.curve.nat_pow_closed GonEPFcurve by presburger 
+qed
+
+lemma ordGisn: 
+  assumes "x < n"  "0 < x"
+  shows "point_mult' x G \<noteq> Infinity"
+  using ECdomainParametersValid_def ECparamsValid assms(1,2) EPF.order_n by presburger
+
+lemma ordGisn': 
+  assumes "x < n"  "0 < x"
+  shows "G [^]\<^bsub>EPF.curve\<^esub> x \<noteq> \<one>\<^bsub>EPF.curve\<^esub>"
+  using assms ordGisn EPF.one_curve EPF.multEqPowInCurve GonEPFcurve EPF.in_carrier_curve 
+  by algebra
+
+lemma curve_ord_G: "EPF.curve.ord G = n"
+  using ECdomainParametersValid_def ECparamsValid EPF.curve_ord_n5 by presburger
+
+lemma multGmodn: "point_mult' x G = point_mult' (x mod n) G"
+  by (metis ECdomainParametersValid_def ECparamsValid EPF.multQmodn)
+
+lemma multGmodn': "G[^]\<^bsub>EPF.curve\<^esub>x = G[^]\<^bsub>EPF.curve\<^esub>(x mod n)"
+  using multGmodn EPF.in_carrier_curve GonEPFcurve EPF.multEqPowInCurve by fastforce 
+
+lemma multdGmodn:
+  assumes "P = point_mult' d G"
+  shows   "point_mult' x P = point_mult' (x mod n) P"
+  by (metis ECdomainParametersValid_def ECparamsValid EPF.in_carrier_curve EPF.multQmodn
+            EPF.order_n_cycle assms dGonEPFcurve)
+
+lemma multdGmodn':
+  assumes "P = point_mult' d G"
+  shows   "P[^]\<^bsub>EPF.curve\<^esub>x = P[^]\<^bsub>EPF.curve\<^esub>(x mod n)"
+  using assms multdGmodn EPF.in_carrier_curve dGonEPFcurve EPF.multEqPowInCurve by fastforce
+
+lemma multGmodn'int: "G[^]\<^bsub>EPF.curve\<^esub>(x::int) = G[^]\<^bsub>EPF.curve\<^esub>(x mod n)"
+  by (metis EPF.in_carrier_curve EPF.one_curve GonEPFcurve EPF.multEqPowInCurve EPF.multQmodn'int
+            nGeq1onEPFcurve prime_gt_1_nat ECparamsValid ECdomainParametersValid_def)
+
+lemma multdGmodn'int: 
+  assumes "P = point_mult' d G"
+  shows   "P[^]\<^bsub>EPF.curve\<^esub>(x::int) = P[^]\<^bsub>EPF.curve\<^esub>(x mod n)"
+  by (metis assms ECparamsValid EPF.in_carrier_curve EPF.multQmodn'int EPF.order_n_cycle
+            dGonEPFcurve prime_gt_1_nat ECdomainParametersValid_def)
+
+
+
+definition "Rn = residue_ring (int n)"
+
+sublocale N: residues_prime n Rn
+  using ECdomainParametersValid_def ECparamsValid residues_prime_def apply presburger
+  using Rn_def by presburger 
+
+abbreviation inv_mod_n :: "nat \<Rightarrow> nat" where
+  "inv_mod_n x \<equiv> inv_mod n x"
+
+lemma inv_mod_n_inv:
+  assumes "x \<in> carrier Rn" "x \<noteq> 0" 
+  shows   "inv\<^bsub>Rn\<^esub> x = inv_mod_n x"
+  using N.inv_mod_p_inv_in_ring assms(1,2) by presburger
+
+lemma inv_mod_n_inv':
+  assumes "0 < x" "x < n"  
+  shows   "inv\<^bsub>Rn\<^esub> x = inv_mod_n x"
+  using assms inv_mod_n_inv by (simp add: N.res_carrier_eq) 
+
+
+
+
+definition ECkeyGen :: "nat \<Rightarrow> int point" where
+  "ECkeyGen d = point_mult' d G"
+
+definition ECkeyPairValid :: "nat \<Rightarrow> int point \<Rightarrow> bool" where
+  "ECkeyPairValid d Q \<equiv> (0 < d) \<and> (d < n) \<and> (point_mult' d G = Q)"
+
+definition ECprivateKeyValid :: "nat \<Rightarrow> bool" where
+  "ECprivateKeyValid d \<equiv> (0 < d) \<and> (d < n)"
+
+lemma ECkeyPairImpliesKeyGen:
+  assumes "ECkeyPairValid d Q"
+  shows   "Q = ECkeyGen d"
+  using ECkeyGen_def ECkeyPairValid_def assms by presburger
+
+lemma ECkeyPairEqKeyGen: "(ECkeyPairValid d Q) = ((Q = ECkeyGen d) \<and> ECprivateKeyValid d)"
+  using ECkeyGen_def ECkeyPairValid_def ECprivateKeyValid_def by auto
+
+lemma ECkeyPairImpliesPrivateKeyValid:
+  assumes "ECkeyPairValid d Q"
+  shows   "ECprivateKeyValid d"
+  using assms ECkeyPairValid_def ECprivateKeyValid_def by auto
+
+lemma ECkeyPairNotInf:
+  assumes "ECkeyPairValid d Q"
+  shows   "Q \<noteq> Infinity"
+  by (metis assms ECkeyPairValid_def ordGisn)
+
+lemma ECkeyPairOnCurve:
+  assumes "ECkeyPairValid d Q"
+  shows   "on_curve' Q"
+  by (metis ECdomainParametersValid_def ECkeyPairValid_def ECparamsValid assms point_mult_closed)
+
+lemma ECkeyPairOrd_n:
+  assumes "ECkeyPairValid d Q"
+  shows   "point_mult' n Q = Infinity"
+  by (metis ECkeyPairValid_def assms mod_self multdGmodn point_mult.simps(1))
+
+lemma ECkeyPair_dInRn':
+  assumes "ECprivateKeyValid d"
+  shows   "d \<in> carrier Rn"
+  using ECprivateKeyValid_def N.res_carrier_eq assms by force
+
+lemma ECkeyPair_dInRn:
+  assumes "ECkeyPairValid d Q"
+  shows   "d \<in> carrier Rn"
+  using ECkeyPairValid_def N.res_carrier_eq assms by force
+
+lemma ECkeyPair_invRn':
+  assumes "ECprivateKeyValid d"
+  shows   "inv\<^bsub>Rn\<^esub>d \<in> carrier Rn \<and> d\<otimes>\<^bsub>Rn\<^esub>inv\<^bsub>Rn\<^esub>d = \<one>\<^bsub>Rn\<^esub>"
+  using ECprivateKeyValid_def N.inv_closed N.res_carrier_eq N.zero_cong assms by force
+
+lemma ECkeyPair_invRn:
+  assumes "ECkeyPairValid d Q"
+  shows   "inv\<^bsub>Rn\<^esub>d \<in> carrier Rn \<and> d\<otimes>\<^bsub>Rn\<^esub>inv\<^bsub>Rn\<^esub>d = \<one>\<^bsub>Rn\<^esub>"
+  using ECkeyPairValid_def N.inv_closed N.res_carrier_eq N.zero_cong assms by force
+
+lemma ECkeyPair_inv_d':
+  assumes "ECprivateKeyValid d"
+  shows   "inv_mod_n d = inv\<^bsub>Rn\<^esub>d"
+  using ECprivateKeyValid_def N.res_carrier_eq assms inv_mod_n_inv by force
+
+lemma ECkeyPair_inv_d:
+  assumes "ECkeyPairValid d Q"
+  shows   "inv_mod_n d = inv\<^bsub>Rn\<^esub>d"
+  using ECkeyPairValid_def N.res_carrier_eq assms inv_mod_n_inv by force
+
+lemma ECkeyPair_curveMult:
+  assumes "ECkeyPairValid d Q"
+  shows   "G[^]\<^bsub>EPF.curve\<^esub>d = Q"
+  using ECkeyPairValid_def EPF.in_carrier_curve GonEPFcurve assms EPF.multEqPowInCurve by auto 
+
+lemma ECkeyGen_mod_n: "ECkeyGen d = ECkeyGen (d mod n)"
+  using ECkeyGen_def multGmodn by presburger 
+
+lemma ECkeyGen_valid_mod_n: "(d mod n \<noteq> 0) = ECprivateKeyValid (d mod n)"
+  by (simp add: ECprivateKeyValid_def N.p_prime prime_gt_0_nat)
+
+lemma ECkeyGen_int:
+  fixes d :: int
+  shows "G[^]\<^bsub>EPF.curve\<^esub>d = ECkeyGen (nat (d mod int n))"
+  using EPF.ell_prime_field_axioms GonEPFcurve N.p_prime SEC1.ECkeyGen_def SEC1_axioms 
+        ell_prime_field.in_carrier_curve ell_prime_field.multEqPowInCurve multGmodn'int 
+        prime_gt_0_nat by force
+
+
+definition ECpublicKeyValid :: "int point \<Rightarrow> bool" where
+  "ECpublicKeyValid Q \<equiv> (Q \<noteq> Infinity) \<and> (on_curve' Q) \<and> (point_mult' n Q = Infinity)"
+
+
+definition ECpublicKeyPartialValid :: "int point \<Rightarrow> bool" where
+  "ECpublicKeyPartialValid Q \<equiv> (Q \<noteq> Infinity) \<and> (on_curve' Q)"
+
+lemma validImpliesPartialValid: "ECpublicKeyValid Q \<Longrightarrow> ECpublicKeyPartialValid Q"
+  using ECpublicKeyPartialValid_def ECpublicKeyValid_def by blast
+
+lemma partValidImpliesValidIFheq1:
+  assumes "h = 1"  "ECpublicKeyPartialValid Q"
+  shows   "ECpublicKeyValid Q"
+proof - 
+  have 1: "Q \<noteq> Infinity" using assms(2) ECpublicKeyPartialValid_def by fast
+  have 2: "on_curve' Q"  using assms(2) ECpublicKeyPartialValid_def by fast
+  have 3: "card {P. on_curve a b P} = n" 
+    using ECparamsValid ECdomainParametersValid_def assms(1) by simp
+  have 4: "point_mult' n Q = Infinity" 
+    using 2 3 CurveOrderPrime EPF.AB_in_carrier EPF.nonsingular_in_bf N.p_prime by blast 
+  show ?thesis  using 1 2 4 ECpublicKeyValid_def by presburger
+qed
+
+lemma partValidImpliesValidIFheq1':
+  assumes "h = 1"  "Q \<noteq> Infinity"  "on_curve' Q"
+  shows   "point_mult' n Q = Infinity"
+  using partValidImpliesValidIFheq1 assms ECpublicKeyPartialValid_def ECpublicKeyValid_def
+  by blast
+
+lemma keyPairValidImpliespublicKeyValid:
+  assumes "ECkeyPairValid d Q"
+  shows   "ECpublicKeyValid Q"
+  using ECkeyPairNotInf ECkeyPairOnCurve ECkeyPairOrd_n ECpublicKeyValid_def assms by blast 
+
+lemma ECpublicKeyValid_curve:
+  assumes "ECpublicKeyValid Q"
+  shows   "Q \<noteq> \<one>\<^bsub>EPF.curve\<^esub> \<and> Q \<in> carrier EPF.curve \<and> Q[^]\<^bsub>EPF.curve\<^esub> n = \<one>\<^bsub>EPF.curve\<^esub>"
+  using assms ECpublicKeyValid_def EPF.in_carrier_curve EPF.one_curve EPF.multEqPowInCurve by auto
+
+lemma ECpublicKeyPartValid_curve:
+  assumes "ECpublicKeyPartialValid Q"
+  shows   "Q \<noteq> \<one>\<^bsub>EPF.curve\<^esub> \<and> Q \<in> carrier EPF.curve"
+  using assms ECpublicKeyPartialValid_def EPF.in_carrier_curve EPF.one_curve by auto 
+
+lemma ECkeyGenValid:
+  assumes "ECprivateKeyValid d"
+  shows   "ECpublicKeyValid (ECkeyGen d)"
+  using ECkeyGen_def ECkeyPairValid_def ECprivateKeyValid_def assms 
+        keyPairValidImpliespublicKeyValid by auto
+
+lemma ECKeyGenValidPair:
+  assumes "ECprivateKeyValid d"
+  shows   "ECkeyPairValid d (ECkeyGen d)"
+  using assms ECprivateKeyValid_def ECkeyGen_def ECkeyPairValid_def by simp
+
+
+
+
+definition ECDHprim :: "nat \<Rightarrow> int point \<Rightarrow> int option" where
+  "ECDHprim d\<^sub>U Q\<^sub>V = 
+   ( let P = point_mult' d\<^sub>U Q\<^sub>V in
+     ( case P of
+         Infinity    \<Rightarrow> None
+       | Point x\<^sub>P y\<^sub>P \<Rightarrow> Some x\<^sub>P )
+   )"
+
+lemma ECDHinCarrier: 
+  assumes "ECDHprim d Q = Some z"  "on_curve' Q"
+  shows   "z \<in> carrier R" 
+proof - 
+  let ?P = "point_mult' d Q" 
+  have 1: "?P \<noteq> Infinity" using assms(1) ECDHprim_def by fastforce
+  obtain x and y where 2: "?P = Point x y"  by (meson 1 point.exhaust) 
+  have 3: "z = x"         using 1 2 assms(1) ECDHprim_def by auto
+  have 4: "on_curve' ?P"  using assms(2) point_mult_closed by auto 
+  show ?thesis            using 2 3 4 on_curve_def by auto
+qed
+
+lemma ECDH_validKeys:
+  assumes "ECprivateKeyValid d"  "ECpublicKeyValid Q"
+  shows   "\<exists>z. ECDHprim d Q = Some z"
+proof - 
+  have 1: "0 < d \<and> d < n" 
+    using assms(1) ECprivateKeyValid_def by simp
+  have 2: "on_curve' Q \<and> Q \<noteq> Infinity \<and> point_mult' n Q = Infinity" 
+    using assms(2) ECpublicKeyValid_def  by blast
+  let ?P = "point_mult' d Q" 
+  have 3: "?P \<noteq> Infinity"                  using 1 2 EPF.order_n by blast 
+  obtain x and y where 4: "?P = Point x y" using 3 point.exhaust by blast
+  have 5: "ECDHprim d Q = Some x"          using 4 ECDHprim_def by force
+  show ?thesis                             using 5 by fast
+qed
+
+lemma ECDH_curveMult:
+  assumes "on_curve' Q"
+  shows   "ECDHprim d Q =  ( let P = Q [^]\<^bsub>EPF.curve\<^esub> d in
+                           ( case P of Infinity \<Rightarrow> None | Point x\<^sub>P y\<^sub>P \<Rightarrow> Some x\<^sub>P ))"
+  using assms ECDHprim_def EPF.multEqPowInCurve by presburger 
+
+lemma ECDH_2ValidKeyPairs:
+  assumes "ECkeyPairValid d1 P1"  "ECkeyPairValid d2 P2"
+  shows   "ECDHprim d1 P2 = ECDHprim d2 P1"
+  by (metis (no_types, lifting) assms(1,2) ECDHprim_def ECkeyPairValid_def EPF.AB_in_carrier(1,2)
+             EPF.in_carrier_curve EPF.nonsingular_in_bf GonEPFcurve mult.commute point_mult_mult)
+
+
+definition ECcofDHprim :: "nat \<Rightarrow> int point \<Rightarrow> int option" where
+  "ECcofDHprim d\<^sub>U Q\<^sub>V = 
+   ( let P = point_mult' (h*d\<^sub>U) Q\<^sub>V in
+     ( case P of
+         Infinity    \<Rightarrow> None
+       | Point x\<^sub>P y\<^sub>P \<Rightarrow> Some x\<^sub>P )
+   )"
+
+lemma ECcofDHinCarrier: 
+  assumes "ECcofDHprim d Q = Some z" "on_curve' Q"
+  shows   "z \<in> carrier R" 
+proof - 
+  let ?P = "point_mult' (h*d) Q" 
+  have 1: "?P \<noteq> Infinity"                   using assms(1) ECcofDHprim_def by fastforce
+  obtain x and y where 2: "?P = Point x y"  by (meson 1 point.exhaust) 
+  have 3: "z = x"                           using 1 2 assms(1) ECcofDHprim_def by auto
+  have 4: "on_curve' ?P"                    using assms(2) point_mult_closed by auto 
+  show ?thesis                              using 2 3 4 on_curve_def by auto
+qed
+
+lemma ECcofDH_validKeys:
+  assumes "ECprivateKeyValid d"  "ECpublicKeyValid Q"
+  shows   "\<exists>z. ECcofDHprim d Q = Some z"
+proof - 
+  have 1: "0 < d \<and> d < n" 
+    using assms(1) ECprivateKeyValid_def by simp
+  have 2: "on_curve' Q \<and> Q \<noteq> Infinity \<and> point_mult' n Q = Infinity" 
+    using assms(2) ECpublicKeyValid_def by blast
+  have 3: "h < n"          using h_less_n ECparamsValid by auto
+  have 4: "0 < h"          using ECdomainParametersValid_def ECparamsValid by presburger
+  have 5: "\<not> n dvd d"      using 1   by fastforce
+  have 6: "\<not> n dvd h"      using 3 4 by fastforce
+  have 7: "\<not> n dvd (h*d)"  by (simp add: 5 6 N.p_coprime_left coprime_dvd_mult_left_iff)  
+  let ?m = "(h*d) mod n"
+  have 8: "0 < ?m"         using 7 mod_greater_zero_iff_not_dvd by blast 
+  have 9: "?m < n"         using 3 by fastforce 
+  let ?P = "point_mult' (h*d) Q" 
+  have 10: "?P = point_mult' ?m Q" using EPF.multQmodn assms(2) ECpublicKeyValid_def by blast
+  have 11: "?P \<noteq> Infinity"                  using 8 9 2 10 EPF.order_n by auto
+  obtain x and y where 12: "?P = Point x y" using 11 point.exhaust by blast
+  have "ECcofDHprim d Q = Some x"           using 12 ECcofDHprim_def by force
+  then show ?thesis by fast
+qed
+
+lemma ECcoDH_curveMult:
+  assumes "on_curve' Q"
+  shows   "ECcofDHprim d Q =  ( let P = Q [^]\<^bsub>EPF.curve\<^esub> (h*d) in
+                              ( case P of Infinity \<Rightarrow> None | Point x\<^sub>P y\<^sub>P \<Rightarrow> Some x\<^sub>P ))"
+  using assms ECcofDHprim_def EPF.multEqPowInCurve by presburger 
+
+lemma ECcofDH_2ValidKeyPairs:
+  assumes "ECkeyPairValid k1 P1" "ECkeyPairValid k2 P2"
+  shows   "ECcofDHprim k1 P2 = ECcofDHprim k2 P1"
+proof - 
+  have 1: "P1 = point_mult' k1 G" using assms(1) by (simp add: ECkeyPairValid_def)
+  have 2: "P2 = point_mult' k2 G" using assms(2) by (simp add: ECkeyPairValid_def)
+  have 3: "point_mult' (h*k2) P1 = point_mult' (k1*(h*k2)) G"
+    using 1 EPF.AB_in_carrier(1,2) EPF.in_carrier_curve EPF.nonsingular_in_bf GonEPFcurve 
+          point_mult_mult by presburger  
+  have 4: "point_mult' (h*k1) P2 = point_mult' (k2*(h*k1)) G"  
+    using 2 EPF.AB_in_carrier(1,2) EPF.in_carrier_curve EPF.nonsingular_in_bf GonEPFcurve 
+          point_mult_mult by presburger  
+  show ?thesis by (metis 3 4 mult.commute mult.left_commute ECcofDHprim_def)
+qed
+
+
+definition ECDHprimChoose :: "bool \<Rightarrow> nat \<Rightarrow> int point \<Rightarrow> int option" where
+  "ECDHprimChoose useCoDH d\<^sub>U Q\<^sub>V = 
+     (if useCoDH then (ECcofDHprim d\<^sub>U Q\<^sub>V) else (ECDHprim d\<^sub>U Q\<^sub>V) )"
+
+lemma ECDHchooseinCarrier: 
+  assumes "ECDHprimChoose useCo d Q = Some z"  "on_curve' Q"
+  shows   "z \<in> carrier R" 
+  using ECDHprimChoose_def ECDHinCarrier ECcofDHinCarrier assms by presburger
+
+lemma ECDHchoose_validKeys:
+  assumes "ECprivateKeyValid d"  "ECpublicKeyValid Q"
+  shows   "\<exists>z. ECDHprimChoose useCo d Q = Some z"
+  using ECDHprimChoose_def ECDH_validKeys ECcofDH_validKeys assms by presburger
+
+lemma ECDHch_2ValidKeyPairs:
+  assumes "ECkeyPairValid k1 P1"  "ECkeyPairValid k2 P2"
+  shows   "ECDHprimChoose useCoDH k1 P2 = ECDHprimChoose useCoDH k2 P1"
+  by (simp add: ECDHprimChoose_def ECDH_2ValidKeyPairs ECcofDH_2ValidKeyPairs assms(1,2))
+
+
+
+definition MQVcomputeQbar :: "int point \<Rightarrow> nat option" where
+  "MQVcomputeQbar Q = 
+  (case Q of
+     Infinity  \<Rightarrow> None
+   | Point x y \<Rightarrow> (
+     let z    = (2::nat)^(nat (\<lceil>(log 2 n)/2\<rceil>));
+         xBar = nat (x mod z)
+     in Some (xBar + z)
+  ))"
+
+definition MQVcompute_s :: "nat \<Rightarrow> nat option \<Rightarrow> nat \<Rightarrow> nat option" where
+  "MQVcompute_s d2U Q2Ubar d1U = 
+  ( case Q2Ubar of
+     None         \<Rightarrow> None
+   | Some Q2Ubar' \<Rightarrow> Some ((d2U + Q2Ubar'*d1U) mod n))" 
+
+definition MQVcomputeP :: 
+  "nat option \<Rightarrow> int point \<Rightarrow> nat option \<Rightarrow> int point \<Rightarrow> int point option" where
+  "MQVcomputeP s Q2V Q2Vbar Q1V =
+  ( case s of
+     None    \<Rightarrow> None
+   | Some s' \<Rightarrow>
+     (case Q2Vbar of
+       None         \<Rightarrow> None
+     | Some Q2Vbar' \<Rightarrow> Some ( point_mult' (h*s') (add' Q2V (point_mult' Q2Vbar' Q1V)) )
+     )
+  )"
+
+definition ECMQVprim_validInput :: 
+  "nat \<Rightarrow> int point \<Rightarrow> nat \<Rightarrow> int point \<Rightarrow> int point \<Rightarrow> int point \<Rightarrow> bool" where
+  "ECMQVprim_validInput d1U Q1U d2U Q2U Q1V Q2V \<equiv> 
+     (ECkeyPairValid d1U Q1U)      \<and> (ECkeyPairValid d2U Q2U) \<and> 
+     (ECpublicKeyPartialValid Q1V) \<and> (ECpublicKeyPartialValid Q2V)"
+
+definition ECMQVprim :: 
+  "nat \<Rightarrow> int point \<Rightarrow> nat \<Rightarrow> int point \<Rightarrow> int point \<Rightarrow> int point \<Rightarrow> int option" where
+  "ECMQVprim d1U Q1U d2U Q2U Q1V Q2V = 
+  ( let Q2Ubar = MQVcomputeQbar Q2U;
+        s      = MQVcompute_s d2U Q2Ubar d1U;
+        Q2Vbar = MQVcomputeQbar Q2V;
+        P      = MQVcomputeP s Q2V Q2Vbar Q1V
+    in 
+    (case P of
+       None             \<Rightarrow> None
+     | Some Infinity    \<Rightarrow> None
+     | Some (Point x y) \<Rightarrow> Some x
+    )
+  )"
+
+lemma MQVcomputeQbar_notInf:
+  assumes "Q \<noteq> Infinity"
+  shows   "\<exists>Qbar. MQVcomputeQbar Q = Some Qbar"
+  by (metis (no_types, lifting) MQVcomputeQbar_def assms point.case(2) point.exhaust)
+
+lemma MQVcomputeQbar_validPair:
+  assumes "ECkeyPairValid d2U Q2U"
+  shows   "\<exists>Q2Ubar. MQVcomputeQbar Q2U = Some Q2Ubar"
+  using ECkeyPairNotInf MQVcomputeQbar_notInf assms by blast
+
+lemma MQVcomputeQbar_validPub:
+  assumes "ECpublicKeyPartialValid Q2V"
+  shows   "\<exists>Q2Vbar. MQVcomputeQbar Q2V = Some Q2Vbar"
+  using ECpublicKeyPartialValid_def MQVcomputeQbar_notInf assms by presburger
+
+lemma MQVcompute_s_validIn:
+  assumes "ECkeyPairValid d2U Q2U"  "Q2Ubar = MQVcomputeQbar Q2U"
+  shows   "\<exists>s. MQVcompute_s d2U Q2Ubar d1U = Some s"
+  using MQVcomputeQbar_validPair MQVcompute_s_def assms(1,2) by fastforce
+
+lemma MQVcomputeP_validIn:
+  assumes "ECkeyPairValid d2U Q2U"  "ECpublicKeyPartialValid Q2V"  "Q2Ubar = MQVcomputeQbar Q2U"
+          "s = MQVcompute_s d2U Q2Ubar d1U"  "Q2Vbar = MQVcomputeQbar Q2V" 
+  shows   "\<exists>P. MQVcomputeP s Q2V Q2Vbar Q1V = Some P"
+  using MQVcomputeP_def MQVcomputeQbar_validPair MQVcomputeQbar_validPub MQVcompute_s_def assms 
+  by fastforce
+
+lemma MQV_reverseUV:
+  assumes "ECkeyPairValid d1U Q1U"  "ECkeyPairValid d2U Q2U"
+          "ECkeyPairValid d1V Q1V"  "ECkeyPairValid d2V Q2V"
+  shows   "ECMQVprim d1U Q1U d2U Q2U Q1V Q2V = ECMQVprim d1V Q1V d2V Q2V Q1U Q2U"
+proof - 
+  have U11: "Q1U = point_mult' d1U G" using assms(1) by (simp add: ECkeyPairValid_def)
+  have U21: "Q2U = point_mult' d2U G" using assms(2) by (simp add: ECkeyPairValid_def)
+  have V11: "Q1V = point_mult' d1V G" using assms(3) by (simp add: ECkeyPairValid_def)
+  have V21: "Q2V = point_mult' d2V G" using assms(4) by (simp add: ECkeyPairValid_def)
+  obtain Q2Ubar where Q2Ubar: "MQVcomputeQbar Q2U = Some Q2Ubar"
+    using MQVcomputeQbar_validPair assms(2) by presburger 
+  obtain Q2Vbar where Q2Vbar: "MQVcomputeQbar Q2V = Some Q2Vbar"
+    using MQVcomputeQbar_validPair assms(4) by presburger 
+  obtain sU where sU: "MQVcompute_s d2U (Some Q2Ubar) d1U = Some sU"
+    by (simp add: MQVcompute_s_def) 
+  have sU1: "sU = (d2U + Q2Ubar*d1U) mod n" using sU MQVcompute_s_def by simp
+  obtain sV where sV: "MQVcompute_s d2V (Some Q2Vbar) d1V = Some sV"
+    by (simp add: MQVcompute_s_def) 
+  have sV1: "sV = (d2V + Q2Vbar*d1V) mod n" using sV MQVcompute_s_def by simp
+  obtain PU where PU: "MQVcomputeP (Some sU) Q2V (Some Q2Vbar) Q1V = Some PU"
+    by (simp add: MQVcomputeP_def)
+  have U1: "PU = point_mult' (h*sU) (add' Q2V (point_mult' Q2Vbar Q1V))"
+    using MQVcomputeP_def PU by auto
+  have U2: "PU = point_mult' (h*sU) 
+                             (add' (point_mult' d2V G) (point_mult' Q2Vbar (point_mult' d1V G)))"
+    using U1 V11 V21 by fast
+  have U3: "PU = point_mult' (h*sU) (point_mult' (d2V + Q2Vbar*d1V) G)" 
+    by (metis U2 point_mult_add EPF.AB_in_carrier(1,2) EPF.in_carrier_curve EPF.nonsingular_in_bf
+              GonEPFcurve V11 mult.commute point_mult_mult) 
+  have U4: "PU = point_mult' (h*sU*(d2V + Q2Vbar*d1V)) G" 
+    by (metis U3 point_mult_mult EPF.AB_in_carrier(1,2) EPF.in_carrier_curve EPF.nonsingular_in_bf
+              GonEPFcurve mult.commute)
+  let ?xU = "(h*sU*(d2V + Q2Vbar*d1V)) mod n"
+  have U5: "PU = point_mult' ?xU G"   using U4 multGmodn by blast 
+  obtain PV where PV: "MQVcomputeP (Some sV) Q2U (Some Q2Ubar) Q1U = Some PV"
+    by (simp add: MQVcomputeP_def)
+  have V1: "PV = point_mult' (h*sV) (add' Q2U (point_mult' Q2Ubar Q1U))"
+    using MQVcomputeP_def PV by auto
+  have V2: "PV = point_mult' (h*sV) 
+                             (add' (point_mult' d2U G) (point_mult' Q2Ubar (point_mult' d1U G)))"
+    using V1 U11 U21 by fast
+  have V3: "PV = point_mult' (h*sV) (point_mult' (d2U + Q2Ubar*d1U) G)" 
+    by (metis V2 point_mult_add EPF.AB_in_carrier(1,2) EPF.in_carrier_curve EPF.nonsingular_in_bf
+              GonEPFcurve U11 mult.commute point_mult_mult)
+  have V4: "PV = point_mult' (h*sV*(d2U + Q2Ubar*d1U)) G" 
+    by (metis V3 point_mult_mult EPF.AB_in_carrier(1,2) EPF.in_carrier_curve EPF.nonsingular_in_bf
+              GonEPFcurve mult.commute)
+  let ?xV = "(h*sV*(d2U + Q2Ubar*d1U)) mod n"
+  have V5: "PV = point_mult' ?xV G"   using V4 multGmodn by blast 
+  have x1: "?xU = ?xV" by (metis sU1 sV1 mult.commute mod_mult_right_eq mult.assoc) 
+  have x2: "PU = PV"   using x1 U5 V5 by argo
+  show ?thesis         using x2 PU PV Q2Ubar Q2Vbar sU sV ECMQVprim_def by presburger 
+qed
+
+
+
+

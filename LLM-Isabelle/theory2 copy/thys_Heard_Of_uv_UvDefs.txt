@@ -1,0 +1,133 @@
+theory UvDefs
+imports "../HOModel"
+begin
+
+
+
+
+
+
+axiomatization where Proc_finite: "OFCLASS(Proc, finite_class)"
+instance Proc :: finite by (rule Proc_finite)
+
+abbreviation
+
+
+abbreviation "nSteps \<equiv> 2"
+
+definition phase where "phase (r::nat) \<equiv> r div nSteps"
+
+definition step where "step (r::nat) \<equiv> r mod nSteps"
+
+
+record 'val pstate =
+
+
+datatype 'val msg =
+  Val 'val
+| ValVote 'val "'val option"
+
+definition isValVote where "isValVote m \<equiv> \<exists>z v. m = ValVote z v"
+
+definition isVal where "isVal m \<equiv> \<exists>v. m = Val v"
+
+
+fun getvote where
+  "getvote (ValVote z v) = v"
+
+fun getval where
+  "getval (ValVote z v) = z"
+| "getval (Val z) = z"
+
+
+
+definition UV_initState where
+  "UV_initState p st \<equiv> (vote st = None) \<and> (decide st = None)"
+
+
+  "msgRcvd (msgs:: Proc \<rightharpoonup> 'val msg) = {q . msgs q \<noteq> None}"
+
+definition smallestValRcvd where
+  "smallestValRcvd (msgs::Proc \<rightharpoonup> ('val::linorder) msg) \<equiv>
+   Min {v. \<exists>q. msgs q = Some (Val v)}"
+
+
+definition send0 where
+  "send0 r p q st \<equiv> Val (x st)"
+
+definition next0 where
+  "next0 r p st (msgs::Proc \<rightharpoonup> ('val::linorder) msg) st' \<equiv>
+       (\<exists>v. (\<forall>q \<in> msgRcvd msgs. msgs q = Some (Val v))
+           \<and> st' = st \<lparr> vote := Some v, x := smallestValRcvd msgs \<rparr>)
+    \<or> \<not>(\<exists>v. \<forall>q \<in> msgRcvd msgs. msgs q = Some (Val v))
+       \<and> st' = st \<lparr> x := smallestValRcvd msgs \<rparr>"
+
+
+definition send1 where
+  "send1 r p q st \<equiv> ValVote (x st) (vote st)"
+
+definition valVoteRcvd where
+  "valVoteRcvd (msgs :: Proc \<rightharpoonup> 'val msg) \<equiv> 
+   {q . \<exists>z v. msgs q = Some (ValVote z v)}"
+
+definition smallestValNoVoteRcvd where
+  "smallestValNoVoteRcvd (msgs::Proc \<rightharpoonup> ('val::linorder) msg) \<equiv>
+   Min {v. \<exists>q. msgs q = Some (ValVote v None)}"
+
+definition someVoteRcvd where
+  "someVoteRcvd (msgs :: Proc \<rightharpoonup> 'val msg) \<equiv>
+   { q . q \<in> msgRcvd msgs \<and> isValVote (the (msgs q)) \<and> getvote (the (msgs q)) \<noteq> None }"
+
+definition identicalVoteRcvd where
+  "identicalVoteRcvd (msgs :: Proc \<rightharpoonup> 'val msg) v \<equiv>
+   \<forall>q \<in> msgRcvd msgs. isValVote (the (msgs q)) \<and> getvote (the (msgs q)) = Some v"
+
+definition x_update where
+ "x_update st msgs st' \<equiv>
+   (\<exists>q \<in> someVoteRcvd msgs . x st' = the (getvote (the (msgs q))))
+ \<or> someVoteRcvd msgs = {} \<and> x st' = smallestValNoVoteRcvd msgs"
+
+definition dec_update where
+  "dec_update st msgs st' \<equiv>
+    (\<exists>v. identicalVoteRcvd msgs v \<and> decide st' = Some v)
+  \<or> \<not>(\<exists>v. identicalVoteRcvd msgs v) \<and> decide st' = decide st"
+
+definition next1 where
+  "next1 r p st msgs st' \<equiv>
+     x_update st msgs st'
+   \<and> dec_update st msgs st'
+   \<and> vote st' = None"
+
+
+definition UV_sendMsg where
+  "UV_sendMsg (r::nat) \<equiv> if step r = 0 then send0 r else send1 r"
+
+definition UV_nextState where
+  "UV_nextState r \<equiv> if step r = 0 then next0 r else next1 r"
+
+
+
+
+definition UV_commPerRd where
+  "UV_commPerRd HOrs \<equiv> \<forall>p q. \<exists>pq. pq \<in> HOrs p \<inter> HOrs q"
+
+
+definition UV_commGlobal where
+  "UV_commGlobal HOs \<equiv> \<exists>r. \<forall>p q. HOs r p = HOs r q"
+
+
+
+
+definition UV_HOMachine where
+  "UV_HOMachine = \<lparr> 
+    CinitState =  (\<lambda>p st crd. UV_initState p st),
+    sendMsg =  UV_sendMsg,
+    CnextState = (\<lambda>r p st msgs crd st'. UV_nextState r p st msgs st'),
+    HOcommPerRd = UV_commPerRd,
+    HOcommGlobal = UV_commGlobal
+  \<rparr>"
+
+abbreviation
+  "UV_M \<equiv> (UV_HOMachine::(Proc, 'val::linorder pstate, 'val msg) HOMachine)"
+
+end

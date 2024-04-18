@@ -1,0 +1,83 @@
+theory Prim_Abstract
+imports 
+  Main 
+  Common
+  Undirected_Graph
+  "HOL-Eisbach.Eisbach"
+begin
+    
+
+definition "is_subset_MST w g A \<equiv> \<exists>t. is_MST w g t \<and> A \<subseteq> edges t"  
+
+lemma is_subset_MST_empty[simp]: "connected g \<Longrightarrow> is_subset_MST w g {}"
+  using exists_MST unfolding is_subset_MST_def by blast
+
+locale Prim =
+  fixes w :: "'v set \<Rightarrow> nat" and g :: "'v ugraph" and r :: 'v
+begin
+
+definition "rg \<equiv> component_of g r"
+
+lemma reachable_connected[simp, intro!]: "connected rg" 
+  unfolding rg_def by auto
+  
+lemma reachable_edges_subset: "edges rg \<subseteq> edges g" 
+  unfolding rg_def by (rule component_edges_subset)
+
+definition "light_edge C u v 
+  \<equiv>   u\<in>C \<and> v\<notin>C \<and> (u,v)\<in>edges rg 
+    \<and> (\<forall>(u',v')\<in>edges rg \<inter> C\<times>-C. w {u,v} \<le> w {u',v'})"  
+
+definition "respects_cut A C \<equiv> A \<subseteq> C\<times>C \<union> (-C)\<times>(-C)"
+    
+lemma light_edge_is_safe:
+  fixes A :: "('v\<times>'v) set" and C :: "'v set"
+  assumes subset_MST: "is_subset_MST w rg A"
+  assumes respects_cut: "respects_cut A C"
+  assumes light_edge: "light_edge C u v"
+  shows "is_subset_MST w rg ({(v,u)} \<union> A)"
+proof -
+  have crossing_edge: "u\<in>C" "v\<notin>C" "(u,v)\<in>edges rg"
+    and min_edge: "\<forall>(u',v')\<in>edges rg \<inter> C\<times>-C. w {u,v} \<le> w {u',v'}"
+    using light_edge unfolding light_edge_def by auto
+
+  from subset_MST obtain T where T: "is_MST w rg T" "A \<subseteq> edges T" 
+    unfolding is_subset_MST_def by auto
+  hence "tree T" "edges T \<subseteq> edges rg" "nodes T = nodes rg" 
+    by (simp_all add: is_MST_def is_spanning_tree_def)
+  hence "connected T" by(simp_all add: tree_def)
+  show ?thesis
+  proof cases
+    assume "(u,v) \<in> edges T"
+    thus ?thesis unfolding is_subset_MST_def using T by (auto simp: edges_sym')
+  next
+    assume "(u,v) \<notin> edges T" hence "(v,u)\<notin>edges T" by (auto simp: edges_sym')
+          rtrancl_edges_iff_path simplify_pathE)
+      
+    have [simp]: "u\<noteq>v" using crossing_edge by blast
+      
+    from find_crossing_edge_on_path[OF p(1), where P="\<lambda>x. x\<notin>C"] 
+         crossing_edge(1,2)
+    obtain x y p1 p2 where xy: "(x,y) \<in> set p" "x \<in> C" "y \<notin> C"
+      and ux: "path (restrict_edges T (-{(x,y),(y,x)})) u p1 x" 
+      and yv: "path (restrict_edges T (-{(x,y),(y,x)})) y p2 v"
+      using path_change[OF crossing_edge(1,2) p] by blast
+    have "(x,y) \<in> edges T" 
+      by (meson contra_subsetD p(1) path_edges xy(1))
+
+    let ?E' = "edges T - {(x,y),(y,x)}"
+      
+      obtain T1 T2 where T12: 
+        "tree T1" "tree T2" 
+        and "nodes T1 \<inter> nodes T2 = {}" 
+        and "nodes T = nodes T1 \<union> nodes T2"
+        and "edges T1 \<union> edges T2 = ?E'"
+        and "nodes T1 = { u . (x,u)\<in>?E'\<^sup>*}"
+        and "nodes T2 = { u . (y,u)\<in>?E'\<^sup>*}"
+        and "x\<in>nodes T1" "y\<in>nodes T2" .
+    
+    let ?T' = "ins_edge (u,v) (graph_join T1 T2)"    
+
+    have "is_spanning_tree rg ?T'" proof -
+      
+      have E'_sym: "sym (?E'\<^sup>*)" 
